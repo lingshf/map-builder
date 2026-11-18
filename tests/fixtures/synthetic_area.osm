@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="map-builder SYNTHETIC test fixture">
+<meta osm_base="2026-01-01T00:00:00Z"/>
+<node id="1001" lat="47.000179901" lon="8.000657413"></node>
+<node id="1002" lat="47.000179897" lon="8.001183343"></node>
+<node id="1003" lat="47.000314825" lon="8.001183346"></node>
+<node id="1004" lat="47.000314828" lon="8.000854638"></node>
+<node id="1005" lat="47.000719610" lon="8.000854645"></node>
+<node id="1006" lat="47.000719611" lon="8.000657419"></node>
+<node id="1008" lat="46.999280376" lon="7.998422236"></node>
+<node id="1009" lat="46.999280382" lon="7.998948158"></node>
+<node id="1010" lat="46.999640189" lon="7.998948151"></node>
+<node id="1011" lat="46.999640183" lon="7.998422226"></node>
+<node id="1013" lat="46.999532243" lon="7.998580006"></node>
+<node id="1014" lat="46.999532245" lon="7.998790376"></node>
+<node id="1015" lat="46.999388322" lon="7.998790379"></node>
+<node id="1016" lat="46.999388320" lon="7.998580010"></node>
+<node id="1019" lat="47.000636607" lon="7.999316781"></node>
+<node id="1020" lat="47.000667373" lon="7.999440335"></node>
+<node id="1021" lat="47.000802616" lon="7.999368381"></node>
+<node id="1022" lat="47.000771849" lon="7.999244827"></node>
+<node id="1024" lat="47.000638656" lon="7.999658143"></node>
+<node id="1025" lat="47.000638656" lon="7.999815923"></node>
+<node id="1026" lat="47.000800569" lon="7.999815922"></node>
+<node id="1027" lat="47.000800569" lon="7.999658142"></node>
+<node id="1029" lat="47.000674637" lon="8.000065742"></node>
+<node id="1030" lat="47.000674637" lon="8.000197226"></node>
+<node id="1031" lat="47.000764589" lon="8.000197226"></node>
+<node id="1032" lat="47.000764589" lon="8.000065742"></node>
+<node id="1034" lat="47.000683619" lon="8.001761882"></node>
+<node id="1035" lat="47.000683616" lon="8.001919663"></node>
+<node id="1036" lat="47.000755578" lon="8.001919665"></node>
+<node id="1037" lat="47.000755580" lon="8.001761885"></node>
+<node id="1039" lat="46.999217407" lon="8.001748686"></node>
+<node id="1040" lat="46.999217404" lon="8.001932758"></node>
+<node id="1041" lat="46.999343337" lon="8.001932763"></node>
+<node id="1042" lat="46.999343340" lon="8.001748690"></node>
+<node id="1044" lat="47.000134912" lon="8.001906495"></node>
+<node id="1045" lat="47.000134909" lon="8.002037977"></node>
+<node id="1046" lat="47.000224861" lon="8.002037981"></node>
+<node id="1047" lat="47.000224863" lon="8.001906498"></node>
+<node id="1049" lat="47.000899499" lon="7.998027736"></node>
+<node id="1050" lat="47.001079407" lon="7.998290699"></node>
+<node id="1051" lat="47.000899504" lon="7.998290704"></node>
+<node id="1052" lat="47.001079403" lon="7.998027729"></node>
+<node id="1054" lat="47.003552971" lon="8.005193886"></node>
+<node id="1055" lat="47.003552965" lon="8.005325377"></node>
+<node id="1056" lat="47.003642917" lon="8.005325386"></node>
+<node id="1057" lat="47.003642923" lon="8.005193895"></node>
+<node id="1059" lat="46.999909997" lon="7.996581472"></node>
+<node id="1060" lat="46.999955024" lon="8.000000000"></node>
+<node id="1061" lat="46.999999949" lon="8.003418534"></node>
+<node id="1063" lat="46.998470822" lon="8.000262957"></node>
+<node id="1064" lat="46.999820096" lon="8.000262963"></node>
+<node id="1065" lat="47.001439226" lon="8.000328714"></node>
+<node id="1067" lat="47.001079415" lon="7.998948122"></node>
+<node id="1068" lat="47.001169369" lon="7.999211090"></node>
+<node id="1070" lat="46.998920575" lon="7.998948165"></node>
+<node id="1071" lat="46.998920579" lon="7.999474082"></node>
+<node id="1073" lat="46.998740669" lon="8.001314790"></node>
+<node id="1074" lat="46.998740650" lon="8.002498101"></node>
+<node id="1075" lat="46.999100456" lon="8.002498117"></node>
+<node id="1076" lat="46.999100476" lon="8.001314799"></node>
+<node id="1078" lat="47.000179876" lon="7.997501832"></node>
+<node id="1079" lat="47.000179891" lon="7.998290727"></node>
+<node id="1080" lat="47.000539697" lon="7.998290716"></node>
+<node id="1081" lat="47.000539683" lon="7.997501816"></node>
+<node id="1083" lat="46.998740674" lon="7.999211126"></node>
+<node id="1084" lat="46.998740677" lon="7.999737042"></node>
+<node id="1085" lat="46.999010532" lon="7.999737041"></node>
+<node id="1086" lat="46.999010529" lon="7.999211122"></node>
+<node id="1088" lat="47.000359807" lon="8.000000000"><tag k="natural" v="tree"/><tag k="height" v="11"/></node>
+<node id="1089" lat="47.000359796" lon="8.001577795"><tag k="natural" v="tree"/></node>
+<node id="1090" lat="46.998920561" lon="7.997896329"><tag k="natural" v="tree"/></node>
+<way id="1007"><nd ref="1001"/><nd ref="1002"/><nd ref="1003"/><nd ref="1004"/><nd ref="1005"/><nd ref="1006"/><nd ref="1001"/><tag k="building" v="yes"/><tag k="height" v="12"/></way>
+<way id="1012"><nd ref="1008"/><nd ref="1009"/><nd ref="1010"/><nd ref="1011"/><nd ref="1008"/></way>
+<way id="1017"><nd ref="1013"/><nd ref="1014"/><nd ref="1015"/><nd ref="1016"/><nd ref="1013"/></way>
+<way id="1023"><nd ref="1019"/><nd ref="1020"/><nd ref="1021"/><nd ref="1022"/><nd ref="1019"/><tag k="building" v="house"/><tag k="roof:shape" v="gabled"/><tag k="height" v="8"/><tag k="roof:height" v="3"/></way>
+<way id="1028"><nd ref="1024"/><nd ref="1025"/><nd ref="1026"/><nd ref="1027"/><nd ref="1024"/><tag k="building" v="house"/><tag k="roof:shape" v="hipped"/></way>
+<way id="1033"><nd ref="1029"/><nd ref="1030"/><nd ref="1031"/><nd ref="1032"/><nd ref="1029"/><tag k="building" v="yes"/><tag k="roof:shape" v="pyramidal"/><tag k="building:levels" v="2"/></way>
+<way id="1038"><nd ref="1034"/><nd ref="1035"/><nd ref="1036"/><nd ref="1037"/><nd ref="1034"/><tag k="building" v="shed"/><tag k="roof:shape" v="skillion"/><tag k="roof:direction" v="90"/><tag k="height" v="5"/><tag k="roof:height" v="1.5"/></way>
+<way id="1043"><nd ref="1039"/><nd ref="1040"/><nd ref="1041"/><nd ref="1042"/><nd ref="1039"/><tag k="building" v="yes"/><tag k="roof:shape" v="dome"/><tag k="height" v="10"/></way>
+<way id="1048"><nd ref="1044"/><nd ref="1045"/><nd ref="1046"/><nd ref="1047"/><nd ref="1044"/><tag k="building:part" v="yes"/><tag k="min_height" v="6"/><tag k="height" v="12"/></way>
+<way id="1053"><nd ref="1049"/><nd ref="1050"/><nd ref="1051"/><nd ref="1052"/><nd ref="1049"/><tag k="building" v="yes"/></way>
+<way id="1058"><nd ref="1054"/><nd ref="1055"/><nd ref="1056"/><nd ref="1057"/><nd ref="1054"/><tag k="building" v="yes"/></way>
+<way id="1062"><nd ref="1059"/><nd ref="1060"/><nd ref="1061"/><tag k="highway" v="primary"/><tag k="lanes" v="2"/></way>
+<way id="1066"><nd ref="1063"/><nd ref="1064"/><nd ref="1065"/><tag k="highway" v="residential"/><tag k="width" v="6"/></way>
+<way id="1069"><nd ref="1067"/><nd ref="1068"/><tag k="highway" v="footway"/><tag k="bridge" v="yes"/><tag k="layer" v="1"/></way>
+<way id="1072"><nd ref="1070"/><nd ref="1071"/><tag k="highway" v="service"/><tag k="tunnel" v="yes"/><tag k="layer" v="-1"/></way>
+<way id="1077"><nd ref="1073"/><nd ref="1074"/><nd ref="1075"/><nd ref="1076"/><nd ref="1073"/><tag k="landuse" v="forest"/></way>
+<way id="1082"><nd ref="1078"/><nd ref="1079"/><nd ref="1080"/><nd ref="1081"/><nd ref="1078"/><tag k="leisure" v="park"/></way>
+<way id="1087"><nd ref="1083"/><nd ref="1084"/><nd ref="1085"/><nd ref="1086"/><nd ref="1083"/><tag k="natural" v="water"/></way>
+<relation id="1018"><member type="way" ref="1012" role="outer"/><member type="way" ref="1017" role="inner"/><tag k="building" v="apartments"/><tag k="building:levels" v="4"/><tag k="type" v="multipolygon"/></relation>
+</osm>
