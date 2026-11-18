@@ -139,13 +139,22 @@ def unity_x_negated_to_map(p):
 DEFAULT_MAX_SIDE_M = 2000.0
 HARD_MAX_SIDE_M = 5000.0
 MIN_SIDE_M = 50.0
+MAX_ABS_LAT = 84.0          # UTM validity; DEM reprojection relies on it
+MAX_BBOX_SPAN_DEG = 0.2     # far beyond the 5 km cap; rejects inputs the local projection would fold
+ANTIMERIDIAN_GUARD_M = 1000.0  # covers every acquisition margin used by the data sources
 
 
 class Area:
     """Axis-aligned rectangle in the map frame centred on the origin."""
 
     def __init__(self, lat, lon, width_m, height_m, max_side_m=DEFAULT_MAX_SIDE_M):
-        max_side_m = min(float(max_side_m), HARD_MAX_SIDE_M)
+        try:
+            max_side_m = float(max_side_m)
+        except (TypeError, ValueError):
+            raise AreaError("max_side_m must be a number") from None
+        if not (math.isfinite(max_side_m) and max_side_m >= MIN_SIDE_M):
+            raise AreaError(f"max_side_m must be finite and >= {MIN_SIDE_M:.0f} m")
+        max_side_m = min(max_side_m, HARD_MAX_SIDE_M)
         for name, v in (("width", width_m), ("height", height_m)):
             if not (isinstance(v, (int, float)) and math.isfinite(v)):
                 raise AreaError(f"area {name} must be a finite number")
@@ -153,21 +162,34 @@ class Area:
                 raise AreaError(f"area {name} {v:.0f} m is below the minimum {MIN_SIDE_M:.0f} m")
             if v > max_side_m:
                 raise AreaError(f"area {name} {v:.0f} m exceeds the limit {max_side_m:.0f} m")
-        if not (math.isfinite(lat) and math.isfinite(lon)):
+        if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+                and math.isfinite(lat) and math.isfinite(lon)):
             raise AreaError("area centre must be finite")
+        if not (-MAX_ABS_LAT <= lat <= MAX_ABS_LAT and -180.0 <= lon <= 180.0):
+            raise AreaError(f"area centre must have |lat| <= {MAX_ABS_LAT} and -180 <= lon <= 180")
         self.frame = LocalFrame(lat, lon)
         self.width = float(width_m)
         self.height = float(height_m)
+        self.geographic_bbox(margin_m=ANTIMERIDIAN_GUARD_M)  # raises if the area nears the antimeridian
 
     @classmethod
     def from_bbox(cls, south, west, north, east, max_side_m=DEFAULT_MAX_SIDE_M):
+        if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (south, west, north, east)):
+            raise AreaError("bbox values must be finite numbers")
         if not (south < north and west < east):
             raise AreaError("bbox must satisfy south < north and west < east (antimeridian crossing unsupported)")
+        if not (-MAX_ABS_LAT <= south and north <= MAX_ABS_LAT and -180.0 <= west and east <= 180.0):
+            raise AreaError(f"bbox must lie within |lat| <= {MAX_ABS_LAT} and -180 <= lon <= 180")
+        if north - south > MAX_BBOX_SPAN_DEG or east - west > MAX_BBOX_SPAN_DEG:
+            raise AreaError(f"bbox spans more than {MAX_BBOX_SPAN_DEG} degrees; map areas are local (<= "
+                            f"{HARD_MAX_SIDE_M:.0f} m)")
         lat, lon = (south + north) / 2.0, (west + east) / 2.0
         f = LocalFrame(lat, lon)
-        x0, y0 = f.to_local(south, west)
-        x1, y1 = f.to_local(north, east)
-        return cls(lat, lon, abs(x1 - x0), abs(y1 - y0), max_side_m)
+        # Smallest centred rectangle enclosing the corners and edge midpoints of the request.
+        pts = [f.to_local(la, lo) for la in (south, lat, north) for lo in (west, lon, east)]
+        half_w = max(abs(p[0]) for p in pts)
+        half_h = max(abs(p[1]) for p in pts)
+        return cls(lat, lon, 2.0 * half_w, 2.0 * half_h, max_side_m)
 
     @property
     def half(self):
@@ -185,7 +207,10 @@ class Area:
         pts = [self.frame.to_geographic(sx * hx, sy * hy) for sx in (-1, 0, 1) for sy in (-1, 0, 1)]
         lats = [p[0] for p in pts]
         lons = [p[1] for p in pts]
-        return min(lats), min(lons), max(lats), max(lons)
+        s, w, n, e = min(lats), min(lons), max(lats), max(lons)
+        if w < -180.0 or e > 180.0 or s < -90.0 or n > 90.0:
+            raise AreaError("area (plus acquisition margin) crosses the antimeridian or a pole; unsupported")
+        return s, w, n, e
 
     def to_dict(self):
         s, w, n, e = self.geographic_bbox()

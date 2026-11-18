@@ -38,9 +38,16 @@ Consumers must enforce the same bounds the reference validator uses:
 * `package_id = "sha256:" + SHA-256(exact bytes of manifest.json in the archive)`. It is not
   stored inside the manifest; consumers compute it from the raw member bytes, with no JSON
   re-serialisation, so any language gets the same value.
-* Because the manifest contains each file hash, `package_id` binds the visuals, collision,
-  georeference and provenance to one immutable identity. **Replays and recordings should store
-  `package_id`** and refuse to replay against any other package.
+* `package_id` identifies the manifest only. It binds the payload **only after verification**.
+  Before a consumer uses any member or accepts the package's `package_id`, it **must**:
+  * check that the archive members other than `manifest.json` map one-to-one onto `files[]`
+    paths (nothing missing, unlisted or duplicated);
+  * check that each member's uncompressed byte count equals `bytes`;
+  * check that its SHA-256 equals `sha256`.
+  If any check fails, the package is invalid, whatever its `package_id`.
+* Because the verified manifest contains each file hash, `package_id` binds the visuals,
+  collision, georeference and provenance to one immutable identity. **Replays and recordings
+  should store `package_id`** and refuse to replay against any other package.
 * Re-exporting identical content gives identical file hashes. `created_utc` is part of the
   manifest, so each export has its own `package_id`.
 
@@ -52,7 +59,8 @@ All coordinates are in metres.
   right-handed, **+X east, +Y north, +Z up**.
   * The origin is the area centre on the WGS84 ellipsoid (h = 0). x and y are the east and
     north components of ECEF→ENU at the origin, with no scale factor and no earth-curvature
-    correction. This is adequate for areas of about 1–2 km.
+    correction. This is adequate for areas of about 1–2 km. Areas must stay within
+    |lat| ≤ 84°, and an area plus a 1 km margin must not cross the antimeridian.
   * `z = H − georeference.z_offset_m`, where H is the height above
     `georeference.vertical_datum`, for example `EGM2008` for Copernicus.
 * **glTF:** `gltf = (x, z, −y)`, so +X east, +Y up, +Z south. This is a proper rotation, so
@@ -65,10 +73,34 @@ All coordinates are in metres.
   `orientation_probes`; do not assume it.
 * **Winding:** `.mbcol` triangles are counter-clockwise when seen from outside, in the
   right-handed map frame. Building solids are closed, and their signed volume is positive.
+  Open surfaces such as terrain and roads face up (+Z).
 
-`orientation_probes[]` gives the AABB centre of up to three non-terrain objects. Each probe
-has the centre in map, glTF and Unity (X-negated) coordinates. After import, a consumer must
-check that the named node's bounds centre lands at `unity_x_negated`, within 5 cm.
+### Orientation probes
+
+`orientation_probes[]` contains at least one probe whenever the package has geometry, and
+at most three. Terrain is used when nothing else qualifies. Each probe is:
+
+```jsonc
+{"node": "…",                                    // glTF node / collision object name
+ "point_map": [x, y, z], "point_gltf": [...], "point_unity_x_negated": [...],
+ "triangle_map": [[x,y,z], [x,y,z], [x,y,z]],    // one collision triangle of the node, CCW front
+ "normal_map": [nx, ny, nz], "normal_unity_x_negated": [...]}
+```
+
+* `point_*` is an actual world-space vertex of the node, with |x| ≥ 1 m and |y| ≥ 1 m. The
+  node has no vertex within 0.5 m of its X-mirror (−x, y, z). An importer that skips or
+  doubles the reflection therefore cannot match it by symmetry.
+* `triangle_map` contains `point_map` and has a unit front-face normal `normal_map`, where
+  |nx| ≥ 0.05 or |nz| ≥ 0.05.
+
+After import, a consumer must:
+1. find a vertex of the named node, in world space, within 5 cm of `point_unity_x_negated`;
+2. find the imported triangle whose vertices match `triangle_map` mapped to Unity, within
+   5 cm, and require `dot(normalize(Cross(b − a, c − a)), normal_unity_x_negated) > 0.99`.
+   This uses Unity's left-handed cross product in imported index order, so it verifies
+   winding and front faces.
+
+If either check fails, the importer or the conversion is wrong; refuse the map.
 
 ## Visual/collision binding
 
@@ -76,7 +108,11 @@ check that the named node's bounds centre lands at `unity_x_negated`, within 5 c
   object has a glTF node.
 * The validator checks, per object:
   * that the glTF-derived AABB matches the collision AABB within 1 cm + 1e-5 × object size
-  * that the signed-volume sign (winding) agrees
+  * winding agreement. This uses the sign of the **vector area** Σ(b−a)×(c−a)/2 for open
+    meshes (|vector area| ≥ 1 % of the total area, e.g. terrain and roads), and the sign of
+    the **signed volume** for closed meshes. Visual triangles are taken after the glTF world
+    transform and its negative-determinant winding rule, then mapped to the map frame.
+  * the orientation probes (points, triangles and normals) against the visual mesh.
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
 
@@ -99,7 +135,8 @@ check that the named node's bounds centre lands at `unity_x_negated`, within 5 c
                 "triangle_count", "vertex_count", "bounds_min", "bounds_max", "classes": {…}},
   "heightfield": {"path", "nx", "ny", "x0", "y0", "spacing_m", "nan_cells", …} | null,
   "objects": [{"name", "mb_id", "class", "collision": true, "provenance": {…}}],
-  "orientation_probes": [{"node", "map_aabb_center", "gltf", "unity_x_negated"}],
+  "orientation_probes": [{"node", "point_map", "point_gltf", "point_unity_x_negated",
+                          "triangle_map", "normal_map", "normal_unity_x_negated"}],
   "sources": [{"kind": "elevation"|"features", "provider", "license": {…}, "attribution", …}],
   "edits": {"duplicated": n, "user_added": n, "removed": n},
   "notices": "NOTICES.txt", "report": "report.json", "warnings_count": n

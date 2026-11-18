@@ -60,6 +60,30 @@ class GeodesyTest(unittest.TestCase):
         with self.assertRaises(AreaError):
             Area.from_bbox(47.01, 8.0, 47.0, 8.01)
 
+    def test_bbox_fit_encloses_request_and_rejects_nonlocal(self):
+        south, west, north, east = 47.0, 8.0, 47.009, 8.013
+        a = Area.from_bbox(south, west, north, east)
+        for la in (south, north):
+            for lo in (west, east):
+                x, y = a.frame.to_local(la, lo)
+                self.assertTrue(a.contains(x * (1 - 1e-9), y * (1 - 1e-9)), (la, lo, x, y))
+        with self.assertRaises(AreaError):  # would fold onto ~1 km at Greenwich
+            Area.from_bbox(-0.005, -179.995, 0.005, 179.995)
+        with self.assertRaises(AreaError):
+            Area.from_bbox(47.0, 8.0, 47.0 + math.nan, 8.01)
+
+    def test_antimeridian_pole_and_limit_guards(self):
+        with self.assertRaises(AreaError):
+            Area(0.0, 179.999, 1000, 1000)
+        with self.assertRaises(AreaError):
+            Area(89.0, 0.0, 1000, 1000)
+        with self.assertRaises(AreaError):
+            Area(47, 8, 100_000_000, 1000, max_side_m=float("nan"))
+        with self.assertRaises(AreaError):  # hard cap still applies with a huge requested limit
+            Area(47, 8, 6000, 1000, max_side_m=1e9)
+        s, w, n, e = Area(0.0, 179.9, 1000, 1000).geographic_bbox()
+        self.assertLessEqual(e, 180.0)
+
 
 if __name__ == "__main__":
     unittest.main()
