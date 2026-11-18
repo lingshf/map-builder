@@ -171,6 +171,9 @@ class Area:
         self.width = float(width_m)
         self.height = float(height_m)
         self.geographic_bbox(margin_m=ANTIMERIDIAN_GUARD_M)  # raises if the area nears the antimeridian
+        s, _, n, _ = self.geographic_bbox()
+        if s < -MAX_ABS_LAT or n > MAX_ABS_LAT:
+            raise AreaError(f"area footprint must stay within |lat| <= {MAX_ABS_LAT}")
 
     @classmethod
     def from_bbox(cls, south, west, north, east, max_side_m=DEFAULT_MAX_SIDE_M):
@@ -180,7 +183,8 @@ class Area:
             raise AreaError("bbox must satisfy south < north and west < east (antimeridian crossing unsupported)")
         if not (-MAX_ABS_LAT <= south and north <= MAX_ABS_LAT and -180.0 <= west and east <= 180.0):
             raise AreaError(f"bbox must lie within |lat| <= {MAX_ABS_LAT} and -180 <= lon <= 180")
-        if north - south > MAX_BBOX_SPAN_DEG or east - west > MAX_BBOX_SPAN_DEG:
+        if north - south > MAX_BBOX_SPAN_DEG or (east - west) * math.cos(math.radians(max(abs(south), abs(north)))) \
+                > MAX_BBOX_SPAN_DEG:
             raise AreaError(f"bbox spans more than {MAX_BBOX_SPAN_DEG} degrees; map areas are local (<= "
                             f"{HARD_MAX_SIDE_M:.0f} m)")
         lat, lon = (south + north) / 2.0, (west + east) / 2.0

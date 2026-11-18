@@ -83,6 +83,10 @@ class GeodesyTest(unittest.TestCase):
             Area(47, 8, 6000, 1000, max_side_m=1e9)
         s, w, n, e = Area(0.0, 179.9, 1000, 1000).geographic_bbox()
         self.assertLessEqual(e, 180.0)
+        with self.assertRaises(AreaError):  # centre inside the limit, footprint outside it
+            Area(84.0, 0.0, 1000, 1000)
+        a = Area.from_bbox(83.985, -0.15, 83.995, 0.15, max_side_m=5000)  # ~3.5 km x 1.1 km near 84N
+        self.assertAlmostEqual(a.width, 3510, delta=40)
 
 
 if __name__ == "__main__":

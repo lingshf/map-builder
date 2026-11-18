@@ -77,8 +77,13 @@ All coordinates are in metres.
 
 ### Orientation probes
 
-`orientation_probes[]` contains at least one probe whenever the package has geometry, and
-at most three. Terrain is used when nothing else qualifies. Each probe is:
+`orientation_probes[]` has at most three probes. The generator emits one for every node
+(terrain included) that has a qualifying vertex, preferring non-terrain nodes. Real terrain
+almost always qualifies. If no node qualifies, for example perfectly flat symmetric
+geometry, the list is empty and the validator records the warning
+`orientation probes unavailable`. A consumer must then treat importer orientation as
+**unverified**. It should refuse the map, or verify the importer separately, for example
+with the synthetic sample package. Each probe is:
 
 ```jsonc
 {"node": "…",                                    // glTF node / collision object name
@@ -108,10 +113,12 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
   object has a glTF node.
 * The validator checks, per object:
   * that the glTF-derived AABB matches the collision AABB within 1 cm + 1e-5 × object size
-  * winding agreement. This uses the sign of the **vector area** Σ(b−a)×(c−a)/2 for open
-    meshes (|vector area| ≥ 1 % of the total area, e.g. terrain and roads), and the sign of
-    the **signed volume** for closed meshes. Visual triangles are taken after the glTF world
-    transform and its negative-determinant winding rule, then mapped to the map frame.
+  * per-triangle winding agreement. Visual triangles are taken after the glTF world
+    transform and its negative-determinant winding rule, and then mapped to the map frame.
+    Each non-degenerate collision triangle is matched to a visual triangle with the same
+    three vertices (each within 5 mm). A match must have the same cyclic vertex order, so
+    any reversed match is an error. If fewer than 99 % of an object's collision triangles
+    find a match, the validator issues a warning.
   * the orientation probes (points, triangles and normals) against the visual mesh.
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
