@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.mbmap.tmp
+.mbmap-*.tmp
+/build/
+/dist/
+bin/
+obj/
