@@ -77,11 +77,11 @@ All coordinates are in metres.
 
 ### Orientation probes
 
-`orientation_probes[]` has at most three probes. The generator emits one for every node
-(terrain included) that has a qualifying vertex, preferring non-terrain nodes. Real terrain
-almost always qualifies. If no node qualifies, for example perfectly flat symmetric
-geometry, the list is empty and the validator records the warning
-`orientation probes unavailable`. A consumer must then treat importer orientation as
+`orientation_probes[]` has at most three probes, one per selected node. The generator
+selects up to three nodes that have a qualifying vertex, preferring non-terrain nodes and
+falling back to terrain. Real terrain almost always qualifies. If no node qualifies, for
+example perfectly flat symmetric geometry, the list is empty and the validator records the
+warning `orientation probes unavailable`. A consumer must then treat importer orientation as
 **unverified**. It should refuse the map, or verify the importer separately, for example
 with the synthetic sample package. Each probe is:
 
@@ -116,9 +116,11 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
   * per-triangle winding agreement. Visual triangles are taken after the glTF world
     transform and its negative-determinant winding rule, and then mapped to the map frame.
     Each non-degenerate collision triangle is matched to a visual triangle with the same
-    three vertices (each within 5 mm). A match must have the same cyclic vertex order, so
-    any reversed match is an error. If fewer than 99 % of an object's collision triangles
-    find a match, the validator issues a warning.
+    three vertices (each within 5 mm). For each candidate, the validator chooses the vertex
+    correspondence with the lowest total distance; ties between opposite orientations count
+    as ambiguous and are skipped. A best correspondence that is a reversed cyclic order is an
+    error. If fewer than 99 % of an object's collision triangles find an unambiguous match,
+    the validator issues a warning.
   * the orientation probes (points, triangles and normals) against the visual mesh.
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
