@@ -1,13 +1,21 @@
 """Bounded HTTP client (stdlib urllib) with explicit failure mapping.
 
-* Every request has a timeout and a hard byte cap.
+* Every request has a per-operation timeout, a total monotonic deadline
+  (connect, redirects and body) and a hard byte cap; bodies are read in chunks.
+* Redirects are limited and never carry Authorization/X-API-Key/Cookie to
+  another origin or from https to http.
 * Credentials are never placed in error messages or logs: callers pass them via
   ``headers`` and :func:`redact` strips query/userinfo from URLs before they
-  are shown anywhere.
+  are shown anywhere. Errors carry only the redacted URL, the status code or a
+  transport exception class name - never provider bodies or exception text.
+* Partial (206) responses are checked against ``Content-Range``.
 * A transport may be injected (``Transport`` protocol) so tests never touch
   the network.
 """
 
+import http.client
+import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +26,11 @@ from .errors import AuthError, CoverageError, LimitError, NetworkError
 USER_AGENT = f"{GENERATOR_NAME}/{GENERATOR_VERSION} (Blender add-on; +https://github.com/lingshf/map-builder)"
 DEFAULT_TIMEOUT_S = 60.0
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
+TOTAL_TIMEOUT_FACTOR = 4.0
+MAX_REDIRECTS = 5
+READ_CHUNK = 64 * 1024
 SENSITIVE_HEADERS = {"authorization", "x-api-key", "cookie"}
+_CONTENT_RANGE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", re.IGNORECASE)
 
 
 def redact(url):
@@ -40,30 +52,124 @@ class Response:
         self.headers = headers or {}
 
 
+def _origin(parts):
+    scheme = (parts.scheme or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        port = -1
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, (parts.hostname or "").lower(), port
+
+
+def _exc_name(exc):
+    """Exception class name only (never its message, which may echo URLs or credentials)."""
+    return re.sub(r"[^A-Za-z0-9_]", "", type(exc).__name__)[:64] or "Error"
+
+
+def _header(headers, name):
+    name = name.lower()
+    for k, v in (headers or {}).items():
+        if str(k).lower() == name:
+            return v
+    return None
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follows at most ``max_redirects`` redirects and never leaks credentials.
+
+    When any of :data:`SENSITIVE_HEADERS` is present, a redirect that changes
+    origin (scheme/host/port) or downgrades https->http is refused instead of
+    forwarding the credential. Only http/https targets are ever followed.
+    """
+
+    def __init__(self, max_redirects=MAX_REDIRECTS, check_deadline=None):
+        super().__init__()
+        self.max_redirections = max_redirects
+        self.max_repeats = max_redirects
+        self._check_deadline = check_deadline
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        safe = redact(req.full_url)
+        if self._check_deadline:
+            self._check_deadline()
+        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        names = {k.lower() for k in list(req.headers) + list(req.unredirected_hdrs)}
+        reason = None
+        if new.scheme.lower() not in ("http", "https"):
+            reason = "redirect to a non-HTTP scheme refused"
+        elif names & SENSITIVE_HEADERS and (
+                _origin(old) != _origin(new) or (old.scheme.lower() == "https" and new.scheme.lower() != "https")):
+            reason = "redirect to a different origin refused because the request carries credentials"
+        if reason:
+            try:
+                fp.close()
+            except Exception:  # noqa: BLE001 - closing is best effort
+                pass
+            raise NetworkError(f"{safe}: {reason} (HTTP {code})", code, safe)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class UrllibTransport:
+    """urllib transport with safe redirects and a total (monotonic) deadline.
+
+    ``opener`` and ``clock`` may be injected for tests.
+    """
+
+    def __init__(self, total_timeout=None, max_redirects=MAX_REDIRECTS, opener=None, clock=time.monotonic):
+        self.total_timeout = total_timeout
+        self.max_redirects = max_redirects
+        self.opener = opener
+        self.clock = clock
+
     def request(self, method, url, headers, data, timeout, max_bytes):
+        safe = redact(url)
+        total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
+        deadline = self.clock() + total
+
+        def check_deadline():
+            if self.clock() > deadline:
+                raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s", url=safe)
+
+        opener = self.opener or urllib.request.build_opener(SafeRedirectHandler(self.max_redirects, check_deadline))
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                body = resp.read(max_bytes + 1)
-                return Response(resp.status, body, dict(resp.headers.items()))
+            resp = opener.open(req, timeout=max(0.001, min(timeout, deadline - self.clock())))
+            with resp:
+                limit = max_bytes + 1
+                chunks, n = [], 0
+                while n < limit:
+                    check_deadline()
+                    chunk = resp.read(min(READ_CHUNK, limit - n))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    n += len(chunk)
+                check_deadline()
+                status = getattr(resp, "status", None) or resp.getcode()
+                return Response(status, b"".join(chunks), dict(resp.headers.items()))
         except urllib.error.HTTPError as e:
+            hdrs = dict(e.headers.items()) if e.headers else {}
             try:
-                body = e.read(4096)
-            except Exception:  # noqa: BLE001 - best effort diagnostic body
-                body = b""
-            return Response(e.code, body, dict(e.headers.items()) if e.headers else {})
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            reason = getattr(e, "reason", e)
-            raise NetworkError(f"request to {redact(url)} failed: {reason}", url=redact(url)) from None
+                e.close()
+            except Exception:  # noqa: BLE001 - closing is best effort
+                pass
+            return Response(e.code, b"", hdrs)  # error bodies are never surfaced
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException, ValueError) as e:
+            cause = getattr(e, "reason", e)
+            cause = cause if isinstance(cause, BaseException) else e
+            raise NetworkError(f"{safe}: request failed ({_exc_name(cause)})", url=safe) from None
 
 
 class HttpClient:
-    def __init__(self, transport=None, timeout=DEFAULT_TIMEOUT_S, max_bytes=DEFAULT_MAX_BYTES):
-        self.transport = transport or UrllibTransport()
+    def __init__(self, transport=None, timeout=DEFAULT_TIMEOUT_S, max_bytes=DEFAULT_MAX_BYTES, total_timeout=None):
         self.timeout = timeout
+        self.total_timeout = total_timeout if total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
+        self.transport = transport or UrllibTransport(total_timeout=self.total_timeout)
         self.max_bytes = max_bytes
         self.bytes_downloaded = 0
+        self.clock = time.monotonic
 
     def fetch(self, url, method="GET", headers=None, data=None, byte_range=None, max_bytes=None,
               not_found_is_coverage=False):
@@ -75,7 +181,12 @@ class HttpClient:
             start, length = byte_range
             h["Range"] = f"bytes={start}-{start + length - 1}"
         safe = redact(url)
+        started = self.clock()
         resp = self.transport.request(method, url, h, data, self.timeout, max_bytes)
+        body = resp.body or b""
+        self.bytes_downloaded += len(body)  # charge everything received, even if rejected below
+        if self.clock() - started > self.total_timeout:
+            raise NetworkError(f"{safe}: request exceeded the total time limit of {self.total_timeout:g} s", url=safe)
         if resp.status in (401, 403):
             raise AuthError(f"{safe}: provider refused access (HTTP {resp.status}); check credentials/terms", resp.status, safe)
         if resp.status == 404 and not_found_is_coverage:
@@ -83,18 +194,30 @@ class HttpClient:
         if resp.status == 429:
             raise NetworkError(f"{safe}: rate limited (HTTP 429); retry later or use a local file", 429, safe)
         if resp.status not in (200, 206):
-            snippet = resp.body[:200].decode("utf-8", "replace").strip() if resp.body else ""
-            raise NetworkError(f"{safe}: HTTP {resp.status} {snippet}", resp.status, safe)
-        if len(resp.body) > max_bytes:
+            raise NetworkError(f"{safe}: HTTP {resp.status}", resp.status, safe)
+        if len(body) > max_bytes:
             raise LimitError(f"{safe}: response exceeds limit of {max_bytes} bytes")
-        if byte_range is not None:
-            if resp.status == 200:
-                # Server ignored Range: accept only if the whole body is small enough, then slice.
-                start, length = byte_range
-                body = resp.body[start:start + length]
-            else:
-                body = resp.body
-        else:
-            body = resp.body
-        self.bytes_downloaded += len(resp.body)
+        if byte_range is None:
+            if resp.status == 206:
+                raise NetworkError(f"{safe}: unexpected partial response (HTTP 206)", 206, safe)
+            return body
+        start, length = byte_range
+        if resp.status == 200:
+            # Server ignored Range: the whole body (already within max_bytes and charged) is sliced.
+            return body[start:start + length]
+        return self._check_partial(safe, resp, body, start, length)
+
+    @staticmethod
+    def _check_partial(safe, resp, body, start, length):
+        m = _CONTENT_RANGE.match(str(_header(resp.headers, "Content-Range") or ""))
+        if not m:
+            raise NetworkError(f"{safe}: partial response without a valid Content-Range", 206, safe)
+        first, last = int(m.group(1)), int(m.group(2))
+        total = None if m.group(3) == "*" else int(m.group(3))
+        want_last = start + length - 1
+        if (first != start or last < first or last > want_last or len(body) != last - first + 1
+                or (total is not None and last >= total)):
+            raise NetworkError(f"{safe}: partial response does not match the requested byte range", 206, safe)
+        if last < want_last and (total is None or last != total - 1):
+            raise NetworkError(f"{safe}: short partial response before end of file", 206, safe)
         return body

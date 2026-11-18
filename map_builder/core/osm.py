@@ -5,7 +5,7 @@ Online via an Overpass API endpoint, or offline from a local ``.osm`` XML file
 """
 
 import math
-import xml.etree.ElementTree as ET
+import xml.parsers.expat
 
 from .errors import FormatError, LimitError
 
@@ -19,8 +19,13 @@ OSM_LICENSE = {
     "permits_redistribution": True,
 }
 DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OSM_DATASET_ID = "openstreetmap-overpass-xml"
 MAX_OSM_BYTES = 64 * 1024 * 1024
-MAX_ELEMENTS = 2_000_000
+MAX_ELEMENTS = 2_000_000          # top-level node/way/relation/... elements
+MAX_TOTAL_ELEMENTS = 20_000_000   # all XML elements, including <tag>/<nd>/<member>
+MAX_DEPTH = 16
+_PARSE_CHUNK = 1024 * 1024
+_MAX_REMARK_CHARS = 1024
 
 
 def overpass_query(s, w, n, e, timeout_s=90):
@@ -39,23 +44,44 @@ def overpass_query(s, w, n, e, timeout_s=90):
     )
 
 
-def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None):
+def _validated_overpass(body, description):
+    """Parse an Overpass response; any <remark> (timeout/size/runtime error) means partial data."""
+    data = parse_osm_xml(body, description=description)
+    if data.remarks:
+        raise FormatError(f"{description}: Overpass returned an incomplete result (server remark such as "
+                          "timeout or size limit); try a smaller area or later")
+    return data
+
+
+def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False):
+    """``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
+    by a caller that knows the alternative endpoint's terms permit caching."""
     import urllib.parse
     from .http import redact
+    endpoint = redact(url)
+    is_default = isinstance(url, str) and url.strip().rstrip("/") == DEFAULT_OVERPASS_URL.rstrip("/")
+    if not (is_default or allow_cache_override):
+        cache = None
     s, w, n, e = area.geographic_bbox(margin_m=30.0)
     q = overpass_query(s, w, n, e)
-    key = f"{redact(url)}\n{q}"
-    body = cache.get("osm", key) if cache else None
-    from_cache = body is not None
-    if body is None:
+    description = f"overpass:{endpoint}"
+    key = f"{OSM_DATASET_ID}|{endpoint}\n{q}"
+    data = None
+    if cache:
+        body = cache.get("osm", key)
+        if body is not None:
+            try:
+                data = _validated_overpass(body, description)
+            except (FormatError, LimitError):
+                data = None  # unusable cached entry: refetch and overwrite
+    from_cache = data is not None
+    if data is None:
         body = client.fetch(url, method="POST", data=urllib.parse.urlencode({"data": q}).encode("ascii"),
                             headers={"Content-Type": "application/x-www-form-urlencoded"}, max_bytes=MAX_OSM_BYTES)
-        if b"<remark>" in body[:4096] and b"runtime error" in body[:4096]:
-            raise FormatError("Overpass reported a runtime error (timeout/size); try a smaller area or later")
+        data = _validated_overpass(body, description)
         if cache:
-            cache.put("osm", key, body, {"source": redact(url)})
-    data = parse_osm_xml(body, description=f"overpass:{redact(url)}")
-    data.source = {"provider": "overpass", "endpoint": redact(url), "from_cache": from_cache, "query": q}
+            cache.put("osm", key, body, {"source": endpoint, "dataset": OSM_DATASET_ID})
+    data.source = {"provider": "overpass", "endpoint": endpoint, "from_cache": from_cache, "query": q}
     return data
 
 
@@ -66,49 +92,112 @@ class OsmData:
         self.relations = {}   # id -> (members [(type, ref, role)], tags)
         self.timestamp = None
         self.generator = None
+        self.remarks = []     # <remark> texts anywhere in the document (Overpass partial-result signal)
         self.source = {}
 
 
-def parse_osm_xml(data, description="<osm>"):
+def _reject_dtd(*_args):
+    raise FormatError("DTD/entities are not allowed in OSM XML")
+
+
+def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_depth=MAX_DEPTH,
+                  max_total_elements=MAX_TOTAL_ELEMENTS):
+    """Streaming, bounded OSM XML parser (expat).
+
+    DTDs and entity declarations are rejected by the parser itself (whatever the
+    document encoding), and element count/depth limits are enforced while parsing.
+    """
     if isinstance(data, str):
         data = data.encode("utf-8")
     if len(data) > MAX_OSM_BYTES:
         raise LimitError(f"{description}: OSM data exceeds {MAX_OSM_BYTES} bytes")
-    head = data[:4096]
-    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
-        raise FormatError(f"{description}: DTD/entities are not allowed in OSM XML")
-    try:
-        root = ET.fromstring(data)
-    except ET.ParseError as e:
-        raise FormatError(f"{description}: invalid OSM XML: {e}") from None
-    if root.tag != "osm":
-        snippet = head[:120].decode("utf-8", "replace")
-        raise FormatError(f"{description}: not OSM XML (root <{root.tag}>): {snippet}")
     out = OsmData()
-    out.generator = root.get("generator")
-    meta = root.find("meta")
-    if meta is not None:
-        out.timestamp = meta.get("osm_base")
-    count = 0
-    for el in root:
-        count += 1
-        if count > MAX_ELEMENTS:
-            raise LimitError(f"{description}: more than {MAX_ELEMENTS} OSM elements")
-        tags = {t.get("k"): t.get("v") for t in el.findall("tag")}
-        try:
-            if el.tag == "node":
-                lat, lon = float(el.get("lat")), float(el.get("lon"))
-                if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-                    raise ValueError
-                out.nodes[int(el.get("id"))] = (lat, lon, tags)
-            elif el.tag == "way":
-                out.ways[int(el.get("id"))] = ([int(nd.get("ref")) for nd in el.findall("nd")], tags)
-            elif el.tag == "relation":
-                out.relations[int(el.get("id"))] = (
-                    [(m.get("type"), int(m.get("ref")), m.get("role") or "") for m in el.findall("member")], tags)
-        except (TypeError, ValueError):
-            raise FormatError(f"{description}: malformed <{el.tag} id={el.get('id')}>") from None
+    state = {"depth": 0, "top": 0, "total": 0, "cur": None, "remark": None}
+
+    def start(name, attrs):
+        depth = state["depth"] = state["depth"] + 1
+        if depth > max_depth:
+            raise LimitError(f"{description}: OSM XML nesting deeper than {max_depth}")
+        state["total"] += 1
+        if state["total"] > max_total_elements:
+            raise LimitError(f"{description}: more than {max_total_elements} XML elements")
+        if depth == 1:
+            if name != "osm":
+                raise FormatError(f"{description}: not OSM XML (root <{name[:40]}>)")
+            out.generator = attrs.get("generator")
+        elif depth == 2:
+            state["top"] += 1
+            if state["top"] > max_elements:
+                raise LimitError(f"{description}: more than {max_elements} OSM elements")
+            if name in ("node", "way", "relation"):
+                state["cur"] = (name, attrs, {}, [])
+            elif name == "meta":
+                out.timestamp = attrs.get("osm_base")
+        elif depth == 3 and state["cur"] is not None:
+            cur = state["cur"]
+            if name == "tag":
+                cur[2][attrs.get("k")] = attrs.get("v")
+            elif name == "nd" and cur[0] == "way":
+                cur[3].append(attrs.get("ref"))
+            elif name == "member" and cur[0] == "relation":
+                cur[3].append((attrs.get("type"), attrs.get("ref"), attrs.get("role") or ""))
+        if name == "remark":
+            out.remarks.append("")
+            state["remark"] = depth
+
+    def end(name):
+        depth = state["depth"]
+        state["depth"] = depth - 1
+        if state["remark"] == depth and name == "remark":
+            state["remark"] = None
+        if depth == 2 and state["cur"] is not None and state["cur"][0] == name:
+            _finish(out, state["cur"], description)
+            state["cur"] = None
+
+    def text(s):
+        if state["remark"] is not None and len(out.remarks[-1]) < _MAX_REMARK_CHARS:
+            out.remarks[-1] = (out.remarks[-1] + s)[:_MAX_REMARK_CHARS]
+
+    p = xml.parsers.expat.ParserCreate()
+    p.SetParamEntityParsing(xml.parsers.expat.XML_PARAM_ENTITY_PARSING_NEVER)
+    p.StartDoctypeDeclHandler = _reject_dtd
+    p.EntityDeclHandler = _reject_dtd
+    p.UnparsedEntityDeclHandler = _reject_dtd
+    p.NotationDeclHandler = _reject_dtd
+    p.ExternalEntityRefHandler = _reject_dtd
+    p.StartElementHandler = start
+    p.EndElementHandler = end
+    p.CharacterDataHandler = text
+    try:
+        for i in range(0, len(data), _PARSE_CHUNK):
+            p.Parse(data[i:i + _PARSE_CHUNK], False)
+        p.Parse(b"", True)
+    except xml.parsers.expat.ExpatError as e:
+        raise FormatError(f"{description}: invalid OSM XML: {xml.parsers.expat.ErrorString(e.code)} "
+                          f"at line {e.lineno}") from None
+    except ValueError:
+        raise FormatError(f"{description}: unsupported OSM XML encoding (use UTF-8)") from None
+    except FormatError as e:
+        if str(e).startswith("DTD/"):
+            raise FormatError(f"{description}: {e}") from None
+        raise
     return out
+
+
+def _finish(out, cur, description):
+    kind, attrs, tags, items = cur
+    try:
+        if kind == "node":
+            lat, lon = float(attrs.get("lat")), float(attrs.get("lon"))
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError
+            out.nodes[int(attrs.get("id"))] = (lat, lon, tags)
+        elif kind == "way":
+            out.ways[int(attrs.get("id"))] = ([int(r) for r in items], tags)
+        else:
+            out.relations[int(attrs.get("id"))] = ([(t, int(r), role) for t, r, role in items], tags)
+    except (TypeError, ValueError):
+        raise FormatError(f"{description}: malformed <{kind} id={str(attrs.get('id'))[:20]}>") from None
 
 
 def load_osm_file(path):
@@ -308,6 +397,7 @@ def classify(data, area, max_features=50_000):
     out = Classified()
     used_as_member = set()
     polygons = {}  # feature id -> [Polygon]
+    rel_outer_ways = {}  # area family -> way ids that are outers of an area relation with geometry
 
     def make_polygons(fid, outers, inners):
         polys = []
@@ -333,6 +423,11 @@ def classify(data, area, max_features=50_000):
                 if p.contains(*h[0]) or point_in_ring(h[0][0], h[0][1], p.outer):
                     p.holes.append(h)
                     break
+            else:
+                # dropping the hole would fill a courtyard: skip the whole feature instead
+                out.invalid.append({"id": fid, "reason": "inner ring lies outside every outer ring; "
+                                                         "skipped rather than filling the hole"})
+                return []
         for p in polys:
             if ring_self_intersects(p.outer) or any(ring_self_intersects(h) for h in p.holes):
                 out.invalid.append({"id": fid, "reason": "self-intersecting ring"})
@@ -346,20 +441,32 @@ def classify(data, area, max_features=50_000):
         fid = f"osm:relation/{rid}"
         if tags.get("type") == "building":
             continue  # building relations group parts; parts are handled as ways
-        outer_ways, inner_ways = [], []
-        missing = False
+        outer_ways, inner_ways, outer_ids = [], [], []
+        missing_outer = missing_inner = False
         for typ, ref, role in members:
             if typ != "way":
                 continue
             used_as_member.add(ref)
             w = data.ways.get(ref)
             if w is None:
-                missing = True
+                if role == "inner":
+                    missing_inner = True
+                else:
+                    missing_outer = True
                 continue
-            (inner_ways if role == "inner" else outer_ways).append(w[0])
+            if role == "inner":
+                inner_ways.append(w[0])
+            else:
+                outer_ways.append(w[0])
+                outer_ids.append(ref)
         orings, ok1 = _assemble_rings(outer_ways)
         irings, ok2 = _assemble_rings(inner_ways)
-        if missing or not (ok1 and ok2):
+        if missing_inner or not ok2:
+            # Emitting the outer without its hole would fill a courtyard: skip and report.
+            out.invalid.append({"id": fid, "reason": "multipolygon has a missing or unclosed inner ring; "
+                                                     "skipped rather than filling the hole"})
+            continue
+        if missing_outer or not ok1:
             out.invalid.append({"id": fid, "reason": "multipolygon has missing or unclosed member ways"})
             if not orings:
                 continue
@@ -368,7 +475,11 @@ def classify(data, area, max_features=50_000):
         if any(p is None for p in o_pts + i_pts):
             out.invalid.append({"id": fid, "reason": "multipolygon references missing nodes"})
             continue
-        polygons[fid] = (make_polygons(fid, o_pts, i_pts), tags)
+        polys = make_polygons(fid, o_pts, i_pts)
+        polygons[fid] = (polys, tags)
+        fam = _area_family(tags)
+        if polys and fam:
+            rel_outer_ways.setdefault(fam, set()).update(outer_ids)
 
     for wid, (nids, tags) in data.ways.items():
         fid = f"osm:way/{wid}"
@@ -376,7 +487,12 @@ def classify(data, area, max_features=50_000):
         is_area_tagged = any(k in tags for k in ("building", "building:part", "landuse", "leisure")) or (
             tags.get("natural") in ("water", "wood", "scrub", "grassland", "heath", "wetland", "beach", "sand",
                                     "bare_rock"))
-        if closed and is_area_tagged and tags.get("area") != "no":
+        as_area = closed and is_area_tagged and tags.get("area") != "no"
+        if as_area and wid in rel_outer_ways.get(_area_family(tags), ()):
+            # Already represented (with its holes) by a multipolygon of the same class: a standalone
+            # solid copy would fill the courtyard. Other roles of the way (e.g. highway) still apply.
+            as_area = False
+        if as_area:
             pts = way_points(nids)
             if pts is None:
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
@@ -393,14 +509,16 @@ def classify(data, area, max_features=50_000):
                     out.unsupported.append({"id": fid, "reason": f"{kind} lines are not generated in v1",
                                             "tags": _subset(tags)})
                 continue
-            if tags["highway"] in ROAD_EXCLUDE:
-                continue
-            reason = _unsupported_reason(tags)
             parts = _clip_polyline(pts, area)
             if not parts:
                 continue
+            # Bridges/tunnels/building passages are reported before any generic exclusion so that
+            # e.g. highway=corridor + tunnel=building_passage is never silently dropped.
+            reason = _unsupported_reason(tags)
             if reason:
                 out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
+                continue
+            if tags["highway"] in ROAD_EXCLUDE:
                 continue
             for k, part in enumerate(parts):
                 out.roads.append(Feature(fid if len(parts) == 1 else f"{fid}#{k}", "road", tags, part))
@@ -426,6 +544,11 @@ def classify(data, area, max_features=50_000):
         else:
             cls = area_class(tags)
             if cls:
+                reason = _unsupported_reason(tags)
+                if reason:
+                    if any(_bbox_overlaps(p.bbox(), area) for p in polys):
+                        out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
+                    continue
                 for k, p in enumerate(polys):
                     out.areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area", dict(tags, _class=cls), p))
 
@@ -462,6 +585,19 @@ def _resolve_building_parts(out):
                 continue
         keep.append(b)
     out.buildings = keep
+
+
+def _area_family(tags):
+    """Class used to decide whether a way and a multipolygon describe the same area feature."""
+    if "building" in tags or "building:part" in tags:
+        return "building"
+    return area_class(tags)
+
+
+def _bbox_overlaps(bbox, area):
+    hx, hy = area.half
+    x0, y0, x1, y1 = bbox
+    return x1 >= -hx and x0 <= hx and y1 >= -hy and y0 <= hy
 
 
 def area_class(tags):

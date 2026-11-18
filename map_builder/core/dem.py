@@ -12,10 +12,14 @@ including commercial, with attribution. It is a *surface* model (DSM) that
 includes buildings and canopy at ~30 m; see docs for consequences.
 """
 
+import hashlib
 import math
+import os
+from array import array
 
 from .errors import CoverageError, FormatError, LimitError, NoDataError
 from .geodesy import utm_forward
+from .http import redact
 from .tiff import FileSource, GeoTiff, HttpRangeSource
 
 COPERNICUS_BASE_URL = "https://copernicus-dem-30m.s3.amazonaws.com"
@@ -34,6 +38,16 @@ COPERNICUS_LICENSE = {
     "permits_redistribution": True,
 }
 MAX_GRID_POINTS = 400_000
+COPERNICUS_DATASET_ID = "copernicus-dem-glo30-public"
+HASH_CHUNK = 1024 * 1024
+
+
+def _sha256_file(path, chunk=HASH_CHUNK):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 class ElevationGrid:
@@ -123,8 +137,25 @@ def _bilinear(rasters, pick, lat, lon):
     return ((vals[0] * (1 - tx) + vals[1] * tx) * (1 - ty) + (vals[2] * (1 - tx) + vals[3] * tx) * ty)
 
 
+def _check_windows(area, spacing, rasters):
+    """Bound the pixel window each raster must serve before any block is decoded."""
+    s, w, n, e = area.geographic_bbox(margin_m=2 * spacing + 60.0)
+    pts = [(la, lo) for la in (s, (s + n) / 2, n) for lo in (w, (w + e) / 2, e)]
+    for r in rasters:
+        t = r.tiff
+        if not hasattr(t, "check_window"):
+            continue
+        cr = [t.col_row(*r.project(la, lo)) for la, lo in pts]
+        c0 = max(0, math.floor(min(c for c, _ in cr)) - 1)
+        r0 = max(0, math.floor(min(rr for _, rr in cr)) - 1)
+        c1 = min(t.width - 1, math.ceil(max(c for c, _ in cr)) + 1)
+        r1 = min(t.height - 1, math.ceil(max(rr for _, rr in cr)) + 1)
+        t.check_window(c0, r0, c1, r1)
+
+
 def _sample_grid(area, spacing, rasters, pick, provenance, progress=None):
     x0, y0, nx, ny = grid_layout(area, spacing)
+    _check_windows(area, spacing, rasters)
     heights = []
     missing = 0
     first_missing = None
@@ -166,7 +197,18 @@ def copernicus_tile_name(lat_floor, lon_floor):
     return f"Copernicus_DSM_COG_10_{ns}{abs(lat_floor):02d}_00_{ew}{abs(lon_floor):03d}_00_DEM"
 
 
-def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS_BASE_URL, progress=None):
+def _is_default_endpoint(url, default):
+    return isinstance(url, str) and url.strip().rstrip("/") == default.rstrip("/")
+
+
+def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS_BASE_URL, progress=None,
+                     allow_cache_override=False):
+    """``cache`` is used only for the public default endpoint (whose licence permits caching) unless the
+    caller explicitly sets ``allow_cache_override`` for a mirror it knows may be cached."""
+    is_default = _is_default_endpoint(base_url, COPERNICUS_BASE_URL)
+    if not (is_default or allow_cache_override):
+        cache = None
+    endpoint = redact(base_url.rstrip("/"))
     s, w, n, e = area.geographic_bbox(margin_m=2 * spacing + 60.0)
     tiles = {}
     for la in range(math.floor(s), math.floor(n) + 1):
@@ -178,7 +220,8 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
     for key, name in tiles.items():
         url = f"{base_url.rstrip('/')}/{name}/{name}.tif"
         try:
-            src = HttpRangeSource(client, url, description=f"copernicus:{name}", cache=cache)
+            src = HttpRangeSource(client, url, description=f"copernicus:{name}", cache=cache,
+                                  cache_key=f"{COPERNICUS_DATASET_ID}|{endpoint}|{name}")
         except CoverageError:
             raise CoverageError(
                 f"Copernicus DEM tile {name} is not published (ocean, or excluded from the public "
@@ -197,7 +240,8 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
         "kind": "elevation",
         "provider": "copernicus-glo30-aws",
         "product": "Copernicus DEM GLO-30 (public release), digital SURFACE model",
-        "access": f"{base_url} (AWS Open Data, no credentials)",
+        "access": (f"{endpoint} (AWS Open Data, no credentials)" if is_default
+                   else f"{endpoint} (caller-supplied endpoint)"),
         "tiles": sorted(tiles.values()),
         "horizontal_crs": "EPSG:4326",
         "vertical_datum": "EGM2008 (EPSG:3855) orthometric height, metres",
@@ -216,15 +260,12 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
 
 def load_local_geotiff(area, path, spacing=10.0, vertical_datum="user-declared (unknown)", license_note="",
                        progress=None):
-    import hashlib
-    import os
     src = FileSource(path)
     try:
         tiff = GeoTiff(src)
         raster = _Raster(tiff)
         prov = _local_provenance(path, tiff, area, spacing, vertical_datum, license_note)
-        with open(path, "rb") as f:
-            prov["sha256"] = hashlib.sha256(f.read()).hexdigest()
+        prov["sha256"] = _sha256_file(path)
         prov["file_name"] = os.path.basename(path)
         return _sample_grid(area, spacing, [raster], lambda la, lo: raster, prov, progress)
     finally:
@@ -248,37 +289,51 @@ def _local_provenance(path, tiff, area, spacing, vertical_datum, license_note):
 
 
 class AsciiGrid:
-    """ESRI ASCII grid presented with the same interface as GeoTiff."""
+    """ESRI ASCII grid presented with the same interface as GeoTiff.
+
+    Parsed incrementally in bounded chunks: the file size, header line length,
+    token length and token count are all checked while reading, and values are
+    stored compactly. NaN/Inf samples and the NODATA_value sentinel (including
+    a NaN sentinel) read as NoData.
+    """
 
     MAX_CELLS = 25_000_000
+    MAX_FILE_BYTES = 1024 ** 3
+    MAX_HEADER_LINE = 256
+    MAX_TOKEN = 64
+    CHUNK = 256 * 1024
+    _HEADER_KEYS = ("ncols", "nrows", "xllcorner", "yllcorner", "xllcenter", "yllcenter", "cellsize", "nodata_value")
 
     def __init__(self, path, crs):
         self.src = type("S", (), {"description": path, "fetched": 0})()
         header = {}
-        with open(path, "r", encoding="ascii", errors="strict") as f:
-            pos = f.tell()
-            line = f.readline()
-            while line and line.split() and line.split()[0].lower() in (
-                    "ncols", "nrows", "xllcorner", "yllcorner", "xllcenter", "yllcenter", "cellsize", "nodata_value"):
-                k, v = line.split()[:2]
-                header[k.lower()] = float(v)
+        with open(path, "rb") as f:
+            if os.fstat(f.fileno()).st_size > self.MAX_FILE_BYTES:
+                raise LimitError(f"{path}: ASCII grid larger than {self.MAX_FILE_BYTES} bytes")
+            while True:
                 pos = f.tell()
-                line = f.readline()
+                line = f.readline(self.MAX_HEADER_LINE)
+                parts = line.split()
+                if not parts or parts[0].decode("ascii", "replace").lower() not in self._HEADER_KEYS:
+                    break
+                if len(parts) < 2:
+                    raise FormatError(f"{path}: malformed ASCII grid header line")
+                try:
+                    header[parts[0].decode("ascii").lower()] = float(parts[1])
+                except (UnicodeDecodeError, ValueError):
+                    raise FormatError(f"{path}: malformed ASCII grid header value") from None
             f.seek(pos)
             try:
                 self.width, self.height = int(header["ncols"]), int(header["nrows"])
                 cs = header["cellsize"]
             except KeyError as e:
                 raise FormatError(f"{path}: missing ASCII grid header {e}") from None
-            if self.width * self.height > self.MAX_CELLS or self.width <= 1 or self.height <= 1 or cs <= 0:
+            except (ValueError, OverflowError):
+                raise FormatError(f"{path}: implausible grid size") from None
+            if (self.width * self.height > self.MAX_CELLS or self.width <= 1 or self.height <= 1
+                    or not (math.isfinite(cs) and cs > 0)):
                 raise FormatError(f"{path}: implausible grid size")
-            vals = f.read().split()
-        if len(vals) != self.width * self.height:
-            raise FormatError(f"{path}: expected {self.width * self.height} values, found {len(vals)}")
-        try:
-            self.values = [float(v) for v in vals]
-        except ValueError:
-            raise FormatError(f"{path}: non-numeric value in grid") from None
+            self.values = self._read_values(f, path, self.width * self.height)
         self.nodata = header.get("nodata_value")
         self.sx = self.sy = cs
         if "xllcorner" in header:
@@ -290,6 +345,33 @@ class AsciiGrid:
         self.y_c0 = ylow + (self.height - 1) * cs
         self.crs = crs
 
+    def _read_values(self, f, path, expected):
+        values = array("d")
+        carry = b""
+        while True:
+            chunk = f.read(self.CHUNK)
+            data = carry + chunk
+            toks = data.split()
+            carry = b""
+            if chunk and toks and not data[-1:].isspace():
+                carry = toks.pop()  # possibly split token; finish it with the next chunk
+                if len(carry) > self.MAX_TOKEN:
+                    raise FormatError(f"{path}: over-long value in grid")
+            if len(values) + len(toks) > expected:
+                raise FormatError(f"{path}: expected {expected} values, found more")
+            try:
+                for t in toks:
+                    if len(t) > self.MAX_TOKEN:
+                        raise ValueError
+                    values.append(float(t))
+            except ValueError:
+                raise FormatError(f"{path}: non-numeric value in grid") from None
+            if not chunk:
+                break
+        if len(values) != expected:
+            raise FormatError(f"{path}: expected {expected} values, found {len(values)}")
+        return values
+
     def col_row(self, x, y):
         return (x - self.x_c0) / self.sx, (self.y_c0 - y) / self.sy
 
@@ -297,6 +379,8 @@ class AsciiGrid:
         if not (0 <= col < self.width and 0 <= row < self.height):
             return None
         v = self.values[row * self.width + col]
+        if not math.isfinite(v):
+            return None  # NaN/Inf (including a NaN NODATA_value) are NoData
         if self.nodata is not None and v == self.nodata:
             return None
         return v
@@ -318,14 +402,11 @@ def parse_crs(text):
 
 def load_ascii_grid(area, path, crs_text, spacing=10.0, vertical_datum="user-declared (unknown)",
                     license_note="", progress=None):
-    import hashlib
-    import os
     grid = AsciiGrid(path, parse_crs(crs_text))
     raster = _Raster(grid)
     raster.contains_pixel = lambda c, r: 0 <= c < grid.width and 0 <= r < grid.height
     prov = _local_provenance(path, grid, area, spacing, vertical_datum, license_note)
-    with open(path, "rb") as f:
-        prov["sha256"] = hashlib.sha256(f.read()).hexdigest()
+    prov["sha256"] = _sha256_file(path)
     prov["file_name"] = os.path.basename(path)
     return _sample_grid(area, spacing, [raster], lambda la, lo: raster, prov, progress)
 

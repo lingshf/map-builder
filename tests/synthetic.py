@@ -69,8 +69,8 @@ class OsmBuilder:
         self.ways.append((wid, ids, tags or {}))
         return wid
 
-    def multipolygon(self, outer, inners, tags):
-        o = self.way(outer, closed=True)
+    def multipolygon(self, outer, inners, tags, outer_tags=None):
+        o = self.way(outer, outer_tags, closed=True)
         ins = [self.way(i, closed=True) for i in inners]
         rid = self._next()
         self.relations.append((rid, [("way", o, "outer")] + [("way", i, "inner") for i in ins],

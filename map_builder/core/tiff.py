@@ -11,8 +11,10 @@ the same code reads local files and HTTP range requests (cloud-optimised
 GeoTIFFs such as the Copernicus DEM on AWS) without downloading whole files.
 """
 
+import array
 import math
 import struct
+import sys
 import zlib
 
 from .errors import FormatError, LimitError
@@ -21,6 +23,13 @@ _TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 
 _TYPE_FMT = {1: "B", 3: "H", 4: "I", 6: "b", 8: "h", 9: "i", 11: "f", 12: "d"}
 
 MAX_RASTER_PIXELS_READ = 16_000_000
+MAX_DIMENSION = 1_000_000          # pixels per side
+MAX_BLOCK_BYTES = 16 * 1024 * 1024  # decoded bytes of one strip/tile
+MAX_BLOCK_CACHE_BYTES = 64 * 1024 * 1024
+MAX_TAG_BYTES = 16 * 1024 * 1024   # aggregate out-of-line tag data decoded from the IFD
+# Only the tags this reader interprets are decoded; everything else is skipped unread.
+NEEDED_TAGS = frozenset({256, 257, 258, 259, 273, 277, 278, 279, 317, 322, 323, 324, 325, 339,
+                         33550, 33922, 34264, 34735, 42113})
 
 
 class FileSource:
@@ -64,26 +73,37 @@ class HttpRangeSource:
 
     HEAD_BYTES = 256 * 1024
 
-    def __init__(self, client, url, description, cache=None, max_total_bytes=96 * 1024 * 1024):
+    def __init__(self, client, url, description, cache=None, max_total_bytes=96 * 1024 * 1024, cache_key=None):
         self.client = client
         self.url = url
         self.description = description
         self.cache = cache
+        # Cache identity: must be stable and credential-free (defaults to the description).
+        self.cache_key = cache_key or description
         self.max_total_bytes = max_total_bytes
         self.fetched = 0
         self._head = self._get(0, self.HEAD_BYTES, allow_short=True)
         self.size = None
 
     def _get(self, offset, length, allow_short=False):
-        key = f"{self.description}#{offset}+{length}"
+        key = f"{self.cache_key}#{offset}+{length}"
         body = self.cache.get("ranges", key) if self.cache else None
         if body is None:
-            if self.fetched + length > self.max_total_bytes:
+            remaining = self.max_total_bytes - self.fetched
+            if length > remaining:
                 raise LimitError(f"{self.description}: download budget of {self.max_total_bytes} bytes exceeded")
-            body = self.client.fetch(self.url, byte_range=(offset, length), not_found_is_coverage=True)
-            self.fetched += len(body)
+            cap = min(remaining, getattr(self.client, "max_bytes", remaining))
+            before = getattr(self.client, "bytes_downloaded", 0)
+            try:
+                body = self.client.fetch(self.url, byte_range=(offset, length), max_bytes=cap,
+                                         not_found_is_coverage=True)
+            finally:
+                # charge the full response (a server ignoring Range sends the whole file)
+                self.fetched += max(getattr(self.client, "bytes_downloaded", 0) - before, 0)
+            if self.fetched > self.max_total_bytes:
+                raise LimitError(f"{self.description}: download budget of {self.max_total_bytes} bytes exceeded")
             if self.cache:
-                self.cache.put("ranges", key, body, {"source": self.description})
+                self.cache.put("ranges", key, body, {"source": self.cache_key})
         if len(body) < length and not allow_short:
             raise FormatError(f"{self.description}: short read at {offset}")
         return body
@@ -97,7 +117,8 @@ class HttpRangeSource:
         pass
 
 
-def lzw_decode(data):
+def lzw_decode(data, max_out=None):
+    """TIFF LZW decode; raises :class:`LimitError` if output would exceed ``max_out`` bytes."""
     out = bytearray()
     table = [bytes([i]) for i in range(256)] + [b"", b""]
     width = 9
@@ -133,9 +154,28 @@ def lzw_decode(data):
             raise FormatError("corrupt LZW stream")
         out += entry
         prev = entry
+        if max_out is not None and len(out) > max_out:
+            raise LimitError(f"LZW block decodes to more than the expected {max_out} bytes")
         if len(table) >= (1 << width) - 1 and width < 12:
             width += 1
     return bytes(out)
+
+
+def inflate_capped(data, max_out):
+    """zlib/Deflate decode that never produces more than ``max_out`` bytes."""
+    d = zlib.decompressobj()
+    out = d.decompress(data, max_out)
+    tail = d.unconsumed_tail
+    while tail and not d.eof:
+        # Output buffer is full; any further output means the block is larger than declared.
+        if d.decompress(tail, 1):
+            raise LimitError(f"deflate block decodes to more than the expected {max_out} bytes")
+        if d.unconsumed_tail == tail:
+            break
+        tail = d.unconsumed_tail
+    if not d.eof:
+        raise zlib.error("incomplete or truncated stream")
+    return out
 
 
 class GeoTiff:
@@ -157,6 +197,8 @@ class GeoTiff:
         self.tags = self._read_ifd(ifd)
         self._parse()
         self._blocks = {}
+        self._cache_bytes = 0
+        self.max_cache_bytes = MAX_BLOCK_CACHE_BYTES
 
     # -- parsing ---------------------------------------------------------
     def _read_ifd(self, off):
@@ -165,14 +207,19 @@ class GeoTiff:
             raise FormatError(f"{self.src.description}: implausible IFD entry count {n}")
         raw = self.src.read(off + 2, n * 12)
         tags = {}
+        budget = MAX_TAG_BYTES
         for i in range(n):
             tag, typ, count = struct.unpack(self.bo + "HHI", raw[i * 12:i * 12 + 8])
+            if tag not in NEEDED_TAGS:
+                continue  # never read or keep values we do not interpret
             size = _TYPE_SIZES.get(typ)
             if size is None:
                 continue
             total = size * count
-            if total > 64 * 1024 * 1024:
-                raise FormatError(f"{self.src.description}: tag {tag} too large")
+            if total > 4:
+                budget -= total
+                if budget < 0:
+                    raise LimitError(f"{self.src.description}: TIFF tag data exceeds {MAX_TAG_BYTES} bytes")
             valbytes = raw[i * 12 + 8:i * 12 + 12]
             data = valbytes[:total] if total <= 4 else self.src.read(struct.unpack(self.bo + "I", valbytes)[0], total)
             if typ == 2:
@@ -218,8 +265,8 @@ class GeoTiff:
         if 322 in self.tags:
             self.block_w = self._tag1(322)
             self.block_h = self._tag1(323)
-            self.offsets = self.tags[324]
-            self.counts = self.tags[325]
+            self.offsets = self.tags.get(324)
+            self.counts = self.tags.get(325)
         else:
             self.block_w = self.width
             self.block_h = min(self._tag1(278, self.height), self.height)
@@ -227,7 +274,18 @@ class GeoTiff:
             self.counts = self.tags.get(279)
         if not self.offsets or not self.counts or len(self.offsets) != len(self.counts):
             raise FormatError(f"{d}: missing or inconsistent strip/tile offsets")
+        # Validate geometry before any pixel payload is read.
+        if not (0 < self.width <= MAX_DIMENSION and 0 < self.height <= MAX_DIMENSION):
+            raise LimitError(f"{d}: raster size {self.width}x{self.height} exceeds {MAX_DIMENSION} pixels per side")
+        if not self.block_w or not self.block_h or self.block_w <= 0 or self.block_h <= 0:
+            raise FormatError(f"{d}: invalid strip/tile size")
+        self.block_bytes = self.block_w * self.block_h * self.bytes_ps
+        if self.block_bytes > MAX_BLOCK_BYTES:
+            raise LimitError(f"{d}: strip/tile of {self.block_w}x{self.block_h} exceeds {MAX_BLOCK_BYTES} bytes")
         self.blocks_across = (self.width + self.block_w - 1) // self.block_w
+        blocks_down = (self.height + self.block_h - 1) // self.block_h
+        if len(self.offsets) < self.blocks_across * blocks_down:
+            raise FormatError(f"{d}: fewer strip/tile offsets than the raster size requires")
         nodata = self.tags.get(42113)
         self.nodata = None
         if isinstance(nodata, str) and nodata.strip():
@@ -235,6 +293,12 @@ class GeoTiff:
                 self.nodata = float(nodata.strip())
             except ValueError:
                 raise FormatError(f"{d}: unparsable GDAL_NODATA {nodata!r}") from None
+            if self.fmt == "f" and math.isfinite(self.nodata):
+                # Pixels are float32: compare against the float32-rounded sentinel.
+                try:
+                    self.nodata = struct.unpack("<f", struct.pack("<f", self.nodata))[0]
+                except OverflowError:
+                    self.nodata = math.copysign(math.inf, self.nodata)
         self._parse_geo()
 
     def _parse_geo(self):
@@ -292,14 +356,22 @@ class GeoTiff:
             return self._blocks[idx]
         if idx >= len(self.offsets):
             raise FormatError(f"{self.src.description}: block index out of range")
-        raw = self.src.read(self.offsets[idx], self.counts[idx]) if self.counts[idx] else b""
+        cap = self.block_bytes
+        count = self.counts[idx]
+        if self.compression == 1:
+            count = min(count, cap)
+        elif count > 2 * cap + 4096:
+            raise LimitError(f"{self.src.description}: compressed block {idx} is implausibly large")
+        raw = self.src.read(self.offsets[idx], count) if count else b""
         try:
             if self.compression in (8, 32946):
-                raw = zlib.decompress(raw)
+                raw = inflate_capped(raw, cap)
             elif self.compression == 5:
-                raw = lzw_decode(raw)
+                raw = lzw_decode(raw, max_out=cap)
         except zlib.error as e:
             raise FormatError(f"{self.src.description}: corrupt deflate block: {e}") from None
+        except LimitError as e:
+            raise LimitError(f"{self.src.description}: {e}") from None
         n = self.block_w * self.block_h
         need = n * self.bytes_ps
         if len(raw) < need:
@@ -310,15 +382,25 @@ class GeoTiff:
         raw = raw[:need]
         rows = n // self.block_w
         vals = self._unpredict(raw, rows)
+        nbytes = len(vals) * vals.itemsize
+        while self._blocks and self._cache_bytes + nbytes > self.max_cache_bytes:
+            old = self._blocks.pop(next(iter(self._blocks)))
+            self._cache_bytes -= len(old) * old.itemsize
         self._blocks[idx] = vals
-        if len(self._blocks) > 64:
-            self._blocks.pop(next(iter(self._blocks)))
+        self._cache_bytes += nbytes
         return vals
 
     def _unpredict(self, raw, rows):
+        """Decoded samples as a compact native ``array.array`` (bounded memory)."""
         w, b = self.block_w, self.bytes_ps
         if self.predictor == 1:
-            return struct.unpack(f"{self.bo}{w * rows}{self.fmt}", raw)
+            vals = array.array(self.fmt)
+            if vals.itemsize != b:
+                return array.array(self.fmt, struct.unpack(f"{self.bo}{w * rows}{self.fmt}", raw))
+            vals.frombytes(raw)
+            if (self.bo == "<") != (sys.byteorder == "little"):
+                vals.byteswap()
+            return vals
         if self.predictor == 2:
             vals = list(struct.unpack(f"{self.bo}{w * rows}{self.fmt}", raw))
             mask = (1 << self.bps) - 1
@@ -330,9 +412,9 @@ class GeoTiff:
                     if signed and v >= 1 << (self.bps - 1):
                         v -= 1 << self.bps
                     vals[base + c] = v
-            return vals
+            return array.array(self.fmt, vals)
         # predictor 3: byte-wise differencing over byte planes (MSB plane first)
-        out = []
+        out = array.array(self.fmt)
         rowbytes = w * b
         for r in range(rows):
             row = bytearray(raw[r * rowbytes:(r + 1) * rowbytes])
@@ -354,12 +436,14 @@ class GeoTiff:
         if i >= len(vals):
             raise FormatError(f"{self.src.description}: truncated block")
         v = float(vals[i])
-        if self.nodata is not None and (v == self.nodata or (math.isnan(self.nodata) and math.isnan(v))):
-            return None
-        if math.isnan(v):
+        if not math.isfinite(v):
+            return None  # NaN/Inf are never valid heights
+        if self.nodata is not None and v == self.nodata:
             return None
         return v
 
     def check_window(self, col0, row0, col1, row1):
+        if col1 < col0 or row1 < row0:
+            return
         if (col1 - col0 + 1) * (row1 - row0 + 1) > MAX_RASTER_PIXELS_READ:
             raise LimitError(f"{self.src.description}: requested window too large")

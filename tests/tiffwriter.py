@@ -72,9 +72,13 @@ def _predict(rows_vals, w, bo, fmt, predictor):
 
 
 def make_geotiff(values, x0, y0, sx, sy, epsg=4326, *, big_endian=False, tile=None, rows_per_strip=None,
-                 compression=8, predictor=1, sample="f32", nodata=None, pixel_is_point=False):
+                 compression=8, predictor=1, sample="f32", nodata=None, pixel_is_point=False,
+                 tag_overrides=None, payload_hook=None):
     """values[row][col], row 0 = north. (x0, y0) = upper-left corner of pixel (0,0) (PixelIsArea)
-    or centre (PixelIsPoint)."""
+    or centre (PixelIsPoint).
+
+    ``tag_overrides`` {tag: (type, values)} replaces/adds IFD entries (types 2/7 take raw bytes);
+    ``payload_hook(raw_uncompressed) -> stored bytes`` replaces block encoding (for corrupt-data tests)."""
     bo = ">" if big_endian else "<"
     fmt, sfmt, bps = {"f32": ("f", 3, 32), "i16": ("h", 2, 16), "u16": ("H", 1, 16)}[sample]
     h, w = len(values), len(values[0])
@@ -95,7 +99,9 @@ def make_geotiff(values, x0, y0, sx, sy, epsg=4326, *, big_endian=False, tile=No
     payloads = []
     for rows, bw in blocks:
         raw = _predict(rows, bw, bo, fmt, predictor)
-        if compression == 8:
+        if payload_hook is not None:
+            raw = payload_hook(raw)
+        elif compression == 8:
             raw = zlib.compress(raw)
         elif compression == 5:
             raw = lzw_encode(raw)
@@ -116,8 +122,10 @@ def make_geotiff(values, x0, y0, sx, sy, epsg=4326, *, big_endian=False, tile=No
         tags += [(273, 4, None), (278, 4, [rows_per_strip or h]), (279, 4, [len(p) for p in payloads])]
     if nodata is not None:
         tags.append((42113, 2, (str(nodata) + "\0").encode("ascii")))
+    for tag, (typ, vals) in (tag_overrides or {}).items():
+        tags = [t for t in tags if t[0] != tag] + [(tag, typ, vals)]
     tags.sort(key=lambda t: t[0])
-    fmts = {3: "H", 4: "I", 12: "d", 2: "s"}
+    fmts = {1: "B", 3: "H", 4: "I", 12: "d", 2: "s", 7: "s"}
     header = 8
     ifd_size = 2 + 12 * len(tags) + 4
     data_off = header + ifd_size
@@ -125,13 +133,13 @@ def make_geotiff(values, x0, y0, sx, sy, epsg=4326, *, big_endian=False, tile=No
     payload_start = None
     # first pass to place blocks after the extra area: compute extra sizes
     def tag_bytes(typ, vals):
-        if typ == 2:
+        if typ in (2, 7):
             return vals
         return struct.pack(f"{bo}{len(vals)}{fmts[typ]}", *vals)
     sizes = {}
     for tag, typ, vals in tags:
         n = len(payloads) if vals is None else (len(vals))
-        sizes[tag] = n * struct.calcsize(fmts[typ]) if typ != 2 else len(vals)
+        sizes[tag] = n * struct.calcsize(fmts[typ]) if typ not in (2, 7) else len(vals)
     extra_len = sum(s for s in sizes.values() if s > 4)
     payload_start = data_off + extra_len
     offsets = []
