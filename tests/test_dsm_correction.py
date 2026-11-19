@@ -2194,6 +2194,32 @@ class ReviewRound11Test(unittest.TestCase):
         with self.assertRaises(LimitError):
             classify(parse_osm_xml(b.xml().encode()), area, mask_extent=self.EXTENT, max_features=2)
 
+    def test_bridge_mask_fragments_are_bounded_while_emitted(self):
+        # round 12: each zig-zag bridge way clips into ~100 off-area fragments; before, all were kept, then dropped
+        import tracemalloc
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        zig = [(55.0, 0.0), (80.0, 5.0), (80.0, -5.0)] * 100
+        for _ in range(200):
+            b.way(zig, {"highway": "service", "bridge": "yes", "width": "4"})
+        data = parse_osm_xml(b.xml().encode())
+        self.assertGreater(len(classify(data, area, mask_extent=(-50.0, -50.0, 50.0, 50.0)).bridges), 15000)
+        def peak(d):
+            tracemalloc.start()
+            try:
+                cl = classify(d, area, mask_extent=(-50.0, -50.0, 50.0, 50.0), max_features=100)
+                return cl, tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+        cl, bridged = peak(data)
+        self.assertEqual(cl.bridges, [])
+        self.assertIn("exceed the feature limit (100 features", cl.mask_unavailable)
+        plain = OsmBuilder()
+        for _ in range(200):
+            plain.way(zig, {"highway": "service", "width": "4"})
+        _cl, baseline = peak(parse_osm_xml(plain.xml().encode()))      # the same ways, not bridges
+        self.assertLess(bridged, 1.5 * baseline)                       # before: ~2.5 x (all fragments kept)
+
 
 def pipeline_mask_message(cls_name):
     from map_builder.core import errors, pipeline

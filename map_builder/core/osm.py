@@ -881,6 +881,16 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
         return pts
 
     out = Classified()
+
+    def keep_mask(lst, feats):
+        # mask-only candidates are bounded as they are emitted (not only after classification), so an
+        # oversized mask never holds more than ``max_features`` of them in memory, correction on or off
+        for f in feats:
+            if _mask_count(out) >= max_features:
+                _drop_mask_candidates(out, max_features)
+                return
+            lst.append(f)
+
     used_as_member = set()
     polygons = {}  # feature id -> [Polygon]
     rel_outer_ways = {}  # area family -> way ids that are outers of an area relation with geometry
@@ -1030,10 +1040,11 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             if pts is None:
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
                 continue
-            if ("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no":
+            if (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"
+                    and not out.mask_unavailable):
                 bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent))
-                for k, part in enumerate(bparts):
-                    out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
+                keep_mask(out.bridges, (Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part)
+                                        for k, part in enumerate(bparts)))
             if "highway" not in tags:
                 kind = "railway" if "railway" in tags else "waterway"
                 if _clip_polyline(pts, area):
@@ -1066,10 +1077,10 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                 # Not generated: counted as outside the area, and a DSM mask candidate if it is a surface
                 # feature (the inside-area predicate below).
                 out.outside += 1
-                if surface_mask_eligible(tags):
+                if surface_mask_eligible(tags) and not out.mask_unavailable:
                     # each polygon on its own: an off-grid polygon of the same relation is never kept
-                    out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys
-                                                 if _rect_overlaps(p.bbox(), building_rect))
+                    keep_mask(out.outside_buildings, (Feature(fid, "building", tags, p) for p in polys
+                                                      if _rect_overlaps(p.bbox(), building_rect)))
                 continue
             reason = _unsupported_reason(tags)
             if reason:
@@ -1097,8 +1108,9 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             x, y = frame.to_local(lat, lon)
             if area.contains(x, y):
                 out.trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
-            elif tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]:
-                out.mask_trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
+            elif (not out.mask_unavailable
+                  and tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]):
+                keep_mask(out.mask_trees, (Feature(f"osm:node/{nid}", "tree", tags, (x, y)),))
 
     # Enforced before building:part matching: replaced outlines are retained (outline_features)
     # and so count, exactly like the parts and the other buildings still in ``out.buildings``.

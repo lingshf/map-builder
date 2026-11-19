@@ -99,7 +99,7 @@ the surrounding ground before the terrain, roads and buildings are built.
   timestamp is not recorded (`osm_base_timestamp_note` instead). The DSM mask candidates (from
     either response) have their own feature allowance (50 000 by default), counted separately from
     the scene content, which alone can fail the build with a feature-limit error; rather than failing
-    the build, mask candidates beyond the allowance are dropped and the correction is skipped with the
+    the build, mask candidates beyond the allowance (enforced as they are collected) are dropped and the correction is skipped with the
     same warning (also with the correction off, mask-only features never fail a build), and a member way
     listed more than once in a multipolygon is used once. Wide-only forest mask areas keep only a
     minimal `_class` tag, not the relation's tags. If only its
