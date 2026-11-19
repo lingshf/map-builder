@@ -17,7 +17,8 @@ from ..core.package import validate_package
 from ..core.pipeline import Settings, generate_plan
 from . import export as mb_export
 from .scene_build import build_scene, write_report_text
-from .sources import SettingsInputError, format_report, needs_network, reject_credentials, settings_kwargs
+from .sources import (SettingsInputError, format_report, needs_network, redact_diagnostics, reject_credentials,
+                      settings_kwargs)
 
 REPORT_TEXT = "MapBuilder Report"
 
@@ -29,7 +30,8 @@ def _abspath(p):
 def fail(op, headline, problems=()):
     """Report a cancelled operation without touching the scene: console gets every problem, the operator
     report the headline plus the first problem."""
-    problems = list(problems)
+    problems = redact_diagnostics([str(p) for p in problems])
+    headline = redact_diagnostics([headline])[0]
     print(f"Map Builder: {headline}" + "".join(f"\n  - {p}" for p in problems))
     more = f" (+{len(problems) - 1} more, see the system console)" if len(problems) > 1 else ""
     op.report({"ERROR"}, f"{headline}: {problems[0]}{more}" if problems else headline)

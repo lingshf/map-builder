@@ -405,6 +405,57 @@ def main(out_dir):
     res, err = run_op(bpy.ops.map_builder.export)
     check(res == {"FINISHED"}, f"export after restoring the scene ({err or 'ok'})")
 
+    # --- material identity, attribute-socket handling and credential-like names (review round 2) -------
+    mlib_path = os.path.join(out_dir, "it_mlib.blend")
+
+    def principled(name, rgb):
+        m = bpy.data.materials.new(name)
+        m.use_nodes = True
+        m.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (*rgb, 1.0)
+        return m
+
+    lm = principled("it_dup", (1.0, 0.0, 0.0))
+    bpy.data.libraries.write(mlib_path, {lm}, fake_user=True)
+    bpy.data.materials.remove(lm)
+    with bpy.data.libraries.load(mlib_path, link=True) as (src_data, dst_data):
+        dst_data.materials = ["it_dup"]
+    linked_mat = dst_data.materials[0]
+    local_mat = principled("it_dup [it_mlib.blend]", (0.0, 0.0, 1.0))
+    alpha_mat = principled("it_alpha", (0.0, 1.0, 0.0))
+    ca = alpha_mat.node_tree.nodes.new("ShaderNodeVertexColor")
+    alpha_mat.node_tree.links.new(ca.outputs["Alpha"],
+                                  alpha_mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
+    mat_boxes = []
+    for i, m in enumerate((linked_mat, local_mat, alpha_mat)):
+        ob = box(f"it_mat_{i}", [root], (-60.0 - 5 * i, 60.0, 40.0))
+        ob.data.materials.append(m)
+        mat_boxes.append(ob)
+    res, err = run_op(bpy.ops.map_builder.export)
+    check(res == {"FINISHED"}, f"export with same-named material datablocks ({err or 'ok'})")
+    with zipfile.ZipFile(pkg) as z:
+        gltf, _ = __import__("map_builder.core.glb", fromlist=["read_glb"]).read_glb(z.read("visual/map.glb"))
+        rep3 = json.loads(z.read("report.json"))
+    gmats = {m["name"]: m["pbrMetallicRoughness"]["baseColorFactor"][:3] for m in gltf.get("materials", [])}
+    dup = {n: c for n, c in gmats.items() if n.startswith("it_dup [it_mlib.blend]")}
+    check(len(dup) == 2 and sorted(tuple(round(x, 3) for x in c) for c in dup.values())
+          == [(0.0, 0.0, 1.0), (1.0, 0.0, 0.0)],
+          f"distinct material datablocks with the same display name keep their own colours ({sorted(dup)})")
+    check([round(x, 3) for x in gmats.get("it_alpha", [])] == [0.0, 1.0, 0.0]
+          and any("it_alpha" in w and "Color" in w for w in rep3["blender_export"]["warnings"]),
+          "Color Attribute Alpha output into Base Color is not treated as RGB (constant colour + warning)")
+    secret = bpy.data.objects.new("it token=FAKE_REVIEW_ONLY", bpy.data.curves.new("it_secret", "CURVE"))
+    root.objects.link(secret)
+    good = sha256(pkg)
+    res, err = run_op(bpy.ops.map_builder.export)
+    check(res == {"CANCELLED"} and "FAKE_REVIEW_ONLY" not in (err or "") and "withheld" in (err or ""),
+          f"credential-like object name is not echoed in the export error ({(err or '')[:100]!r})")
+    check(sha256(pkg) == good, "previous package unchanged after the credential-named failure")
+    bpy.data.objects.remove(secret)
+    for ob in mat_boxes:
+        bpy.data.objects.remove(ob)
+    res, err = run_op(bpy.ops.map_builder.export)
+    check(res == {"FINISHED"}, f"export after removing the material test objects ({err or 'ok'})")
+
     # --- invalid scenes fail and keep the previous package --------------------------------------------
     good = sha256(pkg)
     report_text = bpy.data.texts["MapBuilder Report"].as_string()

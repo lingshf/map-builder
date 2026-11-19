@@ -11,7 +11,7 @@ import unittest
 from map_builder.blender.bake import (DEFAULT_MATERIAL, ExportError, bake_object, det3, export_baked, package_parts,
                                       transform_problem)
 from map_builder.blender.sources import (ENV_OVERPASS_URL, SettingsInputError, endpoint_problem, format_report,
-                                         needs_network, settings_kwargs)
+                                         needs_network, redact_diagnostics, settings_kwargs)
 from map_builder.core.errors import PackageError
 from map_builder.core.generate import MATERIALS, PlanOptions, build_plan
 from map_builder.core.osm import DEFAULT_OVERPASS_URL
@@ -229,6 +229,13 @@ class ExportPolicyTest(unittest.TestCase):
 
 
 class SourcesTest(unittest.TestCase):
+    def test_redact_diagnostics_withholds_credential_like_names(self):
+        out = redact_diagnostics(["'curve token=FAKE_REVIEW_ONLY': CURVE objects cannot be exported",
+                                  "'bld_1': zero scale"])
+        self.assertNotIn("FAKE_REVIEW_ONLY", out[0])
+        self.assertIn("withheld", out[0])
+        self.assertEqual(out[1], "'bld_1': zero scale")
+
     BASE = {"elevation_source": "file", "elevation_file": "/x/dem.asc", "elevation_crs": "EPSG:4326",
             "elevation_vertical_datum": "", "elevation_license": "CC-BY 4.0", "terrain_spacing": 10.0,
             "osm_source": "file", "osm_file": "/x/a.osm", "overpass_endpoint": "default", "cache_dir": ""}

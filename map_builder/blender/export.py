@@ -114,13 +114,15 @@ def material_spec(mat):
     src = _linked_from(base)
     if src is None:
         rgb = tuple(float(c) for c in base.default_value[:3])
-    elif src.type in ATTRIBUTE_NODES and (src.type == "VERTEX_COLOR" or src.attribute_type == "GEOMETRY"):
+    elif (src.type in ATTRIBUTE_NODES and (src.type == "VERTEX_COLOR" or src.attribute_type == "GEOMETRY")
+          and base.links[0].from_socket.identifier == "Color"):
         rgb = WHITE
         attr = src.layer_name if src.type == "VERTEX_COLOR" else src.attribute_name
     else:
         rgb = tuple(float(c) for c in base.default_value[:3])
-        warnings.append(f"material {mat.name!r}: Base Color comes from a {src.bl_label} node (textures and "
-                        "node networks are not exported); exported with the socket's constant colour")
+        warnings.append(f"material {mat.name!r}: Base Color comes from a {src.bl_label} node output other than a "
+                        "colour attribute's Color (textures, scalar outputs and node networks are not exported); "
+                        "exported with the socket's constant colour")
     values = []
     for key in ("Roughness", "Metallic"):
         sock = bsdf.inputs[key]
@@ -215,7 +217,22 @@ def _label(ob):
     return ob.name_full
 
 
-def _bake_mesh_object(ob, depsgraph, materials, warnings):
+def _export_material_name(mat_names, key, name):
+    """Unique, deterministic export name per material datablock (``key``): distinct datablocks whose display
+    names coincide (e.g. a linked 'X' from lib.blend and a local 'X [lib.blend]') get ' (2)', ' (3)', ... in
+    first-seen order, so one never silently takes the other's factors. The default material's name is
+    reserved."""
+    if key in mat_names:
+        return mat_names[key]
+    taken = set(mat_names.values()) | {DEFAULT_MATERIAL}
+    unique, k = name, 2
+    while unique in taken:
+        unique, k = f"{name} ({k})", k + 1
+    mat_names[key] = unique
+    return unique
+
+
+def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
     ev = ob.evaluated_get(depsgraph)
     me = ev.to_mesh()
     try:
@@ -238,6 +255,7 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings):
         for slot in ev.material_slots:
             mname, spec, attr, mwarn = material_spec(slot.material)
             if spec is not None:
+                mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
                 materials.setdefault(mname, spec)
             reader = None
             if attr is not None:
@@ -301,6 +319,7 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
         raise ExportError([f"map collection {root.name!r} is not enabled in view layer {view_layer.name!r}: {why}"])
     instancers = _instancing_parents(depsgraph, set(unique))
     baked, materials, names = [], {}, []
+    mat_names = {}                              # material datablock pointer -> unique export name
     for ob in objects:
         ptr = ob.as_pointer()
         reason = None
@@ -338,7 +357,7 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
                           "add a Realize Instances node")
             continue
         try:
-            b = _bake_mesh_object(ob, depsgraph, materials, warnings)
+            b = _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names)
         except ExportError as e:
             errors.extend(e.errors)
             continue
