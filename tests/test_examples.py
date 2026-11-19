@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 import zipfile
@@ -36,6 +37,26 @@ def _sha256(path):
 def _members(path):
     with zipfile.ZipFile(path) as z:
         return {n: z.read(n) for n in z.namelist()}
+
+
+_CT = {5120: "b", 5121: "B", 5122: "h", 5123: "H", 5125: "I", 5126: "f"}
+_NC = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+
+
+def _glb_accessors(glb):
+    """Decoded values of every accessor (positions, normals, colours, indices...) of a trusted GLB."""
+    jlen = struct.unpack_from("<I", glb, 12)[0]
+    gl = json.loads(glb[20:20 + jlen])
+    bin_start = 20 + jlen + 8
+    out = []
+    for a in gl.get("accessors", []):
+        v = gl["bufferViews"][a["bufferView"]]
+        fmt, nc = _CT[a["componentType"]], _NC[a["type"]]
+        elem = struct.calcsize("<" + fmt) * nc
+        stride = v.get("byteStride") or elem
+        start = bin_start + v.get("byteOffset", 0) + a.get("byteOffset", 0)
+        out.append([x for k in range(a["count"]) for x in struct.unpack_from(f"<{nc}{fmt}", glb, start + k * stride)])
+    return out
 
 
 def _approx_equal(test, a, b, where, msg, tol=1e-4):
@@ -120,6 +141,13 @@ class SyntheticSampleTest(unittest.TestCase):
             _approx_equal(self, ga, gb, "glb.json", stale)
             _approx_equal(self, [(n.index, n.name, n.extras, n.matrix, n.triangles) for n in na],
                           [(n.index, n.name, n.extras, n.matrix, n.triangles) for n in nb], "glb.nodes", stale)
+            acc_a, acc_b = _glb_accessors(fresh["visual/map.glb"]), _glb_accessors(committed["visual/map.glb"])
+            self.assertEqual(len(acc_a), len(acc_b), stale)
+            for i, (x, y) in enumerate(zip(acc_a, acc_b)):
+                if x and isinstance(x[0], int):
+                    self.assertEqual(x, y, f"{stale} (glb.accessors[{i}])")
+                else:
+                    _approx_equal(self, x, y, f"glb.accessors[{i}]", stale)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

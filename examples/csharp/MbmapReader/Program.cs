@@ -84,7 +84,9 @@ static class Program
             scaled.NormalMap = Scale(probe.NormalMap, 2);
             scaled.NormalUnity = Scale(probe.NormalUnity, 2);
             var offVertex = probe.Clone();
-            offVertex.PointMap = new Vec3(probe.PointMap.X, probe.PointMap.Y, probe.PointMap.Z + 1);
+            var tm = probe.TriangleMap;
+            // Above every vertex of the triangle, so it cannot coincide with another vertex.
+            offVertex.PointMap = new Vec3(probe.PointMap.X, probe.PointMap.Y, Math.Max(tm.A.Z, Math.Max(tm.B.Z, tm.C.Z)) + 1);
             offVertex.PointGltf = Axes.MapToGltf(offVertex.PointMap);
             offVertex.PointUnity = Axes.MapToUnity(offVertex.PointMap);
             var imported = Import(vn, negateX: true, reverseWinding: true);
