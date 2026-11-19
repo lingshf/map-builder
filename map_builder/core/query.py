@@ -46,6 +46,13 @@ def _dist2(a, b):
 # vertices only: its plane is undefined or numerically meaningless. Mirrored by MbmapReader.cs.
 DEGENERATE_SIN = 1e-9
 
+# Capsule contact is inclusive: a triangle within radius + CONTACT_TOL_M is a hit, so an exact contact is not
+# lost to rounding (a few ulps at map coordinates up to 1e6 m). Mirrored by MbmapReader.cs.
+CONTACT_TOL_M = 1e-9
+# Rays accept barycentric coordinates down to -RAY_EDGE_TOL (and u + v up to 1 + RAY_EDGE_TOL), so a ray through
+# an edge shared by two triangles cannot slip between them when each rounds its coordinates the other way.
+RAY_EDGE_TOL = 1e-9
+
 
 def triangle_is_degenerate(a, b, c):
     """True for a collapsed (two or three equal vertices) or (nearly) collinear triangle, see DEGENERATE_SIN."""
@@ -121,11 +128,12 @@ def segment_segment_distance(p1, q1, p2, q2):
     return math.sqrt(best)
 
 
-def _ray_triangle(o, d, a, b, c):
+def _ray_triangle(o, d, a, b, c, tol=0.0):
     """Two-sided Moller-Trumbore: the parameter ``t`` along ``o + t d`` where it meets ``abc``, or None
     (also None for a degenerate triangle or a ray parallel to its plane). The numerators are divided by
     the determinant directly: its reciprocal overflows for a subnormal determinant (a grazing ray), which
-    would turn ``0 * inf`` into NaN. A non-finite ``u``, ``v`` or ``t`` is a miss."""
+    would turn ``0 * inf`` into NaN. A non-finite ``u``, ``v`` or ``t`` is a miss. ``tol`` widens the
+    barycentric bounds (see RAY_EDGE_TOL)."""
     e1, e2 = _sub(b, a), _sub(c, a)
     pv = _cross(d, e2)
     det = _dot(e1, pv)
@@ -133,11 +141,11 @@ def _ray_triangle(o, d, a, b, c):
         return None
     tv = _sub(o, a)
     u = _dot(tv, pv) / det
-    if not (0.0 <= u <= 1.0):
+    if not (-tol <= u <= 1.0 + tol):
         return None
     qv = _cross(tv, e1)
     v = _dot(d, qv) / det
-    if not (v >= 0.0 and u + v <= 1.0):
+    if not (v >= -tol and u + v <= 1.0 + tol):
         return None
     t = _dot(e2, qv) / det
     return t if math.isfinite(t) else None
@@ -195,7 +203,7 @@ class _Budget:
 
 def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=False):
     """Collision objects touched by the capsule swept along the polyline ``path_points`` (map frame, metres)
-    with ``radius`` metres: those with a triangle at distance <= ``radius`` from a path segment.
+    with ``radius`` metres: those with a triangle at distance <= ``radius`` (+ CONTACT_TOL_M) from a path segment.
 
     Returns a sorted list of object indices (into ``col.objects``; names are ``col.objects[k]["name"]``), or a
     :data:`CapsuleResult` ``(objects, work)`` when ``result`` is true. A single point is a sphere. Raises
@@ -229,7 +237,7 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
                       max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2]))
                 if not _box_overlap(lo, hi, tb, radius):
                     continue
-                if segment_triangle_distance(p, q, a, b, c) <= radius:
+                if segment_triangle_distance(p, q, a, b, c) <= radius + CONTACT_TOL_M:
                     hit = True
                     break
             if hit:
@@ -287,7 +295,7 @@ def ray_cast(col, origin, direction, max_dist, max_work=DEFAULT_MAX_WORK):
             a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
             if triangle_is_degenerate(a, b, c):
                 continue
-            hit = _ray_triangle(o, d, a, b, c)
+            hit = _ray_triangle(o, d, a, b, c, RAY_EDGE_TOL)
             if hit is None or hit < 0.0 or hit > max_dist:
                 continue
             if best is None or hit < best.t or (hit == best.t and t < best.triangle):

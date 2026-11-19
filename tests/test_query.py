@@ -196,6 +196,21 @@ class RayCastTest(unittest.TestCase):
         miss = ray_cast(col, (0, 0, 1e-300), (1, 0, -1e-310), 10.0)            # numerator / det overflows: a miss
         self.assertIsNone(miss)
 
+    def test_ray_through_a_shared_diagonal_does_not_slip_through(self):
+        """Review round 4: both triangles rounded their barycentrics against the shared edge."""
+        q = [(46, -92, 0), (160, -92, 0), (160, 36, 0), (46, 36, 0)]
+        col = read_collision(write_collision([ColObject("g", "terrain:grid", "terrain", q, [(0, 1, 2), (0, 2, 3)])]))
+        hit = ray_cast(col, (222, 91, 119), (-1, -1, -1), 1000.0)
+        self.assertIsNotNone(hit)
+        self.assertAlmostEqual(hit.t, 119 * math.sqrt(3), places=9)
+
+    def test_exactly_tangent_capsule_is_a_hit(self):
+        """Review round 4: exact 1 m contact computed as 1.0000000000000013 m reported a 1 m capsule clear."""
+        col = read_collision(write_collision([ColObject("t", "osm:way/5", "prop",
+                                                        [(-40, 30, 0), (40, -30, 0), (0, 0, 10)], [(0, 1, 2)])]))
+        self.assertEqual(capsule_hits(col, [(-1, 2, 2), (-1, 2, 3)], 1.0), [0])
+        self.assertEqual(capsule_hits(col, [(-1, 2, 2), (-1, 2, 3)], 0.999), [])
+
     def test_oversized_integers_are_value_errors(self):
         with self.assertRaises(ValueError):
             capsule_hits(self.col, [(10 ** 400, 0, 0)], 1.0)

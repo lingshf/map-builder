@@ -229,7 +229,8 @@ example along a bridge deck, through a tunnel or under an elevated part:
 ```
 
 The capsule is the set of points within `radius_m` of the polyline `path_map`. It is
-**blocked** if any collision triangle (two-sided) lies within `radius_m` of the path. The
+**blocked** if any collision triangle (two-sided) lies within `radius_m` of the path; the
+comparison allows `radius_m + 1e-9` m, so exact contact is never lost to rounding. The
 validator treats a malformed probe or an unknown `feature` as an error. It re-checks every
 probe against the final collision and reports a blocked probe as a **warning**, naming the
 probe by index and the first blocking collision object by `#k`. The check has a fixed work

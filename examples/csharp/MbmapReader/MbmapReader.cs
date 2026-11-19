@@ -717,6 +717,8 @@ namespace MapBuilder.Reference
         public const long PassageQueryBudget = 2_000_000;
         /// <summary>query.py DEGENERATE_SIN: |(b - a) x (c - a)| &lt;= this x longest squared edge = degenerate.</summary>
         public const double DegenerateSin = 1e-9;
+        /// <summary>query.py CONTACT_TOL_M: a triangle within radius + this is a hit (exact contact survives rounding).</summary>
+        public const double ContactTolM = 1e-9;
 
         static Vec3 Add(Vec3 a, Vec3 d, double t) => new Vec3(a.X + d.X * t, a.Y + d.Y * t, a.Z + d.Z * t);
         static double Clamp01(double x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -857,7 +859,7 @@ namespace MapBuilder.Reference
                         Vec3 a = tri.A, b = tri.B, c = tri.C;
                         if (!Overlap(lo, hi, Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Y, Math.Min(b.Y, c.Y)), Math.Min(a.Z, Math.Min(b.Z, c.Z)),
                                      Math.Max(a.X, Math.Max(b.X, c.X)), Math.Max(a.Y, Math.Max(b.Y, c.Y)), Math.Max(a.Z, Math.Max(b.Z, c.Z)), r)) continue;
-                        hit = SegmentTriangleDistance(p, q, tri) <= r;
+                        hit = SegmentTriangleDistance(p, q, tri) <= r + ContactTolM;
                     }
                 }
                 if (hit) hits.Add(obj.Index);
