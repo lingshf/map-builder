@@ -1807,6 +1807,34 @@ class DeclaredBuildingPartTest(unittest.TestCase):
         cl = classify_xml(b, max_part_pair_checks=4)
         self.assertEqual(len(cl.outline_for), 2)
 
+    def multipart_declaration(self, n):
+        """One declaration linking an n-component outline multipolygon to an n-component part
+        multipolygon; component k of the part lies inside component k of the outline."""
+        out = Classified()
+        for k in range(n):
+            x, y = -48 + 3 * (k % 30), -48 + 3 * (k // 30)
+            out.buildings.append(building(rect_ccw(x, y, x + 2, y + 2), fid=f"osm:relation/1#{k}"))
+            out.buildings.append(Feature(f"osm:relation/2#{k}", "building_part", {"building:part": "yes"},
+                                         Polygon(rect_ccw(x + 0.5, y + 0.5, x + 1.5, y + 1.5))))
+        return out, {"osm:relation/2": {("osm:relation/3", "osm:relation/1")}}
+
+    def test_reviewer_multipart_declaration_is_not_expanded(self):
+        import tracemalloc
+        out, declared = self.multipart_declaration(1200)
+        tracemalloc.start()
+        try:
+            with self.assertRaises(LimitError):
+                osm_mod._resolve_building_parts(out, max_pair_checks=1, declared=declared)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 2 * 1024 * 1024)  # old code: 1.44M candidate references, ~13.6 MiB
+        out, declared = self.multipart_declaration(1200)
+        osm_mod._resolve_building_parts(out, max_pair_checks=1200, declared=declared)  # bbox pairs only
+        self.assertEqual(len(out.outline_for), 1200)
+        self.assertEqual(out.outline_for["osm:relation/2#7"], ["osm:relation/1#7"])
+        self.assertEqual(out.invalid, [])
+
 
 # --- Round 7 -------------------------------------------------------------------
 

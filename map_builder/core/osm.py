@@ -869,14 +869,24 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
     by_base = {}
     for oi, o in enumerate(outlines):
         by_base.setdefault(_base_id(o.id), []).append(oi)
-    decl_of = []  # per part: None (undeclared) or (declared outline indices, outline ids, relation ids)
+    # Per part: None (undeclared) or a declaration record shared by every component of the same
+    # declared part, so multipolygon x multipolygon declarations are not expanded per component:
+    # [declared outline indices (frozenset), outline ids, relation ids, smallest outline (lazy)].
+    decl_of = []
+    decl_cache = {}
     for part in parts:
-        d = declared.get(_base_id(part.id))
+        base = _base_id(part.id)
+        d = declared.get(base)
         if d is None:
             decl_of.append(None)
             continue
-        oids = sorted({o for _, o in d if o is not None})
-        decl_of.append((sorted({oi for o in oids for oi in by_base.get(o, ())}), oids, sorted({r for r, _ in d})))
+        rec = decl_cache.get(base)
+        if rec is None:
+            oids = sorted({o for _, o in d if o is not None})
+            ois = frozenset(oi for o in oids for oi in by_base.get(o, ()))
+            work.add(len(ois) + 1)
+            rec = decl_cache[base] = [ois, oids, sorted({r for r, _ in d}), None]
+        decl_of.append(rec)
     candidates = [[] for _ in parts]
     n_pairs = 0
     if outlines:
@@ -909,19 +919,24 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
             for i in range(i0, i1 + 1):
                 for j in range(j0, j1 + 1):
                     grid.setdefault((i, j), []).append(oi)
-        # Phase 1: candidate pairs (bbox overlap, plus declared outlines), capped before any geometry.
+        # Phase 1: candidate pairs by bbox overlap, capped while enumerating, before any geometry.
+        # Declared outlines are found through the same grid: one whose bbox does not overlap the
+        # part cannot contain it, and phase 2 handles "declared but not within" from the record.
         for pi, bb in enumerate(pboxes):
             i0, i1, j0, j1 = cell_range(bb)
-            seen = set(decl_of[pi][0]) if decl_of[pi] else set()
+            seen = set()
             for i in range(i0, i1 + 1):
                 for j in range(j0, j1 + 1):
                     cell = grid.get((i, j), ())
                     work.add(len(cell) + 1)
-                    seen.update(oi for oi in cell if overlap(bb, oboxes[oi]))
-            n_pairs += len(seen)
-            if n_pairs > max_pair_checks:
-                raise LimitError(f"more than {max_pair_checks} overlapping building:part/outline pairs to check; "
-                                 "choose a smaller area")
+                    for oi in cell:
+                        if oi not in seen and overlap(bb, oboxes[oi]):
+                            seen.add(oi)
+                            n_pairs += 1
+                            if n_pairs > max_pair_checks:
+                                raise LimitError(
+                                    f"more than {max_pair_checks} overlapping building:part/outline pairs to "
+                                    "check; choose a smaller area")
             candidates[pi] = sorted(seen)
 
     def size(oi):
@@ -935,8 +950,9 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
         dec = decl_of[pi]
         within = set()
         if dec is not None:
-            ois, oids, rels = dec
-            within = {oi for oi in ois if part_within_outline(g, outlines[oi].geometry, tol, work)}
+            ois, oids, rels = dec[0], dec[1], dec[2]
+            within = {oi for oi in candidates[pi]
+                      if oi in ois and part_within_outline(g, outlines[oi].geometry, tol, work)}
             if within:
                 owner[pi] = min(within, key=size)
                 bases = {_base_id(outlines[oi].id) for oi in within}
@@ -947,7 +963,10 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                         f"{_ids(missed)} too but does not lie within them; it belongs to "
                         f"{outlines[owner[pi]].id} only")
             elif ois:
-                owner[pi] = min(ois, key=size)
+                if dec[3] is None:
+                    work.add(len(ois))
+                    dec[3] = min(ois, key=size)
+                owner[pi] = dec[3]
                 rejected.add(pi)
                 out.invalid.append({"id": part.id, "reason": (
                     f"building:part does not lie within its declared outline {_ids(oids)} (building relation "
@@ -959,7 +978,7 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                     f"{part.id}: building:part of building relation {_ids(rels)} whose declared {what} not "
                     "available as a building outline (missing, outside the area, invalid or unsupported); "
                     "the part is generated standalone and not matched to any other outline")
-            exempt = set(ois)
+            exempt = ois
         else:
             within = {oi for oi in candidates[pi] if part_within_outline(g, outlines[oi].geometry, tol, work)}
             if within:
