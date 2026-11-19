@@ -18,16 +18,18 @@ import shutil
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 from map_builder.blender.bake import bake_object, export_baked
-from map_builder.core.collision import read_collision, read_heightfield
+from map_builder.core import pipeline
+from map_builder.core.collision import heightfield_layout, read_collision, read_heightfield
 from map_builder.core.dem import fetch_copernicus
 from map_builder.core.errors import AreaError, LimitError
 from map_builder.core.generate import MATERIALS, PlanOptions, build_plan
 from map_builder.core.geodesy import Area, LocalFrame
 from map_builder.core.glb import read_glb
-from map_builder.core.package import manifest_bytes, validate_package
-from map_builder.core.pipeline import Settings, acquire, build_package
+from map_builder.core.package import manifest_bytes, validate_package, verify_probe_in_unity
+from map_builder.core.pipeline import Settings, acquire, build_package, generate_plan
 
 from .synthetic import dem_height
 from .test_blender_bake import trs
@@ -49,9 +51,11 @@ HIPPED = "bld_way_1028"
 
 
 def fixture_settings(**kw):
-    return Settings(elevation_source="file", elevation_file=DEM, elevation_vertical_datum="SYNTHETIC",
-                    elevation_license=LICENSE, osm_source="file", osm_file=OSM, heightfield_spacing=2.0,
-                    plan_options=PlanOptions(seed=1), **kw)
+    base = dict(elevation_source="file", elevation_file=DEM, elevation_vertical_datum="SYNTHETIC",
+                elevation_license=LICENSE, osm_source="file", osm_file=OSM, heightfield_spacing=2.0,
+                plan_options=PlanOptions(seed=1))
+    base.update(kw)
+    return Settings(**base)
 
 
 def fixture_area():
@@ -324,6 +328,49 @@ class FixturePackageTest(unittest.TestCase):
             checked += 1
         self.assertGreaterEqual(checked, 12)
 
+    def test_orientation_probes_match_glb_and_collision_in_unity(self):
+        """The serialized manifest probes (not a re-run of the selector) agree with the collision triangles
+        and with the GLB triangles transformed independently to glTF and Unity; the Unity check passes only
+        with the documented winding reversal."""
+        probes = self.manifest["orientation_probes"]
+        self.assertGreater(len(probes), 0, "fixture package has no orientation probes")
+        report = json.loads(read_members(self.path)[self.manifest["report"]])
+        self.assertNotIn("orientation probes unavailable", report["warnings"])
+        for k, p in enumerate(probes):
+            node = p["node"]
+            pm = tuple(p["point_map"])
+            tri_m = [tuple(q) for q in p["triangle_map"]]
+            nm = tuple(p["normal_map"])
+            self.assertTrue(_close(tri_m[0], pm, 1e-9), k)
+            # collision: triangle_map is one of the node's triangles, same winding; normal_map is its normal
+            col_hits = [t for t in self.col_tris(node) if _same_cyclic(tri_m, t, 1e-4)]
+            self.assertEqual(len(col_hits), 1, (k, node))
+            self.assertGreater(sum(a * b for a, b in zip(normal(col_hits[0]), nm)), 0.999, k)
+            # glTF = (x, z, -y), applied here (not via the package helpers)
+            to_gltf = lambda q: (q[0], q[2], -q[1])  # noqa: E731
+            self.assertTrue(_close(tuple(p["point_gltf"]), to_gltf(pm), 1e-6), k)
+            glb = [tuple(tuple(q) for q in t) for t in self.nodes[node].triangles]
+            want_g = tuple(to_gltf(q) for q in tri_m)
+            glb_hits = [t for t in glb if _same_cyclic(want_g, t, TOL)]
+            self.assertEqual(len(glb_hits), 1, (k, node))
+            g = glb_hits[0]
+            # Unity = (-x, z, -y) = glTF with X negated; that reflection needs the index order reversed
+            to_unity = lambda q: (-q[0], q[2], -q[1])  # noqa: E731
+            pu, nu = tuple(p["point_unity_x_negated"]), tuple(p["normal_unity_x_negated"])
+            self.assertTrue(_close(pu, to_unity(pm), 1e-6), k)
+            self.assertTrue(_close(nu, to_unity(nm), 1e-6), k)
+            ux = [(-q[0], q[1], q[2]) for q in g]
+            self.assertTrue(any(_close(q, pu, 0.05) for q in ux), k)
+            imported = [(ux[0], ux[2], ux[1])]          # importer: negate X and reverse index order
+            not_reversed = [(ux[0], ux[1], ux[2])]      # negate X only
+            self.assertGreater(sum(a * b for a, b in zip(normal(imported[0]), nu)), 0.99, k)
+            self.assertLess(sum(a * b for a, b in zip(normal(not_reversed[0]), nu)), -0.99, k)
+            # the documented consumer check accepts the reversed import and rejects the plain reflection
+            self.assertIsNone(verify_probe_in_unity(p, imported), k)
+            reason = verify_probe_in_unity(p, not_reversed)
+            self.assertIsNotNone(reason, k)
+            self.assertIn("winding", reason)
+
 
 # --- 3: simulated Blender edits through the pure bake path --------------------------------------
 
@@ -558,6 +605,71 @@ class ResourceBoundsTest(unittest.TestCase):
 
     def test_oversize_heightfield_rejected_before_network(self):
         self.online(Area(47.0, 8.0, 2000.0, 2000.0), heightfield_spacing=0.25)    # 8001 x 8001 points
+
+    def test_heightfield_below_two_by_two_rejected_before_network(self):
+        thin = Area(47.0, 8.0, 400.0, 50.0)            # heightfield_spacing 60 m -> 7 x 1 points
+        with self.assertRaises(LimitError):
+            heightfield_layout(thin.half, 60.0)
+        self.assertEqual(heightfield_layout(thin.half, 50.0)[2:], (9, 2))
+        self.online(thin, heightfield_spacing=60.0)
+        with self.local_loaders() as calls:
+            with self.assertRaises(LimitError):
+                build_package(thin, fixture_settings(heightfield_spacing=60.0), self.out(), "thin")
+        self.assertEqual(calls, [])
+
+    # local sources: the same bounds hold before any file is opened
+
+    @contextlib.contextmanager
+    def local_loaders(self):
+        calls = []
+
+        def refuse(name):
+            def loader(*a, **kw):
+                calls.append(name)
+                raise AssertionError(f"{name} called for an over-limit request")
+            return loader
+        with mock.patch.object(pipeline, "load_local_elevation", refuse("load_local_elevation")), \
+                mock.patch.object(pipeline, "load_osm_file", refuse("load_osm_file")):
+            yield calls
+
+    def out(self):
+        return os.path.join(self.tmp, "never.mbmap")
+
+    def test_oversize_terrain_grid_from_local_file_rejected_before_loading(self):
+        big = Area(47.0, 8.0, 2000.0, 2000.0)          # 1001 x 1001 terrain points at 2 m
+        for call in (lambda s: acquire(big, s), lambda s: generate_plan(big, s),
+                     lambda s: build_package(big, s, self.out(), "too_big")):
+            with self.local_loaders() as calls:
+                with self.assertRaises(LimitError):
+                    call(fixture_settings(terrain_spacing=2.0, heightfield_spacing=None))
+            self.assertEqual(calls, [])
+        self.assertFalse(os.path.exists(self.out()))
+
+    def test_oversize_heightfield_from_local_file_rejected_before_loading(self):
+        big = Area(47.0, 8.0, 2000.0, 2000.0)          # terrain 201 x 201 is fine; heightfield 8001 x 8001
+        with self.local_loaders() as calls:
+            with self.assertRaises(LimitError):
+                build_package(big, fixture_settings(terrain_spacing=10.0, heightfield_spacing=0.25), self.out(),
+                              "too_big")
+        self.assertEqual(calls, [])
+        self.assertFalse(os.path.exists(self.out()))
+
+
+class HeightfieldPreflightScopeTest(unittest.TestCase):
+    """The heightfield bound belongs to package export: plan generation produces no heightfield."""
+
+    def test_generate_plan_ignores_heightfield_spacing(self):
+        settings = fixture_settings(heightfield_spacing=0.005)        # 80001 x 60001 points if exported
+        plan, sources = generate_plan(fixture_area(), settings)
+        self.assertGreater(len(plan.objects), 0)
+        self.assertEqual(len(sources), 2)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "never.mbmap")
+            with mock.patch.object(pipeline, "load_local_elevation",
+                                   side_effect=AssertionError("loaded before the heightfield check")):
+                with self.assertRaises(LimitError):
+                    build_package(fixture_area(), settings, out, "too_fine")
+            self.assertFalse(os.path.exists(out))
 
 
 if __name__ == "__main__":
