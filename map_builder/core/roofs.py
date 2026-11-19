@@ -180,7 +180,7 @@ def roof_budget(shape, n_ring):
     if shape in ("dome", "onion"):
         rings = dome_rings(n_ring, DOME_SEGMENTS if shape == "dome" else len(ONION) - 1)
         return n_ring * rings, n_ring * 2 * rings
-    if shape in RECT_SHAPES or shape == "mansard":
+    if shape in RECT_SHAPES and shape not in ("gabled", "hipped"):
         return 24, 40
     return 0, 0
 

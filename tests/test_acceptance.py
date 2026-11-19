@@ -189,7 +189,30 @@ def det3(m):
 
 # --- 1 + 2: committed fixture -> CLI -> .mbmap -> read back ---------------------------------------
 
-class FixturePackageTest(unittest.TestCase):
+class PackageBindingMixin:
+    """Reads of a built package (cls.col / cls.entries / cls.nodes) shared by the package tests."""
+
+    def col_tris(self, name):
+        return [tuple(tuple(p) for p in t) for t in self.col.object_triangles(self.entries[name])]
+
+    def glb_tris(self, name):
+        return [tuple(gltf_to_enu(p) for p in t) for t in self.nodes[name].triangles]
+
+    def assert_bound(self, name):
+        """GLB node triangles (glTF -> ENU) == collision triangles, as sets with winding."""
+        col, vis = self.col_tris(name), self.glb_tris(name)
+        self.assertGreater(len(col), 0, name)
+        self.assertEqual(len(col), len(vis), name)
+        miss_c, miss_v = unmatched(col, vis)
+        self.assertEqual((len(miss_c), len(miss_v)), (0, 0), f"{name}: {miss_c[:2]} / {miss_v[:2]}")
+        # the comparison is winding-sensitive: reversed visual triangles must not match (degenerates aside)
+        solid = [t for t in col if normal(t) is not None]
+        miss_r, _ = unmatched(solid, reverse(vis))
+        self.assertEqual(len(miss_r), len(solid), name)
+        return col, vis
+
+
+class FixturePackageTest(PackageBindingMixin, unittest.TestCase):
     """Builds the committed fixtures with tools/mbmap_cli.py (in process) and reads the package back."""
 
     @classmethod
@@ -219,25 +242,6 @@ class FixturePackageTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
-
-    def col_tris(self, name):
-        return [tuple(tuple(p) for p in t) for t in self.col.object_triangles(self.entries[name])]
-
-    def glb_tris(self, name):
-        return [tuple(gltf_to_enu(p) for p in t) for t in self.nodes[name].triangles]
-
-    def assert_bound(self, name):
-        """GLB node triangles (glTF -> ENU) == collision triangles, as sets with winding."""
-        col, vis = self.col_tris(name), self.glb_tris(name)
-        self.assertGreater(len(col), 0, name)
-        self.assertEqual(len(col), len(vis), name)
-        miss_c, miss_v = unmatched(col, vis)
-        self.assertEqual((len(miss_c), len(miss_v)), (0, 0), f"{name}: {miss_c[:2]} / {miss_v[:2]}")
-        # the comparison is winding-sensitive: reversed visual triangles must not match (degenerates aside)
-        solid = [t for t in col if normal(t) is not None]
-        miss_r, _ = unmatched(solid, reverse(vis))
-        self.assertEqual(len(miss_r), len(solid), name)
-        return col, vis
 
     def test_cli_build_is_valid(self):
         self.assertEqual(self.code, 0, self.stdout)
@@ -375,6 +379,75 @@ class FixturePackageTest(unittest.TestCase):
 
 
 # --- 3: simulated Blender edits through the pure bake path --------------------------------------
+
+class RoofShapesPackageTest(PackageBindingMixin, unittest.TestCase):
+    """Every new roof shape through the real export: validator-clean, GLB node == collision, and the
+    fallbacks (unsupported shape, courtyard dome) listed in report.json."""
+
+    SHAPES = ("half-hipped", "gambrel", "mansard", "round", "saltbox", "dome", "onion")
+
+    @classmethod
+    def setUpClass(cls):
+        from .synthetic import OsmBuilder, rect
+        cls.tmp = tempfile.mkdtemp()
+        b = OsmBuilder()
+        cls.ids = {}
+        for k, shape in enumerate(cls.SHAPES):
+            cls.ids[shape] = b.way(rect(-150 + 45 * k, 60, 14, 14 if shape in ("dome", "onion") else 22),
+                                   {"building": "yes", "roof:shape": shape, "height": "10", "roof:height": "3"},
+                                   closed=True)
+        cls.ids["butterfly"] = b.way(rect(-150, -60, 12, 12), {"building": "yes", "roof:shape": "butterfly",
+                                                              "height": "10", "roof:height": "3"}, closed=True)
+        cls.ids["court"] = b.multipolygon(rect(0, -60, 30, 30), [rect(0, -60, 10, 10)[::-1]],
+                                          {"building": "yes", "roof:shape": "dome", "height": "10",
+                                           "roof:height": "3"})
+        osm = os.path.join(cls.tmp, "roofs.osm")
+        with open(osm, "w", encoding="utf-8") as f:
+            f.write(b.xml())
+        cls.path = os.path.join(cls.tmp, "roofs.mbmap")
+        _, cls.result = build_package(fixture_area(), fixture_settings(osm_file=osm), cls.path, "roofs",
+                                      created_utc=UTC)
+        members = read_members(cls.path)
+        cls.manifest = json.loads(members["manifest.json"])
+        cls.report = json.loads(members["report.json"])
+        cls.col = read_collision(members["collision/map.mbcol"])
+        _, nodes = read_glb(members["visual/map.glb"])
+        cls.nodes = {n.name: n for n in nodes}
+        cls.entries = {e["name"]: e for e in cls.col.objects}
+        cls.objects = {o["name"]: o for o in cls.manifest["objects"]}
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def name(self, key):
+        return ("bld_relation_" if key == "court" else "bld_way_") + str(self.ids[key])
+
+    def test_package_is_valid(self):
+        self.assertTrue(self.result.ok, self.result.summary())
+        self.assertEqual(set(self.nodes), set(self.entries))
+
+    def test_each_new_shape_is_bound_closed_and_sloped(self):
+        for shape in self.SHAPES:
+            name = self.name(shape)
+            prov = self.objects[name]["provenance"]
+            self.assertEqual(prov["roof_shape_built"], shape)
+            self.assertTrue(prov["roof_shape"].startswith("measured:"), prov["roof_shape"])
+            col, _ = self.assert_bound(name)
+            self.assertGreater(signed_volume(col), 0, shape)
+            sloped = [n for n in map(normal, col) if n is not None and 0.2 < n[2] < 0.98]
+            self.assertGreaterEqual(len(sloped), 4, shape)
+
+    def test_fallbacks_are_in_object_provenance_and_report(self):
+        for key, built in (("butterfly", "flat"), ("court", "flat")):
+            prov = self.objects[self.name(key)]["provenance"]
+            self.assertEqual(prov["roof_shape_built"], built, key)
+            self.assertTrue(prov["roof_shape"].startswith("fallback:"), prov["roof_shape"])
+            self.assert_bound(self.name(key))
+        self.assertTrue(self.objects[self.name("butterfly")]["provenance"]["roof_shape"].startswith(
+            "fallback:flat (roof:shape=butterfly"))
+        self.assertEqual(self.report["inferred"]["building.roof_shape"], 2)
+
 
 class BakeEditsAcceptanceTest(unittest.TestCase):
     """Edits not asserted by test_blender_bake: collision of a uniformly scaled, a negatively scaled
