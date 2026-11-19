@@ -58,6 +58,14 @@ $b = "C:\tools\blender-4.2.23-windows-x64\blender.exe"
 & $b --background --factory-startup --python tests\blender\run_integration.py -- "$env:TEMP\mb_it"
 ```
 
+Committed sample and C# reference reader (also run in CI). `tests/test_examples.py` checks that
+`examples/synthetic_sample.mbmap` validates and equals a fresh `--created-utc` build; see
+[examples/README.md](../examples/README.md):
+
+```
+dotnet run -c Release --project examples\csharp\MbmapReader -- examples\synthetic_sample.mbmap
+```
+
 ## Recorded results
 
 | Date | Layer | Result |
@@ -65,12 +73,17 @@ $b = "C:\tools\blender-4.2.23-windows-x64\blender.exe"
 | 2026-11-18 | Unit + acceptance (Python 3.12, Windows) | 290 tests OK (21 in `test_acceptance.py`) |
 | 2026-11-18 | CLI build + validate | `VALID: 0 error(s), 1 warning(s)` (warning: 2 degenerate collision triangles) |
 | 2026-11-18 | Headless Blender 4.2.23 LTS (Windows x64) | 74 PASS, `OK: 0 failure(s)`; 77 objects, 5131 collision triangles |
+| PR #7 | Unit + acceptance (Python 3.12, Windows) | 295 tests OK (adds `test_examples.py`) |
+| PR #7 | C# reader (.NET 8, Windows) on `examples/synthetic_sample.mbmap` | `OK`: 5 members hash-verified, 3 probes PASS with both negative controls rejected, heightfield vs terrain max \|dz\| 1e-6 m; tampered copy → `INVALID: collision/map.mbcol: SHA-256 mismatch`, exit 1 |
 
 ## Not validated
 
 * The live Copernicus DEM and Overpass services: CI uses fakes and the committed SYNTHETIC fixtures only.
 * The online acquisition path inside Blender (only the offline refusal is exercised).
 * Loading packages on the consumer side (Unity importer or the simulator core); the Unity mapping is
-  checked only by simulating the documented importer convention.
+  checked only by simulating the documented importer convention (in Python and in the C# reference
+  reader), not with glTFast in Unity.
+* Byte-identical sample builds across operating systems: verified on Windows only. The sample test
+  falls back to a 1e-4 tolerance comparison if platform maths differ.
 * Performance, memory use and frame rate (FPS) of generated maps.
 * Real-world data quality (OSM completeness, DEM accuracy, vertical datum correctness).
