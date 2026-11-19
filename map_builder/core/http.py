@@ -165,6 +165,16 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _clamp_socket_timeout(resp, seconds):
+    """Best effort: bound the next receive on the response's socket by the remaining deadline."""
+    sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
+    if sock is not None:
+        try:
+            sock.settimeout(seconds)
+        except OSError:
+            pass
+
+
 class UrllibTransport:
     """urllib transport with safe redirects and a total (monotonic) deadline.
 
@@ -196,7 +206,12 @@ class UrllibTransport:
                 chunks, n = [], 0
                 while n < limit:
                     check_deadline()
-                    chunk = resp.read(min(READ_CHUNK, limit - n))
+                    _clamp_socket_timeout(resp, max(0.001, min(timeout, deadline - self.clock())))
+                    want = min(READ_CHUNK, limit - n)
+                    # read1 returns after a single underlying receive, so the deadline is re-checked
+                    # between receives rather than after a buffered read that may span many of them
+                    reader = getattr(resp, "read1", None)
+                    chunk = reader(want) if reader is not None else resp.read(want)
                     if not chunk:
                         break
                     chunks.append(chunk)

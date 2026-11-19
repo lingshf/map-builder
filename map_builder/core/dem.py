@@ -214,7 +214,11 @@ def _open_remote_tiff(client, url, description, cache, cache_key, name):
                 f"Copernicus DEM tile {name} is not published (ocean, or excluded from the public "
                 "GLO-30 release); no terrain was generated - import a local elevation file instead") from None
         try:
-            return GeoTiff(src)  # invalidates the source's cache entries on failure
+            tiff = GeoTiff(src)  # invalidates the source's cache entries on failure
+            if tiff.crs["kind"] != "geographic":
+                src.invalidate()  # provider-specific rejection: evict like any other validation failure
+                raise FormatError(f"{name}: unexpected CRS {tiff.crs}")
+            return tiff
         except (FormatError, LimitError):
             if attempt or not src.cache_hits:
                 raise
@@ -252,8 +256,6 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
         url = f"{base_url.rstrip('/')}/{name}/{name}.tif"
         tiff = _open_remote_tiff(client, url, f"copernicus:{name}", cache,
                                  f"{COPERNICUS_DATASET_ID}|{cache_scope}|{name}", name)
-        if tiff.crs["kind"] != "geographic":
-            raise FormatError(f"{name}: unexpected CRS {tiff.crs}")
         rasters[key] = _Raster(tiff)
 
     def pick(lat, lon):

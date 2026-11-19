@@ -19,7 +19,7 @@ from map_builder.core.errors import (AuthError, CoverageError, FormatError, Limi
                                      NoDataError)
 from map_builder.core.geodesy import Area, utm_forward
 from map_builder.core.http import HttpClient, Response, SafeRedirectHandler, UrllibTransport, redact
-from map_builder.core.osm import DEFAULT_OVERPASS_URL, classify, fetch_overpass, parse_osm_xml
+from map_builder.core.osm import DEFAULT_OVERPASS_URL, classify, fetch_overpass, parse_osm_xml, ring_area
 from map_builder.core.tiff import BytesSource, GeoTiff, HttpRangeSource, lzw_decode
 
 from .synthetic import AREA_H, AREA_W, ORIGIN, OsmBuilder, dem_height, rect, write_dem_asc
@@ -935,6 +935,44 @@ class RangeCacheValidationTest(unittest.TestCase):
         with self.assertRaises(FormatError):
             t.pixel(0, 0)
         self.assertEqual(cache.store, {})
+
+    def test_wrong_crs_tile_is_evicted_after_provider_recovers(self):
+        utm = make_geotiff([[1.0] * 8 for _ in range(8)], 500000.0, 5210000.0, 10.0, 10.0, epsg=32632)
+        tr = FakeTransport({self.url: utm})
+        with self.assertRaises(FormatError):
+            self.fetch(tr)
+        tr.files[self.url] = CopernicusTest().tile()
+        self.assertIsNotNone(self.fetch(tr))  # same cache: the UTM header must not be replayed
+
+
+class RoundFourTest(unittest.TestCase):
+    def test_nested_inner_ring_goes_to_smallest_enclosing_outer(self):
+        b = OsmBuilder()
+        rings = [rect(0, 0, 80, 80), rect(0, 0, 60, 60)[::-1], rect(0, 0, 40, 40), rect(0, 0, 20, 20)[::-1]]
+        ids = [b.way(r, closed=True) for r in rings]
+        roles = ["outer", "inner", "outer", "inner"]
+        b.relations.append((7, [("way", i, r) for i, r in zip(ids, roles)],
+                            {"type": "multipolygon", "building": "yes"}))
+        cl = classify(parse_osm_xml(b.xml()), Area(*ORIGIN, AREA_W, AREA_H))
+        polys = sorted((f.geometry for f in cl.buildings), key=lambda p: abs(ring_area(p.outer)))
+        self.assertEqual([len(p.holes) for p in polys], [1, 1])
+        self.assertFalse(any(p.contains(0, 0) for p in polys))  # inner courtyard stays open
+        self.assertTrue(any(p.contains(15, 0) for p in polys))  # ring between 10 m and 20 m is solid
+        self.assertFalse(any(p.contains(25, 0) for p in polys))  # outer courtyard (20-30 m) stays open
+
+    def test_body_read_uses_single_receive_reads(self):
+        clock = FakeClock()
+
+        class Read1Only(FakeHttpResponse):
+            def read(self, n=-1):
+                raise AssertionError("buffered read must not be used")
+
+            def read1(self, n=-1):
+                return FakeHttpResponse.read(self, n)
+        resp = Read1Only([b"x" * 10] * 100, clock=clock, step=10.0)
+        t = UrllibTransport(total_timeout=25.0, opener=FakeOpener(resp), clock=clock)
+        with self.assertRaises(NetworkError):
+            t.request("GET", "https://h.example/", {}, None, 5.0, 10_000)
 
 
 if __name__ == "__main__":

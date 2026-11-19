@@ -433,10 +433,10 @@ def classify(data, area, max_features=50_000):
                 continue
             if ring_area(h) > 0:
                 h.reverse()
-            for p in polys:
-                if p.contains(*h[0]) or point_in_ring(h[0][0], h[0][1], p.outer):
-                    p.holes.append(h)
-                    break
+            # nested rings (outer, inner, outer, inner): the hole belongs to the smallest enclosing outer
+            owners = [p for p in polys if point_in_ring(h[0][0], h[0][1], p.outer)]
+            if owners:
+                min(owners, key=lambda p: abs(ring_area(p.outer))).holes.append(h)
             else:
                 # dropping the hole would fill a courtyard: skip the whole feature instead
                 out.invalid.append({"id": fid, "reason": "inner ring lies outside every outer ring; "
