@@ -1,0 +1,122 @@
+# Generate a map
+
+## First try: offline synthetic area
+
+Download or clone the **same release's source** as well as installing its extension
+zip. The test fixtures are in the source checkout, not a separate release asset.
+They describe an invented place, not real Switzerland or OpenStreetMap data.
+
+In **3D Viewport > Sidebar (N) > Map Builder**, enter:
+
+| Group | Setting | Value |
+|---|---|---|
+| Area (WGS84) | Area | Centre + size |
+| Area | Latitude / Longitude | 47.0 / 8.0 |
+| Area | Width / Height | 400 / 300 m |
+| Sources | Elevation | Local file |
+| Sources | Elevation file | Choose `tests\fixtures\synthetic_dem.asc` from the checkout |
+| Sources | CRS (.asc) | EPSG:4326 |
+| Sources | Vertical datum | SYNTHETIC |
+| Sources | Licence | SYNTHETIC test data (no licence required) |
+| Sources | Terrain spacing | 10 m |
+| Sources | DSM correction | Auto (off for this local elevation file) |
+| Sources | Features | Local .osm file |
+| Sources | OSM file | Choose `tests\fixtures\synthetic_area.osm` |
+| Content | Map name | synthetic_preview |
+
+Leave the content toggles and seed at their defaults, then click **Generate Map**.
+A new collection appears containing independently editable terrain, buildings,
+roads, water and vegetation. Existing scene objects are not cleared.
+
+Open Blender's **Text Editor** and select **MapBuilder Report**. Review sources,
+unsupported features, invalid features and warnings before using the map. A
+successful generation can still have warnings; it does not mean every OSM
+feature was generated.
+
+**Synthetic attribution caveat:** the v0.1.0 Blender UI assumes local OSM files
+are OSM data; it has no synthetic OSM licence override. For a correctly labelled,
+redistributable synthetic package, use the
+[release demo](../demo/v0.1.0/README.md), which declares synthetic attribution
+through the shared pipeline, or the [CLI sample command](../../examples/README.md),
+which supplies `--osm-license`. Do not present the fixture as real OSM data.
+
+## Real data: online or your own files
+
+Use a WGS84 centre and a roughly 1000 x 1000 m area. Supported normal side
+lengths are 50-2000 m and latitude must satisfy |lat| <= 84 degrees. A bounding
+box is an alternative. This is a small-area workflow, not a world streamer.
+
+Choose **Copernicus GLO-30 (online)** and **Overpass API (online)**, enable
+Blender's online access, then Generate. Downloads can fail because of provider
+availability, coverage or connectivity; fix the reported cause and retry.
+There is no fabricated or flat-ground fallback.
+
+For local elevation use a supported GeoTIFF or ESRI ASCII grid in EPSG:4326 or
+WGS84 UTM, declare its true vertical datum and licence, and provide covering OSM
+XML. See [source-data licensing](../../README.md#data-licences).
+
+Never put credentials in the scene. The optional private Overpass endpoint is
+read from `MAP_BUILDER_OVERPASS_URL` at generation time, not entered in a URL
+field. Reports retain only sanitized source information.
+
+## DSM terrain correction (inferred ground, preview)
+
+GLO-30 is a roughly 30 m **surface model**: rooftops, tree canopy and bridge decks
+can appear as raised ground. The **Sources > DSM correction** control lowers
+terrain under OSM-mapped buildings, trees, forests and bridge decks toward a
+smooth fill of surrounding ground **before** placing buildings and vegetation.
+It never raises terrain. Collision and the exported terrain follow this result.
+
+| Setting | Behavior |
+|---|---|
+| Auto (default) | On for Copernicus GLO-30; off for local elevation files |
+| On | Request correction, including for a local DSM |
+| Off | Keep the source surface unchanged; suitable for an already corrected local DTM |
+
+For a real Copernicus map, leave **Auto**, generate and read
+**MapBuilder Report**. To compare, set **Off** and generate a second, separately
+named collection; each Generate adds a new collection. Inspect one collection
+at a time and select the intended **Map collection** explicitly when exporting.
+Do not expect the offline fixture's default Auto setting to demonstrate DSM
+lowering: it deliberately leaves local data unchanged.
+
+In the CLI, append `--dsm-correction` to force On or
+`--no-dsm-correction` to force Off; omit both for Auto. All normal input and
+licensing arguments still apply.
+
+When correction is enabled with online Overpass features, a second, wider
+**mask-only** request covers nearby and enclosing features. The normal response
+still determines scene content; cold-cache generation can take longer. If this
+optional request fails or its mask budgets are exceeded, generation continues
+with the **original surface model and a warning**. Correction is also skipped
+if fewer than 5% of samples are unmasked or the bounded fill does not converge.
+This differs from a required DEM/content download failure, which still stops
+generation. NoData remains an error; neither case invents replacement terrain.
+
+Check `report.json`'s `terrain_correction` for `applied`, `reason`,
+`masked_points`, `lowered_points`, `total_points`, `max_lowering_m` and
+`mean_lowering_m`. `dsm_mask_query` records the optional request in source
+provenance. Applied correction is labelled inferred and receives a processing
+note in package `NOTICES.txt`; raw source hashes are unchanged. Package schema
+remains **2.0.0**.
+
+**Limits:** this is not survey-quality bare earth or a true DTM. Hidden hills
+and hollows inside large masks are smoothed, fills touching an area edge level
+off, and buildings or trees missing from OSM remain uncorrected. Masking a
+bridge deck does not generate a flyable bridge or tunnel.
+
+## Roof shapes and road-export diagnostics
+
+OSM `roof:shape` supports flat, gabled, hipped, pyramidal and skillion, plus
+half-hipped, gambrel, mansard, round and saltbox on rectangles and dome/onion
+on convex footprints. Roof orientation and direction tags influence supported
+shapes. Unsupported or ill-fitting shapes fall back with `fallback:` provenance;
+inspect the report rather than assuming every tagged roof is reproduced.
+The synthetic sample's way/1043 demonstrates a dome.
+
+On steep real terrain, a road face thinner than float32 can represent may be
+omitted if storing it would make it non-upward-facing. `slivers_dropped` in the
+road's provenance records the count, maximum width and total area. This is
+not general road simplification: wider folded faces remain invalid and package
+validation is not relaxed. Bridges and tunnels are still omitted even though
+internal structure routing is in place.
