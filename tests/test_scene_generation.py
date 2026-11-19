@@ -1,5 +1,6 @@
 import math
 import random
+import re
 import tempfile
 import unittest
 from collections import Counter
@@ -493,6 +494,12 @@ class RoadRibbonTest(unittest.TestCase):
                 p, q, r = W[a], W[b], W[c]
                 if not is_degenerate(p, q, r):
                     self.assertGreater((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]), 0, feature.id)
+        # the coverage lost is measured and bounded: a few float32 ulps (6e-5 m here) wide, far below 1 mm2 in total
+        m = re.search(r"(\d+) face\(s\) .*max width (\S+) m, (\S+) m2", prov["slivers_dropped"])
+        self.assertEqual(m.group(1), "1")
+        self.assertLess(float(m.group(2)), 4 * 2 ** -14)
+        self.assertLess(float(m.group(3)), 1e-4)
+
     def test_wide_right_angle_turn_is_not_folded(self):
         mesh, _, prov = build_road(road([(0, 0), (3, 0), (3, 3)], width="8"), flat_grid(), 0.0)
         self.assertIsNotNone(mesh, prov)

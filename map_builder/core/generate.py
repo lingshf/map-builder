@@ -1170,39 +1170,49 @@ def _ribbon_faces(grid, pieces, groups, work):
                     yield i, j, upper, X0, Y0, out
 
 
-SLIVER_AREA_M2 = 1e-3  # xy area under which a face that is not up-facing once stored (float32) is dropped
+SLIVER_ULPS = 4  # a face whose xy width is within this many float32 ulps of its coordinates is rounding noise
 
 
 def _f32(v):
     return struct.unpack("<f", struct.pack("<f", v))[0]
 
 
+def _f32_ulp(m):
+    """Spacing of float32 values at magnitude ``m``."""
+    return 2.0 ** (math.frexp(max(m, 1e-30))[1] - 24)
+
+
 def drop_unstorable_slivers(local, tris, loc):
-    """Draped ribbons are stored as float32 world positions; a needle-thin face (clip residue
-    on a steep slope) can lose its orientation in that rounding although it is up-facing in
-    double precision, and the package validator then rejects the surface. Returns
-    ``(tris, dropped)`` without the faces whose stored normal is not up (z <= 0) and whose xy
-    area is below ``SLIVER_AREA_M2``; ``(None, None)`` if a larger face fails (fold)."""
+    """Draped ribbons are stored as float32 world positions (the collision/visual precision). A
+    needle-thin face (clip residue on a steep slope) is up-facing in double precision but can lose
+    its orientation in that rounding while staying non-degenerate in 3D, and the package validator
+    then rejects the surface.
+
+    Returns ``(tris, dropped)``: ``tris`` without the faces whose stored normal is not up
+    (z <= 0) and whose xy width (2 * area / longest edge) is at most ``SLIVER_ULPS`` float32 ulps
+    of its world coordinates, i.e. the face is thinner than the storage can represent. ``dropped``
+    lists their ``(width_m, area_m2)``. A wider face that fails is a real fold: ``(None, None)``."""
     from .collision import is_degenerate
     W = [(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local]
     keep = []
-    dropped = 0
+    dropped = []
     for t in tris:
         a, b, c = (W[i] for i in t)
-        ux, uy, uz, vx, vy, vz = b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]
-        nz = ux * vy - uy * vx
+        nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
         la, lb, lc = (local[i] for i in t)
         area2 = (lb[0] - la[0]) * (lc[1] - la[1]) - (lb[1] - la[1]) * (lc[0] - la[0])
         if area2 <= 0:
             return None, None
         if nz <= 0 and not is_degenerate(a, b, c):
-            if area2 / 2 > SLIVER_AREA_M2:
+            longest = max(math.hypot(p[0] - q[0], p[1] - q[1]) for p, q in ((la, lb), (lb, lc), (lc, la)))
+            width = area2 / longest
+            ulp = _f32_ulp(max(abs(w) for p in (a, b, c) for w in p[:2]))
+            if width > SLIVER_ULPS * ulp:
                 return None, None
-            dropped += 1
+            dropped.append((width, area2 / 2))
             continue
         keep.append(t)
     return keep, dropped
-
 
 def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WORK, ownership=None, limit=None):
     """Returns (mesh, location, provenance), or (None, None, {"reason": ...}) if no valid ribbon exists.
@@ -1271,6 +1281,8 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
     if dropped is None:
         return None, None, {"reason": "road ribbon would contain folded faces; not generated"}
     if dropped:
+        # Ownership (below) still claims the pre-filter polygons: the gap is thinner than the storage can
+        # represent, so claiming it keeps lower-priority roads from re-covering it with their own slivers.
         used = sorted({v for t in tris for v in t})
         remap = {v: k for k, v in enumerate(used)}
         local = [local[v] for v in used]
@@ -1296,6 +1308,9 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
         owners = sorted(removed)
         prov["overlap"] = (f"{sum(removed.values()):.2f} m2 shared with higher-priority at-grade road(s) "
                            f"{_id_list(owners)} left to them (ownership: road class, width, feature id)")
+    if dropped:
+        prov["slivers_dropped"] = (f"{len(dropped)} face(s) thinner than float32 storage (max width "
+                                    f"{max(w for w, _ in dropped):.1e} m, {sum(a for _, a in dropped):.1e} m2) omitted")
     if clipped:
         prov["terrain_edge"] = "ribbon trimmed at the terrain edge"
     return mesh, (cx, cy, z0), prov
