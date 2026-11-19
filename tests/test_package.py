@@ -1153,5 +1153,294 @@ class CliTest(TempDirCase):
         self.assertFalse(os.path.exists(self.p("cli2.mbmap")))
 
 
+# --- review fixes (PR #4) --------------------------------------------------------------------------
+
+def flipped_mesh(src, name=None, drop_faces=0):
+    """Copy of ``src`` with every face reversed; ``drop_faces`` removes the last faces (opens a solid)."""
+    m = MeshData(name or src.name)
+    for v in src.vertices:
+        m.add_vertex(*v)
+    faces = list(zip(src.faces, src.face_materials, src.face_colors))
+    for f, mi, c in faces[:len(faces) - drop_faces]:
+        m.add_face(tuple(reversed(f)), src.materials[mi], c)
+    return m
+
+
+def copy_mesh(src, name=None, drop_faces=0, extra_faces=()):
+    m = MeshData(name or src.name)
+    for v in src.vertices:
+        m.add_vertex(*v)
+    faces = list(zip(src.faces, src.face_materials, src.face_colors))
+    for f, mi, c in faces[:len(faces) - drop_faces]:
+        m.add_face(tuple(f), src.materials[mi], c)
+    for pts in extra_faces:
+        m.add_face(tuple(m.add_vertex(*p) for p in pts), "MB Wall", (0.5, 0.5, 0.5))
+    return m
+
+
+class ReviewFixesTest(TempDirCase):
+    # 1: one-to-one binding on export; visual-only triangles reported by the validator
+    def test_writer_requires_one_to_one_binding(self):
+        objs = scene()
+        chiral = objs[1]
+        # an extra visual-only triangle strictly inside the chiral object's box (AABB unchanged)
+        extra = copy_mesh(chiral["mesh"], extra_faces=[((1.0, 0.3, 0.2), (2.0, 0.3, 0.2), (1.0, 0.8, 0.2))])
+        nodes = [node_of(o, mesh=extra) if o is chiral else node_of(o) for o in objs]
+        members, manifest, _ = scene_members(objs, nodes)
+        with self.assertRaises(PackageError) as cm:
+            pkg.write_package(self.p("extra.mbmap"), members, manifest)
+        self.assertIn("one-to-one", str(cm.exception))
+        self.assertIn("1 visual triangle(s) have no collision counterpart", str(cm.exception))
+        self.assertFalse(os.path.exists(self.p("extra.mbmap")))
+        raw_write(self.p("extra_raw.mbmap"), members, manifest)
+        r = validate_package(self.p("extra_raw.mbmap"))
+        self.assertTrue(r.ok, r.summary())   # consumer side: a warning, per the contract
+        self.assertTrue(any("'chiral': 1 visual triangle(s) have no collision counterpart" in w for w in r.warnings),
+                        r.warnings)
+        # the unchanged scene still exports
+        members, manifest, _ = scene_members(scene())
+        self.assertTrue(pkg.write_package(self.p("ok.mbmap"), members, manifest).ok)
+
+    def test_one_to_one_matcher(self):
+        tris = tri_grid(3)
+        self.assertEqual(pkg.match_one_to_one(tris, list(reversed(tris)))["matched"], len(tris))
+        st = pkg.match_one_to_one(tris, tris + tris[:1])                     # duplicate visual triangle
+        self.assertEqual((st["matched"], st["visual_only"]), (len(tris), 1))
+        st = pkg.match_one_to_one(tris + tris[:1], tris)                     # two collision copies, one visual
+        self.assertEqual((st["matched"], st["unmatched"]), (len(tris), 1))
+        st = pkg.match_one_to_one(tris, [(a, c, b) for a, b, c in tris])
+        self.assertEqual(st["reversed"], len(tris))
+        self.assertTrue(pkg.match_one_to_one(tris, tris, max_work=3)["work_exhausted"])
+
+    # 2: independent collision orientation
+    def test_collision_orientation_checked(self):
+        base = scene()
+        cases = {
+            "inverted": (obj("inv", "osm:way/7", "building", flipped_mesh(chiral_mesh("inv")), (-90.0, 70.0, 3.0)),
+                         "signed volume"),
+            "open": (obj("open", "osm:way/7", "building", copy_mesh(box_mesh(80, 60, 90, 75, 1, 9), drop_faces=1)),
+                     "not a closed, consistently oriented solid"),
+            "road": (obj("rd", "osm:way/7", "road", flipped_mesh(grid_terrain_mesh(40, 20, 10.0, name="rd")),
+                         (60.0, -80.0, 1.0)), "does not point up"),
+        }
+        for label, (bad, fragment) in cases.items():
+            with self.subTest(label):
+                members, manifest, _ = scene_members(base + [bad])   # visual and collision agree
+                raw_write(self.p(f"orient_{label}.mbmap"), members, manifest)
+                r = self.assertInvalid(self.p(f"orient_{label}.mbmap"), fragment)
+                self.assertFalse(any("winding mismatch" in e for e in r.errors), r.errors)
+                with self.assertRaises(PackageError):
+                    pkg.write_package(self.p(f"orient_{label}_w.mbmap"), members, manifest)
+        down = [obj("terrain", "terrain:grid", "terrain", flipped_mesh(grid_terrain_mesh(AREA_W, AREA_H, 20.0)))]
+        members, manifest, _ = scene_members(down + base[1:])
+        raw_write(self.p("orient_terrain.mbmap"), members, manifest)
+        self.assertInvalid(self.p("orient_terrain.mbmap"), "terrain 'terrain' has")
+        # degenerate triangles stay a warning and do not break closure or the up test
+        col = read_collision(write_collision([ColObject("t", "terrain:grid", "terrain",
+                                                        [(0, 0, 0), (1, 0, 0), (0, 1, 0), (2, 0, 0)],
+                                                        [(0, 1, 2), (0, 1, 3)])]))
+        self.assertEqual(pkg.collision_orientation_problems(col), [])
+
+    def test_generated_plan_satisfies_orientation(self):
+        area, grid, classified, _, sources = synthetic_inputs(self.p("gen"))
+        plan = build_plan(area, grid, classified, PlanOptions())
+        _, r = plan_to_package(plan, self.p("gen.mbmap"), "synthetic", sources)   # strict export validation
+        self.assertTrue(r.ok, r.summary())
+        members, _ = load(self.p("gen.mbmap"))
+        col = read_collision(members["collision/map.mbcol"])
+        self.assertTrue(any(e["class"] == "building" for e in col.objects))
+        self.assertEqual(pkg.collision_orientation_problems(col), [])
+
+    # 3: non-string class values
+    def test_non_string_class_rejected(self):
+        members, manifest, _ = scene_members(scene())
+        for k, bad in enumerate((["building"], {"building": 1}, 2)):
+            m = copy.deepcopy(manifest)
+            m["objects"][1]["class"] = bad
+            raw_write(self.p(f"cls{k}.mbmap"), members, m)
+            r = self.assertInvalid(self.p(f"cls{k}.mbmap"), "objects[1] must be")
+            self.assertIsNone(r.package_id)
+        data = write_collision(two_objects())
+        _, _, _, nv, nt, *_ = COL_HEADER.unpack_from(data, 0)
+        table = json.loads(data[collision_size(nv, nt, 0):].rstrip(b"\0"))
+        for bad in (["building"], {"x": 1}, None):
+            t = copy.deepcopy(table)
+            t[0]["class"] = bad
+            with self.assertRaises(PackageError) as cm:
+                read_collision(replace_table(data, json.dumps(t).encode()))
+            self.assertIn("unknown class", str(cm.exception))
+            with self.assertRaises(PackageError):
+                write_collision([ColObject("a", "osm:way/1", bad, [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [(0, 1, 2)])])
+
+    # 4: heightfield rasterisation work budget
+    def test_heightfield_visit_budget(self):
+        from map_builder.core import collision as colmod
+        nx = ny = 101
+        quad = [((0, 0, 0), (100, 0, 0), (100, 100, 0)), ((0, 0, 0), (100, 100, 0), (0, 100, 0))]
+        piles = [tuple((p[0], p[1], 0.01 * k) for p in t) for k in range(20) for t in quad]
+        with self.assertRaises(LimitError) as cm:
+            rasterize_heightfield(piles, 0, 0, 1.0, nx, ny)
+        self.assertIn("work budget", str(cm.exception))
+        self.assertLess(colmod.heightfield_visit_budget(nx, ny), 20 * len(quad) * nx * ny / 2)
+        # a legitimate terrain at the same grid (one triangle pair per cell) is far inside the budget
+        legit = grid_terrain_mesh(100, 100, 1.0)
+        tris = [tuple(legit.vertices[i] for i in t) for t in legit.triangles()]
+        z = rasterize_heightfield(tris, -50, -50, 1.0, nx, ny)
+        self.assertFalse(any(math.isnan(v) for row in z for v in row))
+        # export refuses; validation reports it as an error instead of rasterising without bound
+        stacked = grid_terrain_mesh(AREA_W, AREA_H, 400.0)
+        for k in range(1, 20):
+            for t in grid_terrain_mesh(AREA_W, AREA_H, 400.0).triangles():
+                stacked.add_face(tuple(stacked.add_vertex(*grid_terrain_mesh(AREA_W, AREA_H, 400.0).vertices[i][:2],
+                                                          2.0 + 0.05 * k) for i in t), "MB Terrain", (0.3, 0.3, 0.2))
+        objs = [obj("terrain", "terrain:grid", "terrain", stacked)] + scene()[1:]
+        with self.assertRaises(LimitError):
+            scene_members(objs, heightfield_spacing=10.0)
+        with mock.patch.object(colmod, "HF_VISITS_PER_POINT", 10_000):
+            members, manifest, _ = scene_members(objs, heightfield_spacing=10.0)
+        raw_write(self.p("hfbudget.mbmap"), members, manifest)
+        r = self.assertInvalid(self.p("hfbudget.mbmap"), "heightfield: cannot be verified")
+        self.assertTrue(any("work budget" in e for e in r.errors), r.errors)
+
+    # 5: members too compressible for the ratio limit are stored
+    def test_compressible_member_stored(self):
+        members, manifest, _ = scene_members(scene(terrain_fn=lambda x, y: 5.0), heightfield_spacing=1.0)
+        r = pkg.write_package(self.p("flat.mbmap"), members, manifest)
+        self.assertTrue(r.ok, r.summary())
+        with zipfile.ZipFile(self.p("flat.mbmap")) as z:
+            hf = z.getinfo("collision/terrain.mbhf")
+            self.assertEqual(hf.compress_type, zipfile.ZIP_STORED)
+            self.assertEqual(z.getinfo("visual/map.glb").compress_type, zipfile.ZIP_DEFLATED)
+            for zi in z.infolist():
+                self.assertLessEqual(zi.file_size / zi.compress_size, pkg.MAX_RATIO, zi.filename)
+        self.assertEqual(pkg.MAX_RATIO, 200)
+
+    # 6: winding candidates pruned by vertex correspondence before the cap; work budget reported
+    def test_winding_prunes_noncorresponding_candidates(self):
+        a, b, c = (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
+        cen = (1 / 3, 1 / 3, 0.0)
+        visual = [(cen, cen, cen)] * pkg.MAX_WINDING_CANDIDATES + [(a, c, b)]
+        st = match_winding([(a, b, c)], visual)
+        self.assertEqual((st["reversed"], st["ambiguous"]), (1, 0))
+        self.assertFalse(st["work_exhausted"])
+
+    def test_winding_work_budget_reported(self):
+        tris = tri_grid(3)
+        st = match_winding(tris, tris, max_work=5)
+        self.assertTrue(st["work_exhausted"])
+        self.assertEqual(st["ambiguous"], 0)
+        self.assertEqual(st["same"] + st["unchecked"], len(tris))
+        self.assertGreater(st["unchecked"], 0)
+        members, manifest, _ = scene_members(scene())
+        raw_write(self.p("budget.mbmap"), members, manifest)
+        with mock.patch.object(pkg, "MATCH_WORK_PER_TRIANGLE", 0), mock.patch.object(pkg, "MATCH_WORK_SLACK", 1):
+            r = validate_package(self.p("budget.mbmap"))
+        self.assertTrue(any("stopped at its work budget" in w and "not checked" in w for w in r.warnings),
+                        r.warnings)
+
+    # 7: probe triangle match is one-to-one
+    def test_probe_match_is_one_to_one(self):
+        def unity_to_map(u):
+            return [-u[0], -u[2], u[1]]
+        A, B, C = (2.0, 1.0, 3.0), (3.0, 1.0, 3.0), (3.0, 1.04, 3.0)
+        probe = {"point_unity_x_negated": list(A), "triangle_map": [unity_to_map(p) for p in (A, B, C)],
+                 "normal_unity_x_negated": [0.0, 0.0, 1.0]}
+        for p, u in zip(probe["triangle_map"], (A, B, C)):
+            self.assertLess(math.dist(map_to_unity_x_negated(p), u), 1e-12)
+        imported = [(A, B, (2.0, 1.04, 3.0))]     # A twice (within 5 cm); C has no distinct counterpart
+        self.assertEqual(verify_probe_in_unity(probe, imported), "no imported triangle matches triangle_map within 5 cm")
+        self.assertIsNone(verify_probe_in_unity(probe, [(A, B, C)]))
+        self.assertIsNone(verify_probe_in_unity(probe, [(C, A, B)]))     # same cyclic order, other start
+
+    # 8: package_id only for a valid package
+    def test_package_id_only_on_success(self):
+        members, manifest, _ = scene_members(scene())
+        raw_write(self.p("pid_ok.mbmap"), members, manifest)
+        self.assertTrue(validate_package(self.p("pid_ok.mbmap")).package_id.startswith("sha256:"))
+        bad = dict(members)
+        bad["NOTICES.txt"] = members["NOTICES.txt"][:-1] + b"#"                # same size, hash mismatch
+        raw_write(self.p("pid_hash.mbmap"), bad, manifest)                    # hash mismatch
+        bad_payload = dict(members, **{"NOTICES.txt": b"nothing"})
+        raw_write(self.p("pid_payload.mbmap"), bad_payload, rehash(bad_payload, copy.deepcopy(manifest)))
+        m = copy.deepcopy(manifest)
+        m["files"][0]["bytes"] += 1
+        raw_write(self.p("pid_size.mbmap"), members, m)
+        for name, fragment in (("pid_hash", "SHA-256 mismatch"), ("pid_payload", "NOTICES.txt lacks"),
+                               ("pid_size", "manifest bytes")):
+            r = self.assertInvalid(self.p(f"{name}.mbmap"), fragment)
+            self.assertIsNone(r.package_id, name)
+            self.assertNotIn("package_id", r.summary())
+
+    # 9: one credential policy over the whole manifest, without echoing values
+    def test_credentials_anywhere_in_manifest_not_echoed(self):
+        members, manifest, _ = scene_members(scene())
+        secret = "S3KR1Tvalue"
+        changes = {
+            "userinfo": lambda m: m["georeference"].update(projection=f"see https://bob:{secret}@x.example/p"),
+            "query": lambda m: m["objects"][1]["provenance"].update(src=f"https://x.example/t?api_key={secret}"),
+            "header": lambda m: m["area"].update(note=f"Authorization: Bearer {secret}abcdef"),
+            "keyname": lambda m: m["generator"].update(extra={"password": secret}),
+            "nested": lambda m: m["collision"].update(meta=[{"x": [f"https://h.example/?access_token={secret}"]}]),
+            "oddkey": lambda m: m["sources"][0].update({f"https://h.example/?token={secret}": 1}),
+        }
+        for label, change in changes.items():
+            with self.subTest(label):
+                m = copy.deepcopy(manifest)
+                change(m)
+                raw_write(self.p(f"sec_{label}.mbmap"), members, m)
+                r = self.assertInvalid(self.p(f"sec_{label}.mbmap"), "credential-like")
+                self.assertFalse(any(secret in e for e in r.errors + r.warnings), r.errors)
+                with self.assertRaises(PackageError) as cm:
+                    pkg.write_package(self.p(f"sec_{label}_w.mbmap"), members, m)
+                self.assertNotIn(secret, str(cm.exception))
+                self.assertIn("manifest", str(cm.exception))
+        m = copy.deepcopy(manifest)
+        m["files"][0]["path"] = f"../{secret}"
+        m["schema_version"] = secret
+        raw_write(self.p("echo.mbmap"), members, m)
+        r = validate_package(self.p("echo.mbmap"))
+        self.assertFalse(r.ok)
+        self.assertFalse(any(secret in e for e in r.errors), r.errors)
+        with self.assertRaises(PackageError) as cm:
+            objs = scene()
+            col_bytes = write_collision([col_of(o) for o in objs])
+            glb = write_glb([node_of(o) for o in objs], MATERIALS)
+            objects = [{"name": o["name"], "mb_id": o["mb_id"], "class": o["cls"], "collision": True,
+                        "provenance": {"api_key": secret}} for o in objs]
+            assemble("test", AREA, synthetic_sources(), glb, col_bytes, objects, created_utc=UTC)
+        self.assertNotIn(secret, str(cm.exception))
+        self.assertIn("api_key", str(cm.exception))
+        for benign in ("© OpenStreetMap contributors", "Basic geometry and terrain", "H = z + z_offset_m",
+                       "https://opendatacommons.org/licenses/odbl/1-0/", "keyframe=3"):
+            self.assertEqual(pkg.find_secrets({"v": benign}), [], benign)
+
+    # 10: NOTICES.txt must carry each licence
+    def test_notices_require_licence(self):
+        members, manifest, _ = scene_members(scene())
+        text = members["NOTICES.txt"].decode()
+        for s in manifest["sources"]:
+            for key in ("id", "name", "url"):
+                if s["license"].get(key):
+                    self.assertIn(s["license"][key], text)
+        url = next(s["license"]["url"] for s in manifest["sources"] if s["license"].get("url"))
+        lic_id = next(s["license"]["id"] for s in manifest["sources"] if s["license"].get("url"))
+        for label, new_text, fragment in (("url", text.replace(url, "(link removed)"), "licence url of sources[1]"),
+                                          ("id", text.replace(lic_id, "X"), "licence id of sources[1]")):
+            with self.subTest(label):
+                ms = dict(members, **{"NOTICES.txt": new_text.encode()})
+                raw_write(self.p(f"notice_{label}.mbmap"), ms, rehash(ms, copy.deepcopy(manifest)))
+                self.assertInvalid(self.p(f"notice_{label}.mbmap"), fragment)
+        m = copy.deepcopy(manifest)
+        m["sources"][0]["license"] = {"url": "https://example.org/licence"}
+        raw_write(self.p("notice_nolic.mbmap"), members, m)
+        self.assertInvalid(self.p("notice_nolic.mbmap"), "sources[0].license must declare")
+        # a licence text is written verbatim and required verbatim
+        srcs = synthetic_sources()
+        srcs[0]["license"] = dict(srcs[0]["license"], text="Line one of the licence.\nLine two.")
+        members, manifest, _ = scene_members(scene(), sources=srcs)
+        self.assertIn("Line one of the licence.\nLine two.", members["NOTICES.txt"].decode())
+        self.assertTrue(pkg.write_package(self.p("notice_text.mbmap"), members, manifest).ok)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,7 @@ from . import (COLLISION_FORMAT_VERSION, GENERATOR_NAME, GENERATOR_VERSION, HEIG
                PACKAGE_SCHEMA, PACKAGE_SCHEMA_VERSION)
 from .collision import (CLASSES, DEGENERATE_EPS, degenerate_triangle_count, is_degenerate, rasterize_heightfield,
                         read_collision, read_heightfield, strict_json)
-from .errors import PackageError
+from .errors import LimitError, PackageError
 from .geodesy import gltf_to_map, map_to_gltf, map_to_unity_x_negated
 from .glb import read_glb
 
@@ -75,7 +75,12 @@ AABB_TOL_REL = 1e-5
 WINDING_TOL_M = 0.005
 WINDING_MIN_MATCHED = 0.99
 WINDING_TIE_M = 1e-9
-MAX_WINDING_CANDIDATES = 32
+MAX_WINDING_CANDIDATES = 32       # corresponding candidates compared per collision triangle; more = ambiguous
+# Work budget for the per-triangle matchers: candidate visits (including candidates pruned because no vertex
+# correspondence fits) per collision triangle on average, plus a constant. Exported meshes visit about one
+# candidate per triangle; the budget only stops adversarial piles of coincident triangles.
+MATCH_WORK_PER_TRIANGLE = 64
+MATCH_WORK_SLACK = 4096
 PROBE_MIN_ABS_XY_M = 1.0
 PROBE_MIRROR_CLEARANCE_M = 0.5
 PROBE_MIN_NORMAL_XZ = 0.05
@@ -87,8 +92,20 @@ HEIGHTFIELD_TOL_M = 1e-3
 _MB_ID = re.compile(r"(osm:(node|way|relation)/\d+|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
-_SECRET = re.compile(r"(?i)([?&;](api[_-]?key|key|token|access[_-]?token|auth|password|passwd|secret|signature|sig"
-                     r"|x-amz-[a-z-]+)=)|(://[^/\s@]*@)|(\bbearer\s+[a-z0-9._~+/-]{8,})")
+# One credential policy for every string in the manifest (values and keys) and report.json, applied by the
+# writer before emitting and by the validator: URL userinfo, credential-named query/form parameters,
+# HTTP Authorization-style headers and bearer/basic credentials.
+_CREDENTIAL_NAMES = (r"api[_-]?key|apikey|key|access[_-]?key|token|access[_-]?token|refresh[_-]?token|id[_-]?token"
+                     r"|auth|password|passwd|pwd|secret|client[_-]?secret|signature|sig|x-amz-[a-z-]+")
+_SECRET = re.compile(r"(?i)((?:^|[?&;#\s])(?:" + _CREDENTIAL_NAMES + r")=)"
+                     r"|([a-z][a-z0-9+.-]*://[^/\s@?#]*@)"
+                     r"|(\b(?:proxy-)?authorization\s*[:=])|(\bx-api-key\s*[:=])"
+                     r"|(\bbearer\s+[a-z0-9._~+/-]{8,})|((?-i:\bBasic)\s+[A-Za-z0-9+/]{12,}={0,2})")
+# dict keys naming a credential: a non-empty string value under such a key is a secret
+_SECRET_KEY = re.compile(r"(?i)(?:x-)?(?:api[_-]?key|apikey|access[_-]?key|secret[_-]?key|token|access[_-]?token"
+                         r"|refresh[_-]?token|id[_-]?token|auth|authorization|password|passwd|pwd|secret"
+                         r"|client[_-]?secret|signature|credentials?)")
+_SAFE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 
 
 def manifest_bytes(manifest):
@@ -138,18 +155,40 @@ def _unit(v):
     return None if n == 0 else (v[0] / n, v[1] / n, v[2] / n)
 
 
+_PERMUTATIONS = ((0, 1, 2), (1, 2, 0), (2, 0, 1), (0, 2, 1), (2, 1, 0), (1, 0, 2))   # 3 cyclic, then 3 reversed
+
+
+def _key_label(path, k, i):
+    """Path step for a dict key that never echoes untrusted key text."""
+    return f"{path}.{k}" if isinstance(k, str) and _SAFE_KEY.fullmatch(k) else f"{path}[key #{i}]"
+
+
 def find_secrets(obj, path="$"):
-    """Paths of string values that look like credentials (URL userinfo, key/token query parameters)."""
+    """Locations of credential-like strings (see ``_SECRET``) anywhere in ``obj``: string values, dict keys,
+    and non-empty strings stored under credential-named keys. Locations are built from field names that are
+    plain identifiers and from indices, so they never echo the offending text."""
     hits = []
     if isinstance(obj, dict):
-        for k, v in obj.items():
-            hits += find_secrets(v, f"{path}.{k}")
+        for i, (k, v) in enumerate(obj.items()):
+            where = _key_label(path, k, i)
+            if isinstance(k, str) and _SECRET.search(k):
+                hits.append(f"{path}[key #{i}]")
+            if isinstance(k, str) and _SECRET_KEY.fullmatch(k) and isinstance(v, str) and v.strip():
+                hits.append(where)
+                continue
+            hits += find_secrets(v, where)
     elif isinstance(obj, (list, tuple)):
         for i, v in enumerate(obj):
             hits += find_secrets(v, f"{path}[{i}]")
     elif isinstance(obj, str) and _SECRET.search(obj):
         hits.append(path)
     return hits
+
+
+def secrets_message(where, hits):
+    return (f"{where}: credential-like value(s) at {hits[:5]}{' ...' if len(hits) > 5 else ''}; expected no URL "
+            "userinfo, credential query parameters (key, token, apikey, access_token, signature, password, "
+            "secret, ...), Authorization headers or bearer/basic credentials")
 
 
 # --- manifest ------------------------------------------------------------------
@@ -189,22 +228,33 @@ def build_manifest(name, area, sources, vertical_datum, files, collision_info, h
     }
 
 
+LICENSE_TEXT_KEYS = ("id", "name", "text")   # a source licence declares at least one of these
+LICENSE_NOTICE_KEYS = ("id", "name", "text", "url")   # each one declared must appear in NOTICES.txt
+
+
 def notices_text(sources):
     lines = ["Map package data notices", "========================", "",
              "This package contains visual and collision geometry derived from the sources below.",
              "Procedural details (materials, inferred heights/roofs, scattered vegetation) are generated",
              "by map-builder and are not measurements. See report.json and manifest objects[].provenance.", ""]
     for s in sources:
-        lic = s.get("license", {})
+        lic = s.get("license") or {}
         lines.append(f"- {s.get('product', s.get('provider'))}")
         if s.get("attribution"):
             lines.append(f"  Attribution: {s['attribution']}")
-        if lic:
-            lines.append(f"  Licence: {lic.get('name', lic.get('id'))} {lic.get('url', '')}".rstrip())
+        if lic.get("name"):
+            lines.append(f"  Licence: {lic['name']}")
+        if lic.get("id"):
+            lines.append(f"  Licence identifier: {lic['id']}")
+        if lic.get("url"):
+            lines.append(f"  Licence URL: {lic['url']}")
+        if lic.get("text"):
+            lines.append("  Licence text:")
+            lines.append(lic["text"])
         if s.get("notes"):
             lines.append(f"  Notes: {s['notes']}")
     lines.append("")
-    if any(s.get("license", {}).get("id") == "ODbL-1.0" for s in sources):
+    if any((s.get("license") or {}).get("id") == "ODbL-1.0" for s in sources):
         lines += [
             "OpenStreetMap / ODbL: the geometry in this package is a Produced Work derived from the",
             "OpenStreetMap database. Credit '(c) OpenStreetMap contributors' visibly wherever the map is",
@@ -305,12 +355,13 @@ def verify_probe_in_unity(probe, unity_triangles, tol=PROBE_MATCH_M):
     nu = probe["normal_unity_x_negated"]
     found = False
     for t in unity_triangles:
-        if all(any(_dist(w, q) <= tol for q in t) for w in want) and all(any(_dist(w, q) <= tol for w in want)
-                                                                          for q in t):
-            found = True
-            n = _unit(_cross(*t))  # Unity Vector3.Cross(b - a, c - a), imported index order
-            if n is not None and n[0] * nu[0] + n[1] * nu[1] + n[2] * nu[2] > PROBE_MIN_DOT:
-                return None
+        # one-to-one: some permutation pairs each wanted vertex with a distinct imported vertex within tol
+        if not any(all(_dist(want[i], t[perm[i]]) <= tol for i in range(3)) for perm in _PERMUTATIONS):
+            continue
+        found = True
+        n = _unit(_cross(*t))  # Unity Vector3.Cross(b - a, c - a), imported index order
+        if n is not None and n[0] * nu[0] + n[1] * nu[1] + n[2] * nu[2] > PROBE_MIN_DOT:
+            return None
     if not found:
         return "no imported triangle matches triangle_map within 5 cm"
     return "imported triangle front face does not match normal_unity_x_negated (winding or handedness wrong)"
@@ -318,47 +369,85 @@ def verify_probe_in_unity(probe, unity_triangles, tol=PROBE_MATCH_M):
 
 # --- per-triangle winding match ------------------------------------------------------------
 
-def match_winding(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_candidates=MAX_WINDING_CANDIDATES):
+def _centroid(t):
+    return ((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3)
+
+
+def _centroid_cells(tri, tol):
+    """Cells (size 2*tol) that can hold the centroid of a triangle whose vertices are each within tol."""
+    cs = 2.0 * tol
+    cen = _centroid(tri)
+    lo = _cell((cen[0] - tol, cen[1] - tol, cen[2] - tol), cs)
+    hi = _cell((cen[0] + tol, cen[1] + tol, cen[2] + tol), cs)
+    return [(ix, iy, iz) for ix in range(lo[0], hi[0] + 1) for iy in range(lo[1], hi[1] + 1)
+            for iz in range(lo[2], hi[2] + 1)]
+
+
+def _correspondence(tri, v, tol):
+    """(best same-orientation, best reversed) total vertex distance over the vertex correspondences whose
+    every pair is within ``tol``; ``inf`` where no correspondence of that orientation fits."""
+    d = [[_dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
+    best = [math.inf, math.inf]
+    for k, perm in enumerate(_PERMUTATIONS):
+        dd = (d[0][perm[0]], d[1][perm[1]], d[2][perm[2]])
+        if max(dd) <= tol:
+            best[k >= 3] = min(best[k >= 3], sum(dd))
+    return best[0], best[1]
+
+
+def _match_budget(n, max_work):
+    return MATCH_WORK_PER_TRIANGLE * n + MATCH_WORK_SLACK if max_work is None else max_work
+
+
+def match_winding(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_candidates=MAX_WINDING_CANDIDATES,
+                  max_work=None):
     """Match each non-degenerate collision triangle to visual triangles (same frame) whose three vertices
     are each within ``tol``. Bounded: visual triangles are hashed by centroid in cells of 2*tol, so each
-    query visits at most 8 cells, and at most ``max_candidates`` candidates are compared (more counts as
-    ambiguous)."""
+    query visits at most 8 cells. Candidates with no vertex correspondence within ``tol`` are pruned first;
+    more than ``max_candidates`` corresponding candidates count as ambiguous. Every candidate visit counts
+    against ``max_work`` (default ``MATCH_WORK_PER_TRIANGLE`` per collision triangle + ``MATCH_WORK_SLACK``);
+    once it is exhausted the remaining triangles are counted as ``unchecked`` and ``work_exhausted`` is set,
+    which callers must report as such (it is not a tie)."""
+    collision_triangles = list(collision_triangles)
     cs = 2.0 * tol
     grid = {}
     for v in visual_triangles:
-        c = ((v[0][0] + v[1][0] + v[2][0]) / 3, (v[0][1] + v[1][1] + v[2][1]) / 3, (v[0][2] + v[1][2] + v[2][2]) / 3)
-        grid.setdefault(_cell(c, cs), []).append(v)
+        grid.setdefault(_cell(_centroid(v), cs), []).append(v)
     st = {"considered": 0, "degenerate": 0, "same": 0, "reversed": 0, "ambiguous": 0, "unmatched": 0,
-          "comparisons": 0, "reversed_examples": []}
+          "unchecked": 0, "comparisons": 0, "work": 0, "work_exhausted": False, "reversed_examples": []}
+    budget = _match_budget(len(collision_triangles), max_work)
     for tri in collision_triangles:
+        if st["work_exhausted"]:
+            st["unchecked"] += 1
+            continue
         if is_degenerate(*tri, DEGENERATE_EPS):
             st["degenerate"] += 1
             continue
-        st["considered"] += 1
-        a, b, c = tri
-        cen = ((a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3)
-        lo = _cell((cen[0] - tol, cen[1] - tol, cen[2] - tol), cs)
-        hi = _cell((cen[0] + tol, cen[1] + tol, cen[2] + tol), cs)
         best_same = best_rev = math.inf
         n = 0
         overflow = False
-        for ix in range(lo[0], hi[0] + 1):
-            for iy in range(lo[1], hi[1] + 1):
-                for iz in range(lo[2], hi[2] + 1):
-                    for v in grid.get((ix, iy, iz), ()):
-                        n += 1
-                        if n > max_candidates:
-                            overflow = True
-                            break
-                        st["comparisons"] += 1
-                        d = [[_dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
-                        for k in range(3):
-                            same = (d[0][k], d[1][(k + 1) % 3], d[2][(k + 2) % 3])
-                            rev = (d[0][k], d[1][(k - 1) % 3], d[2][(k - 2) % 3])
-                            if max(same) <= tol:
-                                best_same = min(best_same, sum(same))
-                            if max(rev) <= tol:
-                                best_rev = min(best_rev, sum(rev))
+        for cell in _centroid_cells(tri, tol):
+            for v in grid.get(cell, ()):
+                st["work"] += 1
+                if st["work"] > budget:
+                    st["work_exhausted"] = True
+                    break
+                same, rev = _correspondence(tri, v, tol)
+                if same == math.inf and rev == math.inf:
+                    continue          # no vertex correspondence: cannot be this triangle's visual
+                n += 1
+                if n > max_candidates:
+                    overflow = True
+                    break
+                st["comparisons"] += 1
+                best_same = min(best_same, same)
+                best_rev = min(best_rev, rev)
+            if overflow or st["work_exhausted"]:
+                break
+        if st["work_exhausted"]:
+            st["unchecked"] += 1
+            continue
+        st["considered"] += 1
         if overflow:
             st["ambiguous"] += 1
         elif best_same == math.inf and best_rev == math.inf:
@@ -374,34 +463,148 @@ def match_winding(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_
     return st
 
 
+def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_work=None):
+    """Exporter-side binding (stricter than the consumer diagnostic of :func:`match_winding`): pair every
+    collision triangle with a *distinct* visual triangle whose vertices are each within ``tol`` in the same
+    cyclic order (any order for a degenerate collision triangle, which has no orientation), and leave no
+    visual triangle unpaired. Greedy in collision order, taking the closest unused candidate; exports come
+    from the same evaluated meshes, so pairs coincide to float32 precision and greedy choice is exact.
+    Bounded by ``max_work`` candidate visits like :func:`match_winding`.
+
+    Returns {"matched", "reversed", "unmatched", "visual_only", "work_exhausted"}: ``reversed`` counts
+    collision triangles whose only free counterparts have reversed winding; ``visual_only`` counts visual
+    triangles left unpaired."""
+    collision_triangles = list(collision_triangles)
+    visual_triangles = list(visual_triangles)
+    cs = 2.0 * tol
+    grid = {}
+    for k, v in enumerate(visual_triangles):
+        grid.setdefault(_cell(_centroid(v), cs), []).append(k)
+    used = [False] * len(visual_triangles)
+    st = {"matched": 0, "reversed": 0, "unmatched": 0, "visual_only": 0, "work_exhausted": False}
+    budget = _match_budget(len(collision_triangles), max_work)
+    work = 0
+    for tri in collision_triangles:
+        degenerate = is_degenerate(*tri, DEGENERATE_EPS)
+        best, best_k, reversed_only = math.inf, None, False
+        for cell in _centroid_cells(tri, tol):
+            for k in grid.get(cell, ()):
+                work += 1
+                if work > budget:
+                    st["work_exhausted"] = True
+                    return st
+                if used[k]:
+                    continue
+                same, rev = _correspondence(tri, visual_triangles[k], tol)
+                d = min(same, rev) if degenerate else same
+                if d < best:
+                    best, best_k = d, k
+                elif rev < math.inf:
+                    reversed_only = True
+        if best_k is not None:
+            used[best_k] = True
+            st["matched"] += 1
+        elif reversed_only:
+            st["reversed"] += 1
+        else:
+            st["unmatched"] += 1
+    st["visual_only"] = used.count(False)
+    return st
+
+
+# --- independent collision orientation ------------------------------------------------------
+
+def collision_orientation_problems(col):
+    """Checks the final collision on its own, per docs/PACKAGE_FORMAT.md "Winding" (agreement with the
+    visuals does not prove orientation: both could be inverted). Returns a list of error strings.
+
+    * ``building``: a closed solid with consistently oriented edges (every directed edge, after welding
+      identical float32 positions, is matched by its reverse equally often; zero-length edges of degenerate
+      triangles are ignored, degenerate triangles are otherwise kept so slivers still close the surface)
+      and positive signed volume (outward-facing). Generated buildings, all roof shapes, courtyards and
+      raised parts, are closed by construction; an edit that opens one is refused, as the contract
+      requires closed building solids.
+    * ``terrain`` and ``road``: every non-degenerate triangle faces up (normal z > 0).
+    Other classes (vegetation, water, props, user) carry no orientation requirement in the contract."""
+    problems = []
+    for e in col.objects:
+        cls = e["class"]
+        if cls not in ("building", "terrain", "road"):
+            continue
+        tris = col.object_triangles(e)
+        if cls == "building":
+            edges = {}
+            for t in tris:
+                for p, q in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
+                    if p != q:
+                        edges[(p, q)] = edges.get((p, q), 0) + 1
+            unbalanced = sum(1 for (p, q), n in edges.items()
+                             if edges.get((q, p), 0) != n and ((q, p) not in edges or (p, q) < (q, p)))
+            if unbalanced:
+                problems.append(f"collision: building {e['name']!r} is not a closed, consistently oriented solid "
+                                f"({unbalanced} open or inconsistently wound edge(s)); building solids must be "
+                                "closed with CCW-outward faces")
+                continue
+            rx, ry, rz = ((e["aabb"][0] + e["aabb"][3]) / 2, (e["aabb"][1] + e["aabb"][4]) / 2,
+                          (e["aabb"][2] + e["aabb"][5]) / 2)
+            vol = 0.0
+            for a, b, c in tris:
+                ax, ay, az = a[0] - rx, a[1] - ry, a[2] - rz
+                bx, by, bz = b[0] - rx, b[1] - ry, b[2] - rz
+                cx, cy, cz = c[0] - rx, c[1] - ry, c[2] - rz
+                vol += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
+            vol /= 6.0
+            if not vol > 0.0:
+                problems.append(f"collision: building {e['name']!r} has signed volume {vol:.6g} m^3; it must be "
+                                "positive (faces CCW seen from outside)")
+        else:
+            down = sum(1 for t in tris if not is_degenerate(*t) and _cross(*t)[2] <= 0.0)
+            if down:
+                problems.append(f"collision: {cls} {e['name']!r} has {down} non-degenerate triangle(s) whose "
+                                "normal does not point up (z <= 0); open surfaces must face +Z")
+    return problems
+
+
 # --- writing --------------------------------------------------------------------------
 
-def _zinfo(name):
+def _zinfo(name, data=b""):
+    """Deterministic entry. Deflated unless deflate would compress ``data`` beyond the validator's MAX_RATIO
+    (e.g. a constant heightfield): such members are stored, so every written entry passes the ratio check."""
     zi = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))  # deterministic archive
     zi.compress_type = zipfile.ZIP_DEFLATED
+    if data:
+        co = zlib.compressobj(6, zlib.DEFLATED, -15)   # the raw deflate stream zipfile writes at level 6
+        size = len(co.compress(data)) + len(co.flush())
+        if len(data) > MAX_RATIO * size:
+            zi.compress_type = zipfile.ZIP_STORED
     zi.external_attr = (stat.S_IFREG | 0o644) << 16
     return zi
 
 
 def write_package(path, members, manifest):
     """Atomically write and validate a package. The archive is written to a temporary file next to
-    ``path``, fsynced, validated, and only then moved over ``path`` with ``os.replace``; on any failure the
-    temporary file is removed and a previous export at ``path`` is left untouched."""
+    ``path``, fsynced, validated (in the exporter's strict mode), and only then moved over ``path`` with
+    ``os.replace``; on any failure the temporary file is removed and a previous export at ``path`` is left
+    untouched."""
     path = os.path.abspath(path)
     if not path.lower().endswith(PACKAGE_EXTENSION):
         raise PackageError(f"package path must end with {PACKAGE_EXTENSION}")
+    secrets = find_secrets(manifest, "manifest")
+    if secrets:
+        raise PackageError("refusing to write the package: " + secrets_message("manifest", secrets))
+    data = manifest_bytes(manifest)
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".mbmap-", suffix=".tmp", dir=directory)
     try:
         with os.fdopen(fd, "wb") as fh:
             with zipfile.ZipFile(fh, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-                z.writestr(_zinfo(MANIFEST), manifest_bytes(manifest))
+                z.writestr(_zinfo(MANIFEST, data), data)
                 for name in sorted(members):
-                    z.writestr(_zinfo(name), members[name])
+                    z.writestr(_zinfo(name, members[name]), members[name])
             fh.flush()
             os.fsync(fh.fileno())
-        result = validate_package(tmp)
+        result = validate_package(tmp, strict=True)
         if result.errors:
             raise PackageError("package failed validation; previous export kept:\n- " + "\n- ".join(result.errors))
         os.replace(tmp, path)
@@ -442,7 +645,7 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
     report["edits"] = edits
     secrets = find_secrets({"sources": sources, "report": report, "objects": objects, "name": name})
     if secrets:
-        raise PackageError(f"refusing to write credential-like values into the package: {secrets[:5]}")
+        raise PackageError("refusing to write the package: " + secrets_message("package", secrets))
     try:
         report_bytes = json.dumps(report, indent=1, sort_keys=True, ensure_ascii=False,
                                   allow_nan=False).encode("utf-8")
@@ -468,6 +671,9 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
     manifest = build_manifest(name, area, sources, elevation[0]["vertical_datum"], files, collision_info, hf_info,
                               objects, probes, {k: len(v) for k, v in edits.items()}, len(report["warnings"]),
                               blender_version=blender_version, created_utc=created_utc)
+    secrets = find_secrets(manifest, "manifest")
+    if secrets:
+        raise PackageError("refusing to write the package: " + secrets_message("manifest", secrets))
     return members, manifest, probes
 
 
@@ -481,6 +687,7 @@ class ValidationResult:
         self.package_id = None
         self.collision = None
         self.winding = {}
+        self.strict = False
 
     @property
     def ok(self):
@@ -500,9 +707,14 @@ _ZIP_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError, Ru
                OverflowError, MemoryError)
 
 
-def validate_package(path):
-    """Validate a package file; never raises for malformed input (errors are collected)."""
+def validate_package(path, strict=False):
+    """Validate a package file; never raises for malformed input (errors are collected).
+
+    ``strict`` is the exporter's mode (used by :func:`write_package`): on top of the consumer checks, each
+    node's visual and collision triangles must correspond one-to-one with the same winding.
+    ``package_id`` is published only if the package is valid; after any error it is None."""
     r = ValidationResult()
+    r.strict = strict
     try:
         with zipfile.ZipFile(path, "r") as z:
             _validate_zip(z, r)
@@ -510,6 +722,8 @@ def validate_package(path):
         r.errors.append(f"not a readable package: {type(e).__name__}: {e}")
     except PackageError as e:
         r.errors.append(str(e))
+    if r.errors:
+        r.package_id = None
     return r
 
 
@@ -569,7 +783,6 @@ def _validate_zip(z, r):
     r.manifest = m
     if not _check_version(m, r):
         return
-    r.package_id = package_id_of(raw)
     _check_manifest(m, r)
     if r.errors:
         return
@@ -595,19 +808,22 @@ def _validate_zip(z, r):
     if r.errors:
         return
     _validate_payloads(m, blobs, r)
+    if not r.errors:
+        r.package_id = package_id_of(raw)   # only now does it bind the verified payload
 
 
 def _check_version(m, r):
     if m.get("schema") != PACKAGE_SCHEMA:
-        r.errors.append(f"manifest: schema is {m.get('schema')!r}, expected {PACKAGE_SCHEMA!r}")
+        r.errors.append(f"manifest: schema must be {PACKAGE_SCHEMA!r}")
         return False
     v = m.get("schema_version")
     mt = _SEMVER.fullmatch(v) if isinstance(v, str) else None
     if not mt:
-        r.errors.append(f"manifest: schema_version {v!r} is not MAJOR.MINOR.PATCH")
+        r.errors.append("manifest: schema_version must be a MAJOR.MINOR.PATCH string")
         return False
     if mt.group(1) != PACKAGE_SCHEMA_VERSION.split(".")[0]:
-        r.errors.append(f"manifest: unsupported schema major version {v}")
+        r.errors.append(f"manifest: unsupported schema major version {mt.group(1)} (expected "
+                        f"{PACKAGE_SCHEMA_VERSION.split('.')[0]})")
         return False
     return True
 
@@ -654,34 +870,36 @@ def _check_manifest(m, r):
     files = m.get("files")
     if need(isinstance(files, list), "files must be an array"):
         seen_paths, seen_roles = set(), set()
-        for f in files:
+        for i, f in enumerate(files):
+            loc = f"files[{i}]"
             if not (isinstance(f, dict) and isinstance(f.get("path"), str) and isinstance(f.get("role"), str)
                     and isinstance(f.get("media_type"), str) and isinstance(f.get("sha256"), str)
                     and re.fullmatch(r"[0-9a-f]{64}", f["sha256"]) and isinstance(f.get("bytes"), int)
                     and not isinstance(f["bytes"], bool) and f["bytes"] >= 0):
-                err(f"manifest: malformed files[] entry {str(f)[:200]}")
+                err(f"manifest: {loc} must be {{path, role, media_type: strings, sha256: 64 lowercase hex digits, "
+                    "bytes: count}")
                 continue
             p = f["path"]
             if not safe_member_name(p) or p == MANIFEST:
-                err(f"manifest: files[] path {p!r} is unsafe or the manifest itself")
+                err(f"manifest: {loc}.path must be a safe relative member path other than {MANIFEST!r}")
                 continue
             if p.lower() in seen_paths:
-                err(f"manifest: files[] lists {p!r} twice")
+                err(f"manifest: {loc}.path lists a member path twice")
             seen_paths.add(p.lower())
             if p in MEMBERS:
                 role, media_type, _ = MEMBERS[p]
                 if f["role"] != role:
-                    err(f"manifest: {p} must have role {role!r}, not {f['role']!r}")
+                    err(f"manifest: {loc} ({p}) must have role {role!r}")
                 elif f["media_type"] != media_type:
-                    r.warnings.append(f"{p}: media_type {f['media_type']!r} (expected {media_type!r})")
+                    r.warnings.append(f"{loc} ({p}): media_type is not the expected {media_type!r}")
                 if role in seen_roles:
                     err(f"manifest: role {role!r} listed twice")
                 seen_roles.add(role)
             else:
                 if f["role"] in ROLE_PATHS:
-                    err(f"manifest: role {f['role']!r} must use path {ROLE_PATHS[f['role']]!r}, not {p!r}")
+                    err(f"manifest: {loc}: role {f['role']!r} must use path {ROLE_PATHS[f['role']]!r}")
                 else:
-                    r.warnings.append(f"unknown package member {p!r} (role {f['role']!r}) ignored")
+                    r.warnings.append(f"{loc}: unknown package member ignored")
         for p, (role, _, required) in MEMBERS.items():
             if required and role not in seen_roles:
                 err(f"manifest: required member {p} (role {role!r}) not listed")
@@ -712,22 +930,29 @@ def _check_manifest(m, r):
     need(m.get("notices") == "NOTICES.txt", "notices must be 'NOTICES.txt'")
     objs = m.get("objects")
     if need(isinstance(objs, list) and objs, "objects must be a non-empty array"):
-        for o in objs:
+        for i, o in enumerate(objs):
             if not (isinstance(o, dict) and isinstance(o.get("name"), str) and isinstance(o.get("mb_id"), str)
-                    and o.get("class") in CLASSES and o.get("collision") is True
+                    and isinstance(o.get("class"), str) and o["class"] in CLASSES and o.get("collision") is True
                     and isinstance(o.get("provenance"), dict)):
-                err(f"manifest: malformed objects[] entry {str(o)[:200]}")
+                err(f"manifest: objects[{i}] must be {{name, mb_id: strings, class: one of {sorted(CLASSES)}, "
+                    "collision: true, provenance: object}")
     need(isinstance(m.get("orientation_probes"), list) and len(m["orientation_probes"]) <= PROBE_MAX,
          f"orientation_probes must be an array of at most {PROBE_MAX}")
     srcs = m.get("sources")
     if need(isinstance(srcs, list) and srcs, "sources must be a non-empty array"):
-        for s in srcs:
+        for i, s in enumerate(srcs):
             if not (isinstance(s, dict) and s.get("kind") in ("elevation", "features")
                     and isinstance(s.get("provider"), str) and s["provider"]
                     and isinstance(s.get("license"), dict) and s["license"]
                     and isinstance(s.get("attribution"), str)):
-                err("manifest: every source needs kind (elevation|features), provider, license {...} and "
+                err(f"manifest: sources[{i}] needs kind (elevation|features), provider, license {{...}} and "
                     "attribution")
+                break
+            lic = s["license"]
+            if (not all(isinstance(lic.get(k), str) for k in LICENSE_NOTICE_KEYS if k in lic)
+                    or not any(lic.get(k) for k in LICENSE_TEXT_KEYS)):
+                err(f"manifest: sources[{i}].license must declare a licence identifier, name or text "
+                    f"({'/'.join(LICENSE_TEXT_KEYS)}) and an optional url, all strings")
                 break
         else:
             if not any(s["kind"] == "elevation" for s in srcs):
@@ -738,9 +963,9 @@ def _check_manifest(m, r):
          "edits must be {duplicated, user_added, removed} counts")
     wc = m.get("warnings_count")
     need(isinstance(wc, int) and not isinstance(wc, bool) and wc >= 0, "warnings_count must be a count")
-    secrets = find_secrets({k: m.get(k) for k in ("sources", "objects", "name", "generator")})
+    secrets = find_secrets(m, "manifest")
     if secrets:
-        err(f"manifest: credential-like values at {secrets[:5]}")
+        err(secrets_message("manifest", secrets))
 
 
 def _aabb(points):
@@ -765,6 +990,7 @@ def _validate_payloads(m, blobs, r):
         r.warnings.append(f"collision has {deg} degenerate (zero-area) triangles")
     if not any(c == CLASSES["terrain"] for c in col.tri_class):
         r.warnings.append("collision has no terrain-class triangles")
+    r.errors.extend(collision_orientation_problems(col))
     _check_objects(m, col, r)
     try:
         _, nodes = read_glb(blobs["visual"])
@@ -844,6 +1070,27 @@ def _check_binding(m, col, nodes, r):
         elif st["considered"] and st["same"] < WINDING_MIN_MATCHED * st["considered"]:
             r.warnings.append(f"{e['name']!r}: only {st['same']}/{st['considered']} collision triangles have an "
                               f"unambiguous visual match ({st['ambiguous']} ambiguous, {st['unmatched']} unmatched)")
+        if st["work_exhausted"]:
+            r.warnings.append(f"{e['name']!r}: winding check stopped at its work budget; {st['unchecked']} "
+                              "collision triangle(s) were not checked (not counted as ties)")
+        if r.strict:
+            one = match_one_to_one(ctris, vis)
+            if one["work_exhausted"]:
+                r.errors.append(f"export binding for {e['name']!r}: the one-to-one visual/collision triangle "
+                                "correspondence could not be verified within its work budget")
+            elif one["reversed"] or one["unmatched"] or one["visual_only"]:
+                r.errors.append(f"export binding for {e['name']!r}: visual and collision triangles must correspond "
+                                f"one-to-one with the same winding; {one['unmatched']} collision triangle(s) have "
+                                f"no free visual counterpart, {one['reversed']} only a reversed one, and "
+                                f"{one['visual_only']} visual triangle(s) have no collision counterpart")
+        else:
+            vst = match_winding(vis, ctris)
+            if vst["unmatched"]:
+                r.warnings.append(f"{e['name']!r}: {vst['unmatched']} visual triangle(s) have no collision "
+                                  "counterpart (visible but not collidable)")
+            if vst["work_exhausted"]:
+                r.warnings.append(f"{e['name']!r}: visual-only triangle check stopped at its work budget; "
+                                  f"{vst['unchecked']} visual triangle(s) were not checked")
     _check_probes(m, col, by_name, r)
 
 
@@ -935,8 +1182,12 @@ def _check_heightfield(info, data, col, r):
             abs(info[a] - hf[b]) > 1e-9 for a, b in (("x0", "x0"), ("y0", "y0"), ("spacing_m", "spacing"))):
         r.errors.append("heightfield: manifest nx/ny/x0/y0/spacing_m/nan_cells differ from the file")
         return
-    want = rasterize_heightfield(col.class_triangles("terrain"), hf["x0"], hf["y0"], hf["spacing"], hf["nx"],
-                                 hf["ny"])
+    try:
+        want = rasterize_heightfield(col.class_triangles("terrain"), hf["x0"], hf["y0"], hf["spacing"], hf["nx"],
+                                     hf["ny"])
+    except LimitError as e:
+        r.errors.append(f"heightfield: cannot be verified: {e}")
+        return
     for j in range(hf["ny"]):
         for i in range(hf["nx"]):
             a, b = hf["z"][j][i], want[j][i]
@@ -952,11 +1203,15 @@ def _check_notices(m, data, r):
     except UnicodeDecodeError:
         r.errors.append("NOTICES.txt is not UTF-8")
         return
-    for s in m["sources"]:
+    for k, s in enumerate(m["sources"]):
         if s["attribution"] and s["attribution"] not in text:
-            r.errors.append(f"NOTICES.txt lacks the attribution of source {s['provider']!r}")
+            r.errors.append(f"NOTICES.txt lacks the attribution of sources[{k}]")
         elif not s["attribution"]:
-            r.warnings.append(f"source {s['provider']!r} has no attribution text")
+            r.warnings.append(f"sources[{k}] has no attribution text")
+        for key in LICENSE_NOTICE_KEYS:
+            if s["license"].get(key) and s["license"][key] not in text:
+                r.errors.append(f"NOTICES.txt lacks the licence {key} of sources[{k}] (sources[{k}].license.{key} "
+                                "must appear verbatim)")
 
 
 def _check_report(m, data, r):

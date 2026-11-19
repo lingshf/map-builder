@@ -104,8 +104,9 @@ def write_collision(objects):
         names.add(o.name)
         if not isinstance(o.mb_id, str) or not o.mb_id:
             raise PackageError(f"collision object {o.name!r} has no mb_id")
-        if o.cls not in CLASSES:
-            raise PackageError(f"unknown collision class {o.cls!r} for {o.name!r}")
+        if not isinstance(o.cls, str) or o.cls not in CLASSES:
+            raise PackageError(f"collision object {o.name!r} has an unknown class; expected one of "
+                               f"{sorted(CLASSES)}")
         tris = [tuple(t) for t in o.triangles]
         if not tris:
             raise PackageError(f"collision object {o.name!r} has no triangles")
@@ -271,8 +272,9 @@ def read_collision(data, max_triangles=MAX_TRIANGLES, max_vertices=MAX_VERTICES)
         names.add(name)
         if not isinstance(e["mb_id"], str) or not e["mb_id"]:
             raise PackageError(f"collision: object {name!r} has no mb_id")
-        if e["class"] not in CLASSES:
-            raise PackageError(f"collision: object {name!r} has unknown class {e['class']!r}")
+        if not isinstance(e["class"], str) or e["class"] not in CLASSES:
+            raise PackageError(f"collision: object entry {k} has an unknown class; expected a string, one "
+                               f"of {sorted(CLASSES)}")
         s, c = e["tri_start"], e["tri_count"]
         if not (_is_int(s) and _is_int(c) and s >= 0 and c >= 1 and s + c <= nt):
             raise PackageError(f"collision: bad triangle range for {name!r}")
@@ -316,6 +318,20 @@ def degenerate_triangle_count(col, eps=DEGENERATE_EPS):
 
 MAX_HF_POINTS = 4_000_000
 
+# Cumulative budget for grid points visited while rasterising (each triangle visits every point of its
+# clipped XY bounding box). A legitimate terrain mesh visits about 2-8 points per grid point: each cell is
+# covered by roughly one triangle, a triangle's bounding box is about twice its area, and points on shared
+# edges are visited by every adjacent triangle (measured worst case on generated terrain: 7.9). 16 per
+# point gives 2x headroom over that, so a 1 km^2 terrain at the finest grid MAX_HF_POINTS allows stays
+# well inside it, while N overlapping area-spanning triangles (N * nx * ny visits) fail once N > 16.
+# HF_VISIT_SLACK covers tiny grids where per-triangle rounding dominates.
+HF_VISITS_PER_POINT = 16
+HF_VISIT_SLACK = 4096
+
+
+def heightfield_visit_budget(nx, ny):
+    return HF_VISITS_PER_POINT * nx * ny + HF_VISIT_SLACK
+
 
 def heightfield_layout(area_half, spacing):
     """(x0, y0, nx, ny) of the grid covering the area rectangle; raises LimitError if too large."""
@@ -334,6 +350,8 @@ def rasterize_heightfield(triangles, x0, y0, spacing, nx, ny):
     if nx * ny > MAX_HF_POINTS:
         raise LimitError("heightfield too large")
     z = [[math.nan] * nx for _ in range(ny)]
+    budget = heightfield_visit_budget(nx, ny)
+    visited = 0
     for a, b, c in triangles:
         det = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
         if abs(det) < 1e-12:
@@ -342,6 +360,13 @@ def rasterize_heightfield(triangles, x0, y0, spacing, nx, ny):
         i1 = min(nx - 1, int(math.floor((max(a[0], b[0], c[0]) - x0) / spacing + 1e-9)))
         j0 = max(0, int(math.ceil((min(a[1], b[1], c[1]) - y0) / spacing - 1e-9)))
         j1 = min(ny - 1, int(math.floor((max(a[1], b[1], c[1]) - y0) / spacing + 1e-9)))
+        if i1 < i0 or j1 < j0:
+            continue
+        visited += (i1 - i0 + 1) * (j1 - j0 + 1)
+        if visited > budget:
+            raise LimitError(f"heightfield rasterisation exceeds its work budget of {budget} grid-point visits "
+                             f"({HF_VISITS_PER_POINT} per point of the {nx}x{ny} grid + {HF_VISIT_SLACK}); "
+                             "the terrain triangles overlap far more than a terrain surface can")
         for j in range(j0, j1 + 1):
             py = y0 + j * spacing
             row = z[j]

@@ -121,7 +121,18 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
     as ambiguous and are skipped. A best correspondence that is a reversed cyclic order is an
     error. If fewer than 99 % of an object's collision triangles find an unambiguous match,
     the validator issues a warning.
+    Candidates are first pruned to those with a vertex correspondence; the candidate cap and
+    a per-object work budget apply after that. Triangles left unchecked because the budget ran
+    out are reported in that warning, not counted as ambiguous.
+  * visual triangles with no collision counterpart (visible but not collidable). This is a
+    warning.
+  * the collision winding rules above, checked on the collision alone: building solids must be
+    closed (each directed edge matched by its reverse) with a positive signed volume, and
+    non-degenerate terrain and road triangles must have normal Z > 0. A violation is an
+    error. Degenerate triangles are only a warning.
   * the orientation probes (points, triangles and normals) against the visual mesh.
+* The reference exporter is stricter than the validator. It refuses to publish unless each
+  node's visual and collision triangles correspond one-to-one with the same winding.
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
 
