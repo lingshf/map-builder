@@ -362,10 +362,10 @@ def elevated_probe(plan, ctx, feature):
     _emit(plan, ctx, _probe(ctx, f"{feature.id}:under", feature.id, pts, clearance, lambda x, y: zmax))
 
 
-def _local_plan(plan, probes, span):
+def _local_plan(plan, probes):
     """A view of ``plan`` holding only what a probe capsule can touch: objects whose bounding box meets a probe's
-    padded box, and for the terrain and road surfaces (faces no larger than ``span``, one terrain cell) only the
-    faces near a probe. A capsule cannot hit anything else, so the result of the check is the same as on the
+    padded box, and for the terrain and road surfaces only the faces whose plan-view box meets a probe's box.
+    A capsule cannot hit anything else, so the result of the check is the same as on the
     whole scene, at a fraction of the collision-preparation cost. Other objects are kept whole."""
     from types import SimpleNamespace
     gen = _gen()
@@ -408,10 +408,21 @@ def _local_plan(plan, probes, span):
         if spec.mb_class not in ("terrain", "road"):
             objs.append(spec)    # solids must stay closed; other classes are small or may span the scene
             continue
-        # a face is kept if one of its vertices is near a probe in plan view (a face spans at most one terrain cell)
-        near = [any(b[0] - span <= x + x0 <= b[3] + span and b[1] - span <= y + y0 <= b[4] + span for b in boxes)
-                for x, y in zip(vx, vy)]
-        keep = [f for f in md.faces if any(near[i] for i in f)]
+        # Cohen-Sutherland style: a face is dropped for a box when all its vertices lie beyond the same side of it
+        codes = []
+        for b in boxes:
+            lx, ly, hx, hy = b[0] - x0, b[1] - y0, b[3] - x0, b[4] - y0
+            codes.append([(x < lx) | ((x > hx) << 1) | ((y < ly) << 2) | ((y > hy) << 3) for x, y in zip(vx, vy)])
+
+        def kept(f):
+            for c in codes:
+                acc = 15
+                for i in f:
+                    acc &= c[i]
+                    if not acc:
+                        return True
+            return False
+        keep = [f for f in md.faces if kept(f)]
         if len(keep) == len(md.faces):
             objs.append(spec)
         elif keep:
@@ -440,7 +451,7 @@ def finish(plan, ctx):
     if mine:
         others = len(plan.passage_probes) - len(mine)
         room = max(0, PASSAGE_PROBE_MAX - others)
-        _, blocked = check_probes(_local_plan(plan, mine[:PASSAGE_PROBE_MAX], 1.5 * ctx.terrain.spacing),
+        _, blocked = check_probes(_local_plan(plan, mine[:PASSAGE_PROBE_MAX]),
                                   mine[:PASSAGE_PROBE_MAX])
         gone = {b["id"] for b in blocked}
         survivors = [p for p in mine[:PASSAGE_PROBE_MAX] if p["id"] not in gone]
