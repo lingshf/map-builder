@@ -1,5 +1,6 @@
 import math
 import random
+import re
 import tempfile
 import unittest
 from collections import Counter
@@ -467,6 +468,44 @@ class TerrainSurfaceTest(unittest.TestCase):
 
 class RoadRibbonTest(unittest.TestCase):
     """Finding 5 and 8: no folded road faces; collapsed/unbuildable roads are reported."""
+
+    def test_ownership_sliver_on_steep_slope_is_not_stored_downward(self):
+        # Reduced from Pittsburgh (Orlena Way / osm:way/11826594 after losing a junction to osm:way/11716601): the
+        # ownership cut leaves a needle-thin face that is up-facing in double precision but z <= 0 once stored as
+        # float32 world positions, which the package validator rejects ("does not point up").
+        from map_builder.core.collision import f32, is_degenerate
+        H = [[341.33199652777205, 343.02109562491626, 344.460450143909, 345.4254585093813],
+             [341.2119881825108, 343.1313004574437, 344.7888241824759, 345.6522473637793],
+             [341.0149778799737, 343.14388741251, 345.0031767953057, 345.791026721147],
+             [340.1779205461145, 342.3455001603129, 344.27100221251294, 345.1990835931508],
+             [339.340884940553, 341.5471024956061, 343.5388173930337, 344.60710819887083],
+             [338.50000297912425, 340.74439690097614, 342.8022984000102, 344.01141112061873],
+             [337.4933544017123, 339.75812919721443, 341.88173173965646, 343.2591819574438],
+             [336.4867482295739, 338.77185116367184, 340.9611549240076, 342.50691197994973],
+             [335.4801844618759, 337.7855628008747, 340.0405679534061, 341.7546011881409],
+             [335.12225008285685, 337.1183880530372, 339.01550276158935, 340.89420132796204],
+             [334.80698801008884, 336.4722393648623, 337.98364049408315, 340.02661651624476],
+             [334.4917240611435, 335.8261514173198, 336.95183794396434, 339.1589248642838]]
+        grid = make_grid(H, 10.0, -600.0, 160.0)
+        junction = (-584.6777137771276, 256.3324065657131)
+        alley = road([junction, (-588.1659865449286, 241.2974457314687), (-600.0, 176.19316359646575)],
+                     fid="osm:way/11826594")
+        other = road([(-551.7344301751028, 233.46613787562242), junction, (-600.0, 266.9666388971995)],
+                     fid="osm:way/11716601")
+        own = gen.RoadOwnership()
+        for feature in (other, alley):
+            mesh, loc, prov = build_road(feature, grid, 213.0, ownership=own)
+            self.assertIsNotNone(mesh, prov)
+            W = [tuple(f32(c + o) for c, o in zip(v, loc)) for v in mesh.vertices]
+            for a, b, c in mesh.triangles():
+                p, q, r = W[a], W[b], W[c]
+                if not is_degenerate(p, q, r):
+                    self.assertGreater((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]), 0, feature.id)
+        # the coverage lost is measured and bounded: a few float32 ulps (6e-5 m here) wide, far below 1 mm2 in total
+        m = re.search(r"(\d+) face\(s\) .*max width (\S+) m, (\S+) m2", prov["slivers_dropped"])
+        self.assertEqual(m.group(1), "1")
+        self.assertLess(float(m.group(2)), 4 * 2 ** -14)
+        self.assertLess(float(m.group(3)), 1e-4)
 
     def test_wide_right_angle_turn_is_not_folded(self):
         mesh, _, prov = build_road(road([(0, 0), (3, 0), (3, 3)], width="8"), flat_grid(), 0.0)
