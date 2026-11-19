@@ -10,7 +10,7 @@ Also the stage context handed to the stage modules (:class:`StageContext`) and
 
 import math
 
-from .collision import ColObject, read_collision, write_collision
+from .collision import Collision, ColObject, f32, read_collision, write_collision
 from .glb import node_scale
 from .mesh import MeshData
 from .query import DEFAULT_MAX_WORK, capsule_hits
@@ -21,6 +21,8 @@ def _invalid(msg):
 
 
 MAX_TURN_DEG = 60.0
+TILE_M = 32.0               # plan tile size of the probe query index
+CHUNK_M = 24.0              # probe paths are tested in pieces of about this plan length
 _EPS = 1e-9
 
 
@@ -38,6 +40,8 @@ class StageContext:
         self.add = add
         self.classified = classified
         self.road_segments = road_segments
+        self.probes = []        # passage probes queued by the stages, checked by finalize_probes
+        self.keepout = []       # (a, b, radius) plan segments where no tree is placed
         self.pending = []
 
     def flush_unsupported(self, plan):
@@ -185,6 +189,22 @@ def polyline_z_profile(points_xy, z_func, max_step=None):
 
 # --- probes ---------------------------------------------------------------------------------------------------
 
+def _world_mesh(spec, md):
+    """World-space ``(vertices, triangles)`` of a plan object (its transform applied, winding kept)."""
+    sx, sy, sz = node_scale(spec.scale)
+    c, s_ = math.cos(spec.rotation_z), math.sin(spec.rotation_z)
+    loc = spec.location
+    if (sx, sy, sz) == (1.0, 1.0, 1.0) and s_ == 0.0 and c == 1.0 and not any(loc):
+        verts = md.vertices       # identity placement (terrain)
+    else:
+        verts = [(c * x * sx - s_ * y * sy + loc[0], s_ * x * sx + c * y * sy + loc[1], z * sz + loc[2])
+                 for x, y, z in md.vertices]
+    tris = list(md.triangles())
+    if sx * sy * sz < 0:   # a mirrored object keeps its winding rule in world space
+        tris = [(a, c_, b) for a, b, c_ in tris]
+    return verts, tris
+
+
 def plan_collision(plan, exclude=()):
     """Collision of the plan's mesh objects (world transforms applied), as ``(Collision, mb_ids)``; objects
     with ``exclude`` ids are left out."""
@@ -195,45 +215,154 @@ def plan_collision(plan, exclude=()):
         md = spec.mesh if spec.mesh is not None else plan.shared_meshes.get(spec.mesh_key)
         if md is None or not md.faces:
             continue
-        sx, sy, sz = node_scale(spec.scale)
-        c, s_ = math.cos(spec.rotation_z), math.sin(spec.rotation_z)
-        loc = spec.location
-        verts = [(c * x * sx - s_ * y * sy + loc[0], s_ * x * sx + c * y * sy + loc[1], z * sz + loc[2])
-                 for x, y, z in md.vertices]
-        tris = list(md.triangles())
-        if sx * sy * sz < 0:   # a mirrored object keeps its winding rule in world space
-            tris = [(a, c_, b) for a, b, c_ in tris]
+        verts, tris = _world_mesh(spec, md)
         objs.append(ColObject(spec.name, spec.mb_id, spec.mb_class, verts, tris))
         ids.append(spec.mb_id)
     return read_collision(write_collision(objs)), ids
 
+
+class _CollisionIndex:
+    """Plan meshes indexed by ``TILE_M`` plan tiles, so a query for one region builds the collision of just the
+    triangles near it (a superset of what a capsule inside the region can touch, so the hits are the same as
+    on the whole scene). Objects are placed in world space lazily, the first time a query reaches them."""
+
+    def __init__(self, plan):
+        self.plan = plan
+        self.specs = []
+        self.tiles = {}
+        self.geometry = {}
+        radius = {}     # local plan radius per mesh (shared meshes are measured once)
+        for spec in plan.objects:
+            md = spec.mesh if spec.mesh is not None else plan.shared_meshes.get(spec.mesh_key)
+            if md is None or not md.faces:
+                continue
+            r = radius.get(id(md))
+            if r is None:
+                r = radius[id(md)] = max(math.hypot(x, y) for x, y, _ in md.vertices)
+            sx, sy, _sz = node_scale(spec.scale)
+            r *= max(abs(sx), abs(sy))
+            k = len(self.specs)
+            self.specs.append((spec, md))
+            x, y = spec.location[0], spec.location[1]
+            for key in self._keys(x - r, y - r, x + r, y + r):
+                self.tiles.setdefault(key, []).append(k)
+
+    @staticmethod
+    def _keys(x0, y0, x1, y1):
+        return [(i, j) for i in range(math.floor(x0 / TILE_M), math.floor(x1 / TILE_M) + 1)
+                for j in range(math.floor(y0 / TILE_M), math.floor(y1 / TILE_M) + 1)]
+
+    def _placed(self, k):
+        g = self.geometry.get(k)
+        if g is None:
+            spec, md = self.specs[k]
+            verts, tris = _world_mesh(spec, md)
+            by_tile = {}
+            vi = [math.floor(v[0] / TILE_M) for v in verts]
+            vj = [math.floor(v[1] / TILE_M) for v in verts]
+            for n, (a, b, c) in enumerate(tris):
+                i0, j0 = vi[a], vj[a]
+                if i0 == vi[b] == vi[c] and j0 == vj[b] == vj[c]:
+                    by_tile.setdefault((i0, j0), []).append(n)
+                    continue
+                for i in range(min(i0, vi[b], vi[c]), max(i0, vi[b], vi[c]) + 1):
+                    for j in range(min(j0, vj[b], vj[c]), max(j0, vj[b], vj[c]) + 1):
+                        by_tile.setdefault((i, j), []).append(n)
+            g = self.geometry[k] = (verts, tris, by_tile)
+        return g
+
+    def collision(self, region):
+        """Collision of the triangles whose plan bounding box shares a tile with ``region=(x0, y0, x1, y1)``
+        (built directly, with the float32 vertices a serialised collision would hold)."""
+        keys = self._keys(*region)
+        flat, idx, tri_obj, table = [], [], [], []
+        for k in sorted({k for key in keys for k in self.tiles.get(key, ())}):
+            verts, tris, by_tile = self._placed(k)
+            pick = sorted({n for key in keys for n in by_tile.get(key, ())})
+            if not pick:
+                continue
+            spec = self.specs[k][0]
+            remap, start = {}, len(tri_obj)
+            lo, hi = [math.inf] * 3, [-math.inf] * 3
+            for n in pick:
+                for v in tris[n]:
+                    if v not in remap:
+                        q = (f32(verts[v][0]), f32(verts[v][1]), f32(verts[v][2]))
+                        remap[v] = len(flat)
+                        flat.append(q)
+                        for a in range(3):
+                            lo[a] = min(lo[a], q[a])
+                            hi[a] = max(hi[a], q[a])
+                    idx.append(remap[v])
+                tri_obj.append(len(table))
+            table.append({"index": len(table), "name": spec.name, "mb_id": spec.mb_id, "class": spec.mb_class,
+                          "tri_start": start, "tri_count": len(tri_obj) - start, "aabb": lo + hi})
+        return Collision(flat, tuple(idx), tri_obj, bytes(len(tri_obj)), table, None, 1)
 
 def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
     """Passage probes ``{id, feature, path_map, radius_m, ...}`` against the plan meshes (D21).
 
     Returns ``(kept, blocked)``: ``blocked`` entries are ``{id, blocker}`` (the blocking object's ``mb_id``;
     the probe's own ``feature`` counts like any other mesh, so a probe touching its own tunnel wall is blocked,
-    as the package validator does). The work budget is shared: when it runs out the remaining
-    probes are returned in ``blocked`` with ``blocker=None`` and ``reason="work budget exhausted"``, never
-    silently kept."""
+    as the package validator does). Each probe is tested against the triangles around its own path only. The
+    work budget is shared: when it runs out the remaining probes are returned in ``blocked`` with
+    ``blocker=None`` and ``reason="work budget exhausted"``, never silently kept."""
     kept, blocked = [], []
     if not probes:
         return kept, blocked
-    col, _ = plan_collision(plan)
+    index = _CollisionIndex(plan)
+    rank = {}
+    for k, (spec, _md) in enumerate(index.specs):
+        rank.setdefault(spec.mb_id, k)
     left = max_work
     for i, pr in enumerate(probes):
+        pts = [tuple(p) for p in pr["path_map"]]
+        pad = pr["radius_m"] + 0.5
+        # The query's work grows with segments x triangles of every object it reaches, so a long path is tested
+        # in chunks of ~CHUNK_M, each against the triangles around it (the union of the hits is the same).
+        chunks, cur, length = [], [pts[0]], 0.0
+        for a, b in zip(pts, pts[1:]):
+            cur.append(b)
+            length += math.hypot(b[0] - a[0], b[1] - a[1])
+            if length >= CHUNK_M:
+                chunks.append(cur)
+                cur, length = [b], 0.0
+        if len(cur) > 1 or not chunks:
+            chunks.append(cur)
+        found = set()
         try:
-            res = capsule_hits(col, [tuple(p) for p in pr["path_map"]], pr["radius_m"], left, result=True)
+            for ch in chunks:
+                xs, ys = [p[0] for p in ch], [p[1] for p in ch]
+                col = index.collision((min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad))
+                res = capsule_hits(col, ch, pr["radius_m"], left, result=True)
+                left -= res.work
+                found.update(col.objects[k]["mb_id"] for k in res.objects)
         except Exception as exc:   # LimitError: budget exhausted
             if type(exc).__name__ != "LimitError":
                 raise
             for rest in probes[i:]:
                 blocked.append({"id": rest["id"], "blocker": None, "reason": "work budget exhausted"})
             break
-        left -= res.work
-        hits = [col.objects[k]["mb_id"] for k in res.objects]
-        if hits:
-            blocked.append({"id": pr["id"], "blocker": hits[0]})
+        if found:
+            blocked.append({"id": pr["id"], "blocker": min(found, key=lambda m: rank[m])})
         else:
             kept.append(pr)
     return kept, blocked
+
+
+def finalize_probes(plan, ctx):
+    """Check the probes the stages queued on ``ctx.probes`` against the finished scene (after the vegetation)
+    and publish them: kept ones go to ``plan.passage_probes`` (at most ``PASSAGE_PROBE_MAX``), blocked,
+    over-cap and unchecked ones to ``report["passage_probes_blocked"]`` with the blocker's ``mb_id`` or a
+    ``reason``."""
+    from .package import PASSAGE_PROBE_MAX
+    if not ctx.probes:
+        return
+    kept, blocked = check_probes(plan, ctx.probes)
+    room = max(0, PASSAGE_PROBE_MAX - len(plan.passage_probes))
+    for pr in kept[room:]:
+        blocked.append({"id": pr["id"], "blocker": None, "reason": f"passage probe cap {PASSAGE_PROBE_MAX} reached"})
+    plan.passage_probes.extend(kept[:room])
+    if blocked:
+        plan.report.setdefault("passage_probes_blocked", []).extend(blocked)
+    ctx.probes = []

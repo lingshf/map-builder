@@ -749,7 +749,8 @@ class PlanPackageTest(TempDirCase):
         self.assertEqual(report["export"]["objects"], len(self.plan.objects))
         self.assertEqual(report["edits"], {"duplicated": [], "user_added": [], "removed": []})
         self.assertEqual(m["edits"], {"duplicated": 0, "user_added": 0, "removed": 0})
-        self.assertEqual(sum(math.isnan(v) for row in hf["z"] for v in row), 0)
+        # the fixture tunnel (S1-TUNNEL) cuts its bore out of the terrain (the 5 m heightfield may miss it)
+        self.assertGreater(self.plan.report["counts"]["terrain_cut_cells"], 0)
 
     def test_reproducible_identity(self):
         m2, r2 = plan_to_package(self.plan, self.p("again.mbmap"), "synthetic", self.sources, heightfield_spacing=5,

@@ -199,10 +199,14 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
 
 ## Limits
 
-* **Flight under bridges and through tunnels is not generated yet; the format is ready.**
-  Package format 2.0.0 has `bridge`, `tunnel` and `structure` collision classes and
-  `passage_probes`, but the generator still omits bridges and tunnels (listed under
-  `unsupported_features` in `report.json`).
+* **Road tunnels, elevated building parts and building passages are generated; bridges are not.**
+  `highway=*` ways with `tunnel=yes` (and similar) become flyable tubes (floor = road width + 2 m, 4.5 m walls
+  plus a 1 m arch, or `maxheight`; linear floor profile between the portal heights) with a bore passage probe,
+  a terrain cut of the bore volume only (terrain between the floor and the roof; ground below the floor stays)
+  and 1 m portal headwalls where the terrain rises above the roof. No tree stands in a portal or cut zone.
+  Cut-and-cover or underpass tunnels with almost no cover are generated as tubes with a warning. Railway
+  tunnels, `tunnel=culvert` and `man_made=tunnel` stay unsupported. Bridges are still omitted and listed under
+  `unsupported_features` in `report.json`.
 * **Elevated building parts and building passages.** A part with `min_height` at least 2.6 m above
   the ground gets an `elevated` passage probe along its longest edge, and a
   `tunnel=building_passage` way through a building cuts a straight corridor: the building becomes two

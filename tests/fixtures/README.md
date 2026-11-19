@@ -5,7 +5,7 @@ and are not real geographic data.
 
 * `synthetic_area.osm`: hand-built OSM XML (generator "map-builder SYNTHETIC test fixture").
   It covers buildings (gabled, hipped, courtyard, `building:part`, `min_height`), roads, a
-  bridge and a tunnel (both reported as unsupported), water, trees and an invalid bow-tie
+  bridge (reported as unsupported) and a road tunnel (way/1072, generated as a tube), water, trees and an invalid bow-tie
   outline. The node coordinates are placed near 47.0°N 8.0°E for convenience only. They do
   not describe that real location.
 * `synthetic_dem.asc`: ESRI ASCII grid of an analytic sloped/undulating surface (vertical

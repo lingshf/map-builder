@@ -93,6 +93,12 @@ def normal(t):
     return unit(cross(sub(t[1], t[0]), sub(t[2], t[0])))
 
 
+def _min_altitude(t):
+    c = cross(sub(t[1], t[0]), sub(t[2], t[0]))
+    longest = max(math.dist(t[i], t[(i + 1) % 3]) for i in range(3))
+    return math.sqrt(sum(v * v for v in c)) / longest if longest else 0.0
+
+
 def signed_volume(tris):
     return sum(a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
                + a[2] * (b[0] * c[1] - b[1] * c[0]) for a, b, c in tris) / 6.0
@@ -206,7 +212,8 @@ class PackageBindingMixin:
         miss_c, miss_v = unmatched(col, vis)
         self.assertEqual((len(miss_c), len(miss_v)), (0, 0), f"{name}: {miss_c[:2]} / {miss_v[:2]}")
         # the comparison is winding-sensitive: reversed visual triangles must not match (degenerates aside)
-        solid = [t for t in col if normal(t) is not None]
+        # slivers thinner than the matching tolerance (terrain pieces left by a tunnel cut) match their own reverse
+        solid = [t for t in col if normal(t) is not None and _min_altitude(t) > 2 * TOL]
         miss_r, _ = unmatched(solid, reverse(vis))
         self.assertEqual(len(miss_r), len(solid), name)
         return col, vis
