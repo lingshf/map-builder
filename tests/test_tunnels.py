@@ -404,6 +404,26 @@ class TunnelVariantsTest(unittest.TestCase):
         self.assertTrue(unchecked)
         self.assertLess(len(kept), 6)
 
+    def test_a_failed_capsule_call_spends_the_shared_budget(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from map_builder.core import passages, structures
+        grid = hill_grid()
+        plan, _ = plan_for(grid)
+        bore = plan.passage_probes.pop()
+        z = max(v[2] for v in plan.objects[0].mesh.vertices) + 20.0
+        mk = lambda name, kind: dict(bore, id=name, kind=kind, path_map=[[-40 + k, 40, z] for k in range(12)])   # noqa: E731
+        plan.passage_probes.append(dict(mk("e0", "elevated"), path_map=[[42 + k * 0.1, 30, plan.objects[0].mesh.vertices[0][2]] for k in range(12)]))
+        ctx = SimpleNamespace(probes=[mk("t0", "tunnel")], terrain=grid)
+        passages._state(ctx).probes = ["e0"]
+        total = structures.WorkBudget(1)     # less than the ELEV probe needs: its call raises
+        with mock.patch.object(structures, "WorkBudget", lambda: total):
+            structures.finalize_probes(plan, ctx)
+        self.assertEqual(total.left, 0)
+        self.assertEqual(plan.passage_probes, [])
+        self.assertEqual([(e["id"], e.get("reason")) for e in plan.report["passage_probes_blocked"]],
+                         [("e0", "budget_exhausted"), ("t0", "budget_exhausted")])
+
     def test_chunked_probe_check_matches_the_whole_scene_query(self):
         from map_builder.core.generate import ObjectSpec
         from map_builder.core.query import capsule_hits

@@ -323,6 +323,9 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
         rank.setdefault(spec.mb_id, k)
     budget = budget if budget is not None else WorkBudget(max_work)
     for i, pr in enumerate(probes):
+        if budget.left <= 0:   # an earlier check (any kind) spent the allowance: do not run, do not publish
+            blocked.extend({"id": r["id"], "blocker": None, "reason": "budget_exhausted"} for r in probes[i:])
+            break
         pts = [tuple(p) for p in pr["path_map"]]
         pad = pr["radius_m"] + 0.5
         # The query's work grows with segments x triangles of every object it reaches, so a long path is tested
@@ -347,6 +350,7 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
         except Exception as exc:   # LimitError: budget exhausted
             if type(exc).__name__ != "LimitError":
                 raise
+            budget.left = 0   # the failed call spent what was left
             for rest in probes[i:]:
                 blocked.append({"id": rest["id"], "blocker": None, "reason": "budget_exhausted"})
             break
