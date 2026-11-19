@@ -553,20 +553,19 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     if mask_extent is None:
         mask_extent = (-area.half[0], -area.half[1], area.half[0], area.half[1])
     out = _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
-    if mask_data is None:
+    if mask_data is None or out.mask_unavailable:
         return out
     if max_mask_work is None:
         from .dsm import MASK_VALIDATION_WORK_BUDGET as max_mask_work
     work = _MaskWork(max_mask_work)
-    allowance = _FeatureAllowance(max_features - _feature_count(out))
+    allowance = _FeatureAllowance(max_features - _mask_count(out))
     try:
         _add_margin_mask_candidates(out, mask_data, data, area, mask_extent, work, allowance)
     except _MaskWorkExhausted:
         out.mask_work_exceeded = (f"DSM mask candidate assembly needs more than {max_mask_work} geometric tests "
                                   "(the mask validation work budget)")
     except _MaskFeatureLimit:
-        out.mask_unavailable = (f"the DSM mask candidates of the wider DSM mask response exceed the feature limit "
-                                f"({max_features} features, content included)")
+        _drop_mask_candidates(out, max_features)
     except (LimitError, MemoryError):
         raise
     except Exception:
@@ -623,15 +622,30 @@ def _bridge_rect(tags, mask_extent):
     return _expand(mask_extent, road_width(tags)[0] / 2.0 + BRIDGE_BUFFER_M)
 
 
-def _feature_count(out):
-    return (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
-            + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas) + len(out.outline_features))
+def _content_count(out):
+    return (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.outline_features))
+
+
+def _mask_count(out):
+    return len(out.bridges) + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas)
+
+
+def _drop_mask_candidates(out, max_features):
+    """The DSM mask candidates exceed their own ``max_features`` allowance: they are dropped (never generated,
+    so the scene is unaffected) and the correction is skipped with a warning instead of failing the build."""
+    out.bridges, out.outside_buildings, out.mask_trees, out.mask_areas = [], [], [], []
+    out.mask_unavailable = (f"the DSM mask candidates exceed the feature limit ({max_features} features, "
+                            "counted separately from the scene content)")
 
 
 def _check_feature_count(out, max_features):
-    total = _feature_count(out)
+    """``max_features`` bounds the scene content (a hard :class:`LimitError`) and, separately, the DSM mask
+    candidates (dropped with the correction skipped), so mask-only features can never fail a build."""
+    total = _content_count(out)
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
+    if _mask_count(out) > max_features:
+        _drop_mask_candidates(out, max_features)
 
 
 def _is_area_tagged(tags):
@@ -769,11 +783,11 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
                     allowance.take()
                     out.outside_buildings.append(Feature(fid, "building", tags, p))
         elif area_class(tags) == "forest":
+            ftags = {"_class": "forest"}   # mask-only: one small shared dict, never a per-polygon copy of the tags
             for k, p in enumerate(polys):
                 if _rect_overlaps(p.bbox(), mask_extent):
                     allowance.take()
-                    out.mask_areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area",
-                                                  dict(tags, _class="forest"), p))
+                    out.mask_areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area", ftags, p))
 
     outer_of = {}  # margin-only way id -> area families (None: untagged with inners) of relations using it as outer
     for rid, (members, tags) in data.relations.items():

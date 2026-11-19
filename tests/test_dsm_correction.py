@@ -643,11 +643,13 @@ class ReviewRound1Test(unittest.TestCase):
         self.assertEqual(cl.buildings, [])
         self.assertEqual(cl.roads, [])
         self.assertNotIn(f"osm:way/{ids['bridge']}", {u["id"] for u in cl.unsupported})   # outside the area
-        # every candidate counts toward max_features
-        from map_builder.core.errors import LimitError
-        with self.assertRaises(LimitError):
-            classify(data, area, max_features=2, mask_extent=(-50.0, -50.0, 55.0, 55.0))
-        classify(data, area, max_features=3, mask_extent=(-50.0, -50.0, 55.0, 55.0))
+        # mask candidates are bounded separately from the content: over the limit they are dropped and the
+        # correction skipped, never a LimitError (round 11)
+        cl2 = classify(data, area, max_features=2, mask_extent=(-50.0, -50.0, 55.0, 55.0))
+        self.assertEqual((cl2.bridges, cl2.outside_buildings, cl2.mask_trees), ([], [], []))
+        self.assertIn("exceed the feature limit (2 features", cl2.mask_unavailable)
+        self.assertIsNone(classify(data, area, max_features=3, mask_extent=(-50.0, -50.0, 55.0, 55.0))
+                          .mask_unavailable)
 
         # edge samples under them are masked and lowered; none of them is generated
         def h(x, y):
@@ -2090,22 +2092,25 @@ class ReviewRound9Test(unittest.TestCase):
                 self.assertEqual(len(cl.outside_buildings), 1)               # only the polygon near the grid
                 self.assertLess(abs(cl.outside_buildings[0].geometry.centroid()[0]), 1.0)
 
-    def test_replaced_outlines_count_toward_the_mask_allowance(self):
+    def test_content_does_not_reduce_the_mask_allowance(self):
         area = Area(*self.AREA)
         b = OsmBuilder()
         b.way(square(0.0, 0.0, 10.0), {"building": "yes"}, closed=True)
         b.way(square(0.0, 0.0, 10.0), {"building:part": "yes", "building:levels": "2"}, closed=True)
         normal = parse_osm_xml(b.xml().encode())
         b.node(5.0, 0.0, {"natural": "tree"})
+        b.node(6.0, 0.0, {"natural": "tree"})
+        b.node(7.0, 0.0, {"natural": "tree"})
         wide = parse_osm_xml(b.xml().encode())
         ref = classify(normal, area, mask_extent=self.EXTENT)
         self.assertEqual((len(ref.buildings), len(ref.outline_features)), (1, 1))   # the outline was replaced
-        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=2)
-        self.assertEqual(cl.mask_trees, [])
-        self.assertIn("exceed the feature limit (2 features", cl.mask_unavailable)   # before: None, 3 kept
+        # round 11: content and mask candidates are bounded separately
         cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=3)
         self.assertIsNone(cl.mask_unavailable)
-        self.assertEqual(len(cl.mask_trees), 1)
+        self.assertEqual(len(cl.mask_trees), 3)
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=2)
+        self.assertEqual(cl.mask_trees, [])
+        self.assertIn("exceed the feature limit (2 features", cl.mask_unavailable)
 
     def test_off_grid_polygons_of_a_normal_relation_are_not_kept(self):
         area = Area(*self.AREA)
@@ -2133,6 +2138,61 @@ class ReviewRound9Test(unittest.TestCase):
         b2 = OsmBuilder()
         b2.way([(85.0, -40.0), (85.0, 40.0)], dict(bridge, width="60"))     # reach 45 m: within it
         self.assertEqual(len(classify(parse_osm_xml(b2.xml().encode()), area, mask_extent=self.EXTENT).bridges), 1)
+
+
+class ReviewRound11Test(unittest.TestCase):
+    """Round 11: wide-only forest mask features share a minimal tag dict, and mask-only candidates never
+    count toward the hard content feature limit."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+    EXTENT = (-50.0, -50.0, 150.0, 50.0)
+
+    def test_wide_forest_with_many_outers_and_tags_stays_bounded(self):
+        import tracemalloc
+        area = Area(*self.AREA)
+        normal = parse_osm_xml(OsmBuilder().xml().encode())
+        b = OsmBuilder()
+        outers = [b.way(square(52.0 + 2.4 * (k % 40), -48.0 + 0.96 * (k // 40), 0.4), closed=True)
+                  for k in range(4000)]
+        tags = {"type": "multipolygon", "landuse": "forest"}
+        tags.update({f"note:{i}": "x" * 40 for i in range(2000)})
+        b.relations.append((b._next(), [("way", w, "outer") for w in outers], tags))
+        wide = parse_osm_xml(b.xml().encode())
+        tracemalloc.start()
+        try:
+            cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
+            _cur, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertIsNone(cl.mask_unavailable)
+        self.assertIsNone(cl.mask_work_exceeded)
+        self.assertEqual(len(cl.mask_areas), 4000)
+        self.assertEqual(cl.mask_areas[0].tags, {"_class": "forest"})
+        self.assertLess(peak, 48 * 2 ** 20)   # before: a 2,000-tag copy per polygon (~200 MiB)
+
+    def test_mask_only_trees_never_fail_the_content_limit(self):
+        from map_builder.core.errors import LimitError
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        b.way(square(0.0, 0.0, 10.0), {"building": "yes"}, closed=True)
+        for k in range(11):
+            b.node(53.0, -40.0 + 7.0 * k, {"natural": "tree"})              # 3 m outside the east edge
+        data = parse_osm_xml(b.xml().encode())
+        cl = classify(data, area, mask_extent=self.EXTENT, max_features=10)   # before: LimitError (12 > 10)
+        self.assertEqual((len(cl.buildings), cl.mask_trees), (1, []))
+        self.assertIn("exceed the feature limit (10 features", cl.mask_unavailable)
+        g = ElevationGrid(-50.0, -50.0, 5.0, 41, 21, [[ground(-50 + i * 5.0, -50 + j * 5.0) for i in range(41)]
+                                                      for j in range(21)], dict(COPERNICUS))
+        on = build_plan(area, g, cl, PlanOptions(trees=True, seed=1))
+        self.assertFalse(on.report["terrain_correction"]["applied"])       # the correction skipped, with a warning
+        self.assertEqual(on.report["terrain_correction"]["reason"], "mask candidates unavailable")
+        off = build_plan(area, g, cl, PlanOptions(trees=True, seed=1), dsm_correction=False)
+        self.assertEqual(sum(o.mb_class == "building" for o in off.objects), 1)
+        # the content limit itself is unchanged
+        b.node(0.0, 30.0, {"natural": "tree"})
+        b.node(0.0, 35.0, {"natural": "tree"})
+        with self.assertRaises(LimitError):
+            classify(parse_osm_xml(b.xml().encode()), area, mask_extent=self.EXTENT, max_features=2)
 
 
 def pipeline_mask_message(cls_name):

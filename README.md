@@ -96,10 +96,13 @@ the surrounding ground before the terrain, roads and buildings are built.
   `dsm_mask_query` then records only `error_class`, a fixed `error` summary and, for an HTTP
   error, `error_status` — never the parser or server text, which may quote the response. A
   `<meta osm_base>` value (either response, or a local file) that is not an ISO-8601 UTC
-  timestamp is not recorded (`osm_base_timestamp_note` instead). The margin-only candidates also
-  count toward the feature limit (50 000 by default, content included); rather than failing
-  the build, candidates beyond it skip the correction with the same warning, and a member way
-  listed more than once in a multipolygon is used once. If only its
+  timestamp is not recorded (`osm_base_timestamp_note` instead). The DSM mask candidates (from
+    either response) have their own feature allowance (50 000 by default), counted separately from
+    the scene content, which alone can fail the build with a feature-limit error; rather than failing
+    the build, mask candidates beyond the allowance are dropped and the correction is skipped with the
+    same warning (also with the correction off, mask-only features never fail a build), and a member way
+    listed more than once in a multipolygon is used once. Wide-only forest mask areas keep only a
+    minimal `_class` tag, not the relation's tags. If only its
   cache write fails (full disk, unwritable cache), its response is still used, uncached, with a
   warning and `dsm_mask_query.cache_write_error`; a failed cache write of the normal request still
   fails acquisition, as with the correction off. So the input OSM content and its selection are
