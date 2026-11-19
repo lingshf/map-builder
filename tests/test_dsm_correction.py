@@ -682,16 +682,16 @@ class ReviewRound1Test(unittest.TestCase):
         _, dem, _ = write_synthetic_fixtures(tmp.name)
 
         def acquire(dsm_correction, spacing=30.0):
-            seen = {}
+            calls, seen = [], {}
 
             def fake_fetch(area, client, *a, **kw):
-                seen.update(kw)
+                calls.append(kw)
                 return data
             orig = pipeline.fetch_overpass
             orig_classify = pipeline.classify
 
             def spy_classify(*a, **kw):
-                seen["content_bbox"] = kw.get("content_bbox")
+                seen["mask_data"] = kw.get("mask_data")
                 return orig_classify(*a, **kw)
             pipeline.fetch_overpass = fake_fetch
             pipeline.classify = spy_classify
@@ -703,28 +703,27 @@ class ReviewRound1Test(unittest.TestCase):
             finally:
                 pipeline.fetch_overpass = orig
                 pipeline.classify = orig_classify
-            return grid, cl, seen
-        grid, cl, seen = acquire(True)
+            return grid, cl, [c["margin_m"] for c in calls], seen
+        grid, cl, margins, seen = acquire(True)
         # 100 m at 30 m spacing: 5 points, -50..70, so the grid overshoots the area by 20 m; review round 3,
-        # finding 3: the margin covers the overshoot plus the widest mask reach (a bridge centreline up to
-        # dsm.BRIDGE_CANDIDATE_MARGIN_M = 45 m from the grid), rounded up
+        # finding 3: the mask margin covers the overshoot plus the widest mask reach (a bridge centreline up to
+        # dsm.BRIDGE_CANDIDATE_MARGIN_M = 45 m from the grid), rounded up. Review round 5, finding 1: two
+        # requests, the normal 30 m one (the content) and the wider one (mask candidates only)
         self.assertEqual((grid.nx, grid.x0), (5, -50.0))
         self.assertEqual(dsm.BRIDGE_CANDIDATE_MARGIN_M, 45.0)
-        self.assertEqual(seen["margin_m"], 65.0)
-        expect = tuple(round(v, 7) for v in Area(*self.AREA).geographic_bbox(margin_m=30.0))
-        self.assertEqual(seen["content_bbox"], expect)   # only the normal 30 m extent is content
+        self.assertEqual(margins, [30.0, 65.0])
+        self.assertIs(seen["mask_data"], data)
         self.assertTrue(all(abs(p[1] + 62.0) < 1e-3 for p in cl.bridges[0].geometry))
         # no overshoot (100 m at 25 m spacing: -50..50): still the full bridge reach, wider than the normal 30 m
-        grid, _, seen = acquire(True, spacing=25.0)
+        grid, _, margins, _ = acquire(True, spacing=25.0)
         self.assertEqual((grid.nx, grid.x0), (5, -50.0))
-        self.assertEqual(seen["margin_m"], 45.0)
-        self.assertEqual(seen["content_bbox"], expect)
-        # review round 2, finding 2c: with the correction off (the local-file default, or explicitly) the
-        # normal 30 m margin is requested and everything fetched is content
+        self.assertEqual(margins, [30.0, 45.0])
+        # review round 2, finding 2c: with the correction off (the local-file default, or explicitly) only the
+        # normal 30 m request is made, and everything fetched is content
         for setting in (None, False):
-            _, _, seen = acquire(setting)
-            self.assertEqual(seen["margin_m"], 30.0, setting)
-            self.assertIsNone(seen["content_bbox"], setting)
+            _, _, margins, seen = acquire(setting)
+            self.assertEqual(margins, [30.0], setting)
+            self.assertIsNone(seen["mask_data"], setting)
 
     # --- finding 5: lowered points and the provenance note --------------------------------------------------
 
@@ -783,7 +782,6 @@ class ReviewRound2Test(unittest.TestCase):
 
     def test_margin_only_features_affect_only_the_mask(self):
         area = Area(*self.AREA)
-        content_bbox = tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0))
         b = OsmBuilder()
         ids = {"forest": b.way(square(-70, 0, 15), {"landuse": "forest"}, closed=True),   # x -85..-55: in the margin
                "bldg": b.way(square(-70, 40, 3), {"building": "yes"}, closed=True),
@@ -798,8 +796,9 @@ class ReviewRound2Test(unittest.TestCase):
         b.relations.append((rid, [("way", o1, "outer"), ("way", o2, "outer")],
                             {"type": "multipolygon", "landuse": "forest"}))
         data = parse_osm_xml(b.xml().encode())
+        normal = _without(data, ways=[ids[k] for k in ids if k.startswith("m_")])   # the normal 30 m response
         extent = (-60.0, -50.0, 150.0, 50.0)
-        cl = classify(data, area, mask_extent=extent, content_bbox=content_bbox)
+        cl = classify(normal, area, mask_extent=extent, mask_data=data)
         w = {k: f"osm:way/{v}" for k, v in ids.items()}
         self.assertEqual(sorted(f.id for f in cl.areas),
                          sorted([w["forest"], f"osm:relation/{rid}#0", f"osm:relation/{rid}#1"]))
@@ -810,7 +809,7 @@ class ReviewRound2Test(unittest.TestCase):
         self.assertEqual((cl.buildings, cl.trees, cl.roads), ([], [], []))
         _, _, forests, _ = dsm_obstacles(cl, extent=extent)
         self.assertEqual(len(forests), 3)   # forest, relation#0 (relation#1 is far from the grid), m_forest
-        # without content_bbox (a local file) everything is content
+        # without mask_data (a local file) everything is content
         cl = classify(data, area, mask_extent=extent)
         self.assertIn(w["m_forest"], {f.id for f in cl.areas})
         self.assertEqual(cl.mask_areas, [])
@@ -843,8 +842,8 @@ class ReviewRound2Test(unittest.TestCase):
         plans = {}
         for on in (True, False):
             area = Area(*geo)
-            cb = tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0)) if on else None
-            cl = classify(self._scene_osm(wide=on), area, mask_extent=extent, content_bbox=cb)
+            cl = classify(self._scene_osm(wide=False), area, mask_extent=extent,
+                          mask_data=self._scene_osm(wide=True) if on else None)
             plans[on] = build_plan(area, g, cl, PlanOptions(seed=3), dsm_correction=on)
         tc = plans[True].report["terrain_correction"]
         self.assertTrue(tc["applied"])
@@ -963,9 +962,6 @@ class ReviewRound3Test(unittest.TestCase):
     AREA = (47.0, 8.0, 100.0, 100.0)
     EXTENT = (-50.0, -50.0, 150.0, 50.0)   # a grid overshooting the area by 100 m on +x
 
-    def _cb(self, area):
-        return tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0))
-
     # --- finding 1: the content is exactly the normal-extent response ---------------------------------------
 
     def _repro(self):
@@ -984,17 +980,13 @@ class ReviewRound3Test(unittest.TestCase):
         return data, w, _without(data, ways=(inner, part), relations=(m, rel))
 
     def test_a_margin_only_relation_does_not_remove_a_building(self):
-        from map_builder.core.osm import _normal_subset
         data, w, normal = self._repro()
         area = Area(*self.AREA)
         self.assertEqual((list(normal.ways), list(normal.relations)), ([w], []))
-        sub = _normal_subset(data, self._cb(area))
-        self.assertEqual((list(sub.ways), list(sub.relations), list(sub.nodes)),
-                         (list(normal.ways), list(normal.relations), list(normal.nodes)))
         ref = classify(normal, area, mask_extent=self.EXTENT)
         self.assertEqual([f.id for f in ref.buildings], [f"osm:way/{w}"])
         self.assertEqual(ref.invalid, [])
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data)
         self.assertEqual([f.id for f in cl.buildings], [f"osm:way/{w}"])
         self.assertEqual(cl.invalid, [])
         self.assertEqual(_summary(cl), _summary(ref))
@@ -1075,19 +1067,14 @@ class ReviewRound3Test(unittest.TestCase):
         return data, _without(data, **margin)
 
     def test_wide_classification_matches_the_normal_response(self):
-        from map_builder.core.osm import _normal_subset
         area = Area(*self.AREA)
-        cb = self._cb(area)
         configs = {"repro": self._repro()[::2], "landcover": self._config_landcover(),
                    "building relations": self._config_building_relations()[:2]}
         configs.update({f"random {s}": self._config_random(s) for s in range(3)})
         for name, (wide, normal) in configs.items():
             with self.subTest(name):
-                sub = _normal_subset(wide, cb)
-                self.assertEqual((list(sub.nodes), list(sub.ways), list(sub.relations)),
-                                 (list(normal.nodes), list(normal.ways), list(normal.relations)))
                 ref = classify(normal, area, mask_extent=self.EXTENT)
-                cl = classify(wide, area, mask_extent=self.EXTENT, content_bbox=cb)
+                cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
                 self.assertEqual(_summary(cl), _summary(ref))
                 self.assertTrue(ref.buildings or ref.areas)
                 # the margin only adds mask candidates
@@ -1098,7 +1085,7 @@ class ReviewRound3Test(unittest.TestCase):
     def test_margin_only_elements_are_mask_candidates(self):
         area = Area(*self.AREA)
         wide, normal = self._config_landcover()
-        cl = classify(wide, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
         margin_ways = [w for w in wide.ways if w not in normal.ways and wide.ways[w][1]]   # tagged ones
         forest, bldg, star, bridge, under = (f"osm:way/{w}" for w in margin_ways[:5])
         wood = next(f"osm:relation/{r}" for r, (_m, t) in wide.relations.items() if t.get("natural") == "wood")
@@ -1121,7 +1108,7 @@ class ReviewRound3Test(unittest.TestCase):
         area = Area(*self.AREA)
         wide, normal, y = self._config_building_relations()
         self.assertIn(y, normal.ways)
-        cl = classify(wide, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
         self.assertEqual(cl.outside, 1)   # the far part, counted as in the normal response
         self.assertEqual(_summary(cl), _summary(classify(normal, area, mask_extent=self.EXTENT)))
 
@@ -1131,16 +1118,19 @@ class ReviewRound3Test(unittest.TestCase):
         b = OsmBuilder()
         ring = b.way([(110.0 + 20.0 * math.cos(2 * math.pi * k / 1500), 20.0 * math.sin(2 * math.pi * k / 1500))
                       for k in range(1500)], closed=True)
+        rels = []
         for _ in range(5):
-            b.relations.append((b._next(), [("way", ring, "outer")], {"type": "multipolygon", "landuse": "forest"}))
+            rels.append(b._next())
+            b.relations.append((rels[-1], [("way", ring, "outer")], {"type": "multipolygon", "landuse": "forest"}))
         b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
-        return parse_osm_xml(b.xml().encode())
+        data = parse_osm_xml(b.xml().encode())
+        return data, _without(data, ways=[ring], relations=rels)
 
     def test_margin_only_multipolygons_sharing_a_large_ring_classify_quickly(self):
         area = Area(*self.AREA)
-        data = self._shared_ring()
+        data, normal = self._shared_ring()
         t = time.perf_counter()
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data)
         self.assertLess(time.perf_counter() - t, 2.0)
         self.assertEqual(len(cl.mask_areas), 5)
         self.assertEqual(len(cl.buildings), 1)
@@ -1175,7 +1165,7 @@ class ReviewRound3Test(unittest.TestCase):
         b = OsmBuilder()
         star = b.way(_star(0, 0, 10), {"building": "yes"}, closed=True)
         data = parse_osm_xml(b.xml().encode())
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(data, area, mask_extent=self.EXTENT, mask_data=data)
         self.assertEqual(cl.invalid, [{"id": f"osm:way/{star}", "reason": "self-intersecting ring"}])
         self.assertEqual(cl.buildings, [])
 
@@ -1186,9 +1176,6 @@ class ReviewRound4Test(unittest.TestCase):
 
     AREA = (47.0, 8.0, 100.0, 100.0)
     EXTENT = (-50.0, -50.0, 150.0, 50.0)
-
-    def _cb(self, area):
-        return tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0))
 
     # --- finding 1: margin-only ring assembly and hole assignment are budgeted ------------------------------
 
@@ -1215,7 +1202,7 @@ class ReviewRound4Test(unittest.TestCase):
         area = Area(*self.AREA)
         data, normal = self._holed_outers(stacked=False)
         t = time.perf_counter()
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data)
         self.assertLess(time.perf_counter() - t, 2.0)
         self.assertIsNone(cl.mask_work_exceeded)
         self.assertEqual(len(cl.outside_buildings), 3000)
@@ -1230,7 +1217,7 @@ class ReviewRound4Test(unittest.TestCase):
         area = Area(*self.AREA)
         data, normal = self._holed_outers(stacked=True)
         t = time.perf_counter()
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data)
         # bounded by the whole budget (about 2 s of mask validation work), so a looser bound than the repro's
         self.assertLess(time.perf_counter() - t, 4.0)
         self.assertIn("mask validation work budget", cl.mask_work_exceeded)
@@ -1250,7 +1237,7 @@ class ReviewRound4Test(unittest.TestCase):
         for (i, j, x, y), v in zip(points(g), terrain.mesh.vertices):
             self.assertAlmostEqual(v[2] + z, g.heights[j][i], places=6)
         # a smaller budget is shared the same way (pipeline passes PlanOptions.max_mask_validation_work)
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area), max_mask_work=1000)
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data, max_mask_work=1000)
         self.assertEqual(cl.mask_work, 1000)
         plan = build_plan(area, g, cl, PlanOptions(trees=False, max_mask_validation_work=1000))
         self.assertEqual(plan.report["terrain_correction"]["reason"], "mask validation work budget exceeded")
@@ -1273,11 +1260,12 @@ class ReviewRound4Test(unittest.TestCase):
         b.relations.append((rid, [("way", w, "outer") for w in reversed(ways)],
                             {"type": "multipolygon", "landuse": "forest"}))
         data = parse_osm_xml(b.xml().encode())
+        normal = _without(data, ways=ways, relations=[rid])
         t = time.perf_counter()
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area), max_mask_work=100_000)
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data, max_mask_work=100_000)
         self.assertLess(time.perf_counter() - t, 2.0)
         self.assertIsNotNone(cl.mask_work_exceeded)
-        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=data)
         self.assertIsNone(cl.mask_work_exceeded)
         self.assertEqual([f.id for f in cl.mask_areas], [f"osm:relation/{rid}"])
 
@@ -1301,15 +1289,12 @@ class ReviewRound4Test(unittest.TestCase):
 
     def test_a_content_outline_does_not_fill_a_margin_only_courtyard(self):
         from map_builder.core.dem import grid_layout
-        from map_builder.core.osm import _normal_subset
         area = Area(*self.AREA)
         x0, y0, nx, ny = grid_layout(area, 74.0)
         self.assertEqual((x0, y0, nx, ny), (-50.0, -50.0, 3, 3))   # points at -50, 24, 98
         extent = (x0, y0, x0 + 148.0, y0 + 148.0)
         data, normal, w = self._courtyard()
-        sub = _normal_subset(data, self._cb(area))
-        self.assertEqual((list(sub.ways), list(sub.relations)), (list(normal.ways), list(normal.relations)))
-        cl = classify(data, area, mask_extent=extent, content_bbox=self._cb(area))
+        cl = classify(normal, area, mask_extent=extent, mask_data=data)
         ref = classify(normal, area, mask_extent=extent)
         self.assertEqual(_summary(cl), _summary(ref))       # the scene still uses W (replaced by its part)
         self.assertIn(f"osm:way/{w}", cl.outline_features)
@@ -1333,48 +1318,230 @@ class ReviewRound4Test(unittest.TestCase):
                                                                                   "landuse": "forest"}))
         b.relations.append((b._next(), [("way", fw, "outline"), ("way", fp, "part")], {"type": "building"}))
         data = parse_osm_xml(b.xml().encode())
-        cl = classify(data, area, mask_extent=extent, content_bbox=self._cb(area))
+        cl = classify(_without(data, ways=[hole], relations=[rel]), area, mask_extent=extent, mask_data=data)
         self.assertIn(f"osm:way/{fw}", {f.id for f in cl.areas})
         self.assertEqual(cl.mask_suppressed, {f"osm:way/{fw}"})
         tc = build_plan(area, g, cl, PlanOptions(trees=False)).report["terrain_correction"]
         self.assertEqual(tc["masked_points"], 8)
 
-    # --- finding 3: segments across the antimeridian, as Overpass takes them --------------------------------
 
-    def _dateline(self):
+def _assemble_rings_round4(way_lists):
+    """The round-4 ring assembly (front removal, list prepends), unbudgeted: the reference that the content
+    path's results must still equal."""
+    segs = [list(w) for w in way_lists if len(w) >= 2]
+    rings, ok = [], True
+    while segs:
+        cur = segs.pop(0)
+        guard = 0
+        while cur[0] != cur[-1]:
+            guard += 1
+            if guard > 10000:
+                ok = False
+                break
+            for k, s in enumerate(segs):
+                if s[0] == cur[-1]:
+                    cur.extend(s[1:])
+                elif s[-1] == cur[-1]:
+                    cur.extend(reversed(s[:-1]))
+                elif s[-1] == cur[0]:
+                    cur[:0] = s[:-1]
+                elif s[0] == cur[0]:
+                    cur[:0] = list(reversed(s[1:]))
+                else:
+                    continue
+                segs.pop(k)
+                break
+            else:
+                ok = False
+                break
+        if cur[0] == cur[-1] and len(cur) >= 4:
+            rings.append(cur)
+        else:
+            ok = False
+    return rings, ok
+
+
+class ReviewRound5Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-5 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+    EXTENT = (-50.0, -50.0, 150.0, 50.0)
+
+    # --- finding 1: the content is the normal response itself; the wider one only adds mask candidates -------
+
+    def _dateline(self, lons):
+        """A building in ``Area(0, 179.98, 100, 100)`` and a ``man_made=bridge`` way at latitude 0 through
+        ``lons``, which leaves the normal bbox eastward across the antimeridian: in the wide response only."""
         from map_builder.core.geodesy import LocalFrame
         b = OsmBuilder(LocalFrame(0.0, 179.98))
         b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
-        a = b.node(0, 0)
-        b.nodes[-1] = (a, 0.0, 179.9808, {})      # east of the normal bbox, in the wide one
-        c = b._next()
-        b.nodes.append((c, 0.0, -179.9999, {}))   # across the antimeridian
+        ids = []
+        for lon in lons:
+            ids.append(b._next())
+            b.nodes.append((ids[-1], 0.0, lon, {}))
         bridge = b._next()
-        b.ways.append((bridge, [a, c], {"man_made": "bridge"}))
+        b.ways.append((bridge, ids, {"man_made": "bridge"}))
         data = parse_osm_xml(b.xml().encode())
         return data, _without(data, ways=[bridge])
 
-    def test_a_way_crossing_the_antimeridian_is_not_content(self):
-        from map_builder.core.osm import _normal_subset
-        area = Area(0.0, 179.98, 100.0, 100.0)
-        cb = self._cb(area)
-        self.assertLess(cb[3], 179.9808)
-        self.assertLess(area.geographic_bbox(margin_m=75.0)[3], 180.0)   # the wide fetch never reaches +-180
-        wide, normal = self._dateline()
-        sub = _normal_subset(wide, cb)
-        self.assertEqual((list(sub.nodes), list(sub.ways)), (list(normal.nodes), list(normal.ways)))
-        ref = classify(normal, area)
-        cl = classify(wide, area, content_bbox=cb)
-        self.assertEqual(_summary(cl), _summary(ref))
-        self.assertEqual(cl.unsupported, [])
-        self.assertEqual(len(cl.buildings), 1)
-        # Overpass's segment semantics: the short way, split at +-180 (raw longitudes would span the globe)
-        from map_builder.core.osm import _bbox_hit_test
-        seg = [wide.ways[list(wide.ways)[-1]][0]]
-        self.assertFalse(_bbox_hit_test(wide, (-1.0, 179.0, 1.0, 179.9))(seg))
-        self.assertTrue(_bbox_hit_test(wide, (-1.0, 179.99, 1.0, 179.9999))(seg))
-        self.assertTrue(_bbox_hit_test(wide, (-1.0, -180.0, 1.0, -179.99995))(seg))
-        self.assertFalse(_bbox_hit_test(wide, (-1.0, -179.9, 1.0, -179.0))(seg))
+    def test_content_equals_the_normal_response_classification(self):
+        dateline = Area(0.0, 179.98, 100.0, 100.0)
+        bb = dateline.geographic_bbox(margin_m=30.0)
+        self.assertLess(bb[3], 180.0)
+        cases = {"round 5 dateline": (dateline, None, self._dateline((179.9790, 179.9792, -179.9999))),
+                 "round 4 dateline": (dateline, None, self._dateline((179.9808, -179.9999))),
+                 "round 3 repro": (Area(*self.AREA), self.EXTENT, ReviewRound3Test._repro(self)[::2])}
+        self.assertLess(179.9792, bb[1])   # the round-5 way's nodes all lie outside the normal bbox
+        for name, (area, extent, (wide, normal)) in cases.items():
+            with self.subTest(name):
+                ref = classify(normal, area, mask_extent=extent)
+                cl = classify(normal, area, mask_extent=extent, mask_data=wide)
+                self.assertEqual(_summary(cl), _summary(ref))
+                self.assertEqual(len(cl.buildings), 1)
+                if "dateline" in name:
+                    self.assertEqual(cl.unsupported, [])   # before (round 5): a man_made=bridge entry
+
+    def _fixture(self):
+        b = OsmBuilder()
+        b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
+        b.node(-20.0, 20.0, {"natural": "tree"})
+        normal = b.xml().encode()
+        # scripted: only in the wide response, so mask candidates (within the grid extent, x <= 70)
+        b.way(square(62, 0, 6), {"building": "yes"}, closed=True)
+        b.node(65.0, 0.0, {"natural": "tree"})
+        return normal, b.xml().encode()
+
+    def _acquire(self, responses, dsm_correction, cache_dir=""):
+        from map_builder.core import pipeline
+        from map_builder.core.http import HttpClient, Response
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        _, dem, _ = write_synthetic_fixtures(tmp.name)
+
+        class Transport:
+            def __init__(self):
+                self.queries = []
+
+            def request(self, method, url, headers, data, timeout, max_bytes):
+                import urllib.parse
+                self.queries.append(urllib.parse.parse_qs(data.decode("ascii"))["data"][0])
+                status, body = responses.pop(0)
+                return Response(status, body)
+        tr = Transport()
+        settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
+                            elevation_license="SYNTHETIC", terrain_spacing=30.0, dsm_correction=dsm_correction,
+                            cache_dir=cache_dir)
+        grid, cl, sources = pipeline.acquire(Area(*self.AREA), settings, client=HttpClient(tr))
+        return grid, cl, sources, tr.queries
+
+    def test_two_requests_share_the_normal_query_and_cache(self):
+        from map_builder.core.osm import OSM_LICENSE, overpass_query
+        import hashlib
+        normal, wide = self._fixture()
+        area = Area(*self.AREA)
+        q30, q65 = (overpass_query(*area.geographic_bbox(margin_m=m)) for m in (30.0, 65.0))
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        _, off, src_off, queries = self._acquire([(200, normal)], False, cache.name)
+        self.assertEqual(queries, [q30])                        # off: one request, the normal 30 m query
+        self.assertNotIn("dsm_mask_query", src_off[1])
+        _, on, src_on, queries = self._acquire([(200, wide)], True, cache.name)
+        self.assertEqual(queries, [q65])                        # on: the normal query is served from the cache
+        self.assertTrue(src_on[1]["from_cache"])
+        self.assertEqual(src_on[1]["query_sha256"], src_off[1]["query_sha256"])
+        mq = src_on[1]["dsm_mask_query"]
+        self.assertEqual(mq["margin_m"], 65.0)
+        self.assertEqual(mq["query_sha256"], hashlib.sha256(q65.encode("utf-8")).hexdigest())
+        self.assertFalse(mq["from_cache"])
+        self.assertEqual(mq["osm_base_timestamp"], "2026-01-01T00:00:00Z")
+        self.assertIn("mask candidates only", mq["purpose"])
+        self.assertEqual(src_on[1]["license"], OSM_LICENSE)    # one dataset, one licence and attribution
+        self.assertEqual(_summary(on), _summary(off))
+        self.assertEqual(len(on.outside_buildings), 1)
+        self.assertEqual(len(on.mask_trees), 1)
+        self.assertEqual((off.outside_buildings, off.mask_trees), ([], []))
+        # no cache: both requests go out, normal first
+        _, _, _, queries = self._acquire([(200, normal), (200, wide)], True)
+        self.assertEqual(queries, [q30, q65])
+
+    def test_a_failed_mask_request_skips_the_correction_with_a_warning(self):
+        normal, _wide = self._fixture()
+        partial = normal.replace(b"</osm>", b"<remark>runtime error: Query timed out</remark></osm>")
+        for name, resp in (("HTTP 429", (429, b"")), ("server remark", (200, partial))):
+            with self.subTest(name):
+                grid, cl, sources, queries = self._acquire([(200, normal), resp], True)
+                self.assertEqual(len(queries), 2)
+                mq = sources[1]["dsm_mask_query"]
+                self.assertIn("error", mq)
+                self.assertNotIn("query_sha256", mq)
+                self.assertIn("DSM mask request", cl.mask_unavailable)
+                self.assertEqual(len(cl.buildings), 1)            # the content stands
+                heights = [[100.0 + (10.0 if math.hypot(-50 + i * 30.0, -50 + j * 30.0) < 20 else 0.0)
+                            for i in range(grid.nx)] for j in range(grid.ny)]
+                g = ElevationGrid(grid.x0, grid.y0, grid.spacing, grid.nx, grid.ny, heights, dict(COPERNICUS))
+                plan = build_plan(Area(*self.AREA), g, cl, PlanOptions(trees=False), dsm_correction=True)
+                tc = plan.report["terrain_correction"]
+                self.assertFalse(tc["applied"])
+                self.assertEqual(tc["reason"], "mask candidates unavailable")
+                self.assertTrue(any(w.startswith("DSM terrain correction skipped: the DSM mask request")
+                                    for w in plan.report["warnings"]))
+                terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+                z = plan.report["z_offset_m"]
+                for (i, j, x, y), v in zip(points(g), terrain.mesh.vertices):
+                    self.assertAlmostEqual(v[2] + z, g.heights[j][i], places=6)
+        # a failed normal (content) request still fails the acquisition, as with the correction off
+        from map_builder.core.errors import NetworkError
+        with self.assertRaises(NetworkError):
+            self._acquire([(429, b"")], True)
+
+    # --- finding 2: ring assembly charges before copying and has no uncharged quadratic work ----------------
+
+    def test_many_closed_members_are_bounded(self):
+        from map_builder.core.osm import _assemble_rings, _MaskWork, _MaskWorkExhausted
+        members = [[4 * k + 1, 4 * k + 2, 4 * k + 3, 4 * k + 1] for k in range(50_000)]
+        work = _MaskWork(dsm.MASK_VALIDATION_WORK_BUDGET)
+        t = time.perf_counter()
+        rings, ok = _assemble_rings(members, work)
+        self.assertLess(time.perf_counter() - t, 1.0)       # 8.7 s before (in classify)
+        self.assertTrue(ok)
+        self.assertEqual(len(rings), 50_000)
+        self.assertEqual(work.n, 50_000 * 5)                 # each member and its vertices
+        # a small budget runs out on the first members, before the rest are copied
+        work = _MaskWork(1000)
+        t = time.perf_counter()
+        with self.assertRaises(_MaskWorkExhausted):
+            _assemble_rings(members, work)
+        self.assertLess(time.perf_counter() - t, 0.1)
+        self.assertLessEqual(work.n, 1005)
+
+    def test_joining_open_members_is_charged(self):
+        from map_builder.core.osm import _assemble_rings, _MaskWork
+        n = 1500
+        members = [[(k + 1) % n, (k + 2) % n] for k in reversed(range(n))]   # one-segment ways, reverse order
+        work = _MaskWork(10 ** 9)
+        rings, ok = _assemble_rings(members, work)
+        self.assertTrue(ok)
+        self.assertEqual(len(rings), 1)
+        self.assertGreaterEqual(work.n, n * (n - 1) // 2)    # every scan of the remaining members is charged
+
+    def test_content_assembly_is_unchanged(self):
+        from map_builder.core.osm import _assemble_rings
+        rng = random.Random(5)
+        for _ in range(500):
+            members = []
+            for _ in range(rng.randint(0, 12)):
+                w = [rng.randint(0, 9) for _ in range(rng.randint(1, 5))]
+                if rng.random() < 0.3 and len(w) >= 3:
+                    w.append(w[0])
+                members.append(w)
+            self.assertEqual(_assemble_rings(members), _assemble_rings_round4(members), members)
+        # and a ring split into many members in shuffled order
+        for seed in range(20):
+            ids = list(range(200))
+            segs = [[ids[k], ids[(k + 1) % 200]] for k in range(200)]
+            random.Random(seed).shuffle(segs)
+            segs = [s[::-1] if random.Random(seed + k).random() < 0.5 else s for k, s in enumerate(segs)]
+            self.assertEqual(_assemble_rings(segs), _assemble_rings_round4(segs))
 
 
 if __name__ == "__main__":

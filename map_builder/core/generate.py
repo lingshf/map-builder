@@ -1653,21 +1653,23 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             areas.append(a)
     enabled, _ = dsm.resolve(dsm_correction, terrain.provenance)
     excluded, mask_stats, skip = {}, {}, None
+    unavailable = getattr(classified, "mask_unavailable", None)
     obstacles = ((), (), (), ())
     if enabled:
         bad_forests = sum(1 for e in area_invalid if e["reason"].startswith("forest area:"))
         if bad_forests:
             excluded["forest_areas"] = bad_forests
         try:
-            obstacles = dsm_obstacles(classified, areas, terrain_extent(terrain), opts.max_ring_vertices,
-                                      opts.max_triangulation_work, excluded, opts.max_mask_validation_work,
-                                      mask_stats)
+            if not unavailable:   # incomplete candidates (the DSM mask request failed): skipped below
+                obstacles = dsm_obstacles(classified, areas, terrain_extent(terrain), opts.max_ring_vertices,
+                                          opts.max_triangulation_work, excluded, opts.max_mask_validation_work,
+                                          mask_stats)
         except dsm.MaskWorkExceeded as exc:
             skip = str(exc)
     terrain, correction, dsm_warning = dsm.apply_correction(terrain, dsm_correction, *obstacles,
                                                             excluded_invalid=excluded,
                                                             validation_work=mask_stats.get("validation_work"),
-                                                            validation_skipped=skip)
+                                                            validation_skipped=skip, mask_unavailable=unavailable)
     zmin, _ = terrain.min_max()
     z_offset = math.floor(zmin)
     area.frame.z_offset = z_offset

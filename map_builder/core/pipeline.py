@@ -1,7 +1,9 @@
 """End-to-end pipeline glue shared by the Blender add-on and headless tools.
 
 Nothing here substitutes data on failure: every acquisition, generation or export error is
-raised to the caller (no flat terrain, no empty feature set, no partial package).
+raised to the caller (no flat terrain, no empty feature set, no partial package). The one exception is
+the optional second Overpass request that only widens the DSM correction mask: if it fails, the content
+(fetched by the normal request) stands and the correction is skipped with a warning.
 """
 
 import copy
@@ -14,7 +16,7 @@ from .cache import DiskCache, NullCache
 from .collision import (CLASSES, ColObject, heightfield_layout, is_degenerate, rasterize_heightfield,
                         read_collision, write_collision, write_heightfield)
 from .dem import COPERNICUS_BASE_URL, fetch_copernicus, grid_layout, load_local_elevation
-from .errors import PackageError
+from .errors import CoverageError, FormatError, LimitError, NetworkError, PackageError
 from .generate import MATERIALS, PlanOptions, build_plan
 from .glb import node_scale, write_glb
 from .http import HttpClient, redact
@@ -96,7 +98,8 @@ class Settings:
 
 
 def acquire(area, settings, client=None, progress=None):
-    """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data.
+    """Returns (ElevationGrid, Classified, sources list). Raises on any failure (except the DSM mask request,
+    see below); never substitutes data.
     The terrain grid limit is checked first, before any file or network access. The heightfield limit
     belongs to package export (see :func:`build_package`); acquisition and plans produce no heightfield."""
     x0, y0, nx, ny = grid_layout(area, settings.terrain_spacing)
@@ -109,33 +112,50 @@ def acquire(area, settings, client=None, progress=None):
         grid = fetch_copernicus(area, client, settings.terrain_spacing, cache, settings.copernicus_url, progress,
                                 allow_cache_override=settings.allow_cache_override,
                                 cache_dataset_id=settings.elevation_cache_dataset_id)
+    mask_data = mask_query = None
     if settings.osm_source == "file":
         osm = load_osm_file(settings.osm_file)
-        content_bbox = None
     else:
-        # The grid may overshoot the area on the +x/+y sides by up to one spacing. When the DSM correction
-        # is enabled, Overpass fetches every DSM mask candidate the grid can use (selected against the grid
-        # extent, osm.classify mask_extent): the overshoot plus the widest mask reach, a bridge centreline up
-        # to dsm.BRIDGE_CANDIDATE_MARGIN_M away (more than the normal margin); otherwise the normal extent
-        # (area + OSM_FETCH_MARGIN_M) is fetched. Either way the normal-extent response is reconstructed and
-        # is the only content (classify content_bbox): the rest is mask candidates only, so the generated
-        # scene is the same with the correction on or off.
+        # The content is always the normal query (area + OSM_FETCH_MARGIN_M): the same query text and cache
+        # key with the correction on or off, so the generated scene is the same either way. When the DSM
+        # correction is enabled, a second request (the same query with a wider bbox) fetches every DSM mask
+        # candidate the grid can use (selected against the grid extent, osm.classify mask_extent): the grid
+        # may overshoot the area on the +x/+y sides by up to one spacing, plus the widest mask reach, a bridge
+        # centreline up to dsm.BRIDGE_CANDIDATE_MARGIN_M away. Its elements that the normal response lacks are
+        # mask candidates only (classify mask_data). If that request fails, the content stands and the
+        # correction is skipped with a warning (Classified.mask_unavailable).
+        fetch = dict(allow_cache_override=settings.allow_cache_override,
+                     cache_dataset_id=settings.osm_cache_dataset_id)
+        osm = fetch_overpass(area, client, settings.overpass_url, cache, margin_m=OSM_FETCH_MARGIN_M, **fetch)
         enabled, _ = dsm.resolve(settings.dsm_correction, grid.provenance)
-        overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
-                        y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
-        margin = (max(OSM_FETCH_MARGIN_M, float(math.ceil(overshoot + dsm.BRIDGE_CANDIDATE_MARGIN_M)))
-                  if enabled else OSM_FETCH_MARGIN_M)
-        osm = fetch_overpass(area, client, settings.overpass_url, cache,
-                             allow_cache_override=settings.allow_cache_override,
-                             cache_dataset_id=settings.osm_cache_dataset_id, margin_m=margin)
-        # the normal extent's bbox exactly as its query writes it (7 decimals); None when nothing wider was fetched
-        content_bbox = (tuple(round(v, 7) for v in area.geographic_bbox(margin_m=OSM_FETCH_MARGIN_M))
-                        if margin > OSM_FETCH_MARGIN_M else None)
+        if enabled:
+            overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
+                            y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
+            margin = max(OSM_FETCH_MARGIN_M, float(math.ceil(overshoot + dsm.BRIDGE_CANDIDATE_MARGIN_M)))
+            mask_query = {"purpose": "DSM terrain correction mask candidates only (nothing generated from it)",
+                          "margin_m": margin}
+            try:
+                mask_data = fetch_overpass(area, client, settings.overpass_url, cache, margin_m=margin, **fetch)
+            except (NetworkError, CoverageError, FormatError, LimitError) as exc:
+                mask_query["error"] = str(exc)
+            else:
+                src = mask_data.source
+                if "query" in src:
+                    mask_query["query_sha256"] = hashlib.sha256(src["query"].encode("utf-8")).hexdigest()
+                if "from_cache" in src:
+                    mask_query["from_cache"] = src["from_cache"]
+                mask_query["osm_base_timestamp"] = mask_data.timestamp
     s = grid.spacing
     classified = classify(osm, area, mask_extent=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * s,
-                                                  grid.y0 + (grid.ny - 1) * s), content_bbox=content_bbox,
+                                                  grid.y0 + (grid.ny - 1) * s), mask_data=mask_data,
                           max_mask_work=settings.plan_options.max_mask_validation_work)
-    return grid, classified, [dict(grid.provenance), osm_source_entry(osm, settings.osm_license)]
+    osm_entry = osm_source_entry(osm, settings.osm_license)
+    if mask_query is not None:
+        osm_entry["dsm_mask_query"] = mask_query
+        if "error" in mask_query:
+            classified.mask_unavailable = (f"the DSM mask request (OSM area + {mask_query['margin_m']:g} m) failed: "
+                                           f"{mask_query['error']}")
+    return grid, classified, [dict(grid.provenance), osm_entry]
 
 
 def osm_source_entry(osm, declared_license=None):

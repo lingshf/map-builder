@@ -69,23 +69,27 @@ the surrounding ground before the terrain, roads and buildings are built.
   and masked once, so `mask.features` counts distinct polygons.
 * Mask candidates are selected against the terrain grid extent, not the area: buildings, trees and
   bridge ways just outside the area still mask the edge samples within their buffer, but are not
-  generated. Online acquisition fetches OSM for the area plus 30 m; only when the correction is
-  enabled does it fetch wider: the grid's overshoot of the area (below one spacing) plus 45 m, the
+  generated. Online acquisition always fetches OSM for the area plus 30 m, and that response alone
+  is the content. Only when the correction is enabled does it make a second Overpass request, the
+  same query with a wider bbox: the grid's overshoot of the area (below one spacing) plus 45 m, the
   farthest a mask can reach (a bridge centreline: at most 30 m half deck width plus its 15 m
-  buffer), rounded up to a whole metre. The response of the normal 30 m query is then
-  reconstructed exactly from the wider one (the same tag selectors, bbox tests and relation
-  recursion as the Overpass query) and classified on its own, so buildings, `building:part`
-  ownership, multipolygon outer suppression, landcover, roads, trees, counts, `invalid_features`
-  and `unsupported_features` come from it alone. Everything else in the wider response (including
-  relations that merely reference content ways) only adds mask candidates — surface building
+  buffer), rounded up to a whole metre. The normal request is byte-identical to the one made with
+  the correction off (it shares its cache entry), and it is classified exactly as then, so
+  buildings, `building:part` ownership, multipolygon outer suppression, landcover, roads, trees,
+  counts, `invalid_features` and `unsupported_features` come from it alone. The wider request is
+  recorded in the features source as `dsm_mask_query`. Its elements (ways, relations, tree nodes)
+  that the normal response lacks, including relations that merely reference content ways, only
+  add mask candidates — surface building
   footprints, forest/wood polygons, bridge ways and trees: they never colour the terrain, drive
   scatter, or appear in counts, `invalid_features` or `unsupported_features`, and their ring
   topology is checked only by the budgeted, deduplicated mask validation below. A content way that
   is the outer of a multipolygon known only to the wider response (same area family, or an
   untagged one with inner rings) is still generated as in the normal response, but its solid
   footprint is left out of the mask, so it never fills that multipolygon's courtyard or clearing.
-  Ways leaving an area near the antimeridian are bbox-tested as Overpass does, the short way
-  across ±180. So the generated
+  The two requests may see slightly different OSM data (minutes apart, or a cached normal
+  response); that only affects the mask. If the wider request fails (HTTP error, rate limit, size
+  limit, a server-side error remark), the content stands and the correction is skipped with a
+  warning (`reason: mask candidates unavailable`, the uncorrected surface model). So the generated
   scene (objects, colours, materials, report) is the same with the correction on or off; only
   terrain heights and the correction's report fields differ.
 * Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The

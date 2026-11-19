@@ -4,6 +4,7 @@ Online via an Overpass API endpoint, or offline from a local ``.osm`` XML file
 (for reproducibility). OSM data is (c) OpenStreetMap contributors, ODbL 1.0.
 """
 
+import collections
 import math
 import xml.parsers.expat
 
@@ -30,7 +31,6 @@ _MAX_REMARK_CHARS = 1024
 
 
 # The ``.feat`` selectors of :func:`overpass_query`: (element type, tag key, required value or None for any).
-# :func:`_normal_subset` evaluates the same selectors (and the same recursion) offline.
 FEATURE_SELECTORS = (
     ("way", "building", None), ("relation", "building", None),
     ("way", "building:part", None), ("relation", "building:part", None),
@@ -77,9 +77,9 @@ def _validated_overpass(body, description):
 
 def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False,
                    cache_dataset_id=None, margin_m=OSM_FETCH_MARGIN_M):
-    """Fetches the area plus ``margin_m`` on each side (wider than :data:`OSM_FETCH_MARGIN_M` only for DSM
-    mask candidates near the grid edge, see :func:`classify` ``content_bbox``; generated content is still
-    selected against the area). ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
+    """Fetches the area plus ``margin_m`` on each side (:data:`OSM_FETCH_MARGIN_M` for the content; a wider
+    second request only supplies DSM mask candidates near the grid edge, see :func:`classify` ``mask_data``).
+    ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
     by a caller that knows the alternative endpoint's terms permit caching. Caching an override also
     requires a caller-chosen, credential-free ``cache_dataset_id``: endpoint paths (which may embed
     credentials) never appear in cache keys, metadata, diagnostics or provenance."""
@@ -335,15 +335,32 @@ class Polygon:
 
 
 def _assemble_rings(way_lists, work=None):
-    """Join open member ways into closed rings. Returns (rings, ok). ``work`` (optional, a
-    :class:`_MaskWork`) is charged the member vertices and every ring-end comparison."""
-    segs = [list(w) for w in way_lists if len(w) >= 2]
-    if work is not None:
-        work.add(sum(len(s) for s in segs))
+    """Join open member ways into closed rings. Returns (rings, ok). Members are taken in order; an open one
+    is extended by the first remaining member (in order) sharing one of its ends. ``work`` (optional, a
+    :class:`_MaskWork`) is charged each member and its vertices before it is copied, and for every join the
+    scan of the remaining members, the list shift removing the joined one and the vertices it adds. Closed
+    members cost O(1) beyond their copy (no front removal), and prepending is O(added vertices) (a deque),
+    so the uncharged work is linear in the input."""
+    segs = []
+    for w in way_lists:
+        if len(w) >= 2:
+            if work is not None:
+                work.add(1 + len(w))
+            segs.append(list(w))
     rings = []
     ok = True
-    while segs:
-        cur = segs.pop(0)
+    head = 0
+    while head < len(segs):
+        first = segs[head]
+        segs[head] = None
+        head += 1
+        if first[0] == first[-1]:
+            if len(first) >= 4:
+                rings.append(first)
+            else:
+                ok = False
+            continue
+        cur = collections.deque(first)
         guard = 0
         while cur[0] != cur[-1]:
             guard += 1
@@ -351,25 +368,28 @@ def _assemble_rings(way_lists, work=None):
                 ok = False
                 break
             if work is not None:
-                work.add(len(segs) + len(cur))   # the scan, and the copy a prepend makes
-            for k, s in enumerate(segs):
+                work.add(1 + len(segs) - head)   # the scan of the remaining members, and the shift of pop(k)
+            for k in range(head, len(segs)):
+                s = segs[k]
                 if s[0] == cur[-1]:
                     cur.extend(s[1:])
                 elif s[-1] == cur[-1]:
                     cur.extend(reversed(s[:-1]))
                 elif s[-1] == cur[0]:
-                    cur[:0] = s[:-1]
+                    cur.extendleft(reversed(s[:-1]))
                 elif s[0] == cur[0]:
-                    cur[:0] = list(reversed(s[1:]))
+                    cur.extendleft(s[1:])
                 else:
                     continue
+                if work is not None:
+                    work.add(len(s))
                 segs.pop(k)
                 break
             else:
                 ok = False
                 break
         if cur[0] == cur[-1] and len(cur) >= 4:
-            rings.append(cur)
+            rings.append(list(cur))
         else:
             ok = False
     return rings, ok
@@ -415,8 +435,8 @@ class Classified:
         # the predicate generation applies in the area) whose centroid lies outside the area (counted in
         # ``outside``) with a bbox within the extent + the building buffer, and
         # natural=tree nodes outside the area within the extent + the tree radius (``mask_trees``).
-        # ``mask_areas``: forest/wood polygons that are in the input only because of the DSM fetch margin
-        # (classify ``content_bbox``); never used for terrain colouring, scatter or any generated content.
+        # ``mask_areas``: forest/wood polygons that are only in the wider DSM mask response (classify
+        # ``mask_data``); never used for terrain colouring, scatter or any generated content.
         # Margin-only candidates (``mask_areas`` and margin-only ``outside_buildings``) are not topology
         # checked here; generate.dsm_obstacles validates them under the mask validation work budget.
         self.bridges = []
@@ -424,12 +444,15 @@ class Classified:
         self.mask_trees = []
         self.mask_areas = []
         # Feature ids left out of the DSM mask: content ways that are outers of a margin-only multipolygon of
-        # their area family, which supplies the footprint with its holes (classify content_bbox).
+        # their area family, which supplies the footprint with its holes (classify mask_data).
         self.mask_suppressed = set()
         # Margin-only candidate assembly work, charged to the mask validation budget (classify max_mask_work);
         # ``mask_work_exceeded``: the MaskWorkExceeded message once that budget ran out during assembly.
         self.mask_work = 0
         self.mask_work_exceeded = None
+        # The reason the DSM mask candidates are incomplete (e.g. the wider mask request failed), set by the
+        # caller: the correction is then skipped with a warning (generate.build_plan).
+        self.mask_unavailable = None
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -473,102 +496,20 @@ def surface_mask_eligible(tags):
     return _unsupported_reason(tags) is None
 
 
-def _bbox_hit_test(data, content_bbox):
-    """Predicate over lists of node-id lists: True if any listed node lies in ``content_bbox`` (south, west,
-    north, east) or any segment between consecutive listed nodes crosses it (Overpass's bbox semantics for
-    ways; a relation is selected by its member ways). Always True when ``content_bbox`` is None.
-
-    Like Overpass, a segment whose endpoints differ by more than 180 degrees of longitude is taken the short
-    way, across the antimeridian: it is split at +-180 and both parts are tested (an area itself never
-    reaches the antimeridian, :data:`geodesy.ANTIMERIDIAN_GUARD_M`, but a way leaving it may cross it)."""
-    if content_bbox is None:
-        return lambda node_lists: True
-    s, w, n, e = content_bbox
-
-    def seg_hits(a, b):
-        if abs(b[0] - a[0]) > 180.0:
-            shift = 360.0 if a[0] > b[0] else -360.0   # b moved next to a, then a next to b
-            return (_clip_segment(a, (b[0] + shift, b[1]), w, s, e, n) is not None
-                    or _clip_segment((a[0] - shift, a[1]), b, w, s, e, n) is not None)
-        return _clip_segment(a, b, w, s, e, n) is not None
-
-    def hits(node_lists):
-        for nids in node_lists:
-            ll = [(data.nodes[x][1], data.nodes[x][0]) for x in nids if x in data.nodes]
-            if any(w <= p[0] <= e and s <= p[1] <= n for p in ll):
-                return True
-            if any(seg_hits(a, b) for a, b in zip(ll, ll[1:])):
-                return True
-        return False
-    return hits
-
-
-def _normal_subset(data, content_bbox):
-    """The part of ``data`` (fetched with a wider bbox) that the normal-extent query, :func:`overpass_query`
-    with ``content_bbox``, returns: a new :class:`OsmData` in ``data``'s element order.
-
-    Evaluates the query offline, statement by statement: ``.feat`` is every element matching one of
-    :data:`FEATURE_SELECTORS` in the bbox (a way by its nodes or segments, a relation by its member nodes and
-    ways); ``.bldg`` is the ``type=building`` relations in the bbox plus those with a member way
-    (``bw.feat``) or member relation (``br.feat``) in ``.feat``; their member relations (``r.bldg``) are
-    added, and ``>`` brings in the member ways and nodes of every selected relation and the nodes of every
-    selected way. The query is monotone in its bbox, so the wider response contains all of this."""
-    hits = _bbox_hit_test(data, content_bbox)
-    way_hit = {}
-
-    def way_in(wid):
-        if wid not in way_hit:
-            w = data.ways.get(wid)
-            way_hit[wid] = w is not None and hits([w[0]])
-        return way_hit[wid]
-
-    def rel_in(members):
-        return any((t == "way" and way_in(r)) or (t == "node" and r in data.nodes and hits([[r]]))
-                   for t, r, _role in members)
-
-    def selected(typ, tags):
-        return any(t == typ and k in tags and (v is None or tags[k] == v) for t, k, v in FEATURE_SELECTORS)
-    feat_nodes = {nid for nid, (_lat, _lon, tags) in data.nodes.items() if selected("node", tags) and hits([[nid]])}
-    feat_ways = {wid for wid, (_nids, tags) in data.ways.items() if selected("way", tags) and way_in(wid)}
-    feat_rels = {rid for rid, (members, tags) in data.relations.items()
-                 if selected("relation", tags) and rel_in(members)}
-    bldg = {rid for rid, (members, tags) in data.relations.items() if tags.get("type") == "building"
-            and (rel_in(members) or any((t == "way" and r in feat_ways) or (t == "relation" and r in feat_rels)
-                                        for t, r, _role in members))}
-    rels = feat_rels | bldg
-    for rid in bldg:
-        rels.update(r for t, r, _role in data.relations[rid][0] if t == "relation" and r in data.relations)
-    ways, nodes = set(feat_ways), set(feat_nodes)
-    for rid in rels:
-        for t, r, _role in data.relations[rid][0]:
-            if t == "way" and r in data.ways:
-                ways.add(r)
-            elif t == "node" and r in data.nodes:
-                nodes.add(r)
-    for wid in ways:
-        nodes.update(x for x in data.ways[wid][0] if x in data.nodes)
-    sub = OsmData()
-    sub.nodes = {k: v for k, v in data.nodes.items() if k in nodes}
-    sub.ways = {k: v for k, v in data.ways.items() if k in ways}
-    sub.relations = {k: v for k, v in data.relations.items() if k in rels}
-    sub.timestamp, sub.generator, sub.remarks, sub.source = data.timestamp, data.generator, data.remarks, data.source
-    return sub
-
-
 def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None,
-             mask_extent=None, content_bbox=None, max_mask_work=None):
+             mask_extent=None, mask_data=None, max_mask_work=None):
     """Classified features of ``data`` for ``area``. ``mask_extent`` (x0, y0, x1, y1 in the map frame,
     default the area rectangle) is the terrain grid extent used to select the DSM mask candidates
     (``bridges``, ``outside_buildings``, ``mask_trees``, ``mask_areas``); generated features are always
     selected against the area. Every kept feature, mask candidates included, counts toward ``max_features``.
 
-    ``content_bbox`` (south, west, north, east), when ``data`` was fetched with a wider DSM margin than the
-    normal acquisition extent, is that normal extent. The normal-extent response is then reconstructed
-    exactly (:func:`_normal_subset`) and classified as if it were the whole input, so everything that affects
-    the generated scene or the report (buildings, building:part ownership, multipolygon outer suppression,
-    areas, roads, trees, ``outside``, ``invalid``, ``unsupported``, warnings) is the same as without the wider
-    fetch. The rest of ``data``, fetched only for the margin, adds DSM mask candidates only
-    (:func:`_add_margin_mask_candidates`). None (a local file, or no wider fetch): everything is content.
+    ``data`` is the whole content: everything that affects the generated scene or the report (buildings,
+    building:part ownership, multipolygon outer suppression, areas, roads, trees, ``outside``, ``invalid``,
+    ``unsupported``, warnings) comes from it alone, so it is the same whether or not ``mask_data`` is given.
+    ``mask_data`` (optional) is a second, wider response fetched only for the DSM correction (the same query
+    with a wider bbox): its elements whose ids are not in ``data`` (ways, relations, tree nodes) add DSM mask
+    candidates only (:func:`_add_margin_mask_candidates`). None (a local file, or the correction off): the
+    candidates come from ``data`` alone.
 
     Assembling the margin-only candidates is charged to ``max_mask_work`` geometric tests (default
     :data:`dsm.MASK_VALIDATION_WORK_BUDGET`), the budget that :func:`generate.dsm_obstacles` then continues
@@ -576,15 +517,14 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     correction is skipped with a warning. Nothing generated or reported depends on it."""
     if mask_extent is None:
         mask_extent = (-area.half[0], -area.half[1], area.half[0], area.half[1])
-    if content_bbox is None:
-        return _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
-    content = _normal_subset(data, content_bbox)
-    out = _classify(content, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
+    out = _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
+    if mask_data is None:
+        return out
     if max_mask_work is None:
         from .dsm import MASK_VALIDATION_WORK_BUDGET as max_mask_work
     work = _MaskWork(max_mask_work)
     try:
-        _add_margin_mask_candidates(out, data, content, area, mask_extent, work)
+        _add_margin_mask_candidates(out, mask_data, data, area, mask_extent, work)
     except _MaskWorkExhausted:
         out.mask_work_exceeded = (f"DSM mask candidate assembly needs more than {max_mask_work} geometric tests "
                                   "(the mask validation work budget)")
@@ -700,8 +640,9 @@ _MASK_GRID_MAX_SPAN = 16     # an outer covering more cells is tested against ev
 
 
 def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
-    """Adds to ``out`` the DSM mask candidates among the elements of ``data`` that are not in ``content`` (the
-    normal-extent subset): surface building footprints (``outside_buildings``) and forest/wood polygons
+    """Adds to ``out`` the DSM mask candidates among the elements of ``data`` (the wider DSM mask response)
+    whose ids are not in ``content`` (the normal response): surface building footprints (``outside_buildings``)
+    and forest/wood polygons
     (``mask_areas``) from closed ways and multipolygon relations, bridge ways (``bridges``) and trees outside
     the area (``mask_trees``), selected against ``mask_extent`` like the content candidates. Nothing else is
     touched: these elements never generate, colour, scatter, count or report anything. A way that is an outer

@@ -634,7 +634,8 @@ def correct_grid(grid, mask, passes=FINE_PASSES, min_unmasked_fraction=MIN_UNMAS
 
 
 def apply_correction(grid, requested, buildings=(), trees=(), forests=(), bridges=(), excluded_invalid=None,
-                     work_budget=MASK_WORK_BUDGET, validation_work=None, validation_skipped=None):
+                     work_budget=MASK_WORK_BUDGET, validation_work=None, validation_skipped=None,
+                     mask_unavailable=None):
     """(grid to use, report entry, warning or None). ``requested``: the ``dsm_correction`` setting.
 
     The report entry is ``{applied, enabled, setting, masked_points, lowered_points, total_points,
@@ -647,7 +648,8 @@ def apply_correction(grid, requested, buildings=(), trees=(), forests=(), bridge
     Work limits never fail the build: when the mask validation ran out of its budget (``validation_skipped``,
     the :class:`MaskWorkExceeded` message), the mask rasterisation would exceed ``work_budget`` or the fill
     does not converge within its bounded cycles, the correction is skipped with a warning and the
-    uncorrected surface model is used (like the "too few unmasked points" skip)."""
+    uncorrected surface model is used (like the "too few unmasked points" skip). So it is when the mask
+    candidates are incomplete (``mask_unavailable``, the reason: the wider DSM mask request failed)."""
     enabled, reason = resolve(requested, grid.provenance)
     entry = {"applied": False, "enabled": enabled,
              "setting": {None: "auto", True: "on", False: "off"}[requested],
@@ -668,6 +670,10 @@ def apply_correction(grid, requested, buildings=(), trees=(), forests=(), bridge
                        "- 2 x 2 blocks, semi-coarsening along the long axis of elongated grids - then a bounded "
                        "number of V- or W-cycles of red-black Gauss-Seidel until the largest update is below "
                        f"{VCYCLE_TOLERANCE_M:g} m; skipped if not converged), min(original, filled)")
+    if mask_unavailable:
+        entry["reason"] = "mask candidates unavailable"
+        return grid, entry, (f"DSM terrain correction skipped: {mask_unavailable}; the terrain is the "
+                             "uncorrected surface model")
     if validation_skipped:
         entry["reason"] = "mask validation work budget exceeded"
         return grid, entry, (f"DSM terrain correction skipped: {validation_skipped}; the terrain is the "
