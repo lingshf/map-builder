@@ -1,0 +1,39 @@
+{
+  "data": "SYNTHETIC, not a real place",
+  "before": {
+    "package_id": "sha256:b4691dd8f772e2f58218cb09552a413181e5b732a3527d96b216e4c5db4c1d7c",
+    "schema_version": "2.0.0",
+    "objects": 76,
+    "validation": "VALID: 0 error(s), 1 warning(s)\npackage_id sha256:b4691dd8f772e2f58218cb09552a413181e5b732a3527d96b216e4c5db4c1d7c\nwarning: collision has 2 degenerate (zero-area) triangles",
+    "warnings": [
+      "collision has 2 degenerate (zero-area) triangles"
+    ]
+  },
+  "edit": {
+    "mb_id": "osm:way/1007",
+    "scale_before": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "scale_after": [
+      1.0,
+      1.0,
+      1.7999999523162842
+    ],
+    "collision_heights_m": [
+      12.299999237060547,
+      22.139999389648438
+    ]
+  },
+  "after": {
+    "package_id": "sha256:bb7aba38b908e53cfe43983fc9e1eeb53debb6cd499b72de39bafed24e74890e",
+    "schema_version": "2.0.0",
+    "objects": 76,
+    "validation": "VALID: 0 error(s), 1 warning(s)\npackage_id sha256:bb7aba38b908e53cfe43983fc9e1eeb53debb6cd499b72de39bafed24e74890e\nwarning: collision has 2 degenerate (zero-area) triangles",
+    "warnings": [
+      "collision has 2 degenerate (zero-area) triangles"
+    ]
+  },
+  "glb_import_meshes": 76
+}
