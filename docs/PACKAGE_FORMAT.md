@@ -174,7 +174,8 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
 
 | Form | Meaning |
 |---|---|
-| `osm:way/123`, `osm:relation/45`, `osm:node/9` | Generated from that OSM element. |
+| `osm:way/123`, `osm:relation/45`, `osm:node/9` | Generated from that OSM element. Local `.osm` files may use negative ids for unsaved edits, e.g. `osm:way/-7`. |
+| `osm:relation/45#k` | Part `k` of an OSM element that was split into several objects (for example, a multipolygon with several outer rings). |
 | `terrain:grid` | The terrain. |
 | `scatter:<area id>#k` | A procedurally scattered tree. |
 | `<id>~<object name>` | A user duplicate of a generated object. The first object in name order keeps the plain id. |

@@ -90,7 +90,7 @@ PROBE_MIN_DOT = 0.99
 PROBE_MAX = 3
 HEIGHTFIELD_TOL_M = 1e-3
 
-_MB_ID = re.compile(r"(osm:(node|way|relation)/\d+|terrain:grid|scatter:.+#\d+)")
+_MB_ID = re.compile(r"(osm:(node|way|relation)/-?\d+(#\d+)?|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
 
@@ -1214,12 +1214,12 @@ def _check_objects(m, col, r):
             r.errors.append(f"duplicate object identity: objects[{ids[o['mb_id']]}] and objects[{i}] share an mb_id")
         ids.setdefault(o["mb_id"], i)
         base = o["mb_id"].split("~", 1)[0]
-        if "~" in o["mb_id"]:
-            if o["mb_id"] != f"{base}~{o['name']}" or not _MB_ID.fullmatch(base):
-                r.warnings.append(f"objects[{i}]: duplicate identity mb_id is not '<generated id>~<object name>'")
-        elif o["mb_id"].startswith("user:"):
+        if o["mb_id"].startswith("user:"):
             if o["mb_id"] != f"user:{o['name']}":
                 r.warnings.append(f"objects[{i}]: user identity mb_id is not 'user:<object name>'")
+        elif "~" in o["mb_id"]:
+            if o["mb_id"] != f"{base}~{o['name']}" or not _MB_ID.fullmatch(base):
+                r.warnings.append(f"objects[{i}]: duplicate identity mb_id is not '<generated id>~<object name>'")
         elif not _MB_ID.fullmatch(o["mb_id"]):
             r.warnings.append(f"objects[{i}]: unrecognised mb_id form")
     table = {e["name"]: (k, e) for k, e in enumerate(col.objects)}
