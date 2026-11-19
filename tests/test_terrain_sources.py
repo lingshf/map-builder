@@ -1005,6 +1005,27 @@ class RoundFourTest(unittest.TestCase):
         self.assertLess(time_mod.monotonic() - start, 3.0)
         self.assertIn("time limit", str(cm.exception))
 
+    def test_blocked_dns_resolution_returns_at_deadline(self):
+        import socket as socket_mod
+        import threading
+        import time as time_mod
+        release = threading.Event()
+        self.addCleanup(release.set)
+        real = socket_mod.getaddrinfo
+
+        def blocked(*a, **k):
+            release.wait(5.0)
+            return real(*a, **k)
+        with mock.patch("socket.getaddrinfo", blocked):
+            start = time_mod.monotonic()
+            with self.assertRaises(NetworkError) as cm:
+                UrllibTransport(total_timeout=0.3).request("GET", "http://resolver-stall.invalid/", {}, None,
+                                                           10.0, 1000)
+            elapsed = time_mod.monotonic() - start
+            release.set()
+        self.assertLess(elapsed, 1.0)
+        self.assertIn("time limit", str(cm.exception))
+
     def test_stalled_tls_handshake_hits_deadline(self):
         import socket as socket_mod
         import threading

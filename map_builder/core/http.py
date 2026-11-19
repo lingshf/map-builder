@@ -284,8 +284,33 @@ class UrllibTransport:
         self.clock = clock
 
     def request(self, method, url, headers, data, timeout, max_bytes):
-        safe = redact(url)
+        if self.opener is not None:  # injected (test) opener: no real sockets or resolver involved
+            return self._request(method, url, headers, data, timeout, max_bytes)
+        # DNS resolution ignores socket timeouts and cannot be interrupted, so the exchange runs in a
+        # worker thread and the caller waits only until the absolute deadline. A worker still blocked
+        # in the resolver is abandoned (its late sockets are shut down by the expired watchdog).
         total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
+        box = {}
+
+        def work():
+            try:
+                box["ok"] = self._request(method, url, headers, data, timeout, max_bytes, total)
+            except BaseException as e:  # noqa: BLE001 - re-raised in the caller's thread
+                box["err"] = e
+        worker = threading.Thread(target=work, name="map-builder-http", daemon=True)
+        worker.start()
+        worker.join(total + 0.25)  # small grace so the worker's own deadline error normally wins
+        if worker.is_alive():
+            safe = redact(url)
+            raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s", url=safe)
+        if "err" in box:
+            raise box["err"]
+        return box["ok"]
+
+    def _request(self, method, url, headers, data, timeout, max_bytes, total=None):
+        safe = redact(url)
+        if total is None:
+            total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
         deadline = self.clock() + total
 
         def check_deadline():
@@ -307,7 +332,8 @@ class UrllibTransport:
                 pass
             return Response(e.code, b"", hdrs)  # error bodies are never surfaced
         except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException, ValueError) as e:
-            if watchdog is not None and watchdog.expired:
+            near_deadline = deadline - self.clock() <= 0.05  # a per-op timeout clamped to the deadline fired
+            if (watchdog is not None and watchdog.expired) or near_deadline:
                 raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s",
                                    url=safe) from None
             cause = getattr(e, "reason", e)
