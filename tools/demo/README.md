@@ -6,9 +6,12 @@ review: before/after renders, a three.js viewer with probe results, and `summary
 ```powershell
 & C:\tools\blender-4.2.23-windows-x64\blender.exe -b --factory-startup --python-exit-code 1 `
     --python tools\demo\run_demo.py -- --preset synthetic --after examples\synthetic_sample.mbmap `
-    [--before old.mbmap] --out demo-out
+    --out demo-out
 py -3 -m http.server 8780 --directory demo-out\viewer     # then open http://localhost:8780/
 ```
+
+Optional flags (append to the first command): `--before <previous.mbmap>` adds `-before` renders and a
+before/after comparison; `--panel` adds `panel.png` (see below); `--bundle-only` skips the renders.
 
 Output in `--out` (names are fixed): `render-<camera>-after.png` (+ `-before.png`), `viewer/`
 (`index.html`, `viewer.js`, `map.glb`, `probes.json`, `NOTICES.txt`, `vendor/` = three.js r160, MIT)
