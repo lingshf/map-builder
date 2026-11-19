@@ -17,6 +17,8 @@
 
 import http.client
 import re
+import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -175,6 +177,74 @@ def _clamp_socket_timeout(resp, seconds):
             pass
 
 
+class _Watchdog:
+    """Shuts down every socket of a request when its absolute deadline passes.
+
+    A per-receive timeout cannot bound a call (TLS handshake, header, chunk-size or trailer read)
+    that performs many receives, so the deadline is enforced from a timer thread instead.
+    """
+
+    def __init__(self, seconds):
+        self._lock = threading.Lock()
+        self._socks = []
+        self.expired = False
+        self._timer = threading.Timer(max(0.0, seconds), self._fire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _fire(self):
+        with self._lock:
+            self.expired = True
+            socks = list(self._socks)
+        for s in socks:
+            _shutdown_quietly(s)
+
+    def register(self, sock):
+        with self._lock:
+            self._socks.append(sock)
+            expired = self.expired
+        if expired:
+            _shutdown_quietly(sock)
+        return sock
+
+    def cancel(self):
+        self._timer.cancel()
+
+
+def _shutdown_quietly(sock):
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+
+def _watched(conn_class, watchdog):
+    class Watched(conn_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            create = self._create_connection
+            self._create_connection = lambda *a, **k: watchdog.register(create(*a, **k))
+    return Watched
+
+
+class _WatchedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, watchdog):
+        super().__init__()
+        self._watchdog = watchdog
+
+    def http_open(self, req):
+        return self.do_open(_watched(http.client.HTTPConnection, self._watchdog), req)
+
+
+class _WatchedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, watchdog):
+        super().__init__()
+        self._watchdog = watchdog
+
+    def https_open(self, req):
+        return self.do_open(_watched(http.client.HTTPSConnection, self._watchdog), req, context=self._context)
+
+
 class UrllibTransport:
     """urllib transport with safe redirects and a total (monotonic) deadline.
 
@@ -196,29 +266,13 @@ class UrllibTransport:
             if self.clock() > deadline:
                 raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s", url=safe)
 
+        watchdog = None if self.opener else _Watchdog(deadline - self.clock())
         opener = self.opener or urllib.request.build_opener(
-            SafeRedirectHandler(self.max_redirects, check_deadline, lambda: deadline - self.clock()))
+            SafeRedirectHandler(self.max_redirects, check_deadline, lambda: deadline - self.clock()),
+            _WatchedHTTPHandler(watchdog), _WatchedHTTPSHandler(watchdog))
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
-            resp = opener.open(req, timeout=max(0.001, min(timeout, deadline - self.clock())))
-            with resp:
-                limit = max_bytes + 1
-                chunks, n = [], 0
-                while n < limit:
-                    check_deadline()
-                    _clamp_socket_timeout(resp, max(0.001, min(timeout, deadline - self.clock())))
-                    want = min(READ_CHUNK, limit - n)
-                    # read1 returns after a single underlying receive, so the deadline is re-checked
-                    # between receives rather than after a buffered read that may span many of them
-                    reader = getattr(resp, "read1", None)
-                    chunk = reader(want) if reader is not None else resp.read(want)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    n += len(chunk)
-                check_deadline()
-                status = getattr(resp, "status", None) or resp.getcode()
-                return Response(status, b"".join(chunks), dict(resp.headers.items()))
+            return self._exchange(opener, req, timeout, max_bytes, deadline, check_deadline)
         except urllib.error.HTTPError as e:
             hdrs = dict(e.headers.items()) if e.headers else {}
             try:
@@ -227,9 +281,34 @@ class UrllibTransport:
                 pass
             return Response(e.code, b"", hdrs)  # error bodies are never surfaced
         except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException, ValueError) as e:
+            if watchdog is not None and watchdog.expired:
+                raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s",
+                                   url=safe) from None
             cause = getattr(e, "reason", e)
             cause = cause if isinstance(cause, BaseException) else e
             raise NetworkError(f"{safe}: request failed ({_exc_name(cause)})", url=safe) from None
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+
+    def _exchange(self, opener, req, timeout, max_bytes, deadline, check_deadline):
+        resp = opener.open(req, timeout=max(0.001, min(timeout, deadline - self.clock())))
+        with resp:
+            limit = max_bytes + 1
+            chunks, n = [], 0
+            while n < limit:
+                check_deadline()
+                _clamp_socket_timeout(resp, max(0.001, min(timeout, deadline - self.clock())))
+                want = min(READ_CHUNK, limit - n)
+                reader = getattr(resp, "read1", None)
+                chunk = reader(want) if reader is not None else resp.read(want)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                n += len(chunk)
+            check_deadline()
+            status = getattr(resp, "status", None) or resp.getcode()
+            return Response(status, b"".join(chunks), dict(resp.headers.items()))
 
 
 class HttpClient:

@@ -974,6 +974,37 @@ class RoundFourTest(unittest.TestCase):
         with self.assertRaises(NetworkError):
             t.request("GET", "https://h.example/", {}, None, 5.0, 10_000)
 
+    def test_dribbled_chunk_framing_hits_deadline_on_a_real_socket(self):
+        import socket as socket_mod
+        import threading
+        import time as time_mod
+        srv = socket_mod.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        self.addCleanup(srv.close)
+        stop = threading.Event()
+
+        def serve():
+            conn, _ = srv.accept()
+            with conn:
+                conn.recv(4096)
+                conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                while not stop.is_set():  # endless chunk-size line, one byte per 50 ms
+                    try:
+                        conn.sendall(b"0")
+                    except OSError:
+                        return
+                    time_mod.sleep(0.05)
+        th = threading.Thread(target=serve, daemon=True)
+        th.start()
+        self.addCleanup(stop.set)
+        port = srv.getsockname()[1]
+        start = time_mod.monotonic()
+        with self.assertRaises(NetworkError) as cm:
+            UrllibTransport(total_timeout=0.6).request("GET", f"http://127.0.0.1:{port}/", {}, None, 0.4, 10_000)
+        self.assertLess(time_mod.monotonic() - start, 3.0)
+        self.assertIn("time limit", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
