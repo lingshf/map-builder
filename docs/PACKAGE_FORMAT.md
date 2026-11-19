@@ -368,7 +368,9 @@ counted in `edits.removed` and listed in `report.json`.
     correction enabled online, the `features` entry also has an optional `dsm_mask_query` object
     describing the second, wider Overpass request of the same OpenStreetMap data (same licence and
     attribution) used only for DSM mask candidates: `purpose`, `margin_m`, and `query_sha256`,
-    `from_cache`, `osm_base_timestamp` on success or `error` if it failed. The entry's own
+    `from_cache`, `osm_base_timestamp` on success, or `error_class`, `error` (a fixed summary) and
+    for an HTTP error `error_status` if it failed. An `osm_base` value that is not an ISO-8601 UTC
+    timestamp is omitted, here and in the `features` entry itself, with an `osm_base_timestamp_note`. The entry's own
     `query_sha256` is always the normal (area + 30 m) query, the same as with the correction off
   * counts and warnings
 

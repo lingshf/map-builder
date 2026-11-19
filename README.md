@@ -90,8 +90,16 @@ the surrounding ground before the terrain, roads and buildings are built.
   footprint is left out of the mask, so it never fills that multipolygon's courtyard or clearing.
   The two requests may see slightly different OSM data (minutes apart, or a cached normal
   response); that only affects the mask. If the wider request fails (HTTP error, rate limit, size
-  limit, a server-side error remark), the content stands and the correction is skipped with a
-  warning (`reason: mask candidates unavailable`, the uncorrected surface model). If only its
+  limit, a server-side error remark, malformed XML or an unsupported encoding), the content stands
+  and the correction is skipped with a
+  warning (`reason: mask candidates unavailable`, the uncorrected surface model);
+  `dsm_mask_query` then records only `error_class`, a fixed `error` summary and, for an HTTP
+  error, `error_status` — never the parser or server text, which may quote the response. A
+  `<meta osm_base>` value (either response, or a local file) that is not an ISO-8601 UTC
+  timestamp is not recorded (`osm_base_timestamp_note` instead). The margin-only candidates also
+  count toward the feature limit (50 000 by default, content included); rather than failing
+  the build, candidates beyond it skip the correction with the same warning, and a member way
+  listed more than once in a multipolygon is used once. If only its
   cache write fails (full disk, unwritable cache), its response is still used, uncached, with a
   warning and `dsm_mask_query.cache_write_error`; a failed cache write of the normal request still
   fails acquisition, as with the correction off. So the input OSM content and its selection are

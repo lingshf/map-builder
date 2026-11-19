@@ -143,6 +143,12 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
 
     DTDs and entity declarations are rejected by the parser itself (whatever the
     document encoding), and element count/depth limits are enforced while parsing.
+
+    Every failure is a :class:`FormatError` or :class:`LimitError` whose message is project-authored and
+    never quotes the input (an element name, id or encoding label may carry anything, e.g. a credential-like
+    string): any other exception expat or the handlers raise on hostile input (``LookupError`` for an
+    unknown declared encoding, ``ValueError``/``UnicodeError``...) is converted here, so the local-file and
+    Overpass paths (normal and DSM mask requests) only ever see the project error types.
     """
     if isinstance(data, str):
         data = data.encode("utf-8")
@@ -160,7 +166,7 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
             raise LimitError(f"{description}: more than {max_total_elements} XML elements")
         if depth == 1:
             if name != "osm":
-                raise FormatError(f"{description}: not OSM XML (root <{name[:40]}>)")
+                raise FormatError(f"{description}: not OSM XML (the root element is not <osm>)")
             out.generator = attrs.get("generator")
         elif depth == 2:
             state["top"] += 1
@@ -188,7 +194,7 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
         if state["remark"] == depth and name == "remark":
             state["remark"] = None
         if depth == 2 and state["cur"] is not None and state["cur"][0] == name:
-            _finish(out, state["cur"], description)
+            _finish(out, state["cur"], description, state["top"])
             state["cur"] = None
 
     def text(s):
@@ -212,16 +218,22 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
     except xml.parsers.expat.ExpatError as e:
         raise FormatError(f"{description}: invalid OSM XML: {xml.parsers.expat.ErrorString(e.code)} "
                           f"at line {e.lineno}") from None
-    except ValueError:
-        raise FormatError(f"{description}: unsupported OSM XML encoding (use UTF-8)") from None
     except FormatError as e:
         if str(e).startswith("DTD/"):
             raise FormatError(f"{description}: {e}") from None
         raise
+    except LimitError:
+        raise
+    except LookupError:
+        # an unknown encoding declared in the XML declaration (the label itself is not quoted)
+        raise FormatError(f"{description}: unsupported OSM XML encoding (use UTF-8)") from None
+    except (ValueError, TypeError, OverflowError):
+        # UnicodeError (a ValueError) and anything else the parser raises on hostile input
+        raise FormatError(f"{description}: invalid or unsupported OSM XML (use UTF-8)") from None
     return out
 
 
-def _finish(out, cur, description):
+def _finish(out, cur, description, index):
     kind, attrs, tags, items = cur
     try:
         if kind == "node":
@@ -234,7 +246,9 @@ def _finish(out, cur, description):
         else:
             out.relations[int(attrs.get("id"))] = ([(t, int(r), role) for t, r, role in items], tags)
     except (TypeError, ValueError):
-        raise FormatError(f"{description}: malformed <{kind} id={str(attrs.get('id'))[:20]}>") from None
+        # the element's position, never its attribute text (it may carry anything)
+        raise FormatError(f"{description}: malformed <{kind}> (top-level OSM element #{index}: id, coordinates "
+                          "or references are not valid numbers)") from None
 
 
 def load_osm_file(path):
@@ -334,13 +348,14 @@ class Polygon:
         return not any(point_in_ring(x, y, h) for h in self.holes)
 
 
-def _assemble_rings(way_lists, work=None):
+def _assemble_rings(way_lists, work=None, max_rings=None):
     """Join open member ways into closed rings. Returns (rings, ok). Members are taken in order; an open one
     is extended by the first remaining member (in order) sharing one of its ends. ``work`` (optional, a
     :class:`_MaskWork`) is charged each member and its vertices before it is copied, and for every join the
     scan of the remaining members, the list shift removing the joined one and the vertices it adds. Closed
     members cost O(1) beyond their copy (no front removal), and prepending is O(added vertices) (a deque),
-    so the uncharged work is linear in the input."""
+    so the uncharged work is linear in the input. ``max_rings`` (optional, the DSM mask feature allowance):
+    :class:`_MaskFeatureLimit` is raised as soon as one more ring would be produced, before it is kept."""
     segs = []
     for w in way_lists:
         if len(w) >= 2:
@@ -350,13 +365,18 @@ def _assemble_rings(way_lists, work=None):
     rings = []
     ok = True
     head = 0
+
+    def keep(ring):
+        if max_rings is not None and len(rings) >= max_rings:
+            raise _MaskFeatureLimit()
+        rings.append(ring if isinstance(ring, list) else list(ring))
     while head < len(segs):
         first = segs[head]
         segs[head] = None
         head += 1
         if first[0] == first[-1]:
             if len(first) >= 4:
-                rings.append(first)
+                keep(first)
             else:
                 ok = False
             continue
@@ -389,7 +409,7 @@ def _assemble_rings(way_lists, work=None):
                 ok = False
                 break
         if cur[0] == cur[-1] and len(cur) >= 4:
-            rings.append(list(cur))
+            keep(cur)
         else:
             ok = False
     return rings, ok
@@ -525,11 +545,15 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     if max_mask_work is None:
         from .dsm import MASK_VALIDATION_WORK_BUDGET as max_mask_work
     work = _MaskWork(max_mask_work)
+    allowance = _FeatureAllowance(max_features - _feature_count(out))
     try:
-        _add_margin_mask_candidates(out, mask_data, data, area, mask_extent, work)
+        _add_margin_mask_candidates(out, mask_data, data, area, mask_extent, work, allowance)
     except _MaskWorkExhausted:
         out.mask_work_exceeded = (f"DSM mask candidate assembly needs more than {max_mask_work} geometric tests "
                                   "(the mask validation work budget)")
+    except _MaskFeatureLimit:
+        out.mask_unavailable = (f"the DSM mask candidates of the wider DSM mask response exceed the feature limit "
+                                f"({max_features} features, content included)")
     out.mask_work = min(work.n, max_mask_work)
     _check_feature_count(out, max_features)
     return out
@@ -537,6 +561,24 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
 
 class _MaskWorkExhausted(Exception):
     """Internal: :class:`_MaskWork` ran out (caught by :func:`classify`)."""
+
+
+class _MaskFeatureLimit(Exception):
+    """Internal: the margin-only DSM mask candidates would exceed the feature allowance (caught by
+    :func:`classify`, which then skips the correction with a warning instead of failing)."""
+
+
+class _FeatureAllowance:
+    """The features ``max_features`` leaves for the margin-only DSM mask candidates: :meth:`take` raises
+    :class:`_MaskFeatureLimit` before more than ``left`` features are kept."""
+
+    def __init__(self, left):
+        self.left = left
+
+    def take(self, k=1):
+        if k > self.left:
+            raise _MaskFeatureLimit()
+        self.left -= k
 
 
 class _MaskWork:
@@ -552,9 +594,13 @@ class _MaskWork:
             raise _MaskWorkExhausted()
 
 
+def _feature_count(out):
+    return (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
+            + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas))
+
+
 def _check_feature_count(out, max_features):
-    total = (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
-             + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas))
+    total = _feature_count(out)
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
 
@@ -574,6 +620,7 @@ def _mask_polygons(outers, inners, work):
     uniform grid, so a hole is tested only against the outers whose bbox covers its cell."""
     polys, boxes, areas = [], [], []
     for o in outers:
+        work.add(1 + len(o))   # the cleaned ring and its polygon
         o = _clean_ring(o)
         a = ring_area(o) if len(o) >= 3 else 0.0
         if len(o) < 3 or abs(a) < 0.5:
@@ -607,6 +654,7 @@ def _mask_polygons(outers, inners, work):
             for j in range(j0, j1 + 1):
                 cells.setdefault((i, j), []).append(k)
     for h in inners:
+        work.add(1 + len(h))   # the cleaned ring
         h = _clean_ring(h)
         if len(h) < 3 or abs(ring_area(h)) < MIN_HOLE_AREA_M2:
             return []
@@ -641,7 +689,7 @@ _MASK_GRID_MAX_CELLS = 256   # per axis, the hole-to-outer index of _mask_polygo
 _MASK_GRID_MAX_SPAN = 16     # an outer covering more cells is tested against every hole instead
 
 
-def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
+def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, allowance=None):
     """Adds to ``out`` the DSM mask candidates among the elements of ``data`` (the wider DSM mask response)
     whose ids are not in ``content`` (the normal response): surface building footprints (``outside_buildings``)
     and forest/wood polygons
@@ -654,8 +702,15 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
     used on its own in the mask, so a solid copy never covers the relation's holes: a margin-only way is not
     added, and a content way (still generated as in the normal response) is listed in ``mask_suppressed``,
     which :func:`generate.dsm_obstacles` leaves out of the mask. Ring assembly and hole assignment are
-    charged to ``work`` (:class:`_MaskWork`)."""
+    charged to ``work`` (:class:`_MaskWork`), as is every allocation of a candidate (its point list, cleaned
+    ring and polygon), so a closed member costs about three times its vertices. A member listed more than
+    once in a relation (the same way and role) is used once. ``allowance`` (:class:`_FeatureAllowance`,
+    default unbounded) is the number of features left under ``max_features``: it bounds the outer rings of
+    each relation as they are assembled and is charged every candidate before it is kept, so nothing beyond
+    it is materialised (:class:`_MaskFeatureLimit`)."""
     from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
+    if allowance is None:
+        allowance = _FeatureAllowance(math.inf)
     bridge_rect = _expand(mask_extent, BRIDGE_CANDIDATE_MARGIN_M)
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
     tree_rect = _expand(mask_extent, TREE_RADIUS_M)
@@ -663,6 +718,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
     proj_cache = {}
 
     def way_points(nids):
+        work.add(len(nids))   # the point list
         pts = []
         for nid in nids:
             p = proj_cache.get(nid)
@@ -679,10 +735,12 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
             return
         if "building" in tags or "building:part" in tags:
             if any(_rect_overlaps(p.bbox(), building_rect) for p in polys):
+                allowance.take(len(polys))
                 out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys)
         elif area_class(tags) == "forest":
             for k, p in enumerate(polys):
                 if _rect_overlaps(p.bbox(), mask_extent):
+                    allowance.take()
                     out.mask_areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area",
                                                   dict(tags, _class="forest"), p))
 
@@ -691,7 +749,9 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
         if rid in content.relations or tags.get("type") != "multipolygon":
             continue
         fam = _area_family(tags)
-        ways = [(r, role) for t, r, role in members if t == "way"]
+        # each (way, role) once: a repeated member reference adds no geometry, only allocations
+        ways = list(dict.fromkeys((r, "inner" if role == "inner" else "outer") for t, r, role in members
+                                  if t == "way"))
         if fam or any(role == "inner" for _r, role in ways):
             for r, role in ways:
                 if role != "inner":
@@ -700,7 +760,8 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
             continue
         if any(r not in data.ways for r, _role in ways):
             continue
-        orings, _ok1 = _assemble_rings([data.ways[r][0] for r, role in ways if role != "inner"], work)
+        orings, _ok1 = _assemble_rings([data.ways[r][0] for r, role in ways if role != "inner"], work,
+                                       max_rings=allowance.left)
         irings, ok2 = _assemble_rings([data.ways[r][0] for r, role in ways if role == "inner"], work)
         if not ok2 or not orings:
             continue
@@ -732,6 +793,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
             pts = way_points(nids)
             if pts is not None:
                 bparts = _clip_polyline(pts, area, bridge_rect)
+                allowance.take(len(bparts))
                 for k, part in enumerate(bparts):
                     out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
 
@@ -740,6 +802,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
             x, y = frame.to_local(lat, lon)
             # wherever it lies, inside the area included: a margin-only tree is a mask candidate, never generated
             if tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]:
+                allowance.take()
                 out.mask_trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
 
 
@@ -843,7 +906,9 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             continue
         outer_ways, inner_ways, outer_ids = [], [], []
         missing_outer = missing_inner = False
-        for typ, ref, role in members:
+        # each (type, ref, role) once: a repeated member reference adds no geometry (only duplicate copies of a
+        # ring, or a leftover that cannot close), so valid relations are unaffected
+        for typ, ref, role in dict.fromkeys((t, r, "inner" if ro == "inner" else "outer") for t, r, ro in members):
             if typ != "way":
                 continue
             used_as_member.add(ref)

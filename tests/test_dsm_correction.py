@@ -1647,5 +1647,263 @@ class ReviewRound6Test(unittest.TestCase):
         self.assertTrue(all(c == tuple(LANDCOVER_COLORS[None]) for c in terrain.mesh.face_colors))
 
 
+class ReviewRound7Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-7 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+    EXTENT = (-50.0, -50.0, 150.0, 50.0)
+    BAD_ENCODING = b'<?xml version="1.0" encoding="not-a-real-encoding"?><osm/>'
+    SECRET = "token=synthetic"
+
+    def _build(self, responses, dsm_correction=True):
+        """build_package (local SYNTHETIC DEM, scripted Overpass ``responses``): (plan, sources, manifest,
+        package bytes as text, queries)."""
+        from map_builder.core import pipeline
+        from map_builder.core.http import HttpClient, Response
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        _, dem, _ = write_synthetic_fixtures(tmp.name)
+        queries, captured = [], {}
+
+        class Transport:
+            def request(self, method, url, headers, data, timeout, max_bytes):
+                queries.append(data)
+                status, body = responses.pop(0)
+                return Response(status, body)
+        settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
+                            elevation_license="SYNTHETIC", terrain_spacing=30.0, dsm_correction=dsm_correction)
+        orig = pipeline.plan_to_package
+
+        def capture(plan, path, name, sources, **kw):
+            captured["plan"], captured["sources"] = plan, sources
+            return orig(plan, path, name, sources, **kw)
+        pipeline.plan_to_package = capture
+        try:
+            path = os.path.join(tmp.name, "out.mbmap")
+            manifest, result = build_package(Area(*self.AREA), settings, path, "SYNTHETIC",
+                                             client=HttpClient(Transport()), created_utc="2026-01-01T00:00:00Z")
+        finally:
+            pipeline.plan_to_package = orig
+        self.assertTrue(result.ok, result.errors)
+        with zipfile.ZipFile(path) as z:
+            text = "".join(z.read(n).decode("utf-8", "replace") for n in z.namelist())
+        return captured["plan"], captured["sources"], manifest, text, queries
+
+    def _assert_persistable(self, plan, sources, text, *raw):
+        from map_builder.blender.sources import check_persistable
+        check_persistable({"sources": sources, "report": plan.report})   # Blender's persistence check passes
+        persisted = json.dumps([sources, plan.report]) + text
+        for r in raw:
+            self.assertNotIn(r, persisted)
+
+    # --- finding 1: every parser exception on hostile input is a sanitised FormatError -----------------------
+
+    def test_parser_converts_hostile_input_to_format_error(self):
+        from map_builder.core.errors import FormatError
+        from map_builder.core.osm import load_osm_file
+        cases = {"unknown encoding": (self.BAD_ENCODING, "not-a-real-encoding"),
+                 "unsupported encoding": (b'<?xml version="1.0" encoding="utf-7"?><osm/>', "utf-7"),
+                 "invalid utf-8": (b'<osm><node id="1" lat="0" lon="0"><tag k="a" v="\xff\xfe"/></node></osm>',
+                                   "\ufffd"),
+                 "malformed id": (b'<osm><node id="1?token=synthetic" lat="0" lon="0"/></osm>', self.SECRET),
+                 "malformed ref": (b'<osm><way id="5"><nd ref="?token=synthetic"/></way></osm>', self.SECRET),
+                 "foreign root": (b'<token_synthetic_root/>', "token_synthetic_root")}
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for name, (doc, raw) in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(FormatError) as cm:
+                    parse_osm_xml(doc, description="SYNTHETIC")
+                self.assertNotIn(raw, str(cm.exception))
+                self.assertIsNone(cm.exception.__cause__)
+                path = os.path.join(tmp.name, "hostile.osm")
+                with open(path, "wb") as f:
+                    f.write(doc)
+                with self.assertRaises(FormatError) as cm:                     # the local-file path too
+                    load_osm_file(path)
+                self.assertNotIn(raw, str(cm.exception))
+
+    def test_unknown_encoding_of_the_mask_response_skips_the_correction(self):
+        normal, _wide = ReviewRound5Test._fixture(self)
+        grid, cl, sources, queries = ReviewRound5Test._acquire(self, [(200, normal), (200, self.BAD_ENCODING)],
+                                                               True)
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(len(cl.buildings), 1)                                  # the content stands
+        mq = sources[1]["dsm_mask_query"]
+        self.assertEqual(mq["error_class"], "FormatError")
+        self.assertIn("not usable OSM XML", mq["error"])
+        self.assertIn("FormatError", cl.mask_unavailable)
+        self.assertNotIn("not-a-real-encoding", json.dumps(sources) + cl.mask_unavailable)
+        plan = build_plan(Area(*self.AREA), grid, cl, PlanOptions(trees=False), dsm_correction=True)
+        self.assertEqual(plan.report["terrain_correction"]["reason"], "mask candidates unavailable")
+        self.assertTrue(any(w.startswith("DSM terrain correction skipped: the DSM mask request")
+                            for w in plan.report["warnings"]))
+        # the normal (content) request still fails, now with the project error type
+        from map_builder.core.errors import FormatError
+        with self.assertRaises(FormatError):
+            ReviewRound5Test._acquire(self, [(200, self.BAD_ENCODING)], True)
+
+    # --- finding 2: only safe structured summaries reach provenance and the report ---------------------------
+
+    def test_a_credential_like_parser_diagnostic_is_not_persisted(self):
+        normal, wide = ReviewRound5Test._fixture(self)
+        bad = wide.replace(b"</osm>", b'<node id="7?token=synthetic" lat="0" lon="0"/></osm>')
+        plan, sources, manifest, text, queries = self._build([(200, normal), (200, bad)])
+        self.assertEqual(len(queries), 2)
+        mq = sources[1]["dsm_mask_query"]
+        self.assertEqual((mq["error_class"], mq["error"]), ("FormatError", pipeline_mask_message("FormatError")))
+        self.assertEqual(plan.report["terrain_correction"]["reason"], "mask candidates unavailable")
+        self.assertTrue(any(o.mb_class == "building" for o in plan.objects))   # the content was generated
+        self._assert_persistable(plan, sources, text, self.SECRET, "7?token")
+
+    def test_a_network_error_is_summarised(self):
+        normal, _wide = ReviewRound5Test._fixture(self)
+        plan, sources, _m, text, _q = self._build([(200, normal), (429, b"")])
+        mq = sources[1]["dsm_mask_query"]
+        self.assertEqual(mq["error_class"], "NetworkError")
+        self.assertEqual(mq["error_status"], 429)
+        self.assertEqual(mq["error"], pipeline_mask_message("NetworkError"))
+        self._assert_persistable(plan, sources, text)
+
+    def test_an_invalid_osm_base_is_omitted_with_a_note(self):
+        from map_builder.core.pipeline import OSM_BASE_NOTE
+        bad_base = b'<meta osm_base="https://user:pw@example.invalid/?token=synthetic"/>'
+        normal, wide = ReviewRound5Test._fixture(self)
+        hostile_wide = wide.replace(b'<meta osm_base="2026-01-01T00:00:00Z"/>', bad_base)
+        hostile_normal = normal.replace(b'<meta osm_base="2026-01-01T00:00:00Z"/>', bad_base)
+        self.assertNotEqual(hostile_wide, wide)
+        # the wide (mask) response: its candidates are used, only the timestamp is dropped
+        plan, sources, _m, text, _q = self._build([(200, normal), (200, hostile_wide)])
+        mq = sources[1]["dsm_mask_query"]
+        self.assertNotIn("osm_base_timestamp", mq)
+        self.assertEqual(mq["osm_base_timestamp_note"], OSM_BASE_NOTE)
+        self.assertNotIn("error", mq)
+        self.assertEqual(sources[1]["osm_base_timestamp"], "2026-01-01T00:00:00Z")   # the normal one, valid
+        self.assertNotEqual(plan.report["terrain_correction"]["reason"], "mask candidates unavailable")
+        self._assert_persistable(plan, sources, text, self.SECRET, "user:pw")
+        # the normal (content) response, with the correction on and off: the same validation
+        for on, responses in ((True, [(200, hostile_normal), (200, wide)]), (False, [(200, hostile_normal)])):
+            with self.subTest(correction=on):
+                plan, sources, _m, text, _q = self._build(responses, dsm_correction=on)
+                self.assertNotIn("osm_base_timestamp", sources[1])
+                self.assertEqual(sources[1]["osm_base_timestamp_note"], OSM_BASE_NOTE)
+                self.assertTrue(any(o.mb_class == "building" for o in plan.objects))
+                if on:
+                    self.assertEqual(sources[1]["dsm_mask_query"]["osm_base_timestamp"], "2026-01-01T00:00:00Z")
+                self._assert_persistable(plan, sources, text, self.SECRET, "user:pw")
+        # unchanged otherwise: a valid timestamp is recorded and a missing one stays None
+        from map_builder.core.osm import OsmData
+        from map_builder.core.pipeline import osm_source_entry
+        d = OsmData()
+        d.source = {"provider": "local-file", "file_name": "x.osm", "file_generator": "SYNTHETIC?token=x"}
+        src = osm_source_entry(d)
+        self.assertIsNone(src["osm_base_timestamp"])
+        self.assertNotIn("file_generator", src)                         # a credential-like generator, too
+        self.assertIn("file_generator_note", src)
+        d.timestamp, d.source["file_generator"] = "2024-02-29T23:59:59.5Z", "SYNTHETIC generator"
+        src = osm_source_entry(d)
+        self.assertEqual((src["osm_base_timestamp"], src["file_generator"]),
+                         ("2024-02-29T23:59:59.5Z", "SYNTHETIC generator"))
+        self.assertNotIn("osm_base_timestamp_note", src)
+
+    # --- finding 3: wide multipolygon assembly is deduplicated and bounded by the feature allowance -----------
+
+    def _repeated_triangle(self, n=200_000):
+        b = OsmBuilder()
+        b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
+        tri = b.way([(60.0, 0.0), (64.0, 0.0), (62.0, 3.0)], closed=True)
+        rid = b._next()
+        b.relations.append((rid, [("way", tri, "outer")] * n, {"type": "multipolygon", "building": "yes"}))
+        data = parse_osm_xml(b.xml().encode())
+        return data, _without(data, ways=[tri], relations=[rid]), rid
+
+    def test_repeated_member_references_are_bounded(self):
+        import tracemalloc
+        area = Area(*self.AREA)
+        wide, normal, rid = self._repeated_triangle()
+        for name, args in (("mask", (normal, wide)), ("content", (wide, None))):
+            with self.subTest(name):
+                tracemalloc.start()
+                try:
+                    t = time.perf_counter()
+                    cl = classify(args[0], area, mask_extent=self.EXTENT, mask_data=args[1])
+                    elapsed = time.perf_counter() - t
+                    peak = tracemalloc.get_traced_memory()[1]
+                finally:
+                    tracemalloc.stop()
+                self.assertLess(peak, 20 * 2 ** 20)          # about 119 MiB before
+                self.assertLess(elapsed, 2.0)                 # about 11 s (mask) and 15 s (content) before
+                self.assertEqual([f.id for f in cl.outside_buildings], [f"osm:relation/{rid}"])
+                self.assertIsNone(cl.mask_work_exceeded)
+                self.assertIsNone(cl.mask_unavailable)
+                self.assertEqual(len(cl.buildings), 1)
+
+    def test_member_repeated_with_an_empty_role_is_used_once(self):
+        b = OsmBuilder()
+        w = b.way(square(0, 0, 5), closed=True)
+        rid = b._next()
+        b.relations.append((rid, [("way", w, "outer"), ("way", w, ""), ("way", w, "outer")],
+                            {"type": "multipolygon", "building": "yes"}))
+        cl = classify(parse_osm_xml(b.xml().encode()), Area(*self.AREA))
+        self.assertEqual([f.id for f in cl.buildings], [f"osm:relation/{rid}"])   # before: #0, #1, #2 copies
+
+    def test_mask_candidates_beyond_the_feature_allowance_skip_the_correction(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
+        normal = parse_osm_xml(b.xml().encode())
+        members = [("way", b.way(square(60.0 + (k % 40), -20.0 + (k // 40), 0.4), closed=True),
+                    "outer") for k in range(2000)]
+        b.relations.append((b._next(), members, {"type": "multipolygon", "building": "yes"}))
+        for k in range(30):
+            b.node(-45.0 + k, 45.0, {"natural": "tree"})
+        wide = parse_osm_xml(b.xml().encode())
+        from map_builder.core import osm as osm_mod
+        made = []
+        orig = osm_mod.Polygon
+
+        class Counting(orig):
+            def __init__(self, *a, **kw):
+                made.append(1)
+                super().__init__(*a, **kw)
+        osm_mod.Polygon = Counting
+        try:
+            cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=10)   # no LimitError
+        finally:
+            osm_mod.Polygon = orig
+        self.assertIn("exceed the feature limit (10 features", cl.mask_unavailable)
+        self.assertEqual(made, [1])    # the content building only: the 2000 rings stop at the allowance (9)
+        self.assertEqual(_summary(cl), _summary(classify(normal, area, mask_extent=self.EXTENT)))
+        self.assertLessEqual(len(cl.buildings) + len(cl.outside_buildings) + len(cl.mask_trees), 10)
+        g = ReviewRound4Test._grid(self)
+        plan = build_plan(area, g, cl, PlanOptions(trees=False), dsm_correction=True)
+        tc = plan.report["terrain_correction"]
+        self.assertEqual((tc["applied"], tc["reason"]), (False, "mask candidates unavailable"))
+        self.assertTrue(any(w.startswith("DSM terrain correction skipped: the DSM mask candidates") for w in
+                            plan.report["warnings"]))
+        # within the allowance the same candidates are used
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
+        self.assertIsNone(cl.mask_unavailable)
+        self.assertEqual(len(cl.mask_trees), 30)
+        self.assertEqual(len(cl.outside_buildings), 2000)
+
+    def test_a_closed_member_is_charged_its_allocations(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        w = b.way(square(110.0, 0.0, 4.0), closed=True)
+        rid = b._next()
+        b.relations.append((rid, [("way", w, "outer")], {"type": "multipolygon", "building": "yes"}))
+        wide = parse_osm_xml(b.xml().encode())
+        cl = classify(parse_osm_xml(OsmBuilder().xml().encode()), area, mask_extent=self.EXTENT, mask_data=wide)
+        self.assertEqual(len(cl.outside_buildings), 1)
+        n = len(wide.ways[w][0])
+        self.assertGreaterEqual(cl.mask_work, 3 * n)        # the copy, the point list and the cleaned ring
+
+
+def pipeline_mask_message(cls_name):
+    from map_builder.core import errors, pipeline
+    return pipeline._mask_error_message(getattr(errors, cls_name)("SYNTHETIC"))
+
+
 if __name__ == "__main__":
     unittest.main()
