@@ -76,7 +76,8 @@ The sample regeneration command is in `examples/README.md`.
 * **No silent flat-ground substitution.** An elevation failure stops Generate.
 * **DSM terrain correction** (`Settings.dsm_correction`; default auto = on for Copernicus, off
   for local files) lowers DEM points under OSM buildings (+15 m), trees (6 m), forest/wood and
-  bridge ways (width/2 + 15 m) by a BFS fill + 20 smoothing passes, `min(original, filled)`; it is
+  bridge ways (width/2 + 15 m) by a harmonic (Laplace) fill solved by multigrid (reproduces
+  planes, bounded by the surrounding ground, linear work), `min(original, filled)`; it is
   skipped below 5 % unmasked points. It is a derived step: raw elevation provenance and hashes are
   unchanged; the outcome is in `report.json` `terrain_correction`, the terrain `surface` is
   `inferred:`, and the elevation source gets a `processing` note. Approximation, not a DTM.

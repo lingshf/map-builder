@@ -60,8 +60,11 @@ the surrounding ground before the terrain, roads and buildings are built.
 * Masked DEM points are those within 15 m of a building footprint (all buildings, including
   courtyards), within 6 m of a `natural=tree`, inside `landuse=forest`/`natural=wood`, or within
   width/2 + 15 m of a `highway`/`railway` way with `bridge=*` (not `no`).
-* Masked points are filled from the unmasked ground by a breadth-first fill (mean of the
-  already-known 8 neighbours), then smoothed 20 times over the masked points only. The result is
+* Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The
+  equation is solved coarse to fine (multigrid: a nested-iteration guess from halved grids, then
+  V-cycles of red-black Gauss-Seidel until the largest update is below 5 mm). The work is linear in
+  the grid size. A plane, such as a uniform slope, is reproduced under a masked area. The fill is
+  smooth and never goes above or below the surrounding unmasked heights. The result is
   `min(original, filled)`: terrain is never raised and unmasked points are not changed.
 * If fewer than 5 % of the points are unmasked, the correction is skipped with a warning.
 * `report.json` gets a `terrain_correction` entry (`applied`, `setting`, `reason`,
@@ -141,10 +144,12 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
 * The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or
   custom normals.
 * **DSM correction is an approximation, not a DTM.** It only knows the features mapped in OSM:
-  unmapped buildings, trees or hedges stay in the terrain. Inside large masked areas (big forests,
-  dense blocks) the fill flattens real relief, and it cannot reveal ground that differs from the
-  surrounding points (cuttings, river banks under a bridge). `man_made=bridge` outlines are not
-  masked (only the bridge ways are), and bridge ways are clipped to the area.
+  unmapped buildings, trees or hedges stay in the terrain. Inside masked areas the fill is the
+  smoothest surface through the surrounding ground. It follows uniform slopes, but it cannot
+  reveal ground that differs from the surrounding points, such as hills or hollows inside a big
+  forest, cuttings, or river banks under a bridge. Where a masked area touches the edge of the
+  area, the fill there is levelled towards the edge (zero slope across it). `man_made=bridge`
+  outlines are not masked (only the bridge ways are), and bridge ways are clipped to the area.
 * The target size is about 1 × 1 km. There is no streaming, no LOD generation and no
   frame-rate or performance guarantee.
 * The online paths (Copernicus download, Overpass, and online acquisition inside Blender) are

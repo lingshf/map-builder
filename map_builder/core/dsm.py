@@ -5,9 +5,10 @@ the elevation. This module pushes the terrain under those features back toward t
 
 1. :class:`MaskRaster` marks the grid points inside building footprints (buffered), tree crowns,
    forest/wood landcover and bridge deck ribbons (buffered).
-2. :func:`fill_masked` fills the masked points from the unmasked ones with an ordered breadth-first
-   fill (each newly reached point = mean of its already-known 8-neighbours), then runs smoothing passes
-   over the masked points only (Jacobi mean of the 8-neighbours).
+2. :func:`fill_masked` replaces the masked points by a harmonic (Laplace) interpolation of the
+   unmasked ones, solved coarse to fine (multigrid: nested-iteration initial guess, then V-cycles).
+   A plane is reproduced and the fill stays within the range of the surrounding ground (maximum
+   principle), so relief inside large masked areas is interpolated, not flattened.
 3. :func:`correct_grid` keeps ``min(original, filled)`` at masked points: terrain is never raised and
    unmasked points are returned bit-for-bit unchanged.
 
@@ -15,12 +16,13 @@ The result is an approximation of the ground, not a bare-earth DTM. It is a deri
 elevation provenance (provider, tiles, file hashes) is left unchanged and the correction is reported
 separately (``report.json`` ``terrain_correction``).
 
-Work is linear in the grid size and in the total length of the mask geometry (rasterised per row),
-with no all-pairs loops; grids are bounded by :data:`dem.MAX_GRID_POINTS`.
+Work is linear in the grid size (the multigrid solve is bounded by :data:`MAX_VCYCLES` V-cycles on large
+grids and :data:`VCYCLE_WORK_BUDGET` on small ones) and in the total
+length of the mask geometry (rasterised per row), with no all-pairs loops; grids are bounded by
+:data:`dem.MAX_GRID_POINTS`.
 """
 
 import math
-from collections import deque
 
 from .dem import ElevationGrid
 from .errors import NoDataError
@@ -28,7 +30,14 @@ from .errors import NoDataError
 BUILDING_BUFFER_M = 15.0      # about half a GLO-30 pixel around each footprint
 TREE_RADIUS_M = 6.0           # OSM natural=tree crown radius
 BRIDGE_BUFFER_M = 15.0        # added to half the deck width
-SMOOTHING_PASSES = 20
+FINE_PASSES = 2               # initial-guess Gauss-Seidel passes at the finest level; doubled per coarser level
+MAX_LEVEL_PASSES = 256        # cap on the initial-guess passes of any level
+COARSEST_PASSES = 200         # passes on a coarsest level of at most 64 cells
+VCYCLE_SMOOTHING = 2          # Gauss-Seidel passes before and after each coarse-grid correction
+MAX_VCYCLES = 10              # V-cycle cap on large grids
+VCYCLE_WORK_BUDGET = 4_000_000  # small grids may run more V-cycles while cycles * points stays below this
+VCYCLE_LIMIT = 200            # absolute V-cycle cap (thin or tiny grids converge slowly but cheaply)
+VCYCLE_TOLERANCE_M = 0.005    # stop when the largest update / coarse-grid correction is below this
 MIN_UNMASKED_FRACTION = 0.05
 SURFACE_MODEL_PROVIDERS = ("copernicus-glo30-aws",)   # elevation providers that are surface models (DSM)
 
@@ -163,106 +172,248 @@ def build_mask(grid, buildings=(), trees=(), forests=(), bridges=(), building_bu
     return m
 
 
-def _neighbours(nx, ny):
-    """k -> list of 8-neighbour indices (generator per index, bounded)."""
-    def nbrs(k):
-        j, i = divmod(k, nx)
-        out = []
-        for dj in (-1, 0, 1):
-            jj = j + dj
-            if 0 <= jj < ny:
-                base = jj * nx
-                for di in (-1, 0, 1):
-                    ii = i + di
-                    if (di or dj) and 0 <= ii < nx:
-                        out.append(base + ii)
-        return out
-    return nbrs
+def _axis_weights(n, nc):
+    """Per fine index: (coarse a, coarse b, weight a, weight b) of the cell-centred linear prolongation
+    (fine point i lies at coarse coordinate (i - 0.5) / 2), clamped at the grid edges."""
+    out = []
+    for i in range(n):
+        c = i // 2
+        a, b, wa = (c - 1, c, 0.25) if i % 2 == 0 else (c, c + 1, 0.75)
+        out.append((min(max(a, 0), nc - 1), min(max(b, 0), nc - 1), wa, 1.0 - wa))
+    return out
 
 
-def _hsum(row):
-    n = len(row)
-    if n == 1:
-        return [row[0]]
-    return [row[0] + row[1]] + [a + b + c for a, b, c in zip(row, row[1:], row[2:])] + [row[-2] + row[-1]]
+def _zeros(nx, ny):
+    return [[0.0] * (nx + 2) for _ in range(ny + 2)]
 
 
-def fill_masked(heights, mask, nx, ny, passes=SMOOTHING_PASSES):
-    """Filled copy of ``heights`` (rows of floats): masked points get values from the unmasked ones.
+class _Level:
+    """One level of the coarse-to-fine hierarchy.
 
-    Ordered BFS from the unmasked points (row-major seeds): each newly reached masked point becomes the
-    mean of its already-known 8-neighbours. Then ``passes`` Jacobi passes over the masked points only, each
-    setting a point to the mean of its 8-neighbours. Unmasked values are never modified. Needs at least one
-    unmasked point."""
-    n = nx * ny
-    flat = [h for row in heights for h in row]
-    known = bytearray(b"\x01") * n
-    masked_idx = [k for k in range(n) if mask[k]]
-    for k in masked_idx:
-        known[k] = 0
-    if len(masked_idx) == n:
-        raise ValueError("fill_masked needs at least one unmasked point")
-    nbrs = _neighbours(nx, ny)
-    queued = bytearray(n)
-    queue = deque()
-    for k in masked_idx:
-        if any(known[q] for q in nbrs(k)):
-            queue.append(k)
-            queued[k] = 1
-    while queue:
-        k = queue.popleft()
-        total = cnt = 0
-        nb = nbrs(k)
-        for q in nb:
-            if known[q]:
-                total += flat[q]
-                cnt += 1
-        flat[k] = total / cnt
-        known[k] = 1
-        for q in nb:
-            if not known[q] and not queued[q]:
-                queued[q] = 1
-                queue.append(q)
-    rows = [flat[j * nx:(j + 1) * nx] for j in range(ny)]
-    by_row = {}
-    for k in masked_idx:
-        j, i = divmod(k, nx)
-        by_row.setdefault(j, []).append(i)
-    colcount = [min(i + 1, nx - 1) - max(i - 1, 0) + 1 for i in range(nx)]
-    rowcount = [min(j + 1, ny - 1) - max(j - 1, 0) + 1 for j in range(ny)]
+    Arrays on a level are padded row lists ``U[j][i]`` (j in 1..ny, i in 1..nx) with a ghost border.
+    ``known[j]`` (padded bytes, ghosts 1) marks the fixed points; ``spans`` lists (j, first, last)
+    unknown column per row that has unknown points; ``edge`` is True if an unknown point lies on the grid
+    edge (its ghost neighbours then mirror it: a natural boundary, i.e. the mean of the in-grid
+    neighbours)."""
+
+    __slots__ = ("nx", "ny", "known", "spans", "edge", "wy")
+
+    def __init__(self, rows, nx, ny):
+        self.nx, self.ny = nx, ny
+        border = b"\x01" * (nx + 2)
+        self.known = [border] + [b"\x01" + r + b"\x01" for r in rows] + [border]
+        self.spans = []
+        for j, r in enumerate(rows, 1):
+            lo = r.find(0)
+            if lo >= 0:
+                self.spans.append((j, lo + 1, r.rfind(0) + 1))
+        self.edge = any(j in (1, ny) or lo == 1 or hi == nx for j, lo, hi in self.spans)
+        self.wy = None
+
+
+def _hierarchy(known_rows, nx, ny):
+    """Levels from fine to coarse, halving the grid (2 x 2 blocks). A coarse cell is known if any of its
+    children is known. Stops at 2 x 2 cells or before a level with no unknown cell."""
+    levels = [_Level(known_rows, nx, ny)]
+    while nx > 2 or ny > 2:
+        cx, cy = (nx + 1) // 2, (ny + 1) // 2
+        crows = []
+        for jc in range(cy):
+            r0 = known_rows[2 * jc]
+            r1 = known_rows[2 * jc + 1] if 2 * jc + 1 < ny else r0
+            row = (int.from_bytes(r0, "big") | int.from_bytes(r1, "big")).to_bytes(nx, "big")
+            if nx % 2:
+                row += b"\x00"
+            crows.append(bytes(a | b for a, b in zip(row[0::2], row[1::2])))
+        if all(0 not in r for r in crows):
+            break
+        levels[-1].wy = _axis_weights(ny, cy)
+        known_rows, nx, ny = crows, cx, cy
+        levels.append(_Level(known_rows, nx, ny))
+    return levels
+
+
+def _ghosts(U, lev):
+    """Copy the edge values into the ghost border (natural boundary)."""
+    nx, ny = lev.nx, lev.ny
+    for j in range(1, ny + 1):
+        r = U[j]
+        r[0] = r[1]
+        r[nx + 1] = r[nx]
+    U[0][:] = U[1]
+    U[ny + 1][:] = U[ny]
+
+
+def _gauss_seidel(U, lev, passes, B=None):
+    """``passes`` red-black Gauss-Seidel passes over the unknown points of the 5-point equation
+    ``4 * u - sum(neighbours) = b``. For Laplace (``B`` None) each update is the mean of the neighbours."""
+    K = lev.known
     for _ in range(passes):
-        hs = {}
-
-        def hrow(j):
-            h = hs.get(j)
-            if h is None:
-                h = hs[j] = _hsum(rows[j])
-            return h
-
-        updates = []
-        for j, cols in by_row.items():
-            h0 = hrow(j)
-            hm = hrow(j - 1) if j > 0 else None
-            hp = hrow(j + 1) if j < ny - 1 else None
-            row = rows[j]
-            rc = rowcount[j]
-            new = []
-            for i in cols:
-                t = h0[i] - row[i]
-                if hm is not None:
-                    t += hm[i]
-                if hp is not None:
-                    t += hp[i]
-                new.append(t / (colcount[i] * rc - 1))
-            updates.append((j, cols, new))
-        for j, cols, new in updates:
-            row = rows[j]
-            for i, v in zip(cols, new):
-                row[i] = v
-    return rows
+        for colour in (0, 1):
+            if lev.edge:
+                _ghosts(U, lev)
+            for j, lo, hi in lev.spans:
+                row, up, dn, kn = U[j], U[j - 1], U[j + 1], K[j]
+                s = lo + ((lo + j + colour) & 1)
+                e = hi + 1
+                if B is None:
+                    row[s:e:2] = [v if f else (le + ri + a + d) * 0.25 for v, f, le, ri, a, d in
+                                  zip(row[s:e:2], kn[s:e:2], row[s - 1:e - 1:2], row[s + 1:e + 1:2], up[s:e:2],
+                                      dn[s:e:2])]
+                else:
+                    row[s:e:2] = [v if f else (le + ri + a + d + b) * 0.25 for v, f, le, ri, a, d, b in
+                                  zip(row[s:e:2], kn[s:e:2], row[s - 1:e - 1:2], row[s + 1:e + 1:2], up[s:e:2],
+                                      dn[s:e:2], B[j][s:e:2])]
 
 
-def correct_grid(grid, mask, passes=SMOOTHING_PASSES, min_unmasked_fraction=MIN_UNMASKED_FRACTION):
+def _restricted_residual(U, B, lev, clev):
+    """(coarse right-hand side or None, largest absolute residual). The residual is ``b + sum(neighbours)
+    - 4 * u`` at the unknown points; per coarse cell (``clev``), the right-hand side is the sum of its
+    children's residuals (the operator is unscaled, so a cell of twice the spacing carries four times the
+    source)."""
+    nx = lev.nx
+    cx = clev.nx if clev is not None else 0
+    out = _zeros(cx, clev.ny) if clev is not None else None
+    if lev.edge:
+        _ghosts(U, lev)
+    K = lev.known
+    rmax = 0.0
+    for j, _, _ in lev.spans:
+        row, up, dn, kn = U[j], U[j - 1], U[j + 1], K[j]
+        if B is None:
+            r = [0.0 if f else le + ri + a + d - 4.0 * v for v, f, le, ri, a, d in
+                 zip(row[1:nx + 1], kn[1:nx + 1], row[0:nx], row[2:nx + 2], up[1:nx + 1], dn[1:nx + 1])]
+        else:
+            r = [0.0 if f else le + ri + a + d - 4.0 * v + b for v, f, le, ri, a, d, b in
+                 zip(row[1:nx + 1], kn[1:nx + 1], row[0:nx], row[2:nx + 2], up[1:nx + 1], dn[1:nx + 1],
+                     B[j][1:nx + 1])]
+        rmax = max(rmax, max(r), -min(r))
+        if out is None:
+            continue
+        if nx % 2:
+            r.append(0.0)
+        dst = out[((j - 1) >> 1) + 1]
+        dst[1:cx + 1] = [t + a + b for t, a, b in zip(dst[1:cx + 1], r[0::2], r[1::2])]
+    return out, rmax
+
+
+def _prolongate(U, lev, Uc, clev, add):
+    """Bilinear prolongation of the coarser level ``Uc`` onto the unknown points of ``U`` (in place). It
+    replaces them (initial guess) or, with ``add``, is added to them (coarse-grid correction)."""
+    cx, K = clev.nx, lev.known
+    for j, lo, hi in lev.spans:
+        ja, jb, va, vb = lev.wy[j - 1]
+        crow = [va * a + vb * b for a, b in zip(Uc[ja + 1][1:cx + 1], Uc[jb + 1][1:cx + 1])]
+        ext = [crow[0]] + crow + [crow[-1]]
+        f = [0.0] * (2 * cx)
+        f[0::2] = [0.25 * a + 0.75 * b for a, b in zip(ext, ext[1:cx + 1])]
+        f[1::2] = [0.75 * a + 0.25 * b for a, b in zip(ext[1:cx + 1], ext[2:])]
+        row, kn = U[j], K[j]
+        if add:
+            row[lo:hi + 1] = [v if k else v + w for v, k, w in zip(row[lo:hi + 1], kn[lo:hi + 1], f[lo - 1:hi])]
+        else:
+            row[lo:hi + 1] = [v if k else w for v, k, w in zip(row[lo:hi + 1], kn[lo:hi + 1], f[lo - 1:hi])]
+
+
+def _coarse_values(U, lev, clev):
+    """Coarse values for the initial guess: each known coarse cell holds the mean of its known children."""
+    nx, ny, cx = lev.nx, lev.ny, clev.nx
+    Uc = _zeros(cx, clev.ny)
+    for jc in range(clev.ny):
+        tot = [0.0] * cx
+        cnt = [0] * cx
+        for j in (2 * jc + 1, 2 * jc + 2):
+            if j > ny:
+                break
+            kn = lev.known[j][1:nx + 1] + b"\x00"
+            t = [v if f else 0.0 for v, f in zip(U[j][1:nx + 1], kn)] + [0.0]
+            tot = [s + a + b for s, a, b in zip(tot, t[0::2], t[1::2])]
+            cnt = [s + a + b for s, a, b in zip(cnt, kn[0::2], kn[1::2])]
+        Uc[jc + 1][1:cx + 1] = [t / c if c else 0.0 for t, c in zip(tot, cnt)]
+    return Uc
+
+
+def _coarsest_passes(lev, passes):
+    return COARSEST_PASSES if lev.nx * lev.ny <= 64 else passes
+
+
+def _vcycle(levels, level, U, B):
+    """One correction-scheme V-cycle at ``level``. Returns the convergence measure: the larger of the
+    largest Gauss-Seidel update implied by the residual before the cycle (``|r| / 4``) and the largest
+    coarse-grid correction."""
+    lev = levels[level]
+    if level == len(levels) - 1:
+        _gauss_seidel(U, lev, _coarsest_passes(lev, 2 * VCYCLE_SMOOTHING), B)
+        return _restricted_residual(U, B, lev, None)[1] * 0.25 if level == 0 else 0.0
+    _gauss_seidel(U, lev, VCYCLE_SMOOTHING, B)
+    clev = levels[level + 1]
+    rhs, rmax = _restricted_residual(U, B, lev, clev)
+    E = _zeros(clev.nx, clev.ny)
+    _vcycle(levels, level + 1, E, rhs)
+    _prolongate(U, lev, E, clev, True)
+    _gauss_seidel(U, lev, VCYCLE_SMOOTHING, B)
+    return max(rmax * 0.25, max(max(max(r), -min(r)) for r in E))
+
+
+def fill_masked(heights, mask, nx, ny, passes=FINE_PASSES):
+    """Filled copy of ``heights`` (rows of floats): masked points get a harmonic (Laplace) interpolation of
+    the unmasked ones, which stay fixed.
+
+    The discrete problem is the 5-point Laplace equation at the masked points, with the unmasked points
+    fixed and a natural boundary (mean of the in-grid neighbours) at the grid edge. It is solved coarse to
+    fine (multigrid) on a hierarchy of halved grids, where a coarse cell is known if any of its four
+    children is known, with red-black Gauss-Seidel passes:
+
+    1. Initial guess (nested iteration): known coarse cells hold the mean of their known children. The
+       coarsest level (at most 2 x 2 cells, or the last level with unknown cells) is smoothed; each finer
+       level starts its unknown points from the bilinear prolongation of the coarser solution and runs
+       ``passes * 2**level`` passes (at most :data:`MAX_LEVEL_PASSES`).
+    2. The coarse means are biased near the mask edge and on curved ground, so correction-scheme V-cycles
+       (:data:`VCYCLE_SMOOTHING` passes before and after each coarse-grid correction) follow on the finest
+       level until the largest Gauss-Seidel update (``|residual| / 4``) and the largest coarse correction
+       are below :data:`VCYCLE_TOLERANCE_M`, at most :data:`MAX_VCYCLES` times on large grids (small or
+       thin grids, which converge more slowly per cycle, may use up to :data:`VCYCLE_LIMIT` cycles within
+       :data:`VCYCLE_WORK_BUDGET`).
+
+    Work is bounded and linear in the grid size. The result obeys the maximum principle (it is also
+    clamped to the range of the unmasked values against round-off) and is deterministic. Needs at least
+    one unmasked point."""
+    if passes < 0:
+        raise ValueError("passes must be >= 0")
+    known_flat = bytes(0 if m else 1 for m in mask[:nx * ny])
+    if 1 not in known_flat:
+        raise ValueError("fill_masked needs at least one unmasked point")
+    rows = [[float(h) for h in row] for row in heights]
+    if 0 not in known_flat:
+        return rows
+    known_rows = [known_flat[j * nx:(j + 1) * nx] for j in range(ny)]
+    fixed = [v for row, kn in zip(rows, known_rows) for v, f in zip(row, kn) if f]
+    lo_v, hi_v = min(fixed), max(fixed)
+    U = [[r[0]] + r + [r[-1]] for r in rows]
+    U = [U[0][:]] + U + [U[-1][:]]
+    levels = _hierarchy(known_rows, nx, ny)
+    vals = [U]
+    for lev, clev in zip(levels, levels[1:]):
+        vals.append(_coarse_values(vals[-1], lev, clev))
+    top, T = levels[-1], vals[-1]
+    tk = [v for j in range(1, top.ny + 1) for v, f in zip(T[j][1:top.nx + 1], top.known[j][1:top.nx + 1]) if f]
+    start = sum(tk) / len(tk)
+    for j, lo, hi in top.spans:
+        T[j][lo:hi + 1] = [v if f else start for v, f in zip(T[j][lo:hi + 1], top.known[j][lo:hi + 1])]
+    _gauss_seidel(T, top, _coarsest_passes(top, min(passes << (len(levels) - 1), MAX_LEVEL_PASSES)))
+    for level in range(len(levels) - 2, -1, -1):
+        _prolongate(vals[level], levels[level], vals[level + 1], levels[level + 1], False)
+        _gauss_seidel(vals[level], levels[level], min(passes << level, MAX_LEVEL_PASSES))
+    for _ in range(min(VCYCLE_LIMIT, max(MAX_VCYCLES, VCYCLE_WORK_BUDGET // (nx * ny)))):
+        if _vcycle(levels, 0, U, None) < VCYCLE_TOLERANCE_M:
+            break
+    K = levels[0].known
+    for j, lo, hi in levels[0].spans:
+        U[j][lo:hi + 1] = [v if f else min(max(v, lo_v), hi_v) for v, f in zip(U[j][lo:hi + 1], K[j][lo:hi + 1])]
+    return [U[j][1:nx + 1] for j in range(1, ny + 1)]
+
+
+def correct_grid(grid, mask, passes=FINE_PASSES, min_unmasked_fraction=MIN_UNMASKED_FRACTION):
     """(corrected ElevationGrid or None, stats dict) for a :class:`MaskRaster` ``mask`` over ``grid``.
 
     Returns None (and ``stats['skipped']``) when no point is masked or fewer than ``min_unmasked_fraction``
@@ -319,8 +470,10 @@ def apply_correction(grid, requested, buildings=(), trees=(), forests=(), bridge
                      "bridge_buffer_m": f"deck width / 2 + {BRIDGE_BUFFER_M:g}", "forest": "inside landcover",
                      "features": {"buildings": len(buildings), "trees": len(trees), "forest_areas": len(forests),
                                   "bridges": len(bridges)}}
-    entry["method"] = (f"ordered BFS fill (mean of known 8-neighbours), {SMOOTHING_PASSES} smoothing passes "
-                       "over masked points, min(original, filled)")
+    entry["method"] = ("harmonic (Laplace, 5-point) interpolation of the masked points from the unmasked ones, "
+                       "solved coarse to fine (multigrid: nested-iteration initial guess from 2 x 2 coarsened "
+                       "levels, then a bounded number of V-cycles of red-black Gauss-Seidel until the largest "
+                       f"update is below {VCYCLE_TOLERANCE_M:g} m), min(original, filled)")
     warning = None
     if corrected is None:
         entry["reason"] = stats["skipped"]

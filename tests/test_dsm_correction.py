@@ -7,6 +7,7 @@ import math
 import os
 import random
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -224,9 +225,118 @@ class CorrectionTest(unittest.TestCase):
         for j in range(0, g.ny, 7):
             for i in range(0, g.nx, 7):
                 self.assertLessEqual(out.heights[j][i], g.heights[j][i])
-        # the fill is an approximation: inside a 480 m masked area on a 4 % slope it flattens the ground by
-        # metres (documented limit), but never beyond the relief of the area
-        self.assertLess(entry["max_lowering_m"], 0.04 * 480)
+        # the ground is a plane with nothing raised on it: the harmonic fill reproduces it, so (almost) nothing
+        # is lowered, even inside the 480 m forest on the 4 % slope
+        self.assertLess(entry["max_lowering_m"], 0.5)
+
+
+def _plane_with_square(n, spacing, half, cx=0.0, cy=0.0, bump=0.0):
+    """SYNTHETIC grid of :func:`ground` (4 % slope in x) with a ``bump`` m raised block strictly inside the
+    masked square (forest polygons leave their top edge row unmasked), and its mask."""
+    def h(x, y):
+        return ground(x, y) + (bump if abs(x - cx) < half and abs(y - cy) < half else 0.0)
+    g = make_grid(h, n=n, spacing=spacing)
+    return g, dsm.build_mask(g, forests=[[square(cx, cy, half)]])
+
+
+def _max_error(g, rows, fn=ground):
+    return max(abs(rows[j][i] - fn(x, y)) for i, j, x, y in points(g))
+
+
+class HarmonicFillTest(unittest.TestCase):
+    """SYNTHETIC checks that the fill interpolates (Laplace) and does not fabricate relief."""
+
+    def test_slope_under_large_masked_square_is_reproduced(self):
+        # 480 m square on the 4 % slope: 30 m spacing (GLO-30) and a fine 2 m grid
+        for n, spacing, cx in ((41, 30.0, 0.0), (500, 2.0, -100.0)):
+            g, mask = _plane_with_square(n, spacing, 240.0, cx=cx, cy=7.0)
+            self.assertGreaterEqual(mask.count(), (480 / spacing) ** 2)
+            filled = dsm.fill_masked(g.heights, mask.mask, g.nx, g.ny)
+            self.assertLess(_max_error(g, filled), 0.5, spacing)
+            out, stats = dsm.correct_grid(g, mask)
+            self.assertLess(stats["max_lowering_m"], 0.5, spacing)
+            self.assertLess(_max_error(g, out.heights), 0.5, spacing)
+
+    def test_raised_block_on_slope_is_lowered_to_the_plane(self):
+        for n, spacing in ((41, 30.0), (500, 2.0)):
+            g, mask = _plane_with_square(n, spacing, 240.0, cx=-60.0, bump=20.0)
+            out, entry, _ = dsm.apply_correction(g, True, forests=[[square(-60.0, 0.0, 240.0)]])
+            self.assertTrue(entry["applied"])
+            self.assertGreater(entry["max_lowering_m"], 19.5)
+            self.assertLess(_max_error(g, out.heights), 0.5, spacing)
+
+    def test_saddle_and_plane_boundaries_give_a_bounded_smooth_fill(self):
+        def saddle(x, y):   # x^2 - y^2 is harmonic, also for the discrete 5-point Laplacian
+            return 200.0 + (x * x - y * y) / 400.0
+
+        for fn in (saddle, ground):
+            g = make_grid(fn, n=161, spacing=2.0)
+            mask = dsm.MaskRaster(g)
+            for i, j, x, y in points(g):
+                if math.hypot(x - 10, y + 6) <= 110 or (abs(x + 60) <= 20 and abs(y - 90) <= 40):
+                    mask.mask[j * g.nx + i] = 1
+            filled = dsm.fill_masked(g.heights, mask.mask, g.nx, g.ny)
+            boundary = [g.heights[j][i] for i, j, _, _ in points(g) if not mask.mask[j * g.nx + i]
+                        and any(mask.mask[jj * g.nx + ii] for ii, jj in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1))
+                                if 0 <= ii < g.nx and 0 <= jj < g.ny)]
+            lo, hi = min(boundary), max(boundary)
+            worst_lap = 0.0
+            for i, j, _, _ in points(g):
+                if mask.mask[j * g.nx + i]:
+                    v = filled[j][i]
+                    self.assertTrue(lo <= v <= hi, (fn.__name__, i, j, v, lo, hi))   # maximum principle
+                    lap = filled[j][i - 1] + filled[j][i + 1] + filled[j - 1][i] + filled[j + 1][i] - 4 * v
+                    worst_lap = max(worst_lap, abs(lap))
+            self.assertLess(worst_lap, 0.01, fn.__name__)   # smooth: (nearly) zero discrete Laplacian
+            self.assertLess(_max_error(g, filled, fn), 0.5, fn.__name__)
+            self.assertEqual(filled, dsm.fill_masked(g.heights, mask.mask, g.nx, g.ny))   # deterministic
+
+    def test_largest_grid_is_reproduced_in_bounded_time(self):
+        """399 424 points (dem.MAX_GRID_POINTS is 400 000), 360 000 of them masked (a 900 m square)."""
+        g, mask = _plane_with_square(632, 1.5, 450.0, cx=3.0, cy=5.0)
+        self.assertLessEqual(g.nx * g.ny, 400_000)
+        t0 = time.perf_counter()
+        out, stats = dsm.correct_grid(g, mask)
+        elapsed = time.perf_counter() - t0
+        self.assertGreater(stats["masked_points"], 350_000)
+        self.assertLess(stats["max_lowering_m"], 0.5)
+        self.assertLess(_max_error(g, out.heights), 0.5)
+        self.assertLess(elapsed, 60.0)   # a few seconds on a desktop; lenient for shared CI runners
+
+    def test_small_odd_and_thin_grids_match_a_reference_solve(self):
+        """Odd, thin (1-row / 1-column) and tiny grids with random masks against a plain Gauss-Seidel
+        solve of the same equations (natural boundary at the grid edge) run to round-off."""
+        def reference(h, m, nx, ny):
+            u = [v for row in h for v in row]
+            for _ in range(20000):
+                d = 0.0
+                for k in range(nx * ny):
+                    if m[k]:
+                        j, i = divmod(k, nx)
+                        nb = [q for q, ok in ((k - 1, i > 0), (k + 1, i < nx - 1), (k - nx, j > 0),
+                                              (k + nx, j < ny - 1)) if ok]
+                        v = sum(u[q] for q in nb) / len(nb)
+                        d, u[k] = max(d, abs(v - u[k])), v
+                if d < 1e-10:
+                    break
+            return u
+        rng = random.Random(3)
+        for _ in range(120):
+            nx, ny = rng.randint(1, 13), rng.randint(1, 13)
+            if nx * ny < 2:
+                continue
+            h = [[rng.uniform(-50.0, 50.0) for _ in range(nx)] for _ in range(ny)]
+            p = rng.random()
+            m = bytearray(1 if rng.random() < p else 0 for _ in range(nx * ny))
+            if all(m):
+                m[rng.randrange(nx * ny)] = 0
+            flat = [v for row in h for v in row]
+            got = [v for row in dsm.fill_masked(h, m, nx, ny) for v in row]
+            known = [v for v, q in zip(flat, m) if not q]
+            self.assertEqual([v for v, q in zip(got, m) if not q], known)
+            self.assertTrue(all(min(known) <= v <= max(known) for v in got))
+            err = max(abs(a - b) for a, b in zip(got, reference(h, m, nx, ny)))
+            self.assertLess(err, 0.05, (nx, ny, p))
 
 
 class PlanReportTest(unittest.TestCase):
