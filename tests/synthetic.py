@@ -170,6 +170,53 @@ def synthetic_inputs(directory, spacing=10.0):
     return area, grid, classified, ids, [grid.provenance, osm_src]
 
 
+# --- small hand-built scenes for package/orientation tests ----------------------------
+
+SYNTHETIC_LICENSE_NOTE = "SYNTHETIC test data (no licence required)"
+
+
+def chiral_mesh(name="chiral", material="MB Roof"):
+    """Closed tetrahedron with no symmetry: any axis swap, mirror or winding flip changes it detectably.
+    Faces are CCW seen from outside (signed volume +4/3)."""
+    from map_builder.core.mesh import MeshData
+    m = MeshData(name)
+    p = [m.add_vertex(*q) for q in [(0, 0, 0), (4, 0, 0), (0, 2, 0), (0, 0, 1)]]
+    for f in [(p[0], p[2], p[1]), (p[0], p[1], p[3]), (p[0], p[3], p[2]), (p[1], p[2], p[3])]:
+        m.add_face(f, material, (0.5, 0.5, 0.5))
+    return m
+
+
+def grid_terrain_mesh(width, height, spacing=10.0, height_fn=None, name="terrain"):
+    """Terrain grid over the area rectangle centred on the origin; faces CCW from above (+Z)."""
+    from map_builder.core.mesh import MeshData
+    height_fn = height_fn or (lambda x, y: 2.0 + 0.02 * x + 0.01 * y + 0.0003 * x * y)
+    m = MeshData(name)
+    nx = int(round(width / spacing)) + 1
+    ny = int(round(height / spacing)) + 1
+    x0, y0 = -width / 2.0, -height / 2.0
+    for j in range(ny):
+        for i in range(nx):
+            x, y = x0 + i * spacing, y0 + j * spacing
+            m.add_vertex(x, y, height_fn(x, y))
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a, b = j * nx + i, j * nx + i + 1
+            c, d = (j + 1) * nx + i + 1, (j + 1) * nx + i
+            m.add_face((a, b, c), "MB Terrain", (0.3, 0.3, 0.2))
+            m.add_face((a, c, d), "MB Terrain", (0.3, 0.3, 0.2))
+    return m
+
+
+def synthetic_sources():
+    """Provenance entries shaped like pipeline.acquire output for the SYNTHETIC local files."""
+    from map_builder.core.osm import OSM_ATTRIBUTION, OSM_LICENSE
+    return [{"kind": "elevation", "provider": "local-file", "product": "user-supplied elevation raster",
+             "vertical_datum": "SYNTHETIC", "license": {"id": "user-declared", "name": SYNTHETIC_LICENSE_NOTE},
+             "attribution": SYNTHETIC_LICENSE_NOTE, "file_name": "synthetic_dem.asc"},
+            {"kind": "features", "provider": "local-file", "product": "OpenStreetMap", "license": OSM_LICENSE,
+             "attribution": OSM_ATTRIBUTION, "file_name": "synthetic_area.osm"}]
+
+
 if __name__ == "__main__":
     print(write_synthetic_fixtures(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__),
                                                                                       "fixtures")))

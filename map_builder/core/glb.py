@@ -1,0 +1,416 @@
+"""Minimal glTF 2.0 binary (GLB) reader and writer.
+
+The writer produces simple, valid GLB files from :class:`MeshData` (used for tests,
+synthetic samples and headless pipelines without Blender). The reader is used by the
+package validator to compute the world-space triangles of every node, so visuals can be
+cross-checked against the collision file. It is defensive: every count, index, offset and
+size is checked against the actual bytes before use, and any malformed input raises
+:class:`PackageError` (never another exception type).
+"""
+
+import json
+import math
+import struct
+
+from .collision import strict_json
+from .errors import PackageError
+from .geodesy import map_to_gltf
+
+GLB_MAGIC = 0x46546C67
+CHUNK_JSON = 0x4E4F534A
+CHUNK_BIN = 0x004E4942
+MAX_GLB_BYTES = 1024 ** 3
+MAX_VISUAL_TRIANGLES = 8_000_000
+MAX_NODES = 1_000_000
+MAX_DEPTH = 64
+QUAT_UNIT_TOL = 1e-3
+
+
+# --- writer -----------------------------------------------------------------
+
+def _f32(vals):
+    return struct.pack(f"<{len(vals)}f", *vals)
+
+
+def _finite3(p):
+    return len(p) == 3 and all(isinstance(c, (int, float)) and math.isfinite(c) for c in p)
+
+
+def node_scale(scale):
+    """Map-frame scale (number or (sx, sy, sz)) -> tuple (sx, sy, sz)."""
+    if isinstance(scale, (int, float)):
+        return (float(scale),) * 3
+    s = tuple(float(v) for v in scale)
+    if len(s) != 3:
+        raise PackageError("scale must be a number or a 3-tuple")
+    return s
+
+
+def write_glb(nodes, materials, generator="map-builder", extras=None):
+    """nodes: list of dicts {name, mesh: MeshData, location, rotation_z, scale, extras}.
+
+    ``location``/``rotation_z`` (about +Z)/``scale`` (number or per-axis map-frame tuple) are the
+    map-frame object transform; they become the node TRS in glTF axes (gltf = (x, z, -y)).
+    Shared MeshData instances (same object) become one glTF mesh.
+    materials: {name: (rgb, roughness, metallic)}.
+    """
+    gl = {"asset": {"version": "2.0", "generator": generator}, "scenes": [{"nodes": []}], "scene": 0,
+          "nodes": [], "meshes": [], "accessors": [], "bufferViews": [], "materials": [], "buffers": []}
+    if extras:
+        gl["asset"]["extras"] = extras
+    binbuf = bytearray()
+    mat_index = {}
+
+    def material(name):
+        if name not in mat_index:
+            rgb, rough, metal = materials.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
+            mat_index[name] = len(gl["materials"])
+            gl["materials"].append({"name": name, "pbrMetallicRoughness": {
+                "baseColorFactor": [rgb[0], rgb[1], rgb[2], 1.0], "metallicFactor": metal, "roughnessFactor": rough}})
+        return mat_index[name]
+
+    def add_view(data, target):
+        while len(binbuf) % 4:
+            binbuf.append(0)
+        gl["bufferViews"].append({"buffer": 0, "byteOffset": len(binbuf), "byteLength": len(data), "target": target})
+        binbuf.extend(data)
+        return len(gl["bufferViews"]) - 1
+
+    def add_accessor(view, ctype, count, typ, mn=None, mx=None):
+        a = {"bufferView": view, "componentType": ctype, "count": count, "type": typ}
+        if mn is not None:
+            a["min"], a["max"] = mn, mx
+        gl["accessors"].append(a)
+        return len(gl["accessors"]) - 1
+
+    mesh_ids = {}
+
+    def mesh_index(md):
+        key = id(md)
+        if key in mesh_ids:
+            return mesh_ids[key]
+        if not all(_finite3(v) for v in md.vertices):
+            raise PackageError(f"mesh {md.name!r} has a non-finite vertex")
+        prims = []
+        by_mat = {}
+        for f, mi in enumerate(md.face_materials):
+            by_mat.setdefault(mi, []).append(f)
+        for mi, flist in sorted(by_mat.items()):
+            pos, col, nrm = [], [], []
+            for f in flist:
+                face = md.faces[f]
+                c = md.face_colors[f]
+                for k in range(1, len(face) - 1):
+                    tri = [map_to_gltf(md.vertices[i]) for i in (face[0], face[k], face[k + 1])]
+                    a, b, cc = tri
+                    u = [b[i] - a[i] for i in range(3)]
+                    v = [cc[i] - a[i] for i in range(3)]
+                    n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+                    ln = math.sqrt(sum(x * x for x in n))
+                    n = [x / ln for x in n] if ln > 0 else [0.0, 1.0, 0.0]
+                    for p in tri:
+                        pos.extend(p)
+                        col.extend(c)
+                        nrm.extend(n)
+            cnt = len(pos) // 3
+            if cnt == 0:
+                continue
+            xs, ys, zs = pos[0::3], pos[1::3], pos[2::3]
+            pa = add_accessor(add_view(_f32(pos), 34962), 5126, cnt, "VEC3",
+                              [min(xs), min(ys), min(zs)], [max(xs), max(ys), max(zs)])
+            na = add_accessor(add_view(_f32(nrm), 34962), 5126, cnt, "VEC3")
+            ca = add_accessor(add_view(_f32(col), 34962), 5126, cnt, "VEC3")
+            idx = struct.pack(f"<{cnt}I", *range(cnt))
+            ia = add_accessor(add_view(idx, 34963), 5125, cnt, "SCALAR")
+            prims.append({"attributes": {"POSITION": pa, "NORMAL": na, "COLOR_0": ca}, "indices": ia,
+                          "material": material(md.materials[mi]), "mode": 4})
+        gl["meshes"].append({"name": md.name, "primitives": prims})
+        mesh_ids[key] = len(gl["meshes"]) - 1
+        return mesh_ids[key]
+
+    for n in nodes:
+        rz = float(n.get("rotation_z", 0.0))
+        sx, sy, sz = node_scale(n.get("scale", 1.0))
+        loc = tuple(n.get("location", (0.0, 0.0, 0.0)))
+        if not (_finite3(loc) and math.isfinite(rz) and all(math.isfinite(v) for v in (sx, sy, sz))):
+            raise PackageError(f"node {n['name']!r} has a non-finite transform")
+        node = {"name": n["name"], "mesh": mesh_index(n["mesh"]), "translation": list(map_to_gltf(loc))}
+        if rz:
+            # rotation about map +Z == rotation about glTF +Y by the same angle
+            node["rotation"] = [0.0, math.sin(rz / 2), 0.0, math.cos(rz / 2)]
+        if (sx, sy, sz) != (1.0, 1.0, 1.0):
+            node["scale"] = [sx, sz, sy]  # glTF axes (x, z, -y): magnitudes along x, up, south
+        if n.get("extras"):
+            node["extras"] = n["extras"]
+        gl["nodes"].append(node)
+        gl["scenes"][0]["nodes"].append(len(gl["nodes"]) - 1)
+    while len(binbuf) % 4:
+        binbuf.append(0)
+    gl["buffers"].append({"byteLength": len(binbuf)})
+    js = json.dumps(gl, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    js += b" " * (-len(js) % 4)
+    total = 12 + 8 + len(js) + 8 + len(binbuf)
+    return (struct.pack("<III", GLB_MAGIC, 2, total) + struct.pack("<II", len(js), CHUNK_JSON) + js
+            + struct.pack("<II", len(binbuf), CHUNK_BIN) + bytes(binbuf))
+
+
+# --- reader -----------------------------------------------------------------
+
+def _mat_mul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+
+
+def _num_list(v, n, what):
+    if not (isinstance(v, list) and len(v) == n
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in v)):
+        raise PackageError(f"glb: {what} must be {n} finite numbers")
+    return v
+
+
+def _trs(node):
+    has_trs = any(k in node for k in ("translation", "rotation", "scale"))
+    if "matrix" in node:
+        if has_trs:
+            raise PackageError("glb: node has both matrix and TRS")
+        m = _num_list(node["matrix"], 16, "node matrix")
+        if m[3] != 0 or m[7] != 0 or m[11] != 0 or m[15] != 1:
+            raise PackageError("glb: node matrix is not affine")
+        return [[m[c * 4 + r] for c in range(4)] for r in range(4)]  # column-major
+    t = _num_list(node.get("translation", [0, 0, 0]), 3, "translation")
+    x, y, z, w = _num_list(node.get("rotation", [0, 0, 0, 1]), 4, "rotation")
+    if abs(math.sqrt(x * x + y * y + z * z + w * w) - 1.0) > QUAT_UNIT_TOL:
+        raise PackageError("glb: rotation quaternion is not unit length")
+    s = _num_list(node.get("scale", [1, 1, 1]), 3, "scale")
+    r = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+         [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+    return [[r[0][0] * s[0], r[0][1] * s[1], r[0][2] * s[2], t[0]],
+            [r[1][0] * s[0], r[1][1] * s[1], r[1][2] * s[2], t[1]],
+            [r[2][0] * s[0], r[2][1] * s[1], r[2][2] * s[2], t[2]],
+            [0, 0, 0, 1]]
+
+
+def det3(m):
+    return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+
+
+class GlbNode:
+    def __init__(self, index, name, extras, matrix, triangles):
+        self.index = index
+        self.name = name
+        self.extras = extras
+        self.matrix = matrix
+        # world-space glTF coords [(a, b, c)], front faces CCW (negative-determinant rule applied)
+        self.triangles = triangles
+
+
+_CT = {5120: ("b", 1), 5121: ("B", 1), 5122: ("h", 2), 5123: ("H", 2), 5125: ("I", 4), 5126: ("f", 4)}
+_NC = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
+_INDEX_TYPES = (5121, 5123, 5125)
+
+
+def _is_index(v, n):
+    return isinstance(v, int) and not isinstance(v, bool) and 0 <= v < n
+
+
+def _chunks(data):
+    if len(data) < 20:
+        raise PackageError("glb: too short")
+    magic, ver, length = struct.unpack_from("<III", data, 0)
+    if magic != GLB_MAGIC or ver != 2:
+        raise PackageError("glb: not a glTF 2.0 binary")
+    if length != len(data):
+        raise PackageError("glb: length header mismatch")
+    o = 12
+    chunks = []
+    while o < len(data):
+        if o + 8 > len(data):
+            raise PackageError("glb: truncated chunk header")
+        clen, ctype = struct.unpack_from("<II", data, o)
+        o += 8
+        if clen % 4 or o + clen > len(data):
+            raise PackageError("glb: chunk is misaligned or overruns the file")
+        chunks.append((ctype, data[o:o + clen]))
+        o += clen
+    if not chunks or chunks[0][0] != CHUNK_JSON:
+        raise PackageError("glb: the first chunk must be JSON")
+    binc = None
+    if len(chunks) > 1 and chunks[1][0] == CHUNK_BIN:
+        binc = bytes(chunks[1][1])
+    if any(c[0] in (CHUNK_JSON, CHUNK_BIN) for c in chunks[1 + (binc is not None):]):
+        raise PackageError("glb: unexpected extra JSON/BIN chunk")
+    return bytes(chunks[0][1]), binc
+
+
+def read_glb(data, max_bytes=MAX_GLB_BYTES, max_triangles=MAX_VISUAL_TRIANGLES):
+    """-> (gltf json, [GlbNode]) for every node reachable from the default scene."""
+    if len(data) > max_bytes:
+        raise PackageError("glb: file exceeds size limit")
+    try:
+        return _read_glb(data, max_triangles)
+    except PackageError:
+        raise
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError, OverflowError, struct.error,
+            RecursionError, MemoryError) as e:
+        raise PackageError(f"glb: malformed ({type(e).__name__})") from None
+
+
+def _read_glb(data, max_triangles):
+    js, binc = _chunks(data)
+    gl = strict_json(js.rstrip(b" "), "glb: JSON chunk")
+    if not isinstance(gl, dict) or not isinstance(gl.get("asset"), dict) or gl["asset"].get("version") != "2.0":
+        raise PackageError("glb: asset.version must be 2.0")
+    if gl.get("extensionsRequired"):
+        raise PackageError(f"glb: required extensions are not allowed: {gl['extensionsRequired']}")
+    buffers = gl.get("buffers", [])
+    if not isinstance(buffers, list) or len(buffers) > 1:
+        raise PackageError("glb: at most one (GLB-stored) buffer is allowed")
+    for b in buffers:
+        if "uri" in b:
+            raise PackageError("glb: external or data-URI buffers are not allowed in packages")
+        if not _is_index(b.get("byteLength"), (len(binc) if binc is not None else 0) + 1) or (
+                binc is not None and len(binc) - b["byteLength"] > 3):
+            raise PackageError("glb: buffer byteLength does not match the BIN chunk")
+    if buffers and binc is None:
+        raise PackageError("glb: buffer declared without a BIN chunk")
+    for im in gl.get("images", []):
+        if "uri" in im:
+            raise PackageError("glb: external image URIs are not allowed in packages; embed textures")
+    binc = binc or b""
+    blen = buffers[0]["byteLength"] if buffers else 0
+    views = gl.get("bufferViews", [])
+    accessors = gl.get("accessors", [])
+    if not isinstance(views, list) or not isinstance(accessors, list):
+        raise PackageError("glb: bufferViews/accessors must be arrays")
+    budget = {"tris": 0}
+
+    def read_acc(ai, want=None):
+        if not _is_index(ai, len(accessors)):
+            raise PackageError("glb: bad accessor index")
+        a = accessors[ai]
+        if "sparse" in a:
+            raise PackageError("glb: sparse accessors are not supported")
+        fmt, size = _CT.get(a.get("componentType"), (None, None))
+        nc = _NC.get(a.get("type"))
+        if fmt is None or nc is None:
+            raise PackageError("glb: bad accessor type")
+        if want == "position" and (a["componentType"] != 5126 or nc != 3 or a.get("normalized")):
+            raise PackageError("glb: POSITION must be float32 VEC3")
+        if want == "index" and (a["componentType"] not in _INDEX_TYPES or nc != 1):
+            raise PackageError("glb: indices must be unsigned integer scalars")
+        count = a.get("count")
+        if not _is_index(count, len(binc) // (size * nc) + 1 if size else 1) or count < 1:
+            raise PackageError("glb: accessor count is invalid or exceeds the buffer")
+        if not _is_index(a.get("bufferView"), len(views)):
+            raise PackageError("glb: accessor without a valid bufferView")
+        v = views[a["bufferView"]]
+        if v.get("buffer", 0) != 0 or not buffers:
+            raise PackageError("glb: only buffer 0 (the BIN chunk) is supported")
+        voff, vlen, aoff = v.get("byteOffset", 0), v.get("byteLength"), a.get("byteOffset", 0)
+        if not (_is_index(voff, blen + 1) and _is_index(vlen, blen + 1) and voff + vlen <= blen
+                and _is_index(aoff, vlen + 1) and aoff % size == 0):
+            raise PackageError("glb: bufferView/accessor range is outside the buffer")
+        elem = size * nc
+        stride = v.get("byteStride", 0) or elem
+        if not isinstance(stride, int) or stride < elem or stride > 252 or stride % 4 and "byteStride" in v:
+            raise PackageError("glb: invalid byteStride")
+        if aoff + stride * (count - 1) + elem > vlen:
+            raise PackageError("glb: accessor overruns its bufferView")
+        start = voff + aoff
+        if stride == elem:
+            flat = struct.unpack_from(f"<{count * nc}{fmt}", binc, start)
+        else:
+            flat = []
+            for k in range(count):
+                flat.extend(struct.unpack_from(f"<{nc}{fmt}", binc, start + k * stride))
+        if nc == 1:
+            return list(flat)
+        return [tuple(flat[k:k + nc]) for k in range(0, len(flat), nc)]
+
+    nodes_js = gl.get("nodes", [])
+    meshes = gl.get("meshes", [])
+    if not isinstance(nodes_js, list) or len(nodes_js) > MAX_NODES or not isinstance(meshes, list):
+        raise PackageError("glb: nodes/meshes must be arrays within limits")
+    for node in nodes_js:
+        if not isinstance(node, dict):
+            raise PackageError("glb: node must be an object")
+        if "skin" in node or "weights" in node:
+            raise PackageError("glb: skins and morph weights are not allowed in static maps")
+    scenes = gl.get("scenes")
+    if scenes:
+        si = gl.get("scene", 0)
+        if not _is_index(si, len(scenes)):
+            raise PackageError("glb: bad default scene index")
+        roots = scenes[si].get("nodes", [])
+    else:
+        roots = list(range(len(nodes_js)))
+    result = []
+    ident = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    stack = [(n, ident, 0) for n in reversed(roots)]
+    visited = set()
+    mesh_cache = {}
+    while stack:
+        ni, parent, depth = stack.pop()
+        if depth > MAX_DEPTH or not _is_index(ni, len(nodes_js)) or ni in visited:
+            raise PackageError("glb: invalid node hierarchy (bad index, cycle, shared child or too deep)")
+        visited.add(ni)
+        node = nodes_js[ni]
+        m = _mat_mul(parent, _trs(node))
+        tris = []
+        if "mesh" in node:
+            mi = node["mesh"]
+            if not _is_index(mi, len(meshes)):
+                raise PackageError("glb: bad mesh index")
+            if mi in mesh_cache:  # instanced mesh: its triangles count again
+                budget["tris"] += len(mesh_cache[mi])
+                if budget["tris"] > max_triangles:
+                    raise PackageError(f"glb: more than {max_triangles} visual triangles")
+            else:
+                mesh_cache[mi] = _mesh_triangles(meshes[mi], read_acc, budget, max_triangles)
+            flip = det3(m) < 0  # glTF: negative determinant means clockwise front faces
+            for a, b, c in mesh_cache[mi]:
+                wa, wb, wc = (tuple(m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3] for r in range(3))
+                              for p in (a, b, c))
+                tris.append((wa, wc, wb) if flip else (wa, wb, wc))
+        name = node.get("name", f"node{ni}")
+        if not isinstance(name, str):
+            raise PackageError("glb: node name must be a string")
+        extras = node.get("extras", {})
+        result.append(GlbNode(ni, name, extras if isinstance(extras, dict) else {}, m, tris))
+        children = node.get("children", [])
+        if not isinstance(children, list):
+            raise PackageError("glb: node children must be an array")
+        for c in reversed(children):
+            stack.append((c, m, depth + 1))
+    return gl, result
+
+
+def _mesh_triangles(mesh, read_acc, budget, max_triangles):
+    """Local-space triangles of a mesh (mode 4 only; points/lines carry no triangles)."""
+    if not isinstance(mesh, dict) or not isinstance(mesh.get("primitives"), list):
+        raise PackageError("glb: mesh without primitives")
+    out = []
+    for p in mesh["primitives"]:
+        mode = p.get("mode", 4)
+        if mode in (5, 6):
+            raise PackageError("glb: triangle strips/fans are not supported; use mode 4 (TRIANGLES)")
+        if mode not in (0, 1, 2, 3, 4):
+            raise PackageError(f"glb: invalid primitive mode {mode!r}")
+        if p.get("targets"):
+            raise PackageError("glb: morph targets are not allowed in static maps")
+        if mode != 4:
+            continue
+        pos = read_acc(p["attributes"]["POSITION"], "position")
+        if not all(math.isfinite(c) for q in pos for c in q):
+            raise PackageError("glb: non-finite POSITION")
+        idx = read_acc(p["indices"], "index") if "indices" in p else list(range(len(pos)))
+        if len(idx) % 3:
+            raise PackageError("glb: triangle index count is not a multiple of 3")
+        if idx and max(idx) >= len(pos):
+            raise PackageError("glb: index out of range")
+        budget["tris"] += len(idx) // 3
+        if budget["tris"] > max_triangles:
+            raise PackageError(f"glb: more than {max_triangles} visual triangles")
+        out.extend((pos[idx[k]], pos[idx[k + 1]], pos[idx[k + 2]]) for k in range(0, len(idx), 3))
+    return out

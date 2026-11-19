@@ -1,0 +1,66 @@
+"""Headless map-builder CLI (no Blender): build a package from local files, or validate a package.
+
+  py -3.12 tools/mbmap_cli.py validate examples/synthetic_sample.mbmap
+  py -3.12 tools/mbmap_cli.py build --osm area.osm --dem dem.tif --dem-crs EPSG:32632 \
+      --datum EGM2008 --dem-license "..." --lat 47.0 --lon 8.0 --width 400 --height 300 --out out.mbmap
+
+``build`` uses the same core pipeline as the Blender add-on but exports the *generated* plan, not a
+user-edited Blender scene. Use the add-on for edited maps.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from map_builder.core.errors import MapBuilderError  # noqa: E402
+from map_builder.core.geodesy import Area  # noqa: E402
+from map_builder.core.generate import PlanOptions  # noqa: E402
+from map_builder.core.package import validate_package  # noqa: E402
+from map_builder.core.pipeline import Settings, build_package  # noqa: E402
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    v = sub.add_parser("validate", help="validate a .mbmap package")
+    v.add_argument("package")
+    b = sub.add_parser("build", help="build a package from a local OSM file and a local elevation file")
+    b.add_argument("--osm", required=True)
+    b.add_argument("--dem", required=True, help="GeoTIFF or ESRI ASCII grid")
+    b.add_argument("--dem-crs", default="EPSG:4326", help="CRS of an .asc grid (GeoTIFFs carry their own)")
+    b.add_argument("--datum", required=True, help="vertical datum of the elevation values, e.g. EGM2008")
+    b.add_argument("--dem-license", required=True, help="licence/attribution of the elevation data")
+    b.add_argument("--lat", type=float, required=True)
+    b.add_argument("--lon", type=float, required=True)
+    b.add_argument("--width", type=float, default=1000)
+    b.add_argument("--height", type=float, default=1000)
+    b.add_argument("--spacing", type=float, default=10.0, help="terrain grid spacing in metres")
+    b.add_argument("--heightfield", type=float, default=2.0, help="heightfield spacing (0 = none)")
+    b.add_argument("--seed", type=int, default=1)
+    b.add_argument("--name", default="map")
+    b.add_argument("--out", required=True)
+    a = ap.parse_args(argv)
+    try:
+        if a.cmd == "validate":
+            r = validate_package(a.package)
+        else:
+            area = Area(a.lat, a.lon, a.width, a.height)
+            s = Settings(elevation_source="file", elevation_file=a.dem, elevation_crs=a.dem_crs,
+                         elevation_vertical_datum=a.datum, elevation_license=a.dem_license, osm_source="file",
+                         osm_file=a.osm, terrain_spacing=a.spacing, heightfield_spacing=a.heightfield or None,
+                         plan_options=PlanOptions(seed=a.seed))
+            m, r = build_package(area, s, a.out, a.name,
+                                 progress=lambda frac: print(f"terrain {frac:.0%}", file=sys.stderr, end="\r"))
+            print(f"wrote {a.out}  package_id={r.package_id}  objects={len(m['objects'])}  "
+                  f"probes={len(m['orientation_probes'])}")
+    except (MapBuilderError, OSError, ValueError) as e:
+        print(f"ERROR: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    print(r.summary())
+    return 0 if r.ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
