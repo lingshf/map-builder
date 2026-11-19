@@ -58,7 +58,7 @@ def reject_credentials(values, outcome="Nothing was generated"):
 
 def redact_diagnostics(problems):
     """Diagnostics safe to print or show: one that contains a credential-like value (e.g. in a user-chosen
-    object or material name quoted by an early export check) is replaced, never echoed."""
+    object, material or collection name quoted by an export check) is replaced, never echoed."""
     return [p if not has_credential(p) else
             f"(diagnostic withheld: it quotes a {CREDENTIAL_HINT}, e.g. in an object, material or collection name; "
             "rename it)" for p in problems]

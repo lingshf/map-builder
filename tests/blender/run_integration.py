@@ -451,6 +451,17 @@ def main(out_dir):
           f"credential-like object name is not echoed in the export error ({(err or '')[:100]!r})")
     check(sha256(pkg) == good, "previous package unchanged after the credential-named failure")
     bpy.data.objects.remove(secret)
+    c_secret = bpy.data.collections.new("token=FAKE_REVIEW_ONLY")
+    root.children.link(c_secret)
+    c_secret.hide_render = True
+    c_secret.objects.link(box("it_in_secret_coll", [], (-90.0, 60.0, 40.0)))
+    res, err = run_op(bpy.ops.map_builder.export)
+    check("FAKE_REVIEW_ONLY" not in (err or "") and sha256(pkg) == good
+          and "FAKE_REVIEW_ONLY" not in bpy.data.texts["MapBuilder Report"].as_string(),
+          f"credential-like collection name is never echoed or packaged ({res}, {(err or '')[:100]!r})")
+    for ob in list(c_secret.objects):
+        bpy.data.objects.remove(ob)
+    bpy.data.collections.remove(c_secret)
     for ob in mat_boxes:
         bpy.data.objects.remove(ob)
     res, err = run_op(bpy.ops.map_builder.export)

@@ -231,9 +231,11 @@ class ExportPolicyTest(unittest.TestCase):
 class SourcesTest(unittest.TestCase):
     def test_redact_diagnostics_withholds_credential_like_names(self):
         out = redact_diagnostics(["'curve token=FAKE_REVIEW_ONLY': CURVE objects cannot be exported",
-                                  "'bld_1': zero scale"])
-        self.assertNotIn("FAKE_REVIEW_ONLY", out[0])
-        self.assertIn("withheld", out[0])
+                                  "'bld_1': zero scale", "collection 'token=FAKE_REVIEW_ONLY' is disabled",
+                                  "excluded (token=FAKE_REVIEW_ONLY)", 'in "token=FAKE_REVIEW_ONLY"'])
+        for redacted in (out[0], *out[2:]):
+            self.assertNotIn("FAKE_REVIEW_ONLY", redacted)
+            self.assertIn("withheld", redacted)
         self.assertEqual(out[1], "'bld_1': zero scale")
 
     BASE = {"elevation_source": "file", "elevation_file": "/x/dem.asc", "elevation_crs": "EPSG:4326",

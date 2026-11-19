@@ -1413,6 +1413,10 @@ class ReviewFixesTest(TempDirCase):
         for benign in ("© OpenStreetMap contributors", "Basic geometry and terrain", "H = z + z_offset_m",
                        "https://opendatacommons.org/licenses/odbl/1-0/", "keyframe=3"):
             self.assertEqual(pkg.find_secrets({"v": benign}), [], benign)
+        for quoted in ("collection 'token=X1' disabled", "user:token=X1", "(apikey=X1)", '"password=X1"',
+                       "a.key=X1"):
+            self.assertEqual(len(pkg.find_secrets({"v": quoted})), 1, quoted)
+        self.assertEqual(pkg.find_secrets({"v": "monkey=3"}), [])
 
     # 10: NOTICES.txt must carry each licence
     def test_notices_require_licence(self):
