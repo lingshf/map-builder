@@ -975,7 +975,8 @@ namespace MapBuilder.Reference
 
         static string Label(string path) => KnownRoles.ContainsKey(path) ? path : "(unlisted path)";
 
-        internal static bool IsUtc(string s) => Utc.IsMatch(s);
+        internal static bool IsUtc(string s) => Utc.IsMatch(s) && DateTime.TryParseExact(s.Substring(0, 19), "yyyy-MM-dd'T'HH:mm:ss",
+            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _);
 
         static bool SafeName(string n)
         {

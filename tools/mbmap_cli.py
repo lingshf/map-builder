@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from map_builder.core.errors import MapBuilderError  # noqa: E402
 from map_builder.core.geodesy import Area  # noqa: E402
 from map_builder.core.generate import PlanOptions  # noqa: E402
-from map_builder.core.package import validate_package  # noqa: E402
+from map_builder.core.package import is_utc_timestamp, validate_package  # noqa: E402
 from map_builder.core.pipeline import Settings, build_package  # noqa: E402
 
 _UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
@@ -51,7 +51,8 @@ def main(argv=None):
                         "byte-identical, including package_id")
     b.add_argument("--out", required=True)
     a = ap.parse_args(argv)
-    if a.cmd == "build" and a.created_utc is not None and not _UTC.fullmatch(a.created_utc):
+    if a.cmd == "build" and a.created_utc is not None and not (_UTC.fullmatch(a.created_utc)
+                                                                and is_utc_timestamp(a.created_utc)):
         ap.error("--created-utc must be an ISO-8601 UTC timestamp like 2026-01-01T00:00:00Z")
     try:
         if a.cmd == "validate":

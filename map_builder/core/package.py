@@ -92,6 +92,17 @@ HEIGHTFIELD_TOL_M = 1e-3
 _MB_ID = re.compile(r"(osm:(node|way|relation)/\d+|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+
+
+def is_utc_timestamp(s):
+    """True for a real calendar instant written as YYYY-MM-DDTHH:MM:SS[.fff]Z."""
+    if not isinstance(s, str) or not _UTC.fullmatch(s):
+        return False
+    try:
+        time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return False
+    return True
 # One credential policy for every string in the manifest (values and keys) and report.json, applied by the
 # writer before emitting and by the validator: URL userinfo, credential-named query/form parameters,
 # HTTP Authorization-style headers and bearer/basic credentials.
@@ -1012,7 +1023,7 @@ def _check_manifest(m, r):
         return cond
 
     need(isinstance(m.get("name"), str) and m["name"], "name must be a non-empty string")
-    need(isinstance(m.get("created_utc"), str) and _UTC.fullmatch(m["created_utc"]),
+    need(is_utc_timestamp(m.get("created_utc")),
          "created_utc must be an ISO-8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ)")
     g = m.get("generator")
     need(isinstance(g, dict) and isinstance(g.get("name"), str) and isinstance(g.get("version"), str)
