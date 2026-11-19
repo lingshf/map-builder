@@ -502,7 +502,7 @@ def _sub_object(gen, spec, md, keep):
     return gen.ObjectSpec(spec.name, spec.mb_id, spec.mb_class, spec.collection, mesh=sub, location=spec.location)
 
 
-def finish(plan, ctx):
+def finish(plan, ctx, budget=None):
     """D21: probes this module emitted are checked against the finished plan; a blocked one is not exported and
     is listed in ``report['passage_probes_blocked']`` with the blocking object's ``mb_id``. The manifest cap is not
     applied here: ``structures.finalize_probes`` applies one global cap to the probes of every kind that survive.
@@ -512,7 +512,7 @@ def finish(plan, ctx):
     dropped = list(st.dropped)
     st.probes, st.dropped = [], []
     if mine:
-        _, blocked = check_probes(_local_plan(plan, mine, ctx.terrain), mine)
+        _, blocked = check_probes(_local_plan(plan, mine, ctx.terrain), mine, budget=budget)
         gone = {b["id"] for b in blocked}
         if gone:
             plan.passage_probes[:] = [p for p in plan.passage_probes if p["id"] not in gone]

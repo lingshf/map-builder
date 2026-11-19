@@ -375,6 +375,35 @@ class TunnelVariantsTest(unittest.TestCase):
         self.assertEqual(kept, [f"e{i}" for i in range(200)] + [f"t{i}" for i in range(PASSAGE_PROBE_MAX - 200)])
         self.assertEqual(dropped, [f"t{i}" for i in range(PASSAGE_PROBE_MAX - 200, 100)])
 
+    def test_one_work_budget_is_shared_by_every_probe_kind(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from map_builder.core import passages, structures
+        grid = hill_grid()
+        plan, _ = plan_for(grid)
+        bore = plan.passage_probes.pop()
+        z = max(v[2] for v in plan.objects[0].mesh.vertices) + 20.0
+        mk = lambda name, kind: dict(bore, id=name, kind=kind, path_map=[[-40 + k, 40, z] for k in range(12)])   # noqa: E731
+        probe = mk("x", "tunnel")
+        one = structures.WorkBudget(10 ** 9)
+        structures.check_probes(plan, [probe], budget=one)
+        cost = 10 ** 9 - one.left
+        self.assertGreater(cost, 0)
+        elev = [mk(f"e{i}", "elevated") for i in range(3)]
+        tun = [mk(f"t{i}", "tunnel") for i in range(3)]
+        plan.passage_probes.extend(dict(p) for p in elev)
+        ctx = SimpleNamespace(probes=[dict(p) for p in tun], terrain=grid)
+        passages._state(ctx).probes = [p["id"] for p in elev]
+        total = structures.WorkBudget(int(cost * 2.5))      # room for 2 probes' work, 6 are staged
+        with mock.patch.object(structures, "WorkBudget", lambda: total):
+            structures.finalize_probes(plan, ctx)
+        self.assertGreaterEqual(total.left, -cost)
+        kept = [p["id"] for p in plan.passage_probes]
+        unchecked = [e["id"] for e in plan.report["passage_probes_blocked"] if e.get("reason") == "budget_exhausted"]
+        self.assertEqual(sorted(kept + unchecked), sorted(p["id"] for p in elev + tun))
+        self.assertTrue(unchecked)
+        self.assertLess(len(kept), 6)
+
     def test_chunked_probe_check_matches_the_whole_scene_query(self):
         from map_builder.core.generate import ObjectSpec
         from map_builder.core.query import capsule_hits

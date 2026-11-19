@@ -299,14 +299,21 @@ class _CollisionIndex:
                           "tri_start": start, "tri_count": len(tri_obj) - start, "aabb": lo + hi})
         return Collision(flat, tuple(idx), tri_obj, bytes(len(tri_obj)), table, None, 1)
 
-def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
+class WorkBudget:
+    """One collision-work allowance shared by every probe check of a finalisation."""
+
+    def __init__(self, left=DEFAULT_MAX_WORK):
+        self.left = left
+
+
+def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
     """Passage probes ``{id, feature, path_map, radius_m, ...}`` against the plan meshes (D21).
 
     Returns ``(kept, blocked)``: ``blocked`` entries are ``{id, blocker}`` (the blocking object's ``mb_id``;
     the probe's own ``feature`` counts like any other mesh, so a probe touching its own tunnel wall is blocked,
     as the package validator does). Each probe is tested against the triangles around its own path only. The
     work budget is shared: when it runs out the remaining probes are returned in ``blocked`` with
-    ``blocker=None`` and ``reason="work budget exhausted"``, never silently kept."""
+    ``blocker=None`` and ``reason="budget_exhausted"``, never silently kept."""
     kept, blocked = [], []
     if not probes:
         return kept, blocked
@@ -314,7 +321,7 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
     rank = {}
     for k, (spec, _md) in enumerate(index.specs):
         rank.setdefault(spec.mb_id, k)
-    left = max_work
+    budget = budget if budget is not None else WorkBudget(max_work)
     for i, pr in enumerate(probes):
         pts = [tuple(p) for p in pr["path_map"]]
         pad = pr["radius_m"] + 0.5
@@ -334,14 +341,14 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
             for ch in chunks:
                 xs, ys = [p[0] for p in ch], [p[1] for p in ch]
                 col = index.collision((min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad))
-                res = capsule_hits(col, ch, pr["radius_m"], left, result=True)
-                left -= res.work
+                res = capsule_hits(col, ch, pr["radius_m"], budget.left, result=True)
+                budget.left -= res.work
                 found.update(col.objects[k]["mb_id"] for k in res.objects)
         except Exception as exc:   # LimitError: budget exhausted
             if type(exc).__name__ != "LimitError":
                 raise
             for rest in probes[i:]:
-                blocked.append({"id": rest["id"], "blocker": None, "reason": "work budget exhausted"})
+                blocked.append({"id": rest["id"], "blocker": None, "reason": "budget_exhausted"})
             break
         if found:
             blocked.append({"id": pr["id"], "blocker": min(found, key=lambda m: rank[m])})
@@ -359,8 +366,9 @@ def finalize_probes(plan, ctx):
     the surplus is not exported and is listed in ``report["passage_probes_dropped"]``."""
     from . import passages
     from .package import PASSAGE_PROBE_MAX
-    passages.finish(plan, ctx)
-    kept, blocked = check_probes(plan, ctx.probes) if ctx.probes else ([], [])
+    budget = WorkBudget()
+    passages.finish(plan, ctx, budget)
+    kept, blocked = check_probes(plan, ctx.probes, budget=budget) if ctx.probes else ([], [])
     ctx.probes = []
     plan.passage_probes.extend(kept)
     if blocked:

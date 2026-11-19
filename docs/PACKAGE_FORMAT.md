@@ -358,7 +358,7 @@ counted in `edits.removed` and listed in `report.json`.
     cells cut for them, and portal headwalls
   * `passage_probes_blocked`: `[{id, blocker, reason?}]`, generated tunnel, building and elevated passage probes that
     collision blocks (not exported), checked on the finished scene (trees included): `blocker` is the blocking
-    object's `mb_id`, or null with a `reason` (work budget exhausted, or the 256-probe package cap reached)
+    object's `mb_id`, or null with a `reason` (udget_exhausted: one collision-work allowance is shared by all probe kinds in plan order, or the 256-probe package cap reached)
   * `passage_probes_dropped`: `[{id, reason}]`, passage probes not exported because the passage road was not generated or the manifest cap of 256 probes was reached
   * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
     buildings where the terrain reaches the roof underside, footprints or trees outside
