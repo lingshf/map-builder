@@ -29,9 +29,10 @@ Blender copy that uses Mesa llvmpipe (software OpenGL). One-time setup:
    (`opengl32.dll` is the important one).
 4. Pass `--mesa-blender <path>\blender.exe` or set `MB_DEMO_BLENDER_MESA`.
 
-`py ... run_demo.py -- --preset synthetic --after pkg.mbmap --panel` then writes `panel.png` (Map Builder
-tab open, map in the viewport; about 20 s). Without a configured copy, or if the run fails, the step is
-skipped and `summary.md` records why instead of faking the UI. The tab click is a simulated event
+Add `--panel` to the command above (after `--out demo-out`) to also write `panel.png` (Map Builder tab
+open, map in the viewport; about 20 s). `panel.png` is deleted at the start of every run, so an old image
+is never left behind; without a configured copy, or if the run fails, the step is skipped and
+`summary.md` records why instead of faking the UI. The tab click is a simulated event
 calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in `panel_shot.py`.
 
 `make_probe_sample.py out.mbmap` derives a small package with three passage probes (PASS, BLOCKED, and

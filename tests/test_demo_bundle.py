@@ -12,8 +12,22 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tools", "demo"))
 
 import demo_bundle as db  # noqa: E402
+import run_demo  # noqa: E402
 
 SAMPLE = os.path.join(REPO, "examples", "synthetic_sample.mbmap")
+
+
+class StalePanelTests(unittest.TestCase):
+    def test_failed_panel_step_leaves_no_old_image(self):
+        for extra in ([], ["--panel", "--mesa-blender", os.path.join(REPO, "no-such", "blender.exe")]):
+            with tempfile.TemporaryDirectory() as out:
+                png = os.path.join(out, "panel.png")
+                with open(png, "wb") as f:
+                    f.write(b"old")
+                run_demo.main(["--preset", "synthetic", "--after", SAMPLE, "--out", out, "--bundle-only"] + extra)
+                self.assertFalse(os.path.exists(png))
+                with open(os.path.join(out, "summary.md"), encoding="utf-8") as f:
+                    self.assertIn("not produced", f.read())
 
 
 def good_preset():

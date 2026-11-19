@@ -153,6 +153,9 @@ def main(argv):
     a = parse_args(argv)
     preset = db.load_preset(a.preset)
     os.makedirs(a.out, exist_ok=True)
+    stale = os.path.join(a.out, "panel.png")
+    if os.path.exists(stale):
+        os.remove(stale)
     after = db.read_package(a.after)
     before = db.read_package(a.before) if a.before else None
     if not a.bundle_only:
