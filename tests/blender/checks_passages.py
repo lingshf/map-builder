@@ -32,10 +32,8 @@ def _configure(pkg):
 
 
 def run(out_dir):
-    import map_builder
     from map_builder.core.package import validate_package
 
-    map_builder.register()
     pkg = os.path.join(out_dir, "passages.mbmap")
     if os.path.exists(pkg):
         os.remove(pkg)
