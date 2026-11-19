@@ -199,11 +199,17 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
 
 ## Limits
 
-* **Flight under bridges, through tunnels or beneath elevated building parts is not generated
-  yet; the format is ready.** Package format 2.0.0 has `bridge`, `tunnel` and `structure`
-  collision classes and `passage_probes`, but the generator still omits bridges and tunnels and
-  builds elevated volumes as closed solids. All of these are listed under
-  `unsupported_features` in `report.json`.
+* **Flight under bridges and through tunnels is not generated yet; the format is ready.**
+  Package format 2.0.0 has `bridge`, `tunnel` and `structure` collision classes and
+  `passage_probes`, but the generator still omits bridges and tunnels (listed under
+  `unsupported_features` in `report.json`).
+* **Elevated building parts and building passages.** A part with `min_height` at least 2.6 m above
+  the ground gets an `elevated` passage probe along its longest edge, and a
+  `tunnel=building_passage` way through a building cuts a straight corridor: the building becomes two
+  lower parts (`<id>#1`, `#2`) and an upper part (`<id>#3`) with a `building_passage` probe. A
+  passage that cannot be cut cleanly (dead end, bend, courtyard, several passages, too low) is listed
+  under `unsupported_features` and the building stays solid. A probe that edits block is not exported
+  and is listed under `passage_probes_blocked` in `report.json`.
 * Each building is a set of closed, outward-facing, positive-volume shells with no interior
   cavities: no rooms, passages or flyable interiors.
 * The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or

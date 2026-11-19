@@ -61,7 +61,7 @@ class OsmTest(unittest.TestCase):
         # routed to their own lists, reported by the stage stubs, and never roads
         self.assertEqual([f.id for f in self.cl.structure_bridges], [f"osm:way/{self.ids['bridge']}"])
         self.assertEqual([f.id for f in self.cl.tunnels], [f"osm:way/{self.ids['tunnel']}"])
-        self.assertEqual(self.cl.passages, [])
+        self.assertEqual([f.id for f in self.cl.passages], [f"osm:way/{self.ids['passage']}"])
         self.assertNotIn(f"osm:way/{self.ids['bridge']}", {u["id"] for u in self.cl.unsupported})
         road_ids = {r.id for r in self.cl.roads}
         self.assertNotIn(f"osm:way/{self.ids['bridge']}", road_ids)
@@ -122,7 +122,7 @@ class PlanTest(unittest.TestCase):
             n += 1
             assert_closed_consistent(self, o.mesh)
             self.assertGreater(signed_volume(o.mesh), 0, o.name)
-        self.assertEqual(n, 8)
+        self.assertEqual(n, 11)  # 8 buildings + the passage building split into 3 parts
 
     def test_measured_height_and_sunk_foundation(self):
         o = self.obj("L")
@@ -167,14 +167,14 @@ class PlanTest(unittest.TestCase):
     def test_elevated_volume_is_flagged(self):
         o = self.obj("elevated")
         self.assertAlmostEqual(min(v[2] for v in o.mesh.vertices), 6.0)
-        self.assertIn("NOT modelled", o.provenance["elevated"])
-        reasons = [u["reason"] for u in self.plan.report["unsupported_features"] if u["id"] == o.mb_id]
-        self.assertTrue(reasons and "elevated" in reasons[0])
+        self.assertIn("space beneath is free", o.provenance["elevated"])
+        self.assertEqual([u for u in self.plan.report["unsupported_features"] if u["id"] == o.mb_id], [])
+        self.assertIn(f"{o.mb_id}:under", [p["id"] for p in self.plan.passage_probes])
 
     def test_roads_drape_on_terrain(self):
         z0 = self.plan.frame.z_offset
         roads = [o for o in self.plan.objects if o.mb_class == "road"]
-        self.assertEqual(len(roads), 2)
+        self.assertEqual(len(roads), 3)  # includes the building passage road
         for o in roads:
             for x, y, z in o.mesh.vertices:
                 wx, wy, wz = x + o.location[0], y + o.location[1], z + o.location[2]

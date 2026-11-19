@@ -352,7 +352,8 @@ counted in `edits.removed` and listed in `report.json`.
   time and stops as soon as it exceeds what remains of the budget (`LimitError` naming the
   road). A road that exactly fits is accepted.
 * `report.json` lists:
-  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, elevated parts
+  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, and building passages that cannot be cut cleanly
+  * `passage_probes_blocked`: `[{id, blocker}]`, generated building/elevated passage probes that collision blocks (not exported)
   * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
     buildings where the terrain reaches the roof underside, footprints or trees outside
     the terrain extent, landcover with invalid ring topology, and rejected building parts

@@ -138,6 +138,8 @@ def build_synthetic_osm(frame=None):
     ids["water"] = b.way([(-60, -140), (-20, -140), (-20, -110), (-60, -110)], {"natural": "water"}, closed=True)
     for k, (x, y) in enumerate(((0, 40), (120, 40), (-160, -120))):
         ids[f"tree{k}"] = b.node(x, y, {"natural": "tree", "height": "11"} if k == 0 else {"natural": "tree"})
+    ids["passage_building"] = b.way(rect(-150, -20, 24, 16), {"building": "yes", "height": "9"}, closed=True)
+    ids["passage"] = b.way([(-175, -20), (-125, -20)], {"highway": "service", "tunnel": "building_passage"})
     return b, ids
 
 
