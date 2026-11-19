@@ -97,9 +97,11 @@ All coordinates are in metres.
 | 8 | `tunnel` | tube | inward tube (below) |
 | 9 | `structure` | solid | closed, positive volume |
 
-The generator emits `tunnel` (road tunnels: `highway=*` with `tunnel=yes`, see `report.json`) and the
-portal-headwall `structure` objects that belong to them. It does not emit `bridge` yet
-(listed as unsupported in `report.json`), but the format, the validator and the reference
+The generator emits `tunnel` (road tunnels: `highway=*` with `tunnel=yes`, see `report.json`), the
+portal-headwall `structure` objects that belong to them, and `bridge` for highway bridges (`bridge=*`, not `no`; deck solid with
+a `deck` passage probe and, only where the clearance over the ground or crossing road is at least 4 m, an `under` probe).
+Deck grade is limited to 8 %; where the requested clearance (`max(1, layer)` x 5 m) cannot be reached the report warns and the
+provenance says so. The format, the validator and the reference
 readers accept them. `manifest.collision.classes` maps names to ids and
 `manifest.collision.class_kinds` maps names to `"solid"`, `"surface"`, `"tube"` or `null`;
 both must equal the tables above.
@@ -353,10 +355,10 @@ counted in `edits.removed` and listed in `report.json`.
   time and stops as soon as it exceeds what remains of the budget (`LimitError` naming the
   road). A road that exactly fits is accepted.
 * `report.json` lists:
-  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), railway tunnels, `tunnel=culvert`, `man_made=tunnel`, and building passages that cannot be cut cleanly
+  * `unsupported_features`: railway, `man_made=bridge` and `building=bridge` bridges, railway tunnels, `tunnel=culvert`, `man_made=tunnel`, and building passages that cannot be cut cleanly
   * `counts.tunnels`, `counts.terrain_cut_cells` and `counts.tunnel_headwalls`: road tunnels generated, terrain
     cells cut for them, and portal headwalls
-  * `passage_probes_blocked`: `[{id, blocker, reason?}]`, generated tunnel, building and elevated passage probes that
+  * `passage_probes_blocked`: `[{id, blocker, reason?}]`, generated bridge, tunnel, building and elevated passage probes that
     collision blocks (not exported), checked on the finished scene (trees included): `blocker` is the blocking
     object's `mb_id`, or null with a `reason` (`budget_exhausted`: one collision-work allowance is shared by all probe kinds in plan order)
   * `passage_probes_dropped`: `[{id, reason}]`, passage probes not exported because the passage road was not generated or the manifest cap of 256 probes was reached

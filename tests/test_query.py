@@ -137,6 +137,27 @@ class CapsuleTest(unittest.TestCase):
         self.assertEqual(capsule_hits(self.col, side, r), [])
         self.assertEqual(capsule_hits(self.col, [(0, -5 - r + eps, 5), (25, -5 - r + eps, 5)], r), [1])
 
+    def test_large_extents_stay_bounded(self):
+        # 300 small triangles plus one 1e6 m triangle (a naive 8 m cell index would need ~1.6e10 cells for it),
+        # and a 1e6 m path (the same for the query); both must fall back to bounded work
+        verts, tris = [], []
+        for i in range(300):
+            o = len(verts)
+            verts += [(i * 10.0, 0, 0), (i * 10.0 + 5, 0, 0), (i * 10.0, 5, 0)]
+            tris.append((o, o + 1, o + 2))
+        o = len(verts)
+        verts += [(-1e6, -1e6, 50), (1e6, -1e6, 50), (0, 1e6, 50)]
+        tris.append((o, o + 1, o + 2))
+        col = read_collision(write_collision([ColObject("m", "terrain:grid", "terrain", verts, tris)]))
+        self.assertEqual(capsule_hits(col, [(1.0, 1.0, 0.3), (2.0, 1.0, 0.3)], 0.5), [0])       # small tris
+        self.assertEqual(capsule_hits(col, [(1.0, 1.0, 49.0), (2.0, 1.0, 49.0)], 0.5), [])
+        self.assertEqual(capsule_hits(col, [(1.0, 1.0, 50.2), (2.0, 1.0, 50.2)], 0.5), [0])     # big tri
+        self.assertEqual(capsule_hits(col, [(-1e6, 0.0, 50.2), (1e6, 0.0, 50.2)], 0.5), [0])   # huge query box
+        far = [(-1e6, 0.0, 200.0), (1e6, 0.0, 200.0)]
+        self.assertEqual(capsule_hits(col, far, 0.5), [])
+        with self.assertRaises(LimitError):
+            capsule_hits(col, far[:1] + [(1e6, 1e6, 50.0)], 0.5, max_work=50)
+
     def test_budget(self):
         with self.assertRaises(LimitError):
             capsule_hits(self.col, [(0, 0, 5), (45, 0, 5)], 1.0, max_work=5)

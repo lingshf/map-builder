@@ -156,7 +156,7 @@ class ScenePlan:
         self.shared_meshes = {}
         self.report = {"counts": {}, "unsupported_features": [], "invalid_features": [], "warnings": [],
                        "inferred": {}}
-        # manifest passage_probes entries ({id, kind, feature, path_map, radius_m})
+        # manifest passage_probes entries ({id, kind, feature, path_map, radius_m}); emitted by the bridge stage
         self.passage_probes = []
 
     def count(self, key, n=1):
@@ -696,12 +696,20 @@ def road_width(tags):
     return ROAD_WIDTHS.get(hw, 4.0), f"inferred:default for highway={hw}"
 
 
-def _dedupe_polyline(pts, tol=1e-3):
-    out = []
-    for p in pts:
-        if not out or math.dist(p, out[-1]) > tol:
-            out.append((float(p[0]), float(p[1])))
-    return out
+POLYLINE_DEDUP_TOL_M = 1e-3   # points closer than this are one point (the sweep path, and the bridge approach checks)
+
+
+def _dedupe_indices(pts, tol=POLYLINE_DEDUP_TOL_M):
+    """Indices of the points ``_dedupe_polyline`` keeps."""
+    kept = []
+    for k, p in enumerate(pts):
+        if not kept or math.dist(p, pts[kept[-1]]) > tol:
+            kept.append(k)
+    return kept
+
+
+def _dedupe_polyline(pts, tol=POLYLINE_DEDUP_TOL_M):
+    return [(float(pts[k][0]), float(pts[k][1])) for k in _dedupe_indices(pts, tol)]
 
 
 def _area2(poly):
@@ -1635,6 +1643,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
     budget.reserve("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
     coverage = {}
     tmesh = build_terrain(terrain, z_offset, areas, coverage)
+    tmesh.grid_layout = (terrain.nx, terrain.ny, terrain.x0, terrain.y0, terrain.spacing)   # lets probes find triangles by cell
     budget.commit(tmesh)
     if correction["applied"]:
         plan.inferred("terrain.surface")
@@ -1829,6 +1838,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                     return True
             return in_segment(seg_buckets, x, y) or in_segment(keep_buckets, x, y)
 
+        deck_blocked = bridges.tree_blocker(ctx)
         n_trees = 0
         for k_tree, f in enumerate(classified.trees):
             if n_trees >= opts.max_trees:
@@ -1841,6 +1851,9 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                 continue
             if in_segment(keep_buckets, x, y):
                 invalid.append({"id": f.id, "reason": "tree stands in a tunnel portal or cut zone; not generated"})
+                continue
+            if deck_blocked(x, y):
+                invalid.append({"id": f.id, "reason": "tree lies within a bridge deck footprint; not generated"})
                 continue
             h = parse_length(f.tags.get("height"))
             prov = {"position": "measured:osm natural=tree"}

@@ -744,7 +744,9 @@ class PlanPackageTest(TempDirCase):
             if key in self.plan.report:
                 self.assertEqual(report[key], json.loads(json.dumps(self.plan.report[key])), key)
         self.assertIn("budget", report)
-        self.assertTrue(any("bridge" in u["reason"] for u in report["unsupported_features"]))
+        self.assertFalse(any("bridge" in u["reason"] for u in report["unsupported_features"]))
+        self.assertEqual(report["counts"]["bridges"], 1)
+        self.assertTrue(any(o["class"] == "bridge" for o in m["objects"]))
         self.assertEqual(m["warnings_count"], len(report["warnings"]))
         self.assertEqual(report["export"]["objects"], len(self.plan.objects))
         self.assertEqual(report["edits"], {"duplicated": [], "user_added": [], "removed": []})
