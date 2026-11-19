@@ -839,7 +839,7 @@ namespace MapBuilder.Reference
         public static List<int> Hits(CollisionMesh col, PassageProbe probe, ref long budget)
         {
             var hits = new List<int>();
-            double r = probe.RadiusM, pad = r + Limits.AabbTableTolM;
+            double r = probe.RadiusM + ContactTolM, pad = r + Limits.AabbTableTolM;
             int segments = Math.Max(1, probe.PathMap.Count - 1);
             foreach (var obj in col.Objects)
             {
@@ -859,7 +859,7 @@ namespace MapBuilder.Reference
                         Vec3 a = tri.A, b = tri.B, c = tri.C;
                         if (!Overlap(lo, hi, Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Y, Math.Min(b.Y, c.Y)), Math.Min(a.Z, Math.Min(b.Z, c.Z)),
                                      Math.Max(a.X, Math.Max(b.X, c.X)), Math.Max(a.Y, Math.Max(b.Y, c.Y)), Math.Max(a.Z, Math.Max(b.Z, c.Z)), r)) continue;
-                        hit = SegmentTriangleDistance(p, q, tri) <= r + ContactTolM;
+                        hit = SegmentTriangleDistance(p, q, tri) <= r;
                     }
                 }
                 if (hit) hits.Add(obj.Index);

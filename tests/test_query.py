@@ -203,6 +203,22 @@ class RayCastTest(unittest.TestCase):
         hit = ray_cast(col, (222, 91, 119), (-1, -1, -1), 1000.0)
         self.assertIsNotNone(hit)
         self.assertAlmostEqual(hit.t, 119 * math.sqrt(3), places=9)
+        a, b, c, d = (0, 0, 0.5625), (2, 0, 1.95703125), (2, 2, -0.265625), (0, 2, -0.46875)   # review round 5:
+        col = read_collision(write_collision([ColObject("g", "terrain:grid", "terrain", [a, b, c, d],
+                                                        [(0, 1, 2), (0, 2, 3)])]))
+        o = (2731.52734375, 569.7041015625, 76.4384765625)       # a grazing ray touching the folded diagonal
+        dr = (-2731.415929287984, -569.5926871004842, -75.92210911317841)
+        hit = ray_cast(col, o, dr, 5000.0)
+        self.assertIsNotNone(hit)
+        n = math.sqrt(sum(x * x for x in dr))
+        self.assertAlmostEqual(hit.t, n, delta=1e-6)
+
+    def test_capsule_prefilter_honours_the_contact_tolerance(self):
+        """Review round 5: the triangle AABB prefilter used the bare radius."""
+        col = read_collision(write_collision([ColObject("g", "terrain:grid", "terrain",
+                                                        [(0, 0, 0.5), (2, 0, 0.5), (2, 2, 0.5)], [(0, 1, 2)])]))
+        z = 0.5 + 0.18 + 5e-10                                              # within CONTACT_TOL_M of 0.18
+        self.assertEqual(capsule_hits(col, [(1.5, 0.5, z), (1.6, 0.5, z)], 0.18), [0])
 
     def test_exactly_tangent_capsule_is_a_hit(self):
         """Review round 4: exact 1 m contact computed as 1.0000000000000013 m reported a 1 m capsule clear."""

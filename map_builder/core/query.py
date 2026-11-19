@@ -10,6 +10,7 @@ every object and triangle visit as one work unit; exceeding ``max_work`` raises
 import math
 import sys
 from collections import namedtuple
+from fractions import Fraction
 
 from .collision import AABB_TABLE_TOL_M
 from .errors import LimitError
@@ -49,8 +50,9 @@ DEGENERATE_SIN = 1e-9
 # Capsule contact is inclusive: a triangle within radius + CONTACT_TOL_M is a hit, so an exact contact is not
 # lost to rounding (a few ulps at map coordinates up to 1e6 m). Mirrored by MbmapReader.cs.
 CONTACT_TOL_M = 1e-9
-# Rays accept barycentric coordinates down to -RAY_EDGE_TOL (and u + v up to 1 + RAY_EDGE_TOL), so a ray through
-# an edge shared by two triangles cannot slip between them when each rounds its coordinates the other way.
+# ray_cast also accepts a tolerant Moller-Trumbore hit (barycentrics down to -RAY_EDGE_TOL), so a ray that only
+# touches a silhouette edge (two triangles folded over each other as seen along a grazing ray, where neither
+# watertight test reports a crossing) still counts as contact.
 RAY_EDGE_TOL = 1e-9
 
 
@@ -128,12 +130,42 @@ def segment_segment_distance(p1, q1, p2, q2):
     return math.sqrt(best)
 
 
-def _ray_triangle(o, d, a, b, c, tol=0.0):
-    """Two-sided Moller-Trumbore: the parameter ``t`` along ``o + t d`` where it meets ``abc``, or None
-    (also None for a degenerate triangle or a ray parallel to its plane). The numerators are divided by
-    the determinant directly: its reciprocal overflows for a subnormal determinant (a grazing ray), which
-    would turn ``0 * inf`` into NaN. A non-finite ``u``, ``v`` or ``t`` is a miss. ``tol`` widens the
-    barycentric bounds (see RAY_EDGE_TOL)."""
+def _edge_functions(ax, ay, bx, by, cx, cy):
+    return cx * by - cy * bx, ax * cy - ay * cx, bx * ay - by * ax
+
+
+def _ray_triangle(o, d, a, b, c):
+    """Two-sided watertight ray/triangle test (Woop, Benthin and Wald 2013): the parameter ``t`` along
+    ``o + t d`` where it meets ``abc``, or None (also None for a ray parallel to the plane). The vertices
+    are translated to the ray origin and sheared so the ray runs along +z; the 2D edge functions of a
+    shared edge are then computed from identical values in both triangles, and any edge function that
+    rounds to zero is recomputed exactly, so a ray can never slip through an edge between two triangles
+    (nor through a shared vertex). A non-finite ``t`` is a miss."""
+    kz = max(range(3), key=lambda i: abs(d[i]))
+    kx, ky = (kz + 1) % 3, (kz + 2) % 3
+    if d[kz] == 0.0:
+        return None
+    sx, sy, sz = d[kx] / d[kz], d[ky] / d[kz], 1.0 / d[kz]
+    pa, pb, pc = _sub(a, o), _sub(b, o), _sub(c, o)
+    sh = [(p[kx] - sx * p[kz], p[ky] - sy * p[kz]) for p in (pa, pb, pc)]
+    u, v, w = _edge_functions(sh[0][0], sh[0][1], sh[1][0], sh[1][1], sh[2][0], sh[2][1])
+    if u == 0.0 or v == 0.0 or w == 0.0:
+        u, v, w = _edge_functions(*(Fraction(x) for p in sh for x in p))
+    if (u < 0 or v < 0 or w < 0) and (u > 0 or v > 0 or w > 0):
+        return None
+    det = u + v + w
+    if det == 0:
+        return None
+    u, v, w, det = float(u), float(v), float(w), float(det)
+    if det == 0.0:
+        return None
+    t = (u * pa[kz] + v * pb[kz] + w * pc[kz]) * sz / det
+    return t if math.isfinite(t) else None
+
+
+def _ray_triangle_tolerant(o, d, a, b, c, tol):
+    """Two-sided Moller-Trumbore with barycentric bounds widened by ``tol``; numerators are divided by the
+    determinant directly (a subnormal determinant's reciprocal would overflow). Non-finite values miss."""
     e1, e2 = _sub(b, a), _sub(c, a)
     pv = _cross(d, e2)
     det = _dot(e1, pv)
@@ -215,7 +247,8 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
         raise ValueError("radius must be a finite number >= 0")
     segs = list(zip(pts, pts[1:])) or [(pts[0], pts[0])]
     budget = _Budget(max_work)
-    pad = radius + AABB_TABLE_TOL_M
+    reach = radius + CONTACT_TOL_M                  # the inclusive contact distance, used by every test below
+    pad = reach + AABB_TABLE_TOL_M
     bounds = []
     for p, q in segs:
         bounds.append(((min(p[0], q[0]), min(p[1], q[1]), min(p[2], q[2])),
@@ -235,9 +268,9 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
                 a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
                 tb = (min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
                       max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2]))
-                if not _box_overlap(lo, hi, tb, radius):
+                if not _box_overlap(lo, hi, tb, reach):
                     continue
-                if segment_triangle_distance(p, q, a, b, c) <= radius + CONTACT_TOL_M:
+                if segment_triangle_distance(p, q, a, b, c) <= reach:
                     hit = True
                     break
             if hit:
@@ -295,7 +328,9 @@ def ray_cast(col, origin, direction, max_dist, max_work=DEFAULT_MAX_WORK):
             a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
             if triangle_is_degenerate(a, b, c):
                 continue
-            hit = _ray_triangle(o, d, a, b, c, RAY_EDGE_TOL)
+            hit = _ray_triangle(o, d, a, b, c)
+            if hit is None or hit < 0.0:
+                hit = _ray_triangle_tolerant(o, d, a, b, c, RAY_EDGE_TOL)
             if hit is None or hit < 0.0 or hit > max_dist:
                 continue
             if best is None or hit < best.t or (hit == best.t and t < best.triangle):
