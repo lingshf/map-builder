@@ -21,6 +21,7 @@ import math
 import os
 import re
 import stat
+import sys
 import tempfile
 import time
 import zipfile
@@ -152,7 +153,13 @@ def safe_member_name(name):
 
 
 def _num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """A real number (int or float, not bool) with a finite float value. Integers are bounded exactly before
+    any float conversion, so an oversized integer (e.g. 10**400) is rejected instead of raising OverflowError."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return -sys.float_info.max <= v <= sys.float_info.max
+    return isinstance(v, float) and math.isfinite(v)
 
 
 def _vec(v, n=3):
@@ -834,10 +841,11 @@ def _tube_problems(k, cls, tris):
         st = [capped[t] for t in ts]
         vol = _signed_volume(st)
         vols.append(vol)
-        if vol < 0.0 or all(is_degenerate(*t) for t in st):
+        if vol < 0.0:
             continue
         problems.append(f"{tag}: shell {s} of {n} (portal loops capped) has signed volume {vol:.6g} m^3; every "
-                        "tube shell must have negative volume (faces CCW seen from the free space inside)")
+                        "tube shell must have negative volume (faces CCW seen from the free space inside; a "
+                        "shell of only zero-area faces encloses nothing and is an error too)")
     if len(vols) == n and not any(v < 0.0 for v in vols):      # (sealed shells are reported above)
         problems.append(f"{tag} has no shell with negative volume once its portals are capped (collapsed or "
                         "flattened); a tube collision object must enclose free space")

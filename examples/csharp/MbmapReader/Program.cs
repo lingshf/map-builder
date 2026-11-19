@@ -125,7 +125,7 @@ static class Program
         // Controls for the capsule check itself, on fixed geometry built in code (so they cannot fail a valid package).
         var capsuleFailures = CapsuleCheck.SelfTest();
         foreach (var f in capsuleFailures) failures.Add($"capsule control: {f}");
-        Console.WriteLine($"capsule    controls on a synthetic box, a collapsed triangle and a nearly parallel 100 km edge: " +
+        Console.WriteLine($"capsule    controls on a synthetic box, a collapsed triangle, a nearly parallel 100 km edge, a shallow crossing and a grazing segment: " +
                           (capsuleFailures.Count == 0 ? "all as expected" : $"{capsuleFailures.Count} FAILED"));
 
         if (p.Heightfield != null)

@@ -109,8 +109,10 @@ edge may occur once, and the boundary edges must form simple closed loops (the p
 loop is capped with a triangle fan around the loop centroid, oriented consistently with the
 adjacent faces. Every resulting closed shell must contain at least one cap, that is, every
 tube shell must be open at one or more portals; a sealed shell (for example an inward-facing
-closed box) is an error. Every shell must have a **negative** signed volume, so its faces
-point inward. Any violation is an error; diagnostics name the object only by `#index`.
+closed box) is an error. Every shell, after capping, must have a **negative** signed volume, so
+its faces point inward; there is no exemption for a shell made only of degenerate (zero-area)
+triangles, whose volume is zero. Any violation is an error; diagnostics name the object only
+by `#index`.
 
 ### Orientation probes
 

@@ -75,6 +75,23 @@ class SegmentTriangleTest(unittest.TestCase):
         self.assertEqual(capsule_hits(col, [p, q], 0.00015), [0])
         self.assertEqual(capsule_hits(col, [p, q], 0.00005), [])
 
+    def test_shallow_crossing_of_a_collapsed_triangle_hits(self):
+        """Review round 2: sin^2 of the angle (2.5e-25) is below the old parallel cutoff, which skipped the
+        interior solution; the path crosses the edge exactly at its midpoint."""
+        p, q = (0.0, -5e-8, 0.0), (200000.0, 5e-8, 0.0)
+        e0, e1 = (0.0, 0.0, 0.0), (200000.0, 0.0, 0.0)
+        self.assertEqual(segment_segment_distance(p, q, e0, e1), 0.0)
+        self.assertEqual(segment_segment_distance(e0, e1, p, q), 0.0)
+        for tri in ((e0, e1, e1), (e0, e1, (100000.0, 0.0, 0.0))):            # collapsed / collinear on the edge
+            with self.subTest(tri=tri):
+                self.assertTrue(triangle_is_degenerate(*tri))
+                self.assertEqual(segment_triangle_distance(p, q, *tri), 0.0)
+                col = read_collision(write_collision([ColObject("edge", "osm:way/8", "prop", list(tri),
+                                                                [(0, 1, 2)])]))
+                self.assertEqual(capsule_hits(col, [p, q], 1e-8), [0])
+        # exactly parallel segments still use the endpoint distances
+        self.assertAlmostEqual(segment_segment_distance((0, 1, 0), (5, 1, 0), (2, 0, 0), (9, 0, 0)), 1.0)
+
     def test_segment_segment_matches_brute_force(self):
         import random
         rng = random.Random(7)
@@ -162,6 +179,30 @@ class RayCastTest(unittest.TestCase):
                 self.assertAlmostEqual(got.t, want.t, places=9)
         side = ray_cast(self.col, (0, 0, 5), (3e-200, 0, 0), 100.0)
         self.assertEqual((side.object, round(side.t, 5)), (1, 10.0))
+
+    def test_grazing_ray_with_subnormal_determinant(self):
+        """Review round 2: det = 1e-310 made 1/det overflow and u = 0 * inf = NaN, so t came back NaN."""
+        col = read_collision(write_collision([ColObject("tri", "osm:way/4", "prop",
+                                                        [(0, 0, 0), (1, 0, 0), (0, 1, 0)], [(0, 1, 2)])]))
+        for d in ((1, 0, -1e-310), (1, 0, 1e-310), (1, 0, -5e-324)):
+            with self.subTest(d=d):
+                hit = ray_cast(col, (0, 0, 0), d, 10.0)
+                if hit is not None:
+                    self.assertTrue(math.isfinite(hit.t))
+                    self.assertEqual((hit.t, hit.triangle, hit.object), (0.0, 0, 0))
+        hit = ray_cast(col, (0, 0, 0), (1, 0, -1e-310), 10.0)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.t, 0.0)
+        miss = ray_cast(col, (0, 0, 1e-300), (1, 0, -1e-310), 10.0)            # numerator / det overflows: a miss
+        self.assertIsNone(miss)
+
+    def test_oversized_integers_are_value_errors(self):
+        with self.assertRaises(ValueError):
+            capsule_hits(self.col, [(10 ** 400, 0, 0)], 1.0)
+        with self.assertRaises(ValueError):
+            capsule_hits(self.col, [(0, 0, 0)], 10 ** 400)
+        with self.assertRaises(ValueError):
+            ray_cast(self.col, (0, 0, 5), (0, 0, -1), 10 ** 400)
 
     def test_degenerate_triangle_is_never_hit(self):
         col = read_collision(write_collision([ColObject("sliver", "osm:way/3", "prop",

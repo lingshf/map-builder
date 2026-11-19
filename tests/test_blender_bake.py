@@ -195,6 +195,55 @@ class BakeExportTest(unittest.TestCase):
                          MATERIALS, {}, created_utc=UTC, passage_probes=[keep, stray])
         self.assertFalse(os.path.exists(f"{self.tmp}/stray.mbmap"))
 
+    def test_malformed_probe_metadata_fails_export_cleanly(self):
+        """Review round 2: a JSON null is malformed (not "no probes"), and oversized integers give a
+        PackageError instead of an OverflowError, through export_baked and the Blender export_map path."""
+        baked, moved, *_ = self.edited_scene()
+        keep = {"id": "p", "kind": "bridge", "feature": moved.mb_id, "path_map": [[0, 0, 400], [10, 0, 400]],
+                "radius_m": 1.0}
+        cases = {"null": None, "huge radius": [dict(keep, radius_m=10 ** 400)],
+                 "huge coordinate": [dict(keep, path_map=[[10 ** 400, 0, 400], [10, 0, 400]])]}
+        for what, probes in cases.items():
+            with self.subTest(what):
+                out = f"{self.tmp}/bad-{what.replace(' ', '-')}.mbmap"
+                with self.assertRaises(PackageError) as cm:
+                    export_baked(out, "bad", self.area, self.sources, baked, self.generated, MATERIALS, {},
+                                 created_utc=UTC, passage_probes=probes)
+                self.assertIn("passage_probes", str(cm.exception))
+                self.assertFalse(os.path.exists(out))
+                with self.assertRaises(PackageError):
+                    self.export_map_with_meta(baked, out, {"passage_probes": probes})
+                self.assertFalse(os.path.exists(out))
+        # a missing key still means "no probes"
+        manifest, result, report, _ = self.export_map_with_meta(baked, f"{self.tmp}/nokey.mbmap", {})
+        self.assertTrue(result.ok, result.summary())
+        self.assertEqual((manifest["passage_probes"], report["passage_probes_dropped"]), ([], []))
+
+    def export_map_with_meta(self, baked, out, extra):
+        """Run blender/export.py export_map with a stub ``bpy`` and the scene collection replaced by ``baked``."""
+        import sys
+        from unittest import mock
+        f = self.area.frame
+        meta = dict({"area": {"lat": f.lat0, "lon": f.lon0, "width_m": self.area.width, "height_m": self.area.height},
+                     "z_offset_m": f.z_offset, "generated_ids": self.generated, "sources": self.sources}, **extra)
+
+        class Root(dict):
+            name = "Map"
+
+        root = Root(mb_map=json.dumps(meta))
+        before = set(sys.modules)
+        bpy = mock.MagicMock()
+        bpy.path.abspath = lambda p: p
+        bpy.app.version_string = "4.2.23 LTS"
+        try:
+            with mock.patch.dict(sys.modules, {"bpy": bpy}):
+                from map_builder.blender import export as ex
+                with mock.patch.object(ex, "collect", return_value=(baked, MATERIALS, {"warnings": []})):
+                    return ex.export_map(mock.MagicMock(), out, "m", root=root)
+        finally:
+            for k in set(sys.modules) - before:        # never leave bpy-bound modules behind for other tests
+                del sys.modules[k]
+
     def test_failed_export_keeps_previous_package(self):
         baked, *_ = self.edited_scene()
         path = f"{self.tmp}/keep.mbmap"

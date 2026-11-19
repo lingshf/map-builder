@@ -717,8 +717,6 @@ namespace MapBuilder.Reference
         public const long PassageQueryBudget = 2_000_000;
         /// <summary>query.py DEGENERATE_SIN: |(b - a) x (c - a)| &lt;= this x longest squared edge = degenerate.</summary>
         public const double DegenerateSin = 1e-9;
-        /// <summary>query.py PARALLEL_SIN2: segments with sin^2(angle) &lt;= this are treated as parallel.</summary>
-        public const double ParallelSin2 = 1e-24;
 
         static Vec3 Add(Vec3 a, Vec3 d, double t) => new Vec3(a.X + d.X * t, a.Y + d.Y * t, a.Z + d.Z * t);
         static double Clamp01(double x) => x < 0 ? 0 : x > 1 ? 1 : x;
@@ -764,8 +762,9 @@ namespace MapBuilder.Reference
         }
 
         /// <summary>Closest distance between segments p1q1 and p2q2 (query.py segment_segment_distance): the
-        /// smaller of the four endpoint-to-segment distances and, for non-parallel segments, the interior critical
-        /// point solved with Lagrange's identity and refined by re-projection.</summary>
+        /// smaller of the four endpoint-to-segment distances and, whenever d1 x d2 is nonzero, the interior critical
+        /// point solved with Lagrange's identity, clamped and refined by re-projection. Only exactly parallel
+        /// segments or a non-finite solution fall back to the endpoint distances alone.</summary>
         public static double SegmentSegment(Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2)
         {
             Vec3 d1 = q1 - p1, d2 = q2 - p2;
@@ -776,10 +775,10 @@ namespace MapBuilder.Reference
             {
                 var n = Vec3.Cross(d1, d2);
                 double den = Vec3.Dot(n, n);
-                if (den > ParallelSin2 * a * e)
+                double s = den > 0 ? Vec3.Dot(n, Vec3.Cross(d2, p1 - p2)) / den : double.NaN;
+                if (double.IsFinite(s))
                 {
-                    var r = p1 - p2;
-                    double s = Clamp01(Vec3.Dot(n, Vec3.Cross(d2, r)) / den);
+                    s = Clamp01(s);
                     double t = SegmentParam(Add(p1, d1, s), p2, d2, e);
                     s = SegmentParam(Add(p2, d2, t), p1, d1, a);
                     t = SegmentParam(Add(p1, d1, s), p2, d2, e);
@@ -789,20 +788,21 @@ namespace MapBuilder.Reference
             return Math.Sqrt(best);
         }
 
-        /// <summary>Two-sided segment/triangle intersection parameter along p + t (q - p), or NaN.</summary>
+        /// <summary>Two-sided segment/triangle intersection parameter along p + t (q - p), or NaN. Numerators are
+        /// divided by the determinant directly (1/det overflows for a subnormal det); non-finite u, v, t miss.</summary>
         static double SegmentHit(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 c)
         {
             Vec3 e1 = b - a, e2 = c - a, pv = Vec3.Cross(d, e2);
             double det = Vec3.Dot(e1, pv);
             if (det == 0) return double.NaN;
-            double inv = 1 / det;
             var tv = o - a;
-            double u = Vec3.Dot(tv, pv) * inv;
-            if (u < 0 || u > 1) return double.NaN;
+            double u = Vec3.Dot(tv, pv) / det;
+            if (!(u >= 0 && u <= 1)) return double.NaN;
             var qv = Vec3.Cross(tv, e1);
-            double v = Vec3.Dot(d, qv) * inv;
-            if (v < 0 || u + v > 1) return double.NaN;
-            return Vec3.Dot(e2, qv) * inv;
+            double v = Vec3.Dot(d, qv) / det;
+            if (!(v >= 0 && u + v <= 1)) return double.NaN;
+            double t = Vec3.Dot(e2, qv) / det;
+            return double.IsFinite(t) ? t : double.NaN;
         }
 
         public static double SegmentTriangleDistance(Vec3 p, Vec3 q, Triangle tri)
@@ -903,7 +903,8 @@ namespace MapBuilder.Reference
         /// <summary>Controls of the capsule check on fixed geometry built in code (independent of any package):
         /// a box hit through its middle and missed above and beside it (grazing at radius +/- 1 mm), a collapsed
         /// (a == b) triangle measured through its edges, a nearly parallel 100 km segment that must keep 0.1 mm
-        /// precision (Python test_query regression case), and budget exhaustion. Returns the failed checks.</summary>
+        /// precision (Python test_query regression case), a shallow crossing of a collapsed 200 km edge, a grazing
+        /// segment with a subnormal determinant, and budget exhaustion. Returns the failed checks.</summary>
         public static List<string> SelfTest()
         {
             var failed = new List<string>();
@@ -933,6 +934,16 @@ namespace MapBuilder.Reference
             Expect("nearly parallel path 0.1 mm from an edge, r 0.05 mm", deck, Capsule(0.00005, p0, p1), false);
             double dist = SegmentTriangleDistance(p0, p1, deck.GetTriangle(0));
             if (!(Math.Abs(dist - 0.0001) <= 1e-9)) failed.Add($"nearly parallel distance {dist} m, expected 0.0001 m");
+            // Shallow crossing (review round 2): sin^2 = 2.5e-25 is below the old parallel cutoff; the path crosses
+            // the collapsed triangle's edge exactly at its midpoint.
+            var edge = Synthetic((CollisionClass.Prop, new[] { new Vec3(0, 0, 0), new Vec3(200000, 0, 0), new Vec3(200000, 0, 0) }, new[] { 0, 1, 2 }));
+            Vec3 s0 = new Vec3(0, -5e-8, 0), s1 = new Vec3(200000, 5e-8, 0);
+            Expect("shallow crossing of a collapsed 200 km edge, r 1e-8 m", edge, Capsule(1e-8, s0, s1), true);
+            double cross = SegmentSegment(s0, s1, new Vec3(0, 0, 0), new Vec3(200000, 0, 0));
+            if (cross != 0) failed.Add($"shallow crossing distance {cross} m, expected 0");
+            // Grazing segment (review round 2): det = 1e-310, so 1/det overflowed and u = 0 * inf was NaN.
+            double g = SegmentHit(new Vec3(0, 0, 0), new Vec3(1, 0, -1e-310), new Vec3(0, 0, 0), new Vec3(1, 0, 0), new Vec3(0, 1, 0));
+            if (g != 0) failed.Add($"grazing segment hit parameter {g}, expected 0");
             long budget = 3;
             if (Hits(box, Capsule(1.0, new Vec3(0, 0, 5), new Vec3(25, 0, 5)), ref budget) != null) failed.Add("work budget of 3 was not exhausted");
             return failed;

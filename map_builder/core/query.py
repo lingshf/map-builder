@@ -8,6 +8,7 @@ every object and triangle visit as one work unit; exceeding ``max_work`` raises
 """
 
 import math
+import sys
 from collections import namedtuple
 
 from .collision import AABB_TABLE_TOL_M
@@ -44,9 +45,6 @@ def _dist2(a, b):
 # or collinear triangle, width <= DEGENERATE_SIN x its longest edge) is measured through its edges and
 # vertices only: its plane is undefined or numerically meaningless. Mirrored by MbmapReader.cs.
 DEGENERATE_SIN = 1e-9
-# Two segments with sin^2(angle) <= PARALLEL_SIN2 are treated as parallel: their closest distance is then
-# attained, within |segment| x 1e-12, by an endpoint of one of them.
-PARALLEL_SIN2 = 1e-24
 
 
 def triangle_is_degenerate(a, b, c):
@@ -98,11 +96,14 @@ def segment_segment_distance(p1, q1, p2, q2):
     """Closest distance between segments ``p1q1`` and ``p2q2``.
 
     The minimum is either interior to both segments or has an endpoint of one of them, so it is the
-    smaller of the four endpoint-to-segment distances and, for non-parallel segments, the interior
-    critical point. That point is solved with Lagrange's identity (``a e - b^2 = |d1 x d2|^2`` and the
-    numerators as triple products) instead of the cancelling ``a e - b^2`` of Ericson 5.1.9, in a frame
-    relative to the start points, then refined by re-projecting each point onto the other segment (each
-    step can only shorten the distance), so nearly parallel long segments keep their precision."""
+    smaller of the four endpoint-to-segment distances and, whenever the segments are not exactly parallel
+    (``d1 x d2`` nonzero), the interior critical point. That point is solved with Lagrange's identity
+    (``a e - b^2 = |d1 x d2|^2`` and the numerators as triple products) instead of the cancelling
+    ``a e - b^2`` of Ericson 5.1.9, in a frame relative to the start points, then clamped and refined by
+    re-projecting each point onto the other segment (each step can only shorten the distance), so nearly
+    parallel long segments keep their precision. Every candidate is a real pair of segment points, so a
+    poorly conditioned solution can never undercut the true distance; only exactly parallel segments or a
+    non-finite solution fall back to the endpoint distances alone."""
     d1, d2 = _sub(q1, p1), _sub(q2, p2)
     a, e = _dot(d1, d1), _dot(d2, d2)
     best = min(_dist2(p1, closest_point_segment(p1, p2, q2)), _dist2(q1, closest_point_segment(q1, p2, q2)),
@@ -110,9 +111,9 @@ def segment_segment_distance(p1, q1, p2, q2):
     if a > 0.0 and e > 0.0:
         n = _cross(d1, d2)
         den = _dot(n, n)
-        if den > PARALLEL_SIN2 * a * e:
-            r = _sub(p1, p2)
-            s = min(1.0, max(0.0, _dot(n, _cross(d2, r)) / den))
+        s = _dot(n, _cross(d2, _sub(p1, p2))) / den if den > 0.0 else math.nan
+        if math.isfinite(s):
+            s = min(1.0, max(0.0, s))
             t = _segment_param(_lerp(p1, d1, s), p2, d2, e)
             s = _segment_param(_lerp(p2, d2, t), p1, d1, a)
             t = _segment_param(_lerp(p1, d1, s), p2, d2, e)
@@ -122,22 +123,24 @@ def segment_segment_distance(p1, q1, p2, q2):
 
 def _ray_triangle(o, d, a, b, c):
     """Two-sided Moller-Trumbore: the parameter ``t`` along ``o + t d`` where it meets ``abc``, or None
-    (also None for a degenerate triangle or a ray parallel to its plane)."""
+    (also None for a degenerate triangle or a ray parallel to its plane). The numerators are divided by
+    the determinant directly: its reciprocal overflows for a subnormal determinant (a grazing ray), which
+    would turn ``0 * inf`` into NaN. A non-finite ``u``, ``v`` or ``t`` is a miss."""
     e1, e2 = _sub(b, a), _sub(c, a)
     pv = _cross(d, e2)
     det = _dot(e1, pv)
     if det == 0.0:
         return None
-    inv = 1.0 / det
     tv = _sub(o, a)
-    u = _dot(tv, pv) * inv
-    if u < 0.0 or u > 1.0:
+    u = _dot(tv, pv) / det
+    if not (0.0 <= u <= 1.0):
         return None
     qv = _cross(tv, e1)
-    v = _dot(d, qv) * inv
-    if v < 0.0 or u + v > 1.0:
+    v = _dot(d, qv) / det
+    if not (v >= 0.0 and u + v <= 1.0):
         return None
-    return _dot(e2, qv) * inv
+    t = _dot(e2, qv) / det
+    return t if math.isfinite(t) else None
 
 
 def segment_triangle_distance(p, q, a, b, c):
@@ -155,11 +158,20 @@ def segment_triangle_distance(p, q, a, b, c):
     return best
 
 
+def _finite_real(x):
+    """A real number (not bool) with a finite float value; integers are bounded before any conversion, so an
+    oversized int is rejected instead of raising OverflowError."""
+    if isinstance(x, bool):
+        return False
+    if isinstance(x, int):
+        return -sys.float_info.max <= x <= sys.float_info.max
+    return isinstance(x, float) and math.isfinite(x)
+
+
 def _check_points(points, what):
     pts = []
     for p in points:
-        if len(p) != 3 or not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
-                                  for x in p):
+        if len(p) != 3 or not all(_finite_real(x) for x in p):
             raise ValueError(f"{what} must be finite 3-vectors")
         pts.append((float(p[0]), float(p[1]), float(p[2])))
     return pts
@@ -191,7 +203,7 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
     pts = _check_points(path_points, "path_points")
     if not pts:
         raise ValueError("path_points must hold at least one point")
-    if not (isinstance(radius, (int, float)) and math.isfinite(radius) and radius >= 0.0):
+    if not (_finite_real(radius) and radius >= 0.0):
         raise ValueError("radius must be a finite number >= 0")
     segs = list(zip(pts, pts[1:])) or [(pts[0], pts[0])]
     budget = _Budget(max_work)
@@ -257,7 +269,7 @@ def ray_cast(col, origin, direction, max_dist, max_work=DEFAULT_MAX_WORK):
         raise ValueError("direction must not be zero")
     d = (d[0] / m, d[1] / m, d[2] / m)
     n = math.sqrt(_dot(d, d))
-    if not (isinstance(max_dist, (int, float)) and math.isfinite(max_dist) and max_dist >= 0.0):
+    if not (_finite_real(max_dist) and max_dist >= 0.0):
         raise ValueError("max_dist must be a finite number >= 0")
     d = (d[0] / n, d[1] / n, d[2] / n)
     inv = tuple(1.0 / x if x != 0.0 else None for x in d)

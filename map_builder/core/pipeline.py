@@ -218,8 +218,10 @@ def filter_passage_probes(probes, mb_ids, plan_ids=()):
     in ``plan_ids`` but no longer among ``mb_ids`` (the feature was deleted in Blender) is dropped and
     reported by its id. Every other probe must be well formed (:func:`package.passage_probe_problems`) and
     reference an exported object; otherwise PackageError is raised, since a probe that never referenced a
-    plan feature is a bug, not an edit. The messages never echo probe strings."""
-    probes = [] if probes is None else probes
+    plan feature is a bug, not an edit. ``probes`` must be a list (the manifest/metadata value) or a tuple
+    (a Python default such as ``()``); anything else, including None (a JSON null), is malformed. The
+    messages never echo probe strings."""
+    probes = list(probes) if isinstance(probes, tuple) else probes
     bad = passage_probe_problems(probes)
     if bad:
         raise PackageError("invalid passage probes: " + "; ".join(bad))
@@ -238,7 +240,7 @@ def filter_passage_probes(probes, mb_ids, plan_ids=()):
 
 
 def export_package(path, name, area, sources, glb_bytes, col_objects, report, edits=None, blender_version=None,
-                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=None, plan_ids=()):
+                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=(), plan_ids=()):
     """Write a validated package atomically. ``col_objects`` must come from the same final meshes and world
     transforms as ``glb_bytes``; ``object_info[name]['provenance']`` is copied to the manifest.
     ``passage_probes`` (plan probes) are filtered by :func:`filter_passage_probes` against ``plan_ids`` (the

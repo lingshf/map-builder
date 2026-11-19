@@ -416,7 +416,9 @@ def export_map(context, path, name, heightfield_spacing=0.0, root=None):
     parent = os.path.dirname(out)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    probes = meta.get("passage_probes", [])
+    # [] only when the key is absent (metadata written before passage probes existed); an explicit null or any
+    # other malformed value reaches filter_passage_probes and fails the export with a PackageError
+    probes = meta["passage_probes"] if "passage_probes" in meta else []
     manifest, result, edits = export_baked(out, name, area, meta["sources"], baked, meta["generated_ids"],
                                            materials, report, blender_version=bpy.app.version_string,
                                            heightfield_spacing=heightfield_spacing or None,

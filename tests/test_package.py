@@ -11,6 +11,7 @@ import os
 import random
 import shutil
 import struct
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -1746,6 +1747,21 @@ class ClassKindTest(unittest.TestCase):
         self.assertEqual(len(probs), 1, probs)
         self.assertIn("shell 1 of 2 is sealed", probs[0])
 
+    def test_all_degenerate_capped_tube_shell_is_an_error(self):
+        """Review round 2: a capped shell of only zero-area faces (volume 0) used to be exempt; every capped
+        tube shell must have negative volume."""
+        m = MeshData("tet")
+        a, b, c, d = (m.add_vertex(*v) for v in [(0, 0, 0), (4, 0, 0), (0, 4, 0), (0, 0, 4)])
+        for f in [(a, d, b), (b, d, c), (c, d, a)]:          # inward-facing tetrahedron, open at its base abc
+            m.add_face(f, "MB Wall", (0.7, 0.7, 0.7))
+        self.assertEqual(orient_one("tunnel", m), [])
+        p, q, r = (m.add_vertex(*v) for v in [(10, 0, 0), (12, 0, 0), (14, 0, 0)])
+        m.add_face((p, q, r), "MB Wall", (0.7, 0.7, 0.7))        # a separate collinear triangle
+        probs = orient_one("tunnel", m)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertRegex(probs[0], r"tunnel object #0: shell \d of 2 \(portal loops capped\) has signed volume 0 ")
+        self.assertIn("must have negative volume", probs[0])
+
     def test_bridge_and_structure_are_solids(self):
         box = box_mesh(0, 0, 10, 4, 5, 6)
         for cls in ("bridge", "structure"):
@@ -1871,7 +1887,32 @@ class PassageProbeTest(TempDirCase):
         a, b = self.probe(id="a"), self.probe(id="b", feature="osm:way/gone")
         kept, dropped = filter_passage_probes([a, b], ["osm:way/2"], ["osm:way/2", "osm:way/gone"])
         self.assertEqual((kept, dropped), ([a], ["b"]))
-        self.assertEqual(filter_passage_probes(None, []), ([], []))
+        self.assertEqual(filter_passage_probes([], []), ([], []))
+        self.assertEqual(filter_passage_probes((), []), ([], []))          # the Python default: no probes
+
+    def test_null_and_oversized_probe_values_are_clean_problems(self):
+        """Review round 2: an explicit JSON null is malformed, and oversized integers are reported instead of
+        raising OverflowError (in the filter, the writer and the validator)."""
+        from map_builder.core.pipeline import filter_passage_probes
+        cases = {
+            "null": (None, "passage_probes must be an array"),
+            "huge radius": ([self.probe(radius_m=10 ** 400)], "passage_probes[0].radius_m"),
+            "huge negative radius": ([self.probe(radius_m=-10 ** 400)], "passage_probes[0].radius_m"),
+            "huge coordinate": ([self.probe(path_map=[[10 ** 400, 0, 0], [1, 0, 0]])], "passage_probes[0].path_map"),
+            "float max + 1": ([self.probe(path_map=[[int(sys.float_info.max) + 1, 0, 0], [1, 0, 0]])],
+                              "passage_probes[0].path_map"),
+        }
+        _, members, manifest = self.write("ok3.mbmap", [self.probe()])
+        for what, (probes, fragment) in cases.items():
+            with self.subTest(what):
+                self.assertTrue(any(fragment in m for m in pkg.passage_probe_problems(probes)))
+                with self.assertRaises(PackageError) as cm:
+                    filter_passage_probes(probes, ["osm:way/2"], ["osm:way/2"])
+                self.assertIn(fragment, str(cm.exception))
+                m = copy.deepcopy(manifest)
+                m["passage_probes"] = probes
+                raw_write(self.p("huge.mbmap"), members, m)
+                self.assertInvalid(self.p("huge.mbmap"), fragment)
 
     def test_filter_rejects_malformed_and_unknown_probes(self):
         from map_builder.core.pipeline import filter_passage_probes
