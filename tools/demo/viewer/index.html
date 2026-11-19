@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Map Builder demo viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 13px/1.4 system-ui, sans-serif; background: #9ab; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #panel { position: fixed; top: 8px; left: 8px; max-width: 340px; max-height: 70vh; overflow: auto;
+           background: rgba(255,255,255,.92); padding: 8px 10px; border-radius: 4px; }
+  #panel h1 { font-size: 14px; margin: 0 0 4px; }
+  #panel ul { margin: 4px 0; padding-left: 0; list-style: none; }
+  #panel li { cursor: pointer; padding: 1px 0; }
+  .pass { color: #0a7a2a; font-weight: 600; } .blocked { color: #c0151b; font-weight: 600; }
+  #attr { position: fixed; bottom: 4px; right: 8px; background: rgba(255,255,255,.85); padding: 2px 6px; font-size: 11px; }
+</style>
+<script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h1>Map Builder demo viewer</h1>
+  <div id="info">loading...</div>
+  <div><label><input type="checkbox" id="fly"> fly camera (WASD / QE, drag to look, Shift = fast)</label></div>
+  <div>Passage probes (click to fly to):</div>
+  <ul id="probes"></ul>
+</div>
+<div id="attr">Features &copy; OpenStreetMap contributors (ODbL); elevation Copernicus DEM GLO-30 (ESA) when used;
+  see <a href="NOTICES.txt">NOTICES.txt</a>. three.js (MIT)</div>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>
