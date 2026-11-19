@@ -902,10 +902,10 @@ class WideRoadBudgetTest(unittest.TestCase):
         with mock.patch("map_builder.core.generate.MeshData", side_effect=AssertionError("allocated")):
             with self.assertRaises(LimitError):
                 build_road(self.road, self.grid, 0.0, reserve=reserve)
-        self.assertEqual(len(calls), 2)          # cheap bound, then the exact count
-        self.assertLess(calls[1][1], calls[0][1] / 10)
+        # round 3, finding 5: one reservation, with the exact final counts (no per-candidate estimate)
+        self.assertEqual(len(calls), 1)
         mesh, _, _ = build_road(self.road, self.grid, 0.0)
-        self.assertEqual(calls[1][1], sum(1 for _ in mesh.triangles()))  # the count is exact
+        self.assertEqual(calls[0], (len(mesh.vertices), sum(1 for _ in mesh.triangles())))
 
 
 def assert_planar_faces(test, mesh, tol=1e-6):
@@ -983,3 +983,290 @@ class NumericTagBoundsTest(unittest.TestCase):
         self.assertIsNone(parse_length("9" * 400))
         self.assertIsNone(parse_length("9" * 400 + " ft"))
         self.assertIsNone(parse_length("9" * 400 + "'"))
+
+
+# --- Round 3 review findings ----------------------------------------------------
+
+def plan_road_tris(plan):
+    """[(mb_id, world 2D triangle)] over every road object of a plan."""
+    return [(o.mb_id, t) for o in plan.objects if o.mb_class == "road" for t in world_tris(o.mesh, o.location)]
+
+
+def assert_no_shared_area(test, tagged, tol=1e-6):
+    """No coincident triangles and no pairwise 2D overlap > tol m2 across all (id, triangle)s."""
+    tris = [t for _, t in tagged]
+    keys = [tuple(sorted((round(x, 6), round(y, 6)) for x, y in t)) for t in tris]
+    dup = [k for k, n in Counter(keys).items() if n > 1]
+    test.assertEqual(dup, [], "coincident road triangles")
+    boxes = [(min(p[0] for p in t), max(p[0] for p in t), min(p[1] for p in t), max(p[1] for p in t)) for t in tris]
+    order = sorted(range(len(tris)), key=lambda k: boxes[k][0])
+    for n, a in enumerate(order):
+        for b in order[n + 1:]:
+            if boxes[b][0] >= boxes[a][1]:
+                break
+            if boxes[a][2] < boxes[b][3] and boxes[b][2] < boxes[a][3]:
+                ov = tri_overlap(tris[a], tris[b])
+                test.assertLessEqual(ov, tol, (tagged[a][0], tagged[b][0], tris[a], tris[b], ov))
+
+
+def road_union_area(features):
+    return union_area([pc for f in features
+                       for pc in gen._road_pieces(gen._dedupe_polyline(f.geometry), gen.road_width(f.tags)[0] / 2)])
+
+
+class CrossWayOwnershipTest(unittest.TestCase):
+    """Round 3, finding 1: at-grade roads that cross or meet never share area."""
+
+    GRID = flat_grid(n=101, spacing=1.0, x0=-50, y0=-50)
+
+    def crossing(self, foot_pts=((0, -10), (0, 10))):
+        cl = Classified()
+        cl.roads = [road(foot_pts, fid="osm:way/102", highway="footway", width="2"),
+                    road([(-10, 0), (10, 0)], fid="osm:way/101", width="4")]
+        return cl, build_plan(tiny_area(), self.GRID, cl, PlanOptions(trees=False))
+
+    def test_reviewer_crossing(self):
+        cl, plan = self.crossing()
+        tagged = plan_road_tris(plan)
+        assert_no_shared_area(self, tagged)  # old code: 16 identical triangles in both objects
+        area = {k: sum(poly_area(t) for i, t in tagged if i == k) for k in ("osm:way/101", "osm:way/102")}
+        self.assertAlmostEqual(area["osm:way/101"], 80.0, places=6)       # residential keeps its full ribbon
+        self.assertAlmostEqual(area["osm:way/102"], 40.0 - 8.0, places=6)  # footway minus the crossing
+        self.assertAlmostEqual(sum(area.values()), road_union_area(cl.roads), places=6)
+        objs = {o.mb_id: o for o in plan.objects if o.mb_class == "road"}
+        self.assertEqual([o.mb_id for o in plan.objects if o.mb_class == "road"], ["osm:way/102", "osm:way/101"])
+        self.assertIn("osm:way/101", objs["osm:way/102"].provenance["overlap"])
+        self.assertIn("8.00 m2", objs["osm:way/102"].provenance["overlap"])
+        self.assertNotIn("overlap", objs["osm:way/101"].provenance)
+        self.assertNotEqual(objs["osm:way/101"].mesh.face_colors[0], objs["osm:way/102"].mesh.face_colors[0])
+        self.assertEqual(plan.report["counts"]["roads_clipped_by_higher_priority"], 1)
+        self.assertEqual(plan.report["invalid_features"], [])
+
+    def test_fully_covered_way_is_a_warning(self):
+        cl, plan = self.crossing(foot_pts=((-5, 0), (5, 0)))
+        self.assertEqual([o.mb_id for o in plan.objects if o.mb_class == "road"], ["osm:way/101"])
+        self.assertFalse(any(e["id"] == "osm:way/102" for e in plan.report["invalid_features"]))
+        w = [w for w in plan.report["warnings"] if w.startswith("osm:way/102")]
+        self.assertEqual(len(w), 1)
+        self.assertIn("osm:way/101", w[0])
+        self.assertEqual(plan.report["counts"]["roads_fully_covered"], 1)
+
+    def test_priority_class_then_width_then_id(self):
+        r = lambda fid, **t: road([(0, 0), (1, 0)], fid=fid, **t)  # noqa: E731
+        ranked = sorted([r("osm:way/5", highway="footway"), r("osm:way/4", width="9"), r("osm:way/3"),
+                         r("osm:way/2", highway="primary"), r("osm:way/1")], key=gen.road_priority)
+        self.assertEqual([f.id for f in ranked], ["osm:way/2", "osm:way/4", "osm:way/1", "osm:way/3", "osm:way/5"])
+
+    def test_randomized_multi_road(self):
+        rng = random.Random(77)
+        grid = make_grid([[rng.uniform(0, 10) for _ in range(21)] for _ in range(21)], spacing=5.0, x0=-50, y0=-50)
+        classes = ["primary", "residential", "service", "footway", "path", "cycleway"]
+        for trial in range(8):
+            cl = Classified()
+            for k in range(rng.randint(3, 5)):
+                pts = [(rng.uniform(-25, 25), rng.uniform(-25, 25))]
+                for _ in range(rng.randint(1, 3)):
+                    pts.append((min(30, max(-30, pts[-1][0] + rng.uniform(-20, 20))),
+                                min(30, max(-30, pts[-1][1] + rng.uniform(-20, 20)))))
+                tags = {"highway": rng.choice(classes)}
+                if rng.random() < 0.5:
+                    tags["width"] = str(rng.choice([1.5, 3.0, 4.0, 7.0, 10.0]))
+                cl.roads.append(road(pts, fid=f"osm:way/{500 + k}", **tags))
+            if rng.random() < 0.5:  # an exact duplicate of another way (same class and width)
+                src = cl.roads[0]
+                cl.roads.append(Feature("osm:way/599", "road", dict(src.tags), list(src.geometry)))
+            calls = []
+            real = gen.SceneBudget.reserve
+
+            def record(budget, fid, v, t):
+                calls.append((fid, v, t))
+                return real(budget, fid, v, t)
+
+            with self.subTest(trial=trial), mock.patch.object(gen.SceneBudget, "reserve", autospec=True,
+                                                              side_effect=record):
+                plan = build_plan(tiny_area(), grid, cl, PlanOptions(trees=False))
+                tagged = plan_road_tris(plan)
+                assert_no_shared_area(self, tagged)
+                self.assertAlmostEqual(sum(poly_area(t) for _, t in tagged), road_union_area(cl.roads), places=4)
+                self.assertEqual(plan.report["invalid_features"], [])
+                for o in plan.objects:
+                    if o.mb_class == "road":
+                        self.assertIn((o.mb_id, len(o.mesh.vertices), sum(1 for _ in o.mesh.triangles())), calls)
+                        self.assertTrue(all(tri_normal_z(o.mesh, t) > 0 for t in o.mesh.triangles()))
+
+
+class SlopedRoofClearanceTest(unittest.TestCase):
+    """Round 3, finding 2: terrain is compared with the roof underside at the same XY."""
+
+    FOOT = rect_ccw(-10, -5, 10, 5)
+
+    @staticmethod
+    def falling_east():
+        # terrain 4 m at x = -10 falling linearly to 0 m at x = 10
+        return make_grid([[2.0 - 0.2 * (-50 + 10 * i) for i in range(11)] for _ in range(11)], x0=-50, y0=-50)
+
+    def skillion(self, direction):
+        return building(self.FOOT, fid="osm:way/201", height="8", roof__height="5", roof__shape="skillion",
+                        roof__direction=direction)
+
+    def test_reviewer_skillion_clears_falling_terrain(self):
+        grid = self.falling_east()
+        mesh, origin, prov = build_building(self.skillion("90"), grid, 0.0)  # high (8 m) west, low (3 m) east
+        self.assertIn("terrain_clearance", prov)
+        tops = [v for v in mesh.vertices if v[2] > 0]
+        self.assertAlmostEqual(max(v[2] for v in tops), 8.0)
+        self.assertAlmostEqual(min(v[2] for v in tops), 3.0)
+        for x, y, z in tops:
+            clearance = z + origin[2] - terrain_height(grid, x + origin[0], y + origin[1])
+            self.assertGreaterEqual(clearance, 3.0 - 1e-9)
+        cl = Classified()
+        cl.buildings = [self.skillion("90")]
+        plan = build_plan(tiny_area(), grid, cl, PlanOptions(trees=False))
+        self.assertIn("osm:way/201", {o.mb_id for o in plan.objects})
+
+    def test_penetrating_skillion_is_rejected(self):
+        # low (3 m) edge on the west, where the terrain is 4 m above the base datum
+        with self.assertRaises(InvalidFeature) as cm:
+            build_building(self.skillion("270"), self.falling_east(), 0.0)
+        self.assertIn("reaches eave/roof", str(cm.exception))
+        self.assertIn("(-10.00,", str(cm.exception))
+
+    def test_interior_node_against_sloped_underside(self):
+        # flat terrain with one node at (0, 0); the skillion underside is 5.5 m there
+        for bump, ok in ((5.0, True), (6.0, False)):
+            heights = [[0.0] * 11 for _ in range(11)]
+            heights[5][5] = bump
+            grid = make_grid(heights, x0=-50, y0=-50)
+            with self.subTest(bump=bump):
+                if ok:
+                    build_building(self.skillion("90"), grid, 0.0)
+                else:
+                    with self.assertRaises(InvalidFeature) as cm:
+                        build_building(self.skillion("90"), grid, 0.0)
+                    self.assertIn("(0.00, 0.00)", str(cm.exception))
+
+    def test_flat_roof_still_uses_eave(self):
+        with self.assertRaises(InvalidFeature):
+            build_building(building(self.FOOT, height="4"), self.falling_east(), 0.0)
+        build_building(building(self.FOOT, height="4.5"), self.falling_east(), 0.0)
+
+
+class TerrainExtentTest(unittest.TestCase):
+    """Round 3, finding 3: nothing is emitted outside the terrain extent without a report."""
+
+    def test_features_beyond_terrain_edge(self):
+        area = Area(47.0, 8.0, 140.0, 100.0)  # x -70..70, terrain only -50..50
+        grid = flat_grid()
+        cl = Classified()
+        cl.buildings = [building(rect_ccw(35, -5, 55, 5), fid="osm:way/301", height="6"),
+                        building(rect_ccw(20, -5, 30, 5), fid="osm:way/302", height="6")]
+        cl.trees = [Feature("osm:node/303", "tree", {"natural": "tree"}, (55.0, 20.0)),
+                    Feature("osm:node/304", "tree", {"natural": "tree"}, (10.0, 20.0))]
+        cl.roads = [road([(30, 30), (65, 30)], fid="osm:way/305")]
+        cl.areas = [Feature("osm:way/306", "area", {"_class": "forest", "landuse": "forest"},
+                            Polygon(rect_ccw(-70, -50, 70, 50)))]
+        plan = build_plan(area, grid, cl, PlanOptions(max_trees=1000))
+        reasons = {e["id"]: e["reason"] for e in plan.report["invalid_features"]}
+        self.assertIn("terrain extent", reasons["osm:way/301"])   # old code: built, overhanging x = 50..55
+        self.assertIn("terrain extent", reasons["osm:node/303"])
+        ids = {o.mb_id for o in plan.objects}
+        self.assertTrue({"osm:way/302", "osm:node/304", "osm:way/305"} <= ids)
+        self.assertNotIn("osm:way/301", ids)
+        self.assertNotIn("osm:node/303", ids)
+        self.assertEqual(plan.report["counts"]["roads_trimmed_at_terrain_edge"], 1)
+        self.assertTrue(any("does not cover the scene area" in w for w in plan.report["warnings"]))
+        for o in plan.objects:
+            if o.mesh is not None:
+                for x, y, _ in o.mesh.vertices:
+                    self.assertLessEqual(abs(x + o.location[0]), 50 + 1e-9, o.mb_id)
+                    self.assertLessEqual(abs(y + o.location[1]), 50 + 1e-9, o.mb_id)
+            else:
+                self.assertTrue(gen.inside_terrain(grid, o.location[0], o.location[1], tol=0.0), o.mb_id)
+        self.assertGreater(sum(1 for o in plan.objects if o.mb_id.startswith("scatter:")), 50)
+        with self.assertRaises(InvalidFeature):
+            build_building(cl.buildings[0], grid, 0.0)
+        build_building(building(rect_ccw(40, -5, 50.0005, 5), height="6"), grid, 0.0)  # within tolerance
+
+
+class StoreyHeightTest(unittest.TestCase):
+    """Round 3, finding 4: building:levels gives the eave; the roof is added on top."""
+
+    FOOT = rect_ccw(-5, -3, 5, 3)  # short side 6 -> inferred roof 1.8 m
+
+    def levels(self, mesh):
+        return sorted({round(v[2], 6) for v in mesh.vertices})
+
+    def test_reviewer_levels_gabled_without_height(self):
+        mesh, _, prov = build_building(building(self.FOOT, building__levels="2", roof__shape="gabled"),
+                                       flat_grid(), 0.0)
+        self.assertEqual(self.levels(mesh), [-0.3, 6.0, 7.8])  # old code: eave 3, ridge 6
+        self.assertEqual(prov["height_m"], 7.8)
+        self.assertEqual(prov["eave_height_m"], 6.0)
+        self.assertEqual(prov["roof_height_m"], 1.8)
+        self.assertIn("to the eave", prov["height"])
+        self.assertTrue(prov["height"].startswith("inferred:building:levels"))
+        self.assertIn("above the storey-derived eave", prov["roof_height"])
+        assert_closed_manifold(self, mesh)
+
+    def test_explicit_height_is_total(self):
+        mesh, _, prov = build_building(building(self.FOOT, height="8", building__levels="2", roof__shape="gabled"),
+                                       flat_grid(), 0.0)
+        self.assertEqual(self.levels(mesh), [-0.3, 6.2, 8.0])
+        self.assertEqual(prov["height"], "measured:osm height")
+        self.assertNotIn("above the storey-derived eave", prov["roof_height"])
+
+    def test_roof_sources_added_on_top_of_levels(self):
+        cases = [({"roof__levels": "1"}, [-0.3, 6.0, 9.0], "inferred:roof:levels x 3 m"),
+                 ({"roof__height": "2.5"}, [-0.3, 6.0, 8.5], "measured:osm roof:height")]
+        for tags, zs, label in cases:
+            with self.subTest(tags=tags):
+                mesh, _, prov = build_building(building(self.FOOT, building__levels="2", roof__shape="hipped",
+                                                        **tags), flat_grid(), 0.0)
+                self.assertEqual(self.levels(mesh), zs)
+                self.assertEqual(prov["roof_height"], label)
+        mesh, _, prov = build_building(building(self.FOOT, building__levels="2"), flat_grid(), 0.0)
+        self.assertEqual(self.levels(mesh), [-0.3, 6.0])  # flat roof: eave == top
+        h, _, roof, _ = gen.building_height({"building": "yes", "building:levels": "2", "roof:levels": "1"})
+        self.assertEqual((h, roof), (9.0, 3.0))
+
+
+class ExactRoadCountTest(unittest.TestCase):
+    """Round 3, finding 5: the road budget count is exactly the emitted mesh."""
+
+    GRID = flat_grid(n=101, spacing=1.0, x0=-50, y0=-50)
+
+    def test_reviewer_road_count_is_exact(self):
+        calls = []
+        mesh, _, _ = build_road(road([(0, 0), (6, 0)], width="4"), self.GRID, 0.0,
+                                reserve=lambda v, t: calls.append((v, t)))
+        self.assertEqual((len(mesh.vertices), sum(1 for _ in mesh.triangles())), (35, 48))
+        self.assertEqual(calls, [(35, 48)])  # old code requested 144 vertices
+
+    def test_clipped_slivers_and_turns_count_exactly(self):
+        rng = random.Random(8)
+        grid = make_grid([[rng.uniform(0, 5) for _ in range(41)] for _ in range(41)], spacing=1.0, x0=-20, y0=-20)
+        for k in range(40):
+            pts = [(rng.uniform(-15, 15), rng.uniform(-15, 15)) for _ in range(rng.randint(2, 4))]
+            calls = []
+            mesh, _, prov = build_road(road(pts, width=str(rng.choice([0.7, 2.0, 3.3, 6.1]))), grid, 0.0,
+                                       reserve=lambda v, t: calls.append((v, t)))
+            if mesh is None:
+                continue
+            with self.subTest(k=k):
+                self.assertEqual(calls, [(len(mesh.vertices), sum(1 for _ in mesh.triangles()))])
+                used = {i for f in mesh.faces for i in f}
+                self.assertEqual(len(used), len(mesh.vertices))  # no orphan vertices
+
+    def test_budget_exactly_equal_to_need(self):
+        cl = Classified()
+        cl.roads = [road([(0, 0), (6, 0)], fid="osm:way/401", width="4")]
+        n_v, n_t = self.GRID.nx * self.GRID.ny, 2 * (self.GRID.nx - 1) * (self.GRID.ny - 1)
+        plan = build_plan(tiny_area(), self.GRID, cl, PlanOptions(trees=False, max_vertices=n_v + 35,
+                                                                  max_triangles=n_t + 48))
+        self.assertIn("osm:way/401", {o.mb_id for o in plan.objects})
+        self.assertEqual(plan.report["budget"]["vertices"], n_v + 35)
+        for opts in (dict(max_vertices=n_v + 34, max_triangles=n_t + 48),
+                     dict(max_vertices=n_v + 35, max_triangles=n_t + 47)):
+            with self.assertRaises(LimitError) as cm:
+                build_plan(tiny_area(), self.GRID, cl, PlanOptions(trees=False, **opts))
+            self.assertIn("osm:way/401", str(cm.exception))

@@ -172,10 +172,35 @@ counted in `edits.removed` and listed in `report.json`.
 * Values that start with `inferred:` or `fallback:` are defaults chosen by map-builder.
 * Numeric tags outside sane ranges (levels > 200, lengths > 1000 m, non-finite values) are
   not used; they are listed in the object's `rejected_tags` provenance and in `warnings`.
+* Building heights follow OSM semantics. An explicit `height` is the total height and the
+  roof is built within it. Without `height`, `building:levels` × 3 m is the **eave** height
+  (`height` = `inferred:building:levels x 3 m to the eave, roof height added on top`). The roof
+  rise is then added above it: from `roof:height`, from `roof:levels` × 3 m, or
+  `inferred:0.3 x footprint short side (1-6 m), added above the storey-derived eave`.
+  `height_m` is the total height and `eave_height_m` the eave (lowest wall top).
+* Buildings are rejected when the terrain reaches the roof underside, that is, the eave plane,
+  or the sloped plane of a skillion roof. The check compares both surfaces at the same XY
+  positions over the whole footprint. When the terrain rises above the lowest eave but still
+  clears the underside everywhere, `terrain_clearance` records that.
+* Roads: all generated roads are at grade, and no two road objects share ground. Where roads
+  overlap, the area belongs to the higher-priority road:
+  1. the road class (`motorway` … `path`);
+  2. then the wider ribbon;
+  3. then the feature id.
+
+  A road that loses area records it in `overlap` (m² and the owning road ids). A road with no
+  area left is not generated; it is listed in `warnings` and counted in
+  `counts.roads_fully_covered`. Ribbons are trimmed at the terrain edge (`terrain_edge`,
+  `counts.roads_trimmed_at_terrain_edge`).
+* Nothing is generated outside the terrain extent. Building footprints and OSM trees outside
+  it (1 mm tolerance) are listed in `invalid_features`. Procedural scatter is placed only on
+  terrain. Landcover only colours terrain cells. If the terrain does not cover the scene area,
+  `warnings` says so.
 * `report.json` lists:
   * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, elevated parts
-  * `invalid_features`: for example self-intersecting footprints, degenerate inner rings, and
-    buildings where the terrain inside the footprint reaches the eave or roof
+  * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
+    buildings where the terrain reaches the roof underside, and footprints or trees outside
+    the terrain extent
   * counts and warnings
 
 ## `collision/map.mbcol` v1 (little-endian)
