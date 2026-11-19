@@ -1026,6 +1026,36 @@ class RoundFourTest(unittest.TestCase):
         self.assertLess(elapsed, 1.0)
         self.assertIn("time limit", str(cm.exception))
 
+    def test_stalled_workers_are_capped(self):
+        import socket as socket_mod
+        import threading
+        from map_builder.core import http as http_mod
+        release = threading.Event()
+        self.addCleanup(release.set)
+        real = socket_mod.getaddrinfo
+
+        def blocked(*a, **k):
+            release.wait(5.0)
+            return real(*a, **k)
+
+        def alive():
+            return sum(t.name == "map-builder-http" and t.is_alive() for t in threading.enumerate())
+        base = alive()
+        with mock.patch("socket.getaddrinfo", blocked):
+            msgs = []
+            for _ in range(http_mod.MAX_OUTSTANDING_WORKERS + 2):
+                with self.assertRaises(NetworkError) as cm:
+                    UrllibTransport(total_timeout=0.05).request("GET", "http://stall.invalid/", {}, None, 1.0, 10)
+                msgs.append(str(cm.exception))
+            self.assertLessEqual(alive() - base, http_mod.MAX_OUTSTANDING_WORKERS)
+            self.assertIn("too many earlier requests", msgs[-1])
+            release.set()
+            for t in threading.enumerate():
+                if t.name == "map-builder-http":
+                    t.join(5.0)
+        self.assertEqual(alive(), 0)
+        self.assertEqual(http_mod._WORKER_SLOTS._value, http_mod.MAX_OUTSTANDING_WORKERS)  # all slots released
+
     def test_stalled_tls_handshake_hits_deadline(self):
         import socket as socket_mod
         import threading

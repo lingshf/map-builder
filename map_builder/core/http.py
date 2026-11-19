@@ -34,6 +34,8 @@ TOTAL_TIMEOUT_FACTOR = 4.0
 MAX_REDIRECTS = 5
 READ_CHUNK = 64 * 1024
 SENSITIVE_HEADERS = {"authorization", "x-api-key", "cookie"}
+MAX_OUTSTANDING_WORKERS = 4
+_WORKER_SLOTS = threading.BoundedSemaphore(MAX_OUTSTANDING_WORKERS)
 _CONTENT_RANGE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", re.IGNORECASE)
 
 
@@ -291,14 +293,24 @@ class UrllibTransport:
         # in the resolver is abandoned (its late sockets are shut down by the expired watchdog).
         total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
         box = {}
+        if not _WORKER_SLOTS.acquire(blocking=False):
+            safe = redact(url)
+            raise NetworkError(f"{safe}: too many earlier requests are still stalled (e.g. in DNS resolution); "
+                               "retry later", url=safe)
 
         def work():
             try:
                 box["ok"] = self._request(method, url, headers, data, timeout, max_bytes, total)
             except BaseException as e:  # noqa: BLE001 - re-raised in the caller's thread
                 box["err"] = e
+            finally:
+                _WORKER_SLOTS.release()  # held until the worker really exits, even if abandoned
         worker = threading.Thread(target=work, name="map-builder-http", daemon=True)
-        worker.start()
+        try:
+            worker.start()
+        except BaseException:
+            _WORKER_SLOTS.release()
+            raise
         worker.join(total + 0.25)  # small grace so the worker's own deadline error normally wins
         if worker.is_alive():
             safe = redact(url)
