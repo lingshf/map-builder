@@ -654,6 +654,16 @@ class ResourceBoundsTest(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertFalse(os.path.exists(self.out()))
 
+    def test_absurdly_fine_heightfield_spacing_is_a_limit_error(self):
+        big = Area(47.0, 8.0, 400.0, 300.0)
+        for spacing in (1e-310, 5e-324):               # 2*h/spacing overflows to inf
+            with self.assertRaises(LimitError):
+                heightfield_layout(big.half, spacing)
+            with self.local_loaders() as calls:
+                with self.assertRaises(LimitError):
+                    build_package(big, fixture_settings(heightfield_spacing=spacing), self.out(), "too_fine")
+            self.assertEqual(calls, [])
+
 
 class HeightfieldPreflightScopeTest(unittest.TestCase):
     """The heightfield bound belongs to package export: plan generation produces no heightfield."""
