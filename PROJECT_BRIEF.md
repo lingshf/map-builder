@@ -74,6 +74,12 @@ The sample regeneration command is in `examples/README.md`.
   * text fields are scrubbed;
   * the validator enforces the policy on every JSON surface.
 * **No silent flat-ground substitution.** An elevation failure stops Generate.
+* **DSM terrain correction** (`Settings.dsm_correction`; default auto = on for Copernicus, off
+  for local files) lowers DEM points under OSM buildings (+15 m), trees (6 m), forest/wood and
+  bridge ways (width/2 + 15 m) by a BFS fill + 20 smoothing passes, `min(original, filled)`; it is
+  skipped below 5 % unmasked points. It is a derived step: raw elevation provenance and hashes are
+  unchanged; the outcome is in `report.json` `terrain_correction`, the terrain `surface` is
+  `inferred:`, and the elevation source gets a `processing` note. Approximation, not a DTM.
 * **Identity:** `package_id = sha256(raw manifest bytes)`, valid only after the files[] hashes
   are verified. Replays bind to it.
 * **Licensing:**

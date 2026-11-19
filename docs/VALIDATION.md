@@ -82,6 +82,8 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
 | format 2.0.0 review | C# reader (.NET 8, Windows) | sample `OK` with capsule self-test controls (synthetic box, collapsed triangle, nearly parallel 100 km edge, budget) as expected; a scratch package with three passage probes (one blocked only by a collapsed triangle) gives the same PASS/BLOCKED results as the Python validator |
 | format 2.0.0 review round 2 | Unit + acceptance (Python 3.12, Windows) | 335 tests OK (adds grazing-ray subnormal determinant, shallow crossing of a collapsed edge, null/oversized probe metadata incl. `export_map` with a stub `bpy`, and all-degenerate capped tube shell regressions) |
 | format 2.0.0 review round 2 | C# reader (.NET 8, Windows) on `examples/synthetic_sample.mbmap` | `OK`; capsule controls (adds the shallow crossing and the grazing segment) all as expected |
+| DSM correction | Unit + acceptance (Python 3.12, Windows) | 359 tests OK (adds `test_dsm_correction.py`, synthetic: building/tree/forest/bridge-ribbon mask, raised block and tree bump lowered and never raised, unmasked points bit-for-bit, 5 % guard, auto/on/off per source, report/provenance/`processing` note, CLI flags, 250k-point grid) |
+| DSM correction | Sample regenerated (local file, auto = off) and C# reader | `VALID: 0 error(s), 1 warning(s)`; 74 objects, 4945 triangles unchanged; only `report.json` gains `terrain_correction` (`reason: local file (opt-in off)`), new `package_id` `sha256:8ab22b98…`; C# reader `OK`; Blender 4.2.23 integration `OK: 0 failure(s)` |
 
 ## Not validated
 

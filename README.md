@@ -48,6 +48,28 @@ The panel is in **3D Viewport › Sidebar (N) › Map Builder**.
 6. **Validate Package:** this runs the full validator (structure, hashes, binding, geometry,
    probes and policy) and prints the errors and warnings.
 
+### DSM terrain correction
+
+Copernicus GLO-30 is a surface model (DSM): its heights include buildings, tree canopy and bridge
+decks. The **DSM correction** setting (*DSM correction* under the elevation source in the panel: Auto / On / Off; CLI
+`--dsm-correction` / `--no-dsm-correction`) pushes the terrain under those features back toward
+the surrounding ground before the terrain, roads and buildings are built.
+
+* **Auto** (the default) is ON for the Copernicus source and OFF for local elevation files.
+  On or Off overrides that for either source.
+* Masked DEM points are those within 15 m of a building footprint (all buildings, including
+  courtyards), within 6 m of a `natural=tree`, inside `landuse=forest`/`natural=wood`, or within
+  width/2 + 15 m of a `highway`/`railway` way with `bridge=*` (not `no`).
+* Masked points are filled from the unmasked ground by a breadth-first fill (mean of the
+  already-known 8 neighbours), then smoothed 20 times over the masked points only. The result is
+  `min(original, filled)`: terrain is never raised and unmasked points are not changed.
+* If fewer than 5 % of the points are unmasked, the correction is skipped with a warning.
+* `report.json` gets a `terrain_correction` entry (`applied`, `setting`, `reason`,
+  `masked_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, mask parameters and
+  feature counts). When applied, the terrain's `surface` provenance becomes
+  `inferred:DSM corrected (…)` and the elevation source carries a `processing` note, also shown in
+  `NOTICES.txt`. Source hashes and the raw elevation provenance are unchanged.
+
 ## Credentials and privacy
 
 * There is no free-text endpoint field. A private Overpass instance is read from the
@@ -118,6 +140,11 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
   cavities: no rooms, passages or flyable interiors.
 * The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or
   custom normals.
+* **DSM correction is an approximation, not a DTM.** It only knows the features mapped in OSM:
+  unmapped buildings, trees or hedges stay in the terrain. Inside large masked areas (big forests,
+  dense blocks) the fill flattens real relief, and it cannot reveal ground that differs from the
+  surrounding points (cuttings, river banks under a bridge). `man_made=bridge` outlines are not
+  masked (only the bridge ways are), and bridge ways are clipped to the area.
 * The target size is about 1 × 1 km. There is no streaming, no LOD generation and no
   frame-rate or performance guarantee.
 * The online paths (Copernicus download, Overpass, and online acquisition inside Blender) are

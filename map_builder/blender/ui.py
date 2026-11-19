@@ -46,6 +46,7 @@ class MB_PT_main(bpy.types.Panel):
             box.prop(s, "elevation_vertical_datum")
             box.prop(s, "elevation_license")
         box.prop(s, "terrain_spacing")
+        box.prop(s, "dsm_correction")
         box.prop(s, "osm_source")
         if s.osm_source == "file":
             box.prop(s, "osm_file")

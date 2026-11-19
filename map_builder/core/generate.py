@@ -26,6 +26,7 @@ import math
 import random
 import re
 
+from . import dsm
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
@@ -1502,8 +1503,39 @@ class PlanOptions:
         self.max_triangulation_work = max_triangulation_work
 
 
-def build_plan(area, terrain, classified, options=None):
+TERRAIN_SURFACE = "piecewise planar, cells split along the (i,j)-(i+1,j+1) diagonal"
+DSM_CORRECTED_SURFACE = "inferred:DSM corrected (buildings/trees/forest/bridges masked); " + TERRAIN_SURFACE
+
+
+def dsm_obstacles(classified):
+    """Mask inputs for :func:`dsm.apply_correction` from classified features, whether or not they are
+    generated: every building footprint (outlines replaced by building:part features and footprints whose
+    centroid lies outside the area included; holes kept), OSM trees, forest/wood landcover, and bridge
+    ways with the road width the generator would use for them."""
+    buildings, seen = [], set()
+    for f in (list(classified.buildings) + list(getattr(classified, "outline_features", {}).values())
+              + list(getattr(classified, "outside_buildings", ()))):
+        key = (f.id, id(f.geometry))
+        if key not in seen:
+            seen.add(key)
+            buildings.append([f.geometry.outer] + list(f.geometry.holes))
+    trees = [tuple(f.geometry) for f in classified.trees]
+    forests = [[a.geometry.outer] + list(a.geometry.holes) for a in classified.areas
+               if a.tags.get("_class") == "forest"]
+    bridges = [(list(f.geometry), road_width(f.tags)[0]) for f in getattr(classified, "bridges", ())]
+    return buildings, trees, forests, bridges
+
+
+def build_plan(area, terrain, classified, options=None, dsm_correction=None):
+    """Scene plan from the elevation grid ``terrain`` and the classified features.
+
+    ``dsm_correction``: None (auto: on for surface-model sources such as Copernicus GLO-30, off for local
+    files), True or False. When applied, the corrected grid (see :mod:`dsm`) is used for the terrain mesh
+    and everything placed on it; ``report['terrain_correction']`` always records the outcome."""
     opts = options or PlanOptions()
+    enabled, _ = dsm.resolve(dsm_correction, terrain.provenance)
+    obstacles = dsm_obstacles(classified) if enabled else ((), (), (), ())
+    terrain, correction, dsm_warning = dsm.apply_correction(terrain, dsm_correction, *obstacles)
     zmin, _ = terrain.min_max()
     z_offset = math.floor(zmin)
     area.frame.z_offset = z_offset
@@ -1511,6 +1543,9 @@ def build_plan(area, terrain, classified, options=None):
     plan.report["unsupported_features"] = list(classified.unsupported)
     plan.report["invalid_features"] = list(classified.invalid)
     plan.report["warnings"].extend(getattr(classified, "warnings", ()))
+    plan.report["terrain_correction"] = correction
+    if dsm_warning:
+        plan.report["warnings"].append(dsm_warning)
     plan.count("buildings_outside_area", classified.outside)
     budget = SceneBudget(opts.max_vertices, opts.max_triangles)
     invalid = plan.report["invalid_features"]
@@ -1532,9 +1567,11 @@ def build_plan(area, terrain, classified, options=None):
     coverage = {}
     tmesh = build_terrain(terrain, z_offset, areas, coverage)
     budget.commit(tmesh)
+    if correction["applied"]:
+        plan.inferred("terrain.surface")
     add(ObjectSpec("terrain", "terrain:grid", "terrain", "Terrain", mesh=tmesh,
                    provenance={"elevation": terrain.provenance.get("provider"), "spacing_m": terrain.spacing,
-                               "surface": "piecewise planar, cells split along the (i,j)-(i+1,j+1) diagonal"}))
+                               "surface": DSM_CORRECTED_SURFACE if correction["applied"] else TERRAIN_SURFACE}))
     for a in areas:
         if not coverage.get(a.id):
             plan.report["unsupported_features"].append(

@@ -391,6 +391,12 @@ class Classified:
         # on terrain and on the roof actually built), so generation checks the emitted meshes'
         # map-frame Z extents and warns only then. Bounded by the part/outline pair limit.
         self.overlap_candidates = []
+        # Not generated, kept for the DSM terrain correction mask (core/dsm.py): highway/railway ways
+        # tagged bridge=* (other than "no"), clipped to the area (kind "bridge"; they are still reported in
+        # ``unsupported``), and building footprints whose centroid lies outside the area (counted in
+        # ``outside``) but which may still overlap the terrain grid near the area edge.
+        self.bridges = []
+        self.outside_buildings = []
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -601,6 +607,10 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
             if pts is None:
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
                 continue
+            if ("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no":
+                bparts = _clip_polyline(pts, area)
+                for k, part in enumerate(bparts):
+                    out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
             if "highway" not in tags:
                 kind = "railway" if "railway" in tags else "waterway"
                 if _clip_polyline(pts, area):
@@ -631,6 +641,8 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
         if "building" in tags or "building:part" in tags:
             if not area.contains(cx, cy):
                 out.outside += 1
+                if any(_bbox_overlaps(p.bbox(), area) for p in polys):
+                    out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys)
                 continue
             reason = _unsupported_reason(tags)
             if reason:
@@ -660,7 +672,8 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
 
     # Enforced before building:part matching: replaced outlines are retained (outline_features)
     # and so count, exactly like the parts and the other buildings still in ``out.buildings``.
-    total = len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees)
+    total = (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
+             + len(out.outside_buildings))
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
     _resolve_building_parts(out, max_pair_checks=max_part_pair_checks, max_work=max_association_work,

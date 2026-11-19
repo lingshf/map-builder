@@ -49,6 +49,9 @@ class Settings:
         # licence/attribution the user declares for a local OSM-format file that is NOT OpenStreetMap data
         # (e.g. a hand-written synthetic fixture); None = the file is OpenStreetMap data under ODbL
         "osm_license": None,
+        # DSM terrain correction (core/dsm.py): None = auto (on for the Copernicus surface model, off for a
+        # local elevation file), True = on, False = off
+        "dsm_correction": None,
         "plan_options": None,
     }
 
@@ -79,6 +82,8 @@ class Settings:
             self.heightfield_spacing = float(self.heightfield_spacing)
             if not (math.isfinite(self.heightfield_spacing) and self.heightfield_spacing > 0):
                 raise ValueError("heightfield_spacing must be a positive finite number")
+        if self.dsm_correction is not None and not isinstance(self.dsm_correction, bool):
+            raise ValueError("dsm_correction must be None (auto), True or False")
         self.plan_options = self.plan_options or PlanOptions()
 
     def __repr__(self):
@@ -292,9 +297,25 @@ def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generat
                           passage_probes=getattr(plan, "passage_probes", []), plan_ids=generated_ids)
 
 
+def elevation_correction_note(correction):
+    """Text for the elevation source entry (``processing``) when the DSM correction was applied, else None."""
+    if not (correction or {}).get("applied"):
+        return None
+    return (f"DSM terrain correction applied by map-builder (derived; raw source data unchanged): "
+            f"{correction['masked_points']} of {correction['total_points']} terrain points under buildings, "
+            f"trees, forest and bridge decks were lowered toward the surrounding ground (max "
+            f"{correction['max_lowering_m']:g} m, mean {correction['mean_lowering_m']:g} m); an approximation, "
+            "not a bare-earth DTM. See report.json terrain_correction.")
+
+
 def generate_plan(area, settings, client=None, progress=None):
     grid, classified, sources = acquire(area, settings, client, progress)
-    plan = build_plan(area, grid, classified, settings.plan_options)
+    plan = build_plan(area, grid, classified, settings.plan_options, dsm_correction=settings.dsm_correction)
+    note = elevation_correction_note(plan.report.get("terrain_correction"))
+    if note:
+        for src in sources:
+            if src.get("kind") == "elevation":
+                src["processing"] = note
     return plan, sources
 
 

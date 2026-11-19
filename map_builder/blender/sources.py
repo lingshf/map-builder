@@ -25,6 +25,8 @@ from ..core.package import find_secrets, secrets_message
 
 ENV_OVERPASS_URL = "MAP_BUILDER_OVERPASS_URL"
 DEFAULT_LOCAL_DATUM = "user-declared (unknown)"
+# panel DSM correction mode -> core Settings.dsm_correction (None = auto: on for Copernicus, off for a local file)
+DSM_CORRECTION_VALUES = {"AUTO": None, "ON": True, "OFF": False}
 # UI labels of the user-typed string settings that could be persisted (.blend, report Text, package)
 FIELD_LABELS = {"elevation_file": "Elevation file", "elevation_crs": "CRS (.asc)",
                 "elevation_vertical_datum": "Vertical datum", "elevation_license": "Licence",
@@ -130,6 +132,10 @@ def settings_kwargs(values, environ):
             kw["overpass_url"] = DEFAULT_OVERPASS_URL
     else:
         raise SettingsInputError(f"unknown OSM source {kw['osm_source']!r}")
+    dsm = values.get("dsm_correction", "AUTO")
+    if dsm not in DSM_CORRECTION_VALUES:
+        raise SettingsInputError(f"unknown DSM correction mode {dsm!r}")
+    kw["dsm_correction"] = DSM_CORRECTION_VALUES[dsm]
     return kw
 
 
@@ -151,10 +157,16 @@ def format_report(title, sources, report, extra=None):
         if src.get("attribution"):
             lines.append(f"    attribution: {src['attribution']}")
         for k in ("source_resolution_m", "resampled_spacing_m", "crs", "vertical_datum", "osm_base_timestamp",
-                  "endpoint", "file_sha256", "sha256"):
+                  "endpoint", "file_sha256", "sha256", "processing"):
             if src.get(k) is not None:
                 lines.append(f"    {k}: {src[k]}")
     report = report or {}
+    tc = report.get("terrain_correction")
+    if tc:
+        lines += ["", "TERRAIN CORRECTION (DSM)",
+                  f"applied: {tc.get('applied')} ({tc.get('reason')}); setting: {tc.get('setting')}; masked points: "
+                  f"{tc.get('masked_points')} of {tc.get('total_points')}; max lowering: "
+                  f"{tc.get('max_lowering_m')} m; mean lowering: {tc.get('mean_lowering_m')} m"]
     for key, label in (("unsupported_features", "UNSUPPORTED FEATURES"), ("invalid_features", "INVALID FEATURES"),
                        ("warnings", "WARNINGS")):
         items = report.get(key) or []

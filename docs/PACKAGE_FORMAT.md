@@ -356,6 +356,10 @@ counted in `edits.removed` and listed in `report.json`.
   * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
     buildings where the terrain reaches the roof underside, footprints or trees outside
     the terrain extent, landcover with invalid ring topology, and rejected building parts
+  * `terrain_correction`: the DSM correction outcome (`applied`, `setting`, `reason`,
+    `masked_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, mask parameters).
+    Informative only; when applied, the elevation entry in `sources` also has an optional
+    `processing` string (sources are an open object, so this is not a format change)
   * counts and warnings
 
 ## `collision/map.mbcol` v2 (little-endian)
