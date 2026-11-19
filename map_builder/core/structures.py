@@ -13,7 +13,10 @@ import math
 from .collision import Collision, ColObject, f32, read_collision, write_collision
 from .glb import node_scale
 from .mesh import MeshData
-from .query import DEFAULT_MAX_WORK, capsule_hits
+from .collision import AABB_TABLE_TOL_M
+from .query import (CONTACT_TOL_M, DEFAULT_MAX_WORK, _GRID_MIN_TRIS, _Budget, _box_overlap, _check_points,
+                    _finite_real, _grid_candidates, _plane_clear, capsule_hits, grid_of_boxes,
+                    segment_triangle_distance)
 
 def _invalid(msg):
     from .generate import InvalidFeature   # generate imports the stage modules, which import this one
@@ -231,6 +234,8 @@ class _CollisionIndex:
         self.specs = []
         self.tiles = {}
         self.geometry = {}
+        self.f32_data = {}
+        self.grids = {}
         radius = {}     # local plan radius per mesh (shared meshes are measured once)
         for spec in plan.objects:
             md = spec.mesh if spec.mesh is not None else plan.shared_meshes.get(spec.mesh_key)
@@ -251,6 +256,120 @@ class _CollisionIndex:
     def _keys(x0, y0, x1, y1):
         return [(i, j) for i in range(math.floor(x0 / TILE_M), math.floor(x1 / TILE_M) + 1)
                 for j in range(math.floor(y0 / TILE_M), math.floor(y1 / TILE_M) + 1)]
+
+    def _f32_data(self, k):
+        """Per object ``k``: lazily filled float32 vertices and per-triangle boxes, and per-tile box unions."""
+        d = self.f32_data.get(k)
+        if d is None:
+            verts, tris, by_tile = self._placed(k)
+            d = self.f32_data[k] = ([None] * len(verts), [None] * len(tris), {})
+        return d
+
+    def _tri_box(self, k, n):
+        """Float32 box and vertices ``(a, b, c)`` of triangle ``n`` of object ``k`` (cached)."""
+        fv, tb, _ = self._f32_data(k)
+        t = tb[n]
+        if t is None:
+            verts, tris, _ = self._placed(k)
+            q = []
+            for v in tris[n]:
+                p = fv[v]
+                if p is None:
+                    x = verts[v]
+                    p = fv[v] = (f32(x[0]), f32(x[1]), f32(x[2]))
+                q.append(p)
+            a, b, c = q
+            t = tb[n] = ((min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
+                          max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2])), (a, b, c))
+        return t
+
+    def _tile_box(self, k, key):
+        """Union of the float32 boxes of the triangles of object ``k`` listed in tile ``key``."""
+        boxes = self._f32_data(k)[2]
+        u = boxes.get(key)
+        if u is None:
+            lst = self._placed(k)[2].get(key, ())
+            bs = [self._tri_box(k, n)[0] for n in lst]
+            u = boxes[key] = (min(b[0] for b in bs), min(b[1] for b in bs), min(b[2] for b in bs),
+                              max(b[3] for b in bs), max(b[4] for b in bs), max(b[5] for b in bs)) if bs else None
+        return u
+
+    def hits(self, region, chunk, radius, max_work):
+        """What ``capsule_hits(self.collision(region), chunk, radius, max_work, result=True)`` returns, as
+        ``(mb_ids of the hit objects, work)``, with the same work count and the same ``LimitError``, but
+        without building that collision: the per-object triangle pick, boxes and float32 vertices are cached
+        across queries and the triangle grid of an object is built from its picked triangles only."""
+        pts = _check_points(chunk, "path_points")
+        if not pts:
+            raise ValueError("path_points must hold at least one point")
+        if not (_finite_real(radius) and radius >= 0.0):
+            raise ValueError("radius must be a finite number >= 0")
+        keys = self._keys(*region)
+        segs = list(zip(pts, pts[1:])) or [(pts[0], pts[0])]
+        budget = _Budget(max_work)
+        reach = radius + CONTACT_TOL_M
+        pad = reach + AABB_TABLE_TOL_M
+        bounds = [((min(p[0], q[0]), min(p[1], q[1]), min(p[2], q[2])),
+                   (max(p[0], q[0]), max(p[1], q[1]), max(p[2], q[2]))) for p, q in segs]
+        whole = (tuple(min(b[0][a] for b in bounds) for a in range(3)),
+                 tuple(max(b[1][a] for b in bounds) for a in range(3)))
+        found = set()
+        for k in sorted({k for key in keys for k in self.tiles.get(key, ())}):
+            by_tile = self._placed(k)[2]
+            lists = [(key, by_tile[key]) for key in keys if key in by_tile]
+            pick = sorted({n for _, lst in lists for n in lst})
+            if not pick:
+                continue
+            ub = [self._tile_box(k, key) for key, _ in lists]
+            box = [min(b[0] for b in ub), min(b[1] for b in ub), min(b[2] for b in ub),
+                   max(b[3] for b in ub), max(b[4] for b in ub), max(b[5] for b in ub)]
+            n = len(pick)
+            if len(segs) > 1 and not _box_overlap(whole[0], whole[1], box, pad):
+                budget.spend()
+                continue
+            hit = False
+            grid = boxes = None
+            for (p, q), (lo, hi) in zip(segs, bounds):
+                budget.spend()
+                if not _box_overlap(lo, hi, box, pad):
+                    continue
+                if boxes is None:
+                    boxes = [self._tri_box(k, t)[0] for t in pick]
+                    if n > _GRID_MIN_TRIS:
+                        grid = self._grid(k, keys, boxes)
+                scan = False
+                cand = _grid_candidates(grid, lo, hi, reach) if grid is not None else None
+                if cand is not None:
+                    budget.spend(len(cand))
+                    tris = cand
+                else:
+                    scan = True
+                    tris = range(n)
+                for t in tris:
+                    if scan:
+                        budget.spend()
+                    if not _box_overlap(lo, hi, boxes[t], reach):
+                        continue
+                    a, b, c = self._tri_box(k, pick[t])[1]
+                    if _plane_clear(p, q, a, b, c, reach):
+                        continue
+                    if segment_triangle_distance(p, q, a, b, c) <= reach:
+                        hit = True
+                        break
+                if hit:
+                    break
+            if hit:
+                found.add(self.specs[k][0].mb_id)
+        return found, budget.work
+
+    def _grid(self, k, keys, boxes):
+        """Triangle grid of the picked triangles of object ``k`` (cached per object and pick region)."""
+        cache = self.grids
+        ck = (k, keys[0], keys[-1], len(keys))
+        g = cache.get(ck)
+        if g is None:
+            g = cache[ck] = grid_of_boxes(boxes)
+        return g
 
     def _placed(self, k):
         g = self.geometry.get(k)
@@ -306,14 +425,17 @@ class WorkBudget:
         self.left = left
 
 
-def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
+def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None, indexed=True):
     """Passage probes ``{id, feature, path_map, radius_m, ...}`` against the plan meshes (D21).
 
     Returns ``(kept, blocked)``: ``blocked`` entries are ``{id, blocker}`` (the blocking object's ``mb_id``;
     the probe's own ``feature`` counts like any other mesh, so a probe touching its own tunnel wall is blocked,
     as the package validator does). Each probe is tested against the triangles around its own path only. The
     work budget is shared: when it runs out the remaining probes are returned in ``blocked`` with
-    ``blocker=None`` and ``reason="budget_exhausted"``, never silently kept."""
+    ``blocker=None`` and ``reason="budget_exhausted"``, never silently kept.
+
+    ``indexed=False`` is the reference implementation (a collision is built per chunk and queried with
+    ``capsule_hits``); the default ``_CollisionIndex.hits`` gives the identical result and work count."""
     kept, blocked = [], []
     if not probes:
         return kept, blocked
@@ -343,10 +465,16 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
         try:
             for ch in chunks:
                 xs, ys = [p[0] for p in ch], [p[1] for p in ch]
-                col = index.collision((min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad))
-                res = capsule_hits(col, ch, pr["radius_m"], budget.left, result=True)
-                budget.left -= res.work
-                found.update(col.objects[k]["mb_id"] for k in res.objects)
+                region = (min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
+                if indexed:
+                    ids, work = index.hits(region, ch, pr["radius_m"], budget.left)
+                    budget.left -= work
+                    found.update(ids)
+                else:
+                    col = index.collision(region)
+                    res = capsule_hits(col, ch, pr["radius_m"], budget.left, result=True)
+                    budget.left -= res.work
+                    found.update(col.objects[k]["mb_id"] for k in res.objects)
         except Exception as exc:   # LimitError: budget exhausted
             if type(exc).__name__ != "LimitError":
                 raise

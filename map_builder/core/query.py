@@ -337,13 +337,20 @@ def _tri_grid(col, k, s0, n):
     if k in cache:
         return cache[k]
     v, idx = col.vertices, col.indices
-    cells, boxes, big, cs = {}, [], [], _GRID_CELL_M
-    inserted, limit = 0, _GRID_MAX_TRI_CELLS * n     # enumeration guard: the per-triangle cap keeps it below
+    boxes = []
     for t in range(s0, s0 + n):
         a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
-        tb = (min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
-              max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2]))
-        boxes.append(tb)
+        boxes.append((min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
+                      max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2])))
+    cache[k] = grid_of_boxes(boxes, s0)
+    return cache[k]
+
+
+def grid_of_boxes(boxes, s0=0):
+    """``(cell dict, cell size, boxes, big triangle ids)`` of triangles with the given boxes (ids from ``s0``)."""
+    cells, big, cs = {}, [], _GRID_CELL_M
+    inserted, limit = 0, _GRID_MAX_TRI_CELLS * len(boxes)     # enumeration guard: the per-triangle cap keeps it below
+    for t, tb in enumerate(boxes, s0):
         i0, i1 = math.floor(tb[0] / cs), math.floor(tb[3] / cs)
         j0, j1 = math.floor(tb[1] / cs), math.floor(tb[4] / cs)
         if (i1 - i0 + 1) * (j1 - j0 + 1) > _GRID_MAX_TRI_CELLS:
@@ -355,8 +362,7 @@ def _tri_grid(col, k, s0, n):
                 if inserted > limit:
                     raise LimitError("triangle grid cell enumeration exceeded its bound")
                 cells.setdefault((i, j), []).append(t)
-    cache[k] = (cells, cs, boxes, big)
-    return cache[k]
+    return (cells, cs, boxes, big)
 
 
 def _grid_candidates(grid, lo, hi, reach):
