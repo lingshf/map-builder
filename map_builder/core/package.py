@@ -90,7 +90,7 @@ PROBE_MIN_DOT = 0.99
 PROBE_MAX = 3
 HEIGHTFIELD_TOL_M = 1e-3
 
-_MB_ID = re.compile(r"(osm:(node|way|relation)/\d+|terrain:grid|scatter:.+#\d+)")
+_MB_ID = re.compile(r"(osm:(node|way|relation)/\d+(#\d+)?|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
 
