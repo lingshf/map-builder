@@ -1487,6 +1487,10 @@ class ReviewRound2Test(TempDirCase):
         crossing = box_mesh(8, 8, 14, 14, 2, 7)                                       # crosses the boundary
         self.assertTrue(self.orient([(outer, False), (crossing, True)]))
         self.assertEqual(self.orient([(outer, False), (apart, False)]), [])          # two outward shells
+        touching = box_mesh(10, 0, 15, 10, 0, 10)                                     # shares outer's x=10 face
+        for flip in (True, False):                                                    # review round 4
+            probs = self.orient([(outer, False), (touching, flip)])
+            self.assertTrue(probs and "non-manifold" in probs[0], probs)
         # package level: visual and collision agree, so only the independent orientation check catches it
         bad = obj("twin", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
                                                                 (box_mesh(80, 60, 85, 65, 0, 5), True)]))

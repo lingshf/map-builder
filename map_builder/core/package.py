@@ -614,10 +614,11 @@ def _union(parent, a, b):
 
 def _shells(ids):
     """Split a building's triangles (welded id triples) into shells: triangles joined across manifold
-    edges (one use in each direction). Components that are not closed on their own, which only happens at
-    non-manifold edges, are then merged across every edge they share; since the whole object is closed,
-    each merged group is closed. Triangles with no edge of non-zero length (collapsed to a point) belong
-    to no shell. Returns lists of triangle indices, in first-triangle order."""
+    edges (one use in each direction). If a component is not closed on its own, which only happens at
+    non-manifold edges (e.g. two shells sharing a face), returns None: the shells cannot be separated
+    unambiguously, and a merged group's volume would let an outward shell mask an inverted one. Triangles
+    with no edge of non-zero length (collapsed to a point) belong to no shell. Otherwise returns lists of
+    triangle indices, in first-triangle order."""
     edges = {}                                  # undirected edge -> [(triangle, forward)]
     for t, (a, b, c) in enumerate(ids):
         for p, q in ((a, b), (b, c), (c, a)):
@@ -634,10 +635,7 @@ def _shells(ids):
             balance[key] = balance.get(key, 0) + (1 if fwd else -1)
     open_comps = {c for (c, _), n in balance.items() if n}
     if open_comps:
-        for uses in edges.values():
-            ts = [t for t, _ in uses if _find(parent, t) in open_comps]
-            for t in ts[1:]:
-                _union(parent, ts[0], t)
+        return None
     groups = {}
     for t in range(len(ids)):
         if len(set(ids[t])) > 1:
@@ -671,7 +669,12 @@ def _building_problems(k, tris):
         return [f"{tag} is not a closed, consistently oriented solid ({unbalanced} open or inconsistently "
                 "wound edge(s)); building solids must be closed with CCW-outward faces"]
     shells = []
-    for ts in _shells(ids):
+    parts = _shells(ids)
+    if parts is None:
+        return [f"{tag} has non-manifold edges that do not split into independently closed shells, so its "
+                "orientation cannot be verified; v1 building solids must be closed 2-manifold shells (faces "
+                "or edges shared between shells are not supported)"]
+    for ts in parts:
         st = [tris[t] for t in ts]
         shells.append((st, _signed_volume(st)))
     problems = []
