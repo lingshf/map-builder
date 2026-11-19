@@ -164,6 +164,73 @@ def outside_area(obj, area, margin_m=1.0):
     return any(abs(p[0]) > hx + margin_m or abs(p[1]) > hy + margin_m for p in obj.vertices)
 
 
+def export_name_clashes(entries):
+    """Blocking errors for distinct objects that would share an export name.
+
+    ``entries``: [(export name, unambiguous label)] with one entry per *distinct* object (the caller
+    deduplicates by object identity, not by name). Blender lets a linked library object and a local
+    object share ``name`` (their ``name_full`` differs by the library); export names bind glTF nodes to
+    collision objects and derive identities (docs/PACKAGE_FORMAT.md), so such a clash blocks the export
+    instead of dropping or silently renaming one of them."""
+    by_name = {}
+    for name, label in entries:
+        by_name.setdefault(name, []).append(label)
+    return [f"{len(labels)} objects share the export name {name!r}: " + ", ".join(repr(x) for x in sorted(labels))
+            + "; export names must be unique (they bind glTF nodes to collision objects and form identities). "
+              "Rename the local object, or make the linked one local and rename it"
+            for name, labels in sorted(by_name.items()) if len(labels) > 1]
+
+
+# Principled BSDF inputs the package carries (Base Color as a constant or a colour attribute, Roughness and
+# Metallic as constants) or already reports on their own (Alpha: transparency).
+PRINCIPLED_HANDLED = frozenset({"Base Color", "Roughness", "Metallic", "Alpha"})
+# (input, effect) whose non-zero value or link is a visible effect the package cannot carry
+PRINCIPLED_WEIGHTS = (("Subsurface Weight", "subsurface scattering"), ("Transmission Weight", "transmission"),
+                      ("Coat Weight", "coat"), ("Sheen Weight", "sheen"), ("Anisotropic", "anisotropic specular"),
+                      ("Thin Film Thickness", "thin film"))
+PRINCIPLED_NORMALS = (("Normal", "normal/bump map (Normal input)"), ("Coat Normal", "coat normal/bump map"),
+                      ("Tangent", "custom tangent (Tangent input)"))
+
+
+def principled_omissions(inputs):
+    """Effects of a Principled BSDF that the export omits, in a fixed order.
+
+    ``inputs``: {socket name: (is_linked, default value)} of the enabled inputs (Blender 4.x names; a
+    value is a float or a colour/vector tuple). Reported: emission (colour x strength non-zero, or either
+    input linked), non-zero or linked subsurface/transmission/coat/sheen/anisotropic/thin-film weights,
+    linked Normal/Coat Normal/Tangent, and any other linked input outside :data:`PRINCIPLED_HANDLED`."""
+    out, covered = [], set(PRINCIPLED_HANDLED)
+
+    def linked(name):
+        return bool(inputs.get(name, (False, None))[0])
+
+    def number(name):
+        v = inputs.get(name, (False, 0.0))[1]
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    covered.update(("Emission Color", "Emission Strength"))
+    color = inputs.get("Emission Color", (False, (0.0, 0.0, 0.0)))[1]
+    try:
+        glow = number("Emission Strength") * max(float(c) for c in tuple(color)[:3])
+    except (TypeError, ValueError):
+        glow = 0.0
+    if linked("Emission Color") or linked("Emission Strength") or glow != 0.0:
+        out.append("emission")
+    for name, effect in PRINCIPLED_WEIGHTS:
+        covered.add(name)
+        if linked(name) or number(name) != 0.0:
+            out.append(effect)
+    for name, effect in PRINCIPLED_NORMALS:
+        covered.add(name)
+        if linked(name):
+            out.append(effect)
+    out += [f"{name} driven by nodes" for name in sorted(inputs) if name not in covered and linked(name)]
+    return out
+
+
 def _provenance(obj, mb_id, edits_dup):
     if mb_id.startswith("user:"):
         return {"source": "user-added in Blender (no generated identity)"}

@@ -1,4 +1,10 @@
-"""Operators: Generate (new collection, report Text), Export (validated package), Validate."""
+"""Operators: Generate (new collection, report Text), Export (validated package), Validate.
+
+Failure policy (all three operators): a cancelled operator changes nothing in the scene. The problem is
+shown with ``self.report`` (status bar / Info editor) and the full list is printed to the system console;
+the report Text ('MapBuilder Report') is written only after a successful operation, so the last good
+report is never overwritten by a failure.
+"""
 
 import os
 
@@ -11,7 +17,7 @@ from ..core.package import validate_package
 from ..core.pipeline import Settings, generate_plan
 from . import export as mb_export
 from .scene_build import build_scene, write_report_text
-from .sources import SettingsInputError, format_report, needs_network, settings_kwargs
+from .sources import SettingsInputError, format_report, needs_network, reject_credentials, settings_kwargs
 
 REPORT_TEXT = "MapBuilder Report"
 
@@ -20,12 +26,23 @@ def _abspath(p):
     return os.path.abspath(bpy.path.abspath(p)) if p else ""
 
 
+def fail(op, headline, problems=()):
+    """Report a cancelled operation without touching the scene: console gets every problem, the operator
+    report the headline plus the first problem."""
+    problems = list(problems)
+    print(f"Map Builder: {headline}" + "".join(f"\n  - {p}" for p in problems))
+    more = f" (+{len(problems) - 1} more, see the system console)" if len(problems) > 1 else ""
+    op.report({"ERROR"}, f"{headline}: {problems[0]}{more}" if problems else headline)
+    return {"CANCELLED"}
+
+
 def ui_values(s):
     return {"elevation_source": s.elevation_source, "elevation_file": _abspath(s.elevation_file),
             "elevation_crs": s.elevation_crs, "elevation_vertical_datum": s.elevation_vertical_datum,
             "elevation_license": s.elevation_license, "terrain_spacing": s.terrain_spacing,
             "osm_source": s.osm_source, "osm_file": _abspath(s.osm_file),
-            "overpass_endpoint": s.overpass_endpoint, "cache_dir": _abspath(s.cache_dir)}
+            "overpass_endpoint": s.overpass_endpoint, "cache_dir": _abspath(s.cache_dir),
+            "package_name": s.package_name}
 
 
 def make_settings(s):
@@ -64,8 +81,7 @@ class MB_OT_generate(bpy.types.Operator):
         name = s.package_name.strip() or "map"
         problem = online_access_problem(ui_values(s))
         if problem:
-            self.report({"ERROR"}, problem)
-            return {"CANCELLED"}
+            return fail(self, problem)
         wm = context.window_manager
         wm.progress_begin(0, 100)
         try:
@@ -74,10 +90,7 @@ class MB_OT_generate(bpy.types.Operator):
             plan, sources = generate_plan(area, settings, progress=lambda f: wm.progress_update(int(f * 90)))
             root = build_scene(context, plan, sources, name)
         except (MapBuilderError, SettingsInputError, ValueError, OSError) as e:
-            msg = f"Generation failed; nothing was created: {e}"
-            write_report_text(REPORT_TEXT, f"GENERATION FAILED\n\n{msg}\n")
-            self.report({"ERROR"}, msg)
-            return {"CANCELLED"}
+            return fail(self, "Generation failed; nothing was created", [str(e)])
         finally:
             wm.progress_end()
         s.export_collection = root
@@ -102,15 +115,13 @@ class MB_OT_export(bpy.types.Operator):
         s = context.scene.map_builder
         name = s.package_name.strip() or "map"
         try:
+            reject_credentials({"package_name": s.package_name, "export_path": s.export_path},
+                               "Nothing was exported")
             manifest, result, report, edits = mb_export.export_map(
                 context, s.export_path, name, s.heightfield_spacing, root=s.export_collection)
         except (MapBuilderError, ValueError, OSError) as e:
             errors = getattr(e, "errors", None) or [str(e)]
-            write_report_text(REPORT_TEXT, "EXPORT FAILED (the previous package, if any, was kept)\n\n"
-                              + "\n".join(f"- {x}" for x in errors) + "\n")
-            self.report({"ERROR"}, f"Export failed (previous package kept): {len(errors)} problem(s): "
-                                   f"{errors[0]} -- see Text '{REPORT_TEXT}'")
-            return {"CANCELLED"}
+            return fail(self, f"Export failed (previous package kept): {len(errors)} problem(s)", errors)
         write_report_text(REPORT_TEXT, format_report(
             f"Exported {mb_export.resolve_path(s.export_path)}\n{result.summary()}",
             manifest.get("sources", []), report))
@@ -130,13 +141,14 @@ class MB_OT_validate(bpy.types.Operator):
         try:
             path = mb_export.resolve_path(context.scene.map_builder.export_path)
         except MapBuilderError as e:
-            self.report({"ERROR"}, str(e))
-            return {"CANCELLED"}
+            return fail(self, "Validation not run", [str(e)])
         result = validate_package(path)
+        if not result.ok:
+            return fail(self, f"Package is invalid: {result.summary().splitlines()[0]}", result.errors)
         write_report_text(REPORT_TEXT, f"VALIDATE {path}\n{result.summary()}\n\nerrors:\n"
                           + "\n".join(result.errors) + "\n\nwarnings:\n" + "\n".join(result.warnings) + "\n")
-        self.report({"INFO" if result.ok else "ERROR"}, result.summary())
-        return {"FINISHED"} if result.ok else {"CANCELLED"}
+        self.report({"INFO"}, result.summary())
+        return {"FINISHED"}
 
 
 classes = (MB_OT_generate, MB_OT_export, MB_OT_validate)

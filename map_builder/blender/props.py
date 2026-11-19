@@ -3,18 +3,34 @@
 Nothing here may hold a credential: these properties are saved into the .blend file. There is
 deliberately no free-text endpoint field (an endpoint path or query can embed a token); a private
 Overpass endpoint comes from the MAP_BUILDER_OVERPASS_URL environment variable at Generate time
-(see sources.py).
+(see sources.py). Every free-text/path property has an ``update`` callback that clears a credential-like
+value (core credential policy) as soon as it is set, so it is not saved; the panel then shows which
+field was cleared (never the value). Generate/Export re-check the values, which also catches values
+written as raw custom properties (no update callback).
 """
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from ..core.geodesy import DEFAULT_MAX_SIDE_M, MIN_SIDE_M
-from .sources import ENV_OVERPASS_URL
+from .sources import ENV_OVERPASS_URL, FIELD_LABELS, has_credential
 
 
 def _is_map_collection(self, coll):
     return "mb_map" in coll
+
+
+def _scrub(prop):
+    """``update`` callback clearing a credential-like value of ``prop`` before it can be saved."""
+    def update(self, context):
+        label = FIELD_LABELS.get(prop, prop)
+        if has_credential(getattr(self, prop)):
+            setattr(self, prop, "")
+            self.credential_notice = f"{label}: a credential-like value was cleared (it would be saved in the .blend)"
+            print(f"Map Builder: {self.credential_notice}")
+        elif getattr(self, prop) and self.credential_notice.startswith(f"{label}:"):
+            self.credential_notice = ""
+    return update
 
 
 class MB_Settings(bpy.types.PropertyGroup):
@@ -39,12 +55,13 @@ class MB_Settings(bpy.types.PropertyGroup):
         ("copernicus", "Copernicus GLO-30 (online)", "Copernicus DEM GLO-30 from AWS Open Data; public, no account"),
         ("file", "Local file", "GeoTIFF (.tif) or ESRI ASCII grid (.asc) in EPSG:4326 or WGS84 UTM"),
     ], default="copernicus")
-    elevation_file: StringProperty(name="Elevation file", subtype="FILE_PATH")
-    elevation_crs: StringProperty(name="CRS (.asc)", default="EPSG:4326",
+    elevation_file: StringProperty(name="Elevation file", subtype="FILE_PATH", update=_scrub("elevation_file"))
+    elevation_crs: StringProperty(name="CRS (.asc)", default="EPSG:4326", update=_scrub("elevation_crs"),
                                   description="CRS for ASCII grids (GeoTIFF CRS is read from the file)")
     elevation_vertical_datum: StringProperty(name="Vertical datum", default="",
+                                             update=_scrub("elevation_vertical_datum"),
                                              description="Vertical datum of the local file (e.g. EGM2008)")
-    elevation_license: StringProperty(name="Licence", default="",
+    elevation_license: StringProperty(name="Licence", default="", update=_scrub("elevation_license"),
                                       description="Licence/attribution of the local elevation file (required)")
     terrain_spacing: FloatProperty(name="Terrain spacing (m)", default=10.0, min=1.0, max=100.0)
 
@@ -52,13 +69,13 @@ class MB_Settings(bpy.types.PropertyGroup):
         ("overpass", "Overpass API (online)", "Download OpenStreetMap data (ODbL)"),
         ("file", "Local .osm file", "OSM XML file for reproducible builds"),
     ], default="overpass")
-    osm_file: StringProperty(name="OSM file", subtype="FILE_PATH")
+    osm_file: StringProperty(name="OSM file", subtype="FILE_PATH", update=_scrub("osm_file"))
     overpass_endpoint: EnumProperty(name="Endpoint", items=[
         ("default", "Public (overpass-api.de)", "The public Overpass API instance"),
         ("env", f"From ${ENV_OVERPASS_URL}", "Read the endpoint URL from this environment variable when "
                                              "generating; it is never saved in the .blend file"),
     ], default="default")
-    cache_dir: StringProperty(name="Cache folder", subtype="DIR_PATH",
+    cache_dir: StringProperty(name="Cache folder", subtype="DIR_PATH", update=_scrub("cache_dir"),
                               description="Optional download cache (public endpoints only, no credentials)")
 
     buildings: BoolProperty(name="Buildings", default=True)
@@ -69,12 +86,16 @@ class MB_Settings(bpy.types.PropertyGroup):
     max_trees: IntProperty(name="Max trees", default=2000, min=0, max=20000)
     seed: IntProperty(name="Seed", default=0, min=0)
 
-    package_name: StringProperty(name="Map name", default="my_map")
+    package_name: StringProperty(name="Map name", default="my_map", update=_scrub("package_name"))
     export_collection: PointerProperty(name="Map collection", type=bpy.types.Collection, poll=_is_map_collection,
                                        description="Map collection to export (empty: the active or only map)")
-    export_path: StringProperty(name="Package", subtype="FILE_PATH", default="//my_map.mbmap")
+    export_path: StringProperty(name="Package", subtype="FILE_PATH", default="//my_map.mbmap",
+                                update=_scrub("export_path"))
     heightfield_spacing: FloatProperty(name="Heightfield spacing (m)", default=2.0, min=0.0, max=50.0,
                                        description="0 disables the derived terrain heightfield")
+    credential_notice: StringProperty(name="Cleared field", default="",
+                                      description="Which field had a credential-like value cleared (never "
+                                                  "the value)")
 
 
 def register():

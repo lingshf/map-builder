@@ -191,10 +191,83 @@ class BakeExportTest(unittest.TestCase):
             package_parts([], self.generated, MATERIALS)
 
 
+class ExportPolicyTest(unittest.TestCase):
+    def test_linked_and_local_objects_sharing_a_name_block_export(self):
+        from map_builder.blender.bake import export_name_clashes
+        self.assertEqual(export_name_clashes([("a", "a"), ("b", "b [lib.blend]")]), [])
+        errs = export_name_clashes([("Box", "Box"), ("Box", "Box [lib.blend]"), ("c", "c")])
+        self.assertEqual(len(errs), 1)
+        self.assertIn("'Box'", errs[0])
+        self.assertIn("'Box [lib.blend]'", errs[0])
+        self.assertIn("unique", errs[0])
+
+    def test_principled_omissions_name_each_unsupported_effect(self):
+        from map_builder.blender.bake import principled_omissions
+        default = {"Base Color": (False, (0.8, 0.8, 0.8, 1.0)), "Roughness": (False, 0.5),
+                   "Metallic": (False, 0.0), "Alpha": (False, 1.0), "Normal": (False, (0.0, 0.0, 0.0)),
+                   "Emission Color": (False, (1.0, 1.0, 1.0, 1.0)), "Emission Strength": (False, 0.0),
+                   "Subsurface Weight": (False, 0.0), "Transmission Weight": (False, 0.0),
+                   "Coat Weight": (False, 0.0), "Sheen Weight": (False, 0.0), "Anisotropic": (False, 0.0),
+                   "Thin Film Thickness": (False, 0.0), "Specular IOR Level": (False, 0.5), "IOR": (False, 1.5)}
+        self.assertEqual(principled_omissions(default), [])
+        # supported inputs (linked Base Color, Roughness, Metallic, Alpha) are handled elsewhere
+        self.assertEqual(principled_omissions(dict(default, **{"Base Color": (True, (1, 1, 1, 1)),
+                                                               "Roughness": (True, 0.5)})), [])
+        # black emission colour or zero strength: no visible emission
+        self.assertEqual(principled_omissions(dict(default, **{"Emission Color": (False, (0.0, 0.0, 0.0, 1.0)),
+                                                               "Emission Strength": (False, 5.0)})), [])
+        rich = dict(default, **{"Emission Strength": (False, 2.0), "Normal": (True, (0.0, 0.0, 0.0)),
+                                "Transmission Weight": (False, 0.3), "Coat Weight": (False, 0.5),
+                                "Sheen Weight": (True, 0.0), "Subsurface Weight": (False, 0.1),
+                                "Anisotropic": (False, 0.2), "Specular IOR Level": (True, 0.5)})
+        self.assertEqual(principled_omissions(rich),
+                         ["emission", "subsurface scattering", "transmission", "coat", "sheen",
+                          "anisotropic specular", "normal/bump map (Normal input)",
+                          "Specular IOR Level driven by nodes"])
+        self.assertEqual(principled_omissions(dict(default, **{"Emission Color": (True, (0, 0, 0, 1))})),
+                         ["emission"])
+
+
 class SourcesTest(unittest.TestCase):
     BASE = {"elevation_source": "file", "elevation_file": "/x/dem.asc", "elevation_crs": "EPSG:4326",
             "elevation_vertical_datum": "", "elevation_license": "CC-BY 4.0", "terrain_spacing": 10.0,
             "osm_source": "file", "osm_file": "/x/a.osm", "overpass_endpoint": "default", "cache_dir": ""}
+    DUMMY = "DUMMY-TOKEN-0000"
+    LEAKS = (f"see https://user:{DUMMY}@licence.invalid/terms", f"https://licence.invalid/terms?token={DUMMY}",
+             f"Authorization: Bearer {DUMMY}xyz")
+
+    def test_credentials_in_user_fields_are_rejected_without_echo(self):
+        fields = ("elevation_license", "elevation_file", "elevation_crs", "elevation_vertical_datum", "osm_file",
+                  "cache_dir", "package_name")
+        for key in fields:
+            for leak in self.LEAKS:
+                with self.subTest(field=key, leak=leak):
+                    with self.assertRaises(SettingsInputError) as cm:
+                        settings_kwargs(dict(self.BASE, **{key: leak}), {})
+                    msg = str(cm.exception)
+                    self.assertNotIn(self.DUMMY, msg)
+                    self.assertNotIn("licence.invalid", msg)
+                    self.assertIn("credential-like", msg)
+        with self.assertRaises(SettingsInputError) as cm:
+            settings_kwargs(dict(self.BASE, elevation_license=self.LEAKS[0]), {})
+        self.assertIn("Licence", str(cm.exception))
+        settings_kwargs(dict(self.BASE, elevation_license="CC-BY 4.0, https://licence.invalid/terms"), {})
+
+    def test_persisted_scene_data_is_checked_before_writing(self):
+        from map_builder.blender.sources import check_persistable, reject_credentials
+        clean = {"collection_metadata": {"sources": [{"license": {"name": "CC-BY"}, "attribution": "A"}]}}
+        check_persistable(clean)
+        leaky = {"collection_metadata": {"sources": [{"license": {"name": "CC-BY"},
+                                                       "attribution": f"x?api_key={self.DUMMY}"}]}}
+        with self.assertRaises(SettingsInputError) as cm:
+            check_persistable(leaky)
+        msg = str(cm.exception)
+        self.assertIn("collection_metadata.sources[0].attribution", msg)
+        self.assertNotIn(self.DUMMY, msg)
+        with self.assertRaises(SettingsInputError) as cm:
+            reject_credentials({"export_path": f"/x/a.mbmap?sig={self.DUMMY}"}, "Nothing was exported")
+        self.assertIn("Package", str(cm.exception))
+        self.assertNotIn(self.DUMMY, str(cm.exception))
 
     def test_local_files(self):
         kw = settings_kwargs(dict(self.BASE), {})

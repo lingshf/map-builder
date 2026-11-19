@@ -4,7 +4,8 @@ Blender world space *is* the map frame (+X east, +Y north, +Z up, metres, z = H 
 geometry and transforms are used as they are. Each generated object carries custom properties
 ``mb_id``, ``mb_class`` and ``mb_provenance`` (JSON); the map collection carries ``mb_map`` (JSON:
 area, z offset, sources, generation report, generated ids). None of them contains credentials: source
-entries come from the core, which reduces endpoints to their origin.
+entries come from the core, which reduces endpoints to their origin, and :func:`build_scene` checks all of
+it with the core credential policy before creating anything.
 """
 
 import json
@@ -14,6 +15,7 @@ import bpy
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.glb import node_scale
+from .sources import check_persistable
 
 COLOR_ATTR = "mb_color"
 META_KEY = "mb_map"
@@ -47,12 +49,16 @@ def ensure_material(name, created=None):
     return mat
 
 
-def mesh_from_data(md, name=None, created_materials=None):
-    """Blender mesh with exactly the plan's faces (the generator's closed, CCW-outward shells)."""
+def mesh_from_data(md, name, created_materials, created_meshes):
+    """Blender mesh with exactly the plan's faces (the generator's closed, CCW-outward shells).
+
+    The new mesh is appended to ``created_meshes`` right after it is allocated (before anything that can
+    fail), so the caller's single rollback path owns its removal; likewise new materials go to
+    ``created_materials``."""
     me = bpy.data.meshes.new(name or md.name)
+    created_meshes.append(me)
     me.from_pydata(md.vertices, [], md.faces)
     if me.validate(clean_customdata=False) or len(me.polygons) != len(md.faces):
-        bpy.data.meshes.remove(me)
         raise MapBuilderError(f"generated mesh {md.name!r} was altered by Blender's mesh validation; "
                               "refusing to create a scene that differs from the plan")
     for m in md.materials:
@@ -80,16 +86,33 @@ def unique_collection_name(base):
 
 
 def build_scene(context, plan, sources, map_name):
-    """Instantiate ``plan`` in a NEW collection linked to the scene. All datablocks are created first and
-    linked last; if anything fails, the datablocks created here (and only those) are removed again, so a
-    failed generation leaves the file as it was."""
+    """Instantiate ``plan`` in a NEW collection linked to the scene. Everything that will be saved in the
+    .blend (collection metadata, object names and provenance) is first checked with the core credential
+    policy; then all datablocks are created and linked last. If anything fails, the datablocks created here
+    (and only those) are removed again by one rollback path, so a failed generation leaves the file as it
+    was."""
+    area = plan.area
+    frame = area.frame
+    meta = {
+        "version": META_VERSION,
+        "map_name": map_name,
+        "area": {"lat": frame.lat0, "lon": frame.lon0, "width_m": area.width, "height_m": area.height},
+        "z_offset_m": frame.z_offset,
+        "sources": sources,
+        "report": plan.report,
+        "generated_ids": [spec.mb_id for spec in plan.objects],
+    }
+    check_persistable({"collection_metadata": meta,
+                       "objects": [{"name": spec.name, "mb_id": spec.mb_id, "mb_class": spec.mb_class,
+                                    "collection": spec.collection, "provenance": spec.provenance}
+                                   for spec in plan.objects]})
+    meta_json = json.dumps(meta, sort_keys=True, allow_nan=False)
     created_objects, created_meshes, created_colls, created_mats = [], [], [], []
     try:
         root = bpy.data.collections.new(unique_collection_name(f"MapBuilder {map_name}"))
         created_colls.append(root)
         subs = {}
         shared = {}
-        generated = []
         for spec in plan.objects:
             coll = subs.get(spec.collection)
             if coll is None:
@@ -98,14 +121,12 @@ def build_scene(context, plan, sources, map_name):
                 root.children.link(coll)
                 subs[spec.collection] = coll
             if spec.mesh is not None:
-                me = mesh_from_data(spec.mesh, spec.name, created_mats)
-                created_meshes.append(me)
+                me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)
                 me = shared.get(spec.mesh_key)
                 if me is None:
                     me = shared[spec.mesh_key] = mesh_from_data(plan.shared_meshes[spec.mesh_key], spec.mesh_key,
-                                                                created_mats)
-                    created_meshes.append(me)
+                                                                created_mats, created_meshes)
             # Blender may suffix the name (".001") when another map is already in the file; identities
             # live in mb_id, so the object name only has to be unique, which Blender guarantees.
             ob = bpy.data.objects.new(spec.name, me)
@@ -117,19 +138,7 @@ def build_scene(context, plan, sources, map_name):
             ob["mb_class"] = spec.mb_class
             ob["mb_provenance"] = json.dumps(spec.provenance, sort_keys=True)
             coll.objects.link(ob)
-            generated.append(spec.mb_id)
-        area = plan.area
-        frame = area.frame
-        meta = {
-            "version": META_VERSION,
-            "map_name": map_name,
-            "area": {"lat": frame.lat0, "lon": frame.lon0, "width_m": area.width, "height_m": area.height},
-            "z_offset_m": frame.z_offset,
-            "sources": sources,
-            "report": plan.report,
-            "generated_ids": generated,
-        }
-        root[META_KEY] = json.dumps(meta, sort_keys=True, allow_nan=False)
+        root[META_KEY] = meta_json
         context.scene.collection.children.link(root)
     except BaseException:
         for ob in created_objects:

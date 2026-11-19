@@ -2,8 +2,11 @@
 
 How it works (see bake.py for the GLB generation decision):
 
-1. Collect the objects of the map collection (all nested collections). Hidden/render-disabled objects
-   and geometry-less helpers (empties, lights, cameras...) are excluded and listed; curves, text,
+1. Collect the objects of the map collection (all nested collections), deduplicated by object identity
+   (never by name; a linked and a local object sharing a name block the export). Objects reachable only
+   through collections that are excluded/hidden in the view layer or disabled for rendering (the map
+   collection's ancestors included), hidden/render-disabled objects, and geometry-less helpers (empties,
+   lights, cameras...) are excluded and listed; curves, text,
    surfaces, metaballs, point clouds, volumes, grease pencil, instancing and particle systems are
    blocking errors (convert them to meshes first) -- nothing is guessed or silently dropped.
 2. For every mesh object read the *evaluated* mesh (modifiers, shape keys and geometry nodes applied,
@@ -23,7 +26,8 @@ import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
-from .bake import DEFAULT_MATERIAL, WHITE, ExportError, bake_object, degenerate_count, export_baked, outside_area
+from .bake import (DEFAULT_MATERIAL, WHITE, ExportError, bake_object, degenerate_count, export_baked,
+                   export_name_clashes, outside_area, principled_omissions)
 from .scene_build import META_KEY
 
 UNSUPPORTED_TYPES = {"CURVE", "FONT", "SURFACE", "META", "CURVES", "POINTCLOUD", "VOLUME", "GPENCIL",
@@ -86,7 +90,9 @@ def _linked_from(sock):
 def material_spec(mat):
     """(export name, (rgb, roughness, metallic), colour attribute name or None or "" (= render colour
     attribute), [warnings]) for a Blender material. Supported: a Principled BSDF whose Base Color is a
-    constant or comes from a Color Attribute / Attribute node; anything else is approximated and warned."""
+    constant or comes from a Color Attribute / Attribute node; anything else is approximated and warned,
+    and every omitted Principled effect (emission, normal/bump, transmission, coat, sheen, subsurface,
+    anisotropy, thin film, other node-driven inputs, volume/displacement) is named in a warning."""
     if mat is None:
         return DEFAULT_MATERIAL, None, None, ["empty material slot (exported with the default grey material)"]
     warnings = []
@@ -124,6 +130,16 @@ def material_spec(mat):
     alpha = bsdf.inputs.get("Alpha")
     if alpha is not None and (alpha.is_linked or alpha.default_value < 1.0):
         warnings.append(f"material {mat.name!r}: transparency is not exported (opaque)")
+    sockets = {}
+    for sock in bsdf.inputs:
+        if getattr(sock, "enabled", True):
+            v = getattr(sock, "default_value", None)
+            sockets[sock.name] = (sock.is_linked, tuple(v) if hasattr(v, "__len__") else v)
+    omitted = principled_omissions(sockets)
+    omitted += [f"material output {key} driven by nodes" for key in ("Volume", "Displacement")
+                if key in out.inputs and out.inputs[key].is_linked]
+    if omitted:
+        warnings.append(f"material {mat.name!r}: not exported (omitted): {', '.join(omitted)}")
     if not all(math.isfinite(v) for v in (*rgb, *values)):
         raise ExportError([f"material {mat.name!r}: non-finite colour/roughness/metallic"])
     return name, (rgb, values[0], values[1]), attr, warnings
@@ -153,14 +169,50 @@ def _color_reader(me, attr_name):
 
 # --- collection & baking ---------------------------------------------------------------------------------
 
-def _instancing_parents(depsgraph, names):
+def _instancing_parents(depsgraph, pointers):
     found = set()
     for inst in depsgraph.object_instances:
         if inst.is_instance and inst.parent is not None:
-            parent = inst.parent.original.name
-            if parent in names:
+            parent = inst.parent.original.as_pointer()
+            if parent in pointers:
                 found.add(parent)
     return found
+
+
+def _collection_enabled(lc):
+    """A layer collection whose content is rendered and visible: not excluded from the view layer, not
+    hidden in it, and its collection neither disabled in viewports nor for rendering."""
+    c = lc.collection
+    return not (lc.exclude or lc.hide_viewport or c.hide_viewport or c.hide_render)
+
+
+def collection_eligibility(view_layer, root):
+    """(pointers of objects reachable through at least one fully enabled collection path from the scene
+    collection *through* ``root``, {object pointer: sorted names of disabled collections on its paths},
+    whether ``root`` itself is on an enabled path). Every path counts: a collection (and so an object)
+    can be linked in several places; ancestors of ``root`` are part of the path."""
+    root_ptr = root.as_pointer()
+    eligible, blocked, root_enabled = set(), {}, False
+    stack = [(view_layer.layer_collection, False)]
+    while stack:
+        lc, inside = stack.pop()
+        here = lc.collection.as_pointer() == root_ptr
+        if not _collection_enabled(lc):
+            if inside or here or any(c.as_pointer() == root_ptr for c in lc.collection.children_recursive):
+                for ob in lc.collection.all_objects:
+                    blocked.setdefault(ob.as_pointer(), set()).add(lc.collection.name)
+            continue
+        inside = inside or here
+        root_enabled = root_enabled or here
+        if inside:
+            eligible.update(ob.as_pointer() for ob in lc.collection.objects)
+        stack.extend((child, inside) for child in lc.children)
+    return eligible, {k: sorted(v) for k, v in blocked.items()}, root_enabled
+
+
+def _label(ob):
+    """Unambiguous object label for diagnostics (linked objects carry their library: 'Name [lib.blend]')."""
+    return ob.name_full
 
 
 def _bake_mesh_object(ob, depsgraph, materials, warnings):
@@ -226,40 +278,62 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings):
 
 def collect(context, root, depsgraph, area=None, generated_ids=()):
     """Bake the map collection. Returns (baked objects, materials, export report). Raises ExportError
-    listing every blocking problem (nothing is written in that case)."""
+    listing every blocking problem (nothing is written in that case).
+
+    Objects are deduplicated by identity (an object linked in several collections is exported once), never
+    by name: a linked library object and a local object may share a name, which blocks the export (see
+    :func:`export_name_clashes`). An object is exported only if at least one collection path from the
+    scene collection through the map collection is enabled in the view layer (not excluded, hidden or
+    disabled for rendering, ancestors included) and the object itself is visible and render-enabled;
+    excluded objects are listed in the report."""
     errors, warnings, excluded = [], [], []
     view_layer = context.view_layer
     generated = set(generated_ids)
-    objects = sorted({ob.name: ob for ob in root.all_objects}.values(), key=lambda o: o.name)
-    names = {ob.name for ob in objects}
-    instancers = _instancing_parents(depsgraph, names)
-    baked, materials = [], {}
+    unique = {}
+    for ob in root.all_objects:
+        unique.setdefault(ob.as_pointer(), ob)
+    objects = sorted(unique.values(), key=lambda o: (o.name, o.name_full))
+    eligible, blocked, root_enabled = collection_eligibility(view_layer, root)
+    if not root_enabled:
+        why = (f"it or a parent collection ({', '.join(sorted(set(n for v in blocked.values() for n in v)))}) is "
+               "excluded from the view layer, hidden, or disabled for rendering") if blocked else \
+            "it is not linked into this scene"
+        raise ExportError([f"map collection {root.name!r} is not enabled in view layer {view_layer.name!r}: {why}"])
+    instancers = _instancing_parents(depsgraph, set(unique))
+    baked, materials, names = [], {}, []
     for ob in objects:
-        if not ob.visible_get(view_layer=view_layer) or ob.hide_render:
-            excluded.append({"object": ob.name, "reason": "hidden in the viewport or disabled for rendering"})
+        ptr = ob.as_pointer()
+        reason = None
+        if ptr not in eligible:
+            reason = (f"only in collection(s) excluded, hidden or disabled for rendering "
+                      f"({', '.join(blocked.get(ptr, [])) or 'outside the enabled map collections'})")
+        elif not ob.visible_get(view_layer=view_layer) or ob.hide_render:
+            reason = "hidden in the viewport or disabled for rendering"
+        if reason:
+            excluded.append({"object": _label(ob), "reason": reason})
             if ob.get("mb_id") in generated:
-                warnings.append(f"{ob.name}: hidden generated object is not exported and counts as removed")
+                warnings.append(f"{_label(ob)}: hidden generated object is not exported and counts as removed")
             continue
         if ob.type in UNSUPPORTED_TYPES:
-            errors.append(f"{ob.name}: {ob.type} objects cannot be exported; convert to a mesh "
+            errors.append(f"{_label(ob)}: {ob.type} objects cannot be exported; convert to a mesh "
                           "(Object > Convert > Mesh), or hide or delete it")
             continue
         if ob.type in IGNORED_TYPES:
-            if ob.name in instancers or ob.instance_type != "NONE":
-                errors.append(f"{ob.name}: instancing ({ob.instance_type}) is not supported; use "
+            if ptr in instancers or ob.instance_type != "NONE":
+                errors.append(f"{_label(ob)}: instancing ({ob.instance_type}) is not supported; use "
                               "Object > Apply > Make Instances Real")
             else:
-                excluded.append({"object": ob.name, "reason": f"{ob.type} has no geometry"})
+                excluded.append({"object": _label(ob), "reason": f"{ob.type} has no geometry"})
             continue
         if ob.type != "MESH":
-            errors.append(f"{ob.name}: unsupported object type {ob.type}")
+            errors.append(f"{_label(ob)}: unsupported object type {ob.type}")
             continue
         if len(ob.particle_systems):
-            errors.append(f"{ob.name}: particle systems are not supported; convert them "
+            errors.append(f"{_label(ob)}: particle systems are not supported; convert them "
                           "(Object > Apply > Make Instances Real / Convert) or remove them")
             continue
-        if ob.name in instancers or ob.instance_type != "NONE":
-            errors.append(f"{ob.name}: instancing (instance type {ob.instance_type} or geometry-node "
+        if ptr in instancers or ob.instance_type != "NONE":
+            errors.append(f"{_label(ob)}: instancing (instance type {ob.instance_type} or geometry-node "
                           "instances) is not supported; use Object > Apply > Make Instances Real or "
                           "add a Realize Instances node")
             continue
@@ -269,8 +343,8 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
             errors.extend(e.errors)
             continue
         if not b.triangles:
-            excluded.append({"object": ob.name, "reason": "evaluated mesh has no faces"})
-            warnings.append(f"{ob.name}: evaluated mesh has no faces; not exported")
+            excluded.append({"object": _label(ob), "reason": "evaluated mesh has no faces"})
+            warnings.append(f"{_label(ob)}: evaluated mesh has no faces; not exported")
             continue
         d = degenerate_count(b)
         if d:
@@ -278,8 +352,13 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
         if area is not None and outside_area(b, area):
             warnings.append(f"{ob.name}: extends outside the map area")
         baked.append(b)
+        names.append((ob.name, _label(ob)))
+    errors.extend(export_name_clashes(names))
     if not baked and not errors:
-        errors.append("nothing to export: no visible mesh objects with faces in the map collection")
+        errors.append("nothing to export: no visible mesh objects with faces in the map collection"
+                      + (f" ({len(excluded)} object(s) excluded: "
+                         + "; ".join(f"{e['object']}: {e['reason']}" for e in excluded[:5])
+                         + (" ..." if len(excluded) > 5 else "") + ")" if excluded else ""))
     if errors:
         raise ExportError(errors)
     report = {"warnings": warnings, "excluded_objects": excluded,

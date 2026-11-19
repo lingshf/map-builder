@@ -54,6 +54,8 @@ class MB_PT_main(bpy.types.Panel):
             if s.overpass_endpoint == "env":
                 box.label(text=f"URL is read from ${ENV_OVERPASS_URL} (not saved)", icon="INFO")
         box.prop(s, "cache_dir")
+        if s.credential_notice:
+            box.label(text=s.credential_notice, icon="ERROR")
         online = getattr(bpy.app, "online_access", True)
         if not online and (s.elevation_source == "copernicus" or s.osm_source == "overpass"):
             box.label(text="Online access is disabled: use local files", icon="ERROR")

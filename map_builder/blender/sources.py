@@ -7,19 +7,63 @@ properties, custom properties and Text blocks are saved into the .blend file. Co
 mirror -- read from the ``MAP_BUILDER_OVERPASS_URL`` environment variable at the moment Generate runs.
 That URL is only held in memory and passed to the core, which records just its origin
 (``scheme://host[:port]``, see ``core.http.redact``) in sources, caches, logs and packages.
+
+Free-text and path settings (licence, CRS, vertical datum, file paths, cache folder, map name, package
+path) are checked with the core credential policy (``core.package.find_secrets``) twice: the property
+``update`` callbacks in props.py clear a credential-like value as soon as it is entered, so it is never
+saved in the .blend; and Generate/Export reject such a value (e.g. one set through a custom property,
+bypassing the callback) *before* anything is written, naming the field but never echoing the value.
+Generate also checks everything it would persist (collection metadata, object provenance, report Text)
+before creating any datablock.
 """
 
 import json
 import urllib.parse
 
 from ..core.osm import DEFAULT_OVERPASS_URL
+from ..core.package import find_secrets, secrets_message
 
 ENV_OVERPASS_URL = "MAP_BUILDER_OVERPASS_URL"
 DEFAULT_LOCAL_DATUM = "user-declared (unknown)"
+# UI labels of the user-typed string settings that could be persisted (.blend, report Text, package)
+FIELD_LABELS = {"elevation_file": "Elevation file", "elevation_crs": "CRS (.asc)",
+                "elevation_vertical_datum": "Vertical datum", "elevation_license": "Licence",
+                "osm_file": "OSM file", "cache_dir": "Cache folder", "package_name": "Map name",
+                "export_path": "Package"}
+CREDENTIAL_HINT = ("credential-like value (URL user-info, key/token/password/signature parameter, Authorization "
+                   "header or bearer/basic credential)")
 
 
 class SettingsInputError(ValueError):
     """The UI values cannot form valid generation settings (message is safe to show and persist)."""
+
+
+def has_credential(value):
+    """True if the string ``value`` is credential-like under the core credential policy."""
+    return isinstance(value, str) and bool(find_secrets(value))
+
+
+def credential_fields(values):
+    """UI labels of the user-typed fields in ``values`` that hold a credential-like value (never the values)."""
+    return [FIELD_LABELS.get(k, k) for k, v in values.items() if k in FIELD_LABELS and has_credential(v)]
+
+
+def reject_credentials(values, outcome="Nothing was generated"):
+    """Raise SettingsInputError naming every field of ``values`` that holds a credential-like value."""
+    bad = credential_fields(values)
+    if bad:
+        raise SettingsInputError(f"{', '.join(bad)}: {CREDENTIAL_HINT} is not allowed (it would be saved in the "
+                                 f".blend file, the report and the package); remove it. {outcome}.")
+
+
+def check_persistable(parts):
+    """Raise SettingsInputError if anything in ``parts`` ({label: JSON-like data that would be saved in the
+    .blend: collection metadata, provenance, report}) is credential-like. Locations only, never values."""
+    hits = []
+    for label, obj in parts.items():
+        hits += find_secrets(obj, label)
+    if hits:
+        raise SettingsInputError(secrets_message("generated scene data", hits) + ". Nothing was generated.")
 
 
 def endpoint_problem(url):
@@ -40,7 +84,9 @@ def needs_network(values):
 
 def settings_kwargs(values, environ):
     """Keyword arguments for ``core.pipeline.Settings`` from UI ``values`` (dict of plain values with
-    absolute paths) and ``environ`` (os.environ or a test dict). Raises SettingsInputError."""
+    absolute paths) and ``environ`` (os.environ or a test dict). Raises SettingsInputError, first for any
+    credential-like user-typed value (see :func:`reject_credentials`)."""
+    reject_credentials(values)
     kw = {"elevation_source": values["elevation_source"], "osm_source": values["osm_source"],
           "terrain_spacing": float(values["terrain_spacing"]), "cache_dir": values.get("cache_dir") or ""}
     if kw["elevation_source"] == "file":
