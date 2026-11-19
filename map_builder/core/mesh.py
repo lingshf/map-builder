@@ -32,7 +32,10 @@ class MeshData:
         self.face_colors.append(tuple(color))
 
     def triangles(self):
-        """Fan-triangulated faces (valid for the planar/convex faces we emit)."""
+        """Fan-triangulated faces. Every face with more than 3 vertices that the generator
+        emits is planar (within 1e-6 m) and convex; non-planar candidates are emitted as
+        explicit triangles instead (see generate._add_planar_face), so the fan never
+        changes the surface."""
         for f in self.faces:
             for k in range(1, len(f) - 1):
                 yield (f[0], f[k], f[k + 1])

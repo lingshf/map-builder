@@ -11,10 +11,11 @@ from map_builder.core.generate import (MAX_RING_VERTICES, ROAD_LIFT_M, InvalidFe
                                        build_plan, build_road, build_terrain, footprint_terrain_range, parse_colour,
                                        parse_length, terrain_height)
 from map_builder.core.geodesy import Area
-from map_builder.core.osm import Classified, Feature, Polygon, parse_osm_xml, ring_area
+from map_builder.core import generate as gen
+from map_builder.core.osm import Classified, Feature, Polygon, classify, parse_osm_xml, ring_area
 from map_builder.core.triangulate import TriangulationError, triangulate, verify_triangulation
 
-from .synthetic import synthetic_inputs
+from .synthetic import OsmBuilder, synthetic_inputs
 
 
 def tri_area(a, b, c):
@@ -407,12 +408,13 @@ class TerrainSurfaceTest(unittest.TestCase):
         heights = [[50.0] * 11 for _ in range(11)]
         heights[5][5] = 40.0  # node at (0, 0), strictly inside the footprint
         grid = make_grid(heights, x0=-50, y0=-50)
-        mesh, origin, prov = build_building(building(rect_ccw(-20, -20, 20, 20), height="10"), grid, 0.0)
+        # height 15: the 10 m of relief stays below the eave (>= eave is rejected, see finding 3)
+        mesh, origin, prov = build_building(building(rect_ccw(-20, -20, 20, 20), height="15"), grid, 0.0)
         self.assertAlmostEqual(origin[2], 40.0)  # not 50 (vertex-only sampling floated it)
         self.assertEqual(prov["ground_slope_m"], 10.0)
         # a courtyard over the dip excludes it
         mesh, origin, _ = build_building(building(rect_ccw(-20, -20, 20, 20), [rect_cw(-10, -10, 10, 10)],
-                                                  height="10"), grid, 0.0)
+                                                  height="15"), grid, 0.0)
         self.assertAlmostEqual(origin[2], 50.0)
 
     def test_terrain_peak_reaching_eave_is_reported(self):
@@ -422,13 +424,20 @@ class TerrainSurfaceTest(unittest.TestCase):
         cl = Classified()
         cl.buildings = [building(rect_ccw(-20, -20, 20, 20), fid="osm:way/90", height="10")]
         plan = build_plan(tiny_area(), grid, cl)
-        o = next(o for o in plan.objects if o.mb_id == "osm:way/90")
-        self.assertIn("terrain_warning", o.provenance)
-        self.assertTrue(any(w.startswith("osm:way/90:") for w in plan.report["warnings"]))
+        # round 2, finding 3: rejected and reported, not emitted with only a warning
+        self.assertNotIn("osm:way/90", {o.mb_id for o in plan.objects})
+        entry = [e for e in plan.report["invalid_features"] if e["id"] == "osm:way/90"]
+        self.assertEqual(len(entry), 1)
+        self.assertIn("reaches eave/roof", entry[0]["reason"])
+        self.assertIn("no grading policy", entry[0]["reason"])
+        with self.assertRaises(InvalidFeature):
+            build_building(cl.buildings[0], grid, 0.0)
         # a gentle bump below the eave is not reported
         heights[5][5] = 3.0
         plan = build_plan(tiny_area(), make_grid(heights, x0=-50, y0=-50), cl)
         self.assertFalse(any("osm:way/90" in w for w in plan.report["warnings"]))
+        self.assertIn("osm:way/90", {o.mb_id for o in plan.objects})
+        self.assertFalse(any(e["id"] == "osm:way/90" for e in plan.report["invalid_features"]))
 
     def test_road_crossing_cell_diagonal_is_not_buried(self):
         # reviewer: 4 m cell, diagonal corners at 10 m, others at 0 (bilinear gives 5 at the centre)
@@ -626,3 +635,351 @@ class RoofProvenanceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+# --- Round 2 review findings ----------------------------------------------------
+
+def _clip_left(poly, a, b):
+    out = []
+    for k in range(len(poly)):
+        p, q = poly[k], poly[(k + 1) % len(poly)]
+        sp = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        sq = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        if sp >= 0:
+            out.append(p)
+        if (sp > 0 > sq) or (sp < 0 < sq):
+            t = sp / (sp - sq)
+            out.append((p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t))
+    return out
+
+
+def poly_area(poly):
+    return sum(poly[k][0] * poly[(k + 1) % len(poly)][1] - poly[(k + 1) % len(poly)][0] * poly[k][1]
+               for k in range(len(poly))) / 2.0
+
+
+def tri_overlap(t1, t2):
+    """Area of the intersection of two CCW triangles (2D)."""
+    poly = list(t1)
+    for k in range(3):
+        poly = _clip_left(poly, t2[k], t2[(k + 1) % 3])
+        if len(poly) < 3:
+            return 0.0
+    return poly_area(poly)
+
+
+def union_area(polys):
+    """Exact area of a union of convex polygons (vertical slabs at every vertex x and edge
+    crossing: inside a slab the covered length is linear in x, so area = width x midpoint length)."""
+    edges, xs = [], []
+    for pi, poly in enumerate(polys):
+        for k in range(len(poly)):
+            a, b = poly[k], poly[(k + 1) % len(poly)]
+            xs.append(a[0])
+            if a[0] != b[0]:
+                edges.append((min(a, b), max(a, b), pi))
+
+    def y_at(e, x):
+        (x0, y0), (x1, y1), _ = e
+        return y0 + (x - x0) * (y1 - y0) / (x1 - x0)
+
+    for u, e in enumerate(edges):
+        for f in edges[u + 1:]:
+            lo, hi = max(e[0][0], f[0][0]), min(e[1][0], f[1][0])
+            if hi > lo:
+                d0, d1 = y_at(e, lo) - y_at(f, lo), y_at(e, hi) - y_at(f, hi)
+                if d0 * d1 < 0:
+                    xs.append(lo + (hi - lo) * d0 / (d0 - d1))
+    xs = sorted(set(xs))
+    total = 0.0
+    for xa, xb in zip(xs, xs[1:]):
+        xm = (xa + xb) / 2
+        ivs = []
+        for pi in range(len(polys)):
+            ys = [y_at(e, xm) for e in edges if e[2] == pi and e[0][0] < xm < e[1][0]]
+            if len(ys) >= 2:
+                ivs.append((min(ys), max(ys)))
+        ivs.sort()
+        length, cur = 0.0, None
+        for lo, hi in ivs:
+            if cur is None or lo > cur[1]:
+                if cur:
+                    length += cur[1] - cur[0]
+                cur = [lo, hi]
+            else:
+                cur[1] = max(cur[1], hi)
+        if cur:
+            length += cur[1] - cur[0]
+        total += (xb - xa) * length
+    return total
+
+
+def world_tris(mesh, loc):
+    V = [(x + loc[0], y + loc[1]) for x, y, _ in mesh.vertices]
+    return [tuple(V[i] for i in t) for t in mesh.triangles()]
+
+
+def inside_convex(poly, p, margin):
+    return all((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) > margin * math.dist(a, b)
+               for a, b in zip(poly, poly[1:] + poly[:1]))
+
+
+class RibbonOverlapTest(unittest.TestCase):
+    """Round 2, finding 1: ribbon faces are interior-disjoint and exactly cover the footprint union."""
+
+    def check_ribbon(self, pts, width, grid, samples=0, rng=None):
+        mesh, loc, prov = build_road(road(pts, width=str(width)), grid, 0.0)
+        self.assertIsNotNone(mesh, prov)
+        tris = world_tris(mesh, loc)
+        # no duplicate faces
+        keys = [tuple(sorted((round(x, 6), round(y, 6)) for x, y in t)) for t in tris]
+        self.assertEqual(len(keys), len(set(keys)), "duplicate road faces")
+        # no pairwise interior overlap
+        boxes = [(min(p[0] for p in t), max(p[0] for p in t), min(p[1] for p in t), max(p[1] for p in t))
+                 for t in tris]
+        order = sorted(range(len(tris)), key=lambda k: boxes[k][0])
+        for n, a in enumerate(order):
+            for b in order[n + 1:]:
+                if boxes[b][0] >= boxes[a][1]:
+                    break
+                if boxes[a][2] < boxes[b][3] and boxes[b][2] < boxes[a][3]:
+                    self.assertLessEqual(tri_overlap(tris[a], tris[b]), 1e-6, (pts, width, tris[a], tris[b]))
+        # summed area == area of the union of the footprint pieces
+        pieces = gen._road_pieces(gen._dedupe_polyline(pts), width / 2)
+        self.assertAlmostEqual(sum(poly_area(t) for t in tris), union_area(pieces), places=5)
+        # point coverage: exactly once inside the union, never outside
+        if samples:
+            x0, x1, y0, y1 = (min(p[0] for p in pts) - width, max(p[0] for p in pts) + width,
+                              min(p[1] for p in pts) - width, max(p[1] for p in pts) + width)
+            for _ in range(samples):
+                p = (rng.uniform(x0, x1), rng.uniform(y0, y1))
+                strict = sum(1 for t in tris if inside_convex(list(t), p, 1e-7))
+                loose = sum(1 for t in tris if inside_convex(list(t), p, -1e-7))
+                if any(inside_convex(pc, p, 1e-6) for pc in pieces):
+                    self.assertGreaterEqual(loose, 1, p)
+                elif not any(inside_convex(pc, p, -1e-6) for pc in pieces):
+                    self.assertEqual(loose, 0, p)
+                self.assertLessEqual(strict, 1, p)
+        self.assertTrue(all(tri_normal_z(mesh, t) > 0 for t in mesh.triangles()))
+        return tris
+
+    def test_reviewer_turn_covers_footprint_once(self):
+        tris = self.check_ribbon([(0, 1), (3, 1), (3, 4)], 4, flat_grid())
+        self.assertAlmostEqual(sum(poly_area(t) for t in tris), 22.0, places=9)  # was 26
+
+    def test_reversal_emits_no_duplicates(self):
+        tris = self.check_ribbon([(0, 1), (3, 1), (0, 1)], 4, flat_grid())
+        self.assertAlmostEqual(sum(poly_area(t) for t in tris), 12.0, places=9)
+
+    def test_randomized_polylines(self):
+        rng = random.Random(2024)
+        grid = make_grid([[rng.uniform(0, 12) for _ in range(11)] for _ in range(11)], x0=-50, y0=-50)
+        for trial in range(60):
+            pts = [(rng.uniform(-20, 20), rng.uniform(-20, 20))]
+            while len(pts) < rng.randint(2, 8):
+                step = rng.choice([0.3, 1.0, 3.0, 8.0, 15.0])
+                ang = rng.uniform(0, 2 * math.pi) if rng.random() < 0.7 else \
+                    math.atan2(pts[-1][1] - pts[-2][1], pts[-1][0] - pts[-2][0]) + math.pi * rng.choice([1, 0.9, 0.5])\
+                    if len(pts) > 1 else 0.0
+                q = (pts[-1][0] + step * math.cos(ang), pts[-1][1] + step * math.sin(ang))
+                if max(abs(q[0]), abs(q[1])) < 35:
+                    pts.append(q)
+            width = rng.choice([1.0, 3.5, 6.0, 12.0])
+            with self.subTest(trial=trial, pts=pts, width=width):
+                self.check_ribbon(pts, width, grid, samples=60, rng=rng)
+
+
+class ScatterBoundsTest(unittest.TestCase):
+    """Round 2, finding 2: landcover indexing and scatter are bounded by the scene, not the polygon."""
+
+    def test_huge_forest_polygon(self):
+        cl = Classified()
+        cl.areas = [Feature("osm:way/71", "area", {"_class": "forest", "landuse": "forest"},
+                            Polygon(rect_ccw(-10_000, -10_000, 10_000, 10_000)))]
+        sizes = []
+        real = gen._Buckets
+
+        def record(*a, **k):
+            b = real(*a, **k)
+            sizes.append(len(b.map))
+            return b
+
+        with mock.patch("map_builder.core.generate._Buckets", side_effect=record):
+            plan = build_plan(tiny_area(), flat_grid(), cl, PlanOptions(max_trees=500))
+        self.assertTrue(sizes)
+        self.assertLessEqual(max(sizes), 16, sizes)  # old code: 160,801 buckets for this polygon
+        trees = [o for o in plan.objects if o.mb_class == "vegetation"]
+        self.assertGreater(len(trees), 50)  # old code: the limit filled with points outside the area -> 0
+        self.assertTrue(all(abs(o.location[0]) <= 50 and abs(o.location[1]) <= 50 for o in trees))
+
+    def test_polygon_inside_bounds_is_unchanged(self):
+        f = Feature("osm:way/72", "area", {"_class": "forest"}, Polygon(rect_ccw(-30, -20, 25, 30)))
+        a = gen.scatter_points(f, 1 / 60, random.Random(5), 1000)
+        b = gen.scatter_points(f, 1 / 60, random.Random(5), 1000, bounds=(-50, -50, 50, 50))
+        self.assertEqual(a, b)
+        self.assertTrue(a)
+
+
+class HoleToleranceTest(unittest.TestCase):
+    """Round 2, finding 4: small holes are kept; degenerate ones reject the footprint (never solid)."""
+
+    def plan_for(self, hole_side):
+        b = OsmBuilder()
+        rid = b.multipolygon(rect_ccw(-10, -10, 10, 10), [rect_ccw(3, 3, 3 + hole_side, 3 + hole_side)],
+                             {"building": "yes", "height": "10"})
+        cl = classify(parse_osm_xml(b.xml().encode()), tiny_area())
+        return f"osm:relation/{rid}", cl, build_plan(tiny_area(), flat_grid(), cl, PlanOptions(trees=False))
+
+    def test_small_valid_hole_is_kept(self):
+        fid, cl, plan = self.plan_for(0.2)
+        o = next(o for o in plan.objects if o.mb_id == fid)
+        geom = next(f for f in cl.buildings if f.id == fid).geometry
+        self.assertEqual(len(geom.holes), 1)
+        self.assertAlmostEqual(ring_area(geom.holes[0]), -0.04, places=3)
+        assert_closed_manifold(self, o.mesh)
+        # old code: the hole was dropped and the roof covered the full outer ring
+        self.assertAlmostEqual(roof_area(o.mesh), ring_area(geom.outer) + ring_area(geom.holes[0]), places=6)
+        self.assertLess(roof_area(o.mesh), ring_area(geom.outer) - 0.03)
+
+    def test_degenerate_hole_reports_footprint(self):
+        fid, cl, plan = self.plan_for(0.05)
+        self.assertEqual([o.mb_id for o in plan.objects if o.mb_class == "building"], [])
+        reasons = [e["reason"] for e in plan.report["invalid_features"] if e["id"] == fid]
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("degenerate inner ring", reasons[0])
+
+
+class ManMadeBridgeTest(unittest.TestCase):
+    """Round 2, finding 5: man_made=bridge/tunnel and building=bridge never become ground geometry."""
+
+    def test_reported_not_built(self):
+        b = OsmBuilder()
+        w1 = b.way([(-30, 0), (30, 0)], {"highway": "service", "man_made": "bridge"})
+        w2 = b.way([(-30, 10), (30, 10)], {"highway": "footway", "man_made": "tunnel"})
+        w3 = b.way(rect_ccw(10, 10, 20, 20), {"building": "bridge"}, closed=True)
+        w4 = b.way(rect_ccw(-20, -20, -10, -10), {"building:part": "bridge"}, closed=True)
+        r1 = b.multipolygon(rect_ccw(-30, 20, -20, 30), [], {"man_made": "bridge"})
+        w5 = b.way([(-30, -30), (30, -30)], {"highway": "service"})
+        cl = classify(parse_osm_xml(b.xml().encode()), tiny_area())
+        unsup = {u["id"]: u["reason"] for u in cl.unsupported}
+        for wid in (w1, w2, w3, w4):
+            self.assertIn(f"osm:way/{wid}", unsup)
+        self.assertIn("man_made=bridge", unsup[f"osm:way/{w1}"])
+        self.assertIn("man_made=tunnel", unsup[f"osm:way/{w2}"])
+        self.assertIn("building=bridge", unsup[f"osm:way/{w3}"])
+        self.assertIn(f"osm:relation/{r1}", unsup)
+        self.assertEqual([r.id for r in cl.roads], [f"osm:way/{w5}"])
+        self.assertEqual(cl.buildings, [])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertEqual([o.mb_id for o in plan.objects if o.mb_class in ("road", "building")], [f"osm:way/{w5}"])
+
+
+class WideRoadBudgetTest(unittest.TestCase):
+    """Round 2, finding 6: a tight count replaces the cheap bound before a road is rejected."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.grid = make_grid([[0.0] * 501 for _ in range(501)], spacing=2.0, x0=-500, y0=-500)
+        cls.road = road([(-450, -450), (450, 450)], fid="osm:way/81", width="60")
+
+    def test_wide_diagonal_road_fits_default_budget(self):
+        cl = Classified()
+        cl.roads = [self.road]
+        plan = build_plan(Area(47.0, 8.0, 1000.0, 1000.0), self.grid, cl, PlanOptions(trees=False))
+        o = next(o for o in plan.objects if o.mb_id == "osm:way/81")  # old estimate: 5.3M vertices -> LimitError
+        self.assertLess(len(o.mesh.vertices), 60_000)
+        self.assertLessEqual(plan.report["budget"]["vertices"], gen.MAX_SCENE_VERTICES)
+
+    def test_over_budget_still_rejected_before_allocation(self):
+        calls = []
+
+        def reserve(v, t):
+            calls.append((v, t))
+            if t > 30_000:
+                raise LimitError(f"refused {t} triangles")
+
+        with mock.patch("map_builder.core.generate.MeshData", side_effect=AssertionError("allocated")):
+            with self.assertRaises(LimitError):
+                build_road(self.road, self.grid, 0.0, reserve=reserve)
+        self.assertEqual(len(calls), 2)          # cheap bound, then the exact count
+        self.assertLess(calls[1][1], calls[0][1] / 10)
+        mesh, _, _ = build_road(self.road, self.grid, 0.0)
+        self.assertEqual(calls[1][1], sum(1 for _ in mesh.triangles()))  # the count is exact
+
+
+def assert_planar_faces(test, mesh, tol=1e-6):
+    V = mesh.vertices
+    for f in mesh.faces:
+        if len(f) == 3:
+            continue
+        a, b, c = (V[i] for i in f[:3])
+        u = [b[k] - a[k] for k in range(3)]
+        w = [c[k] - a[k] for k in range(3)]
+        n = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+        ln = math.sqrt(sum(x * x for x in n))
+        test.assertGreater(ln, 1e-9, f"{mesh.name}: degenerate face {f}")
+        for i in f[3:]:
+            d = sum((V[i][k] - a[k]) * n[k] for k in range(3)) / ln
+            test.assertLessEqual(abs(d), tol, f"{mesh.name}: face {f} is not planar ({d:.3g} m)")
+
+
+class PlanarFacesTest(unittest.TestCase):
+    """Round 2, finding 7: every emitted face is planar or an explicit triangle."""
+
+    def test_all_roof_shapes_and_footprints(self):
+        trapezoid = [(0, 0), (10, 0), (10, 5), (0, 6)]
+        rotated = [(0, 0), (8.660254, 5), (5.660254, 10.196152), (-3, 5.196152)]
+        lshape = [(0, 0), (12, 0), (12, 5), (5, 5), (5, 10), (0, 10)]
+        footprints = {"rect": (rect_ccw(-6, -4, 6, 4), []), "trapezoid": (trapezoid, []),
+                      "rotated": (rotated, []), "L": (lshape, []),
+                      "courtyard": (rect_ccw(-10, -10, 10, 10), [rect_cw(-4, -4, 4, 4)])}
+        for name, (outer, holes) in footprints.items():
+            for shape in ("flat", "gabled", "hipped", "pyramidal", "skillion"):
+                with self.subTest(footprint=name, shape=shape):
+                    mesh, _, prov = build_building(building(outer, holes, height="10", roof__shape=shape,
+                                                            roof__direction="30"), flat_grid(), 0.0)
+                    assert_planar_faces(self, mesh)
+                    assert_closed_manifold(self, mesh)
+        _, _, prov = build_building(building(trapezoid, height="10", roof__shape="gabled"), flat_grid(), 0.0)
+        self.assertEqual(prov["roof_shape_built"], "gabled")
+        self.assertIn("split", prov["roof_faces"])
+
+
+class NumericTagBoundsTest(unittest.TestCase):
+    """Round 2, finding 8: absurd numeric tags never reach vertices; they are reported."""
+
+    CASES = {
+        "roof:levels": {"roof__levels": "1e308", "roof__shape": "gabled"},
+        "building:levels": {"building__levels": "1e308"},
+        "height": {"height": "9" * 400},
+        "min_height": {"height": "10", "min_height": "1e300"},
+        "roof:height": {"roof__height": "5000", "roof__shape": "hipped"},
+        "building:min_level": {"building__min_level": "1e308"},
+    }
+
+    def test_out_of_range_tags_fall_back(self):
+        for key, tags in self.CASES.items():
+            with self.subTest(tag=key):
+                f = building(rect_ccw(-6, -4, 6, 4), fid="osm:way/95", **tags)
+                mesh, origin, prov = build_building(f, flat_grid(), 0.0)
+                self.assertTrue(all(math.isfinite(c) for v in mesh.vertices for c in v))
+                self.assertTrue(all(math.isfinite(c) for c in origin))
+                self.assertLessEqual(max(v[2] for v in mesh.vertices), gen.MAX_HEIGHT_M)
+                self.assertIn(key + "=", prov["rejected_tags"])
+                cl = Classified()
+                cl.buildings = [f]
+                plan = build_plan(tiny_area(), flat_grid(), cl, PlanOptions(trees=False))
+                self.assertIn("osm:way/95", {o.mb_id for o in plan.objects})
+                self.assertTrue(any(w.startswith("osm:way/95: out-of-range tags") for w in plan.report["warnings"]))
+
+    def test_height_fallback_provenance(self):
+        _, _, prov = build_building(building(rect_ccw(-6, -4, 6, 4), height="9" * 400, building__levels="4"),
+                                    flat_grid(), 0.0)
+        self.assertEqual(prov["height_m"], 12.0)
+        self.assertTrue(prov["height"].startswith("fallback:building:levels"))
+        self.assertIn("not a finite number", prov["height_reason"])
+        self.assertIn("osm height", prov["height_source"])
+        self.assertIsNone(parse_length("9" * 400))
+        self.assertIsNone(parse_length("9" * 400 + " ft"))
+        self.assertIsNone(parse_length("9" * 400 + "'"))

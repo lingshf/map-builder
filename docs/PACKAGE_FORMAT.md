@@ -170,9 +170,12 @@ counted in `edits.removed` and listed in `report.json`.
 * `provenance` values that start with `measured:` come from source data, for example the OSM
   `height` tag.
 * Values that start with `inferred:` or `fallback:` are defaults chosen by map-builder.
+* Numeric tags outside sane ranges (levels > 200, lengths > 1000 m, non-finite values) are
+  not used; they are listed in the object's `rejected_tags` provenance and in `warnings`.
 * `report.json` lists:
-  * `unsupported_features`: bridges, tunnels, elevated parts
-  * `invalid_features`: for example self-intersecting footprints
+  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, elevated parts
+  * `invalid_features`: for example self-intersecting footprints, degenerate inner rings, and
+    buildings where the terrain inside the footprint reaches the eave or roof
   * counts and warnings
 
 ## `collision/map.mbcol` v1 (little-endian)

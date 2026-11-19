@@ -369,9 +369,21 @@ class Classified:
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
 
 
+MIN_HOLE_AREA_M2 = 0.01  # inner rings below this are degenerate: the feature is reported, never filled
+
+
 def _unsupported_reason(tags):
+    """Shared v1 support check, applied before a way/relation enters any road, building or area list."""
     if tags.get("bridge") and tags.get("bridge") != "no":
         return "bridge (under-bridge flight and elevated decks are not supported in v1; omitted)"
+    mm = tags.get("man_made")
+    if mm == "bridge":
+        return "man_made=bridge (under-bridge flight and elevated decks are not supported in v1; omitted)"
+    if mm == "tunnel":
+        return "man_made=tunnel (tunnels/passages are not supported in v1; omitted)"
+    for key in ("building", "building:part"):
+        if tags.get(key) == "bridge":
+            return f"{key}=bridge (bridge structures are not supported in v1; omitted)"
     t = tags.get("tunnel")
     if t and t != "no":
         return f"tunnel={t} (tunnels/passages are not supported in v1; omitted)"
@@ -429,8 +441,12 @@ def classify(data, area, max_features=50_000):
             polys.append(Polygon(o))
         for h in inners:
             h = _clean_ring(h)
-            if len(h) < 3 or abs(ring_area(h)) < 0.05:
-                continue
+            if len(h) < 3 or abs(ring_area(h)) < MIN_HOLE_AREA_M2:
+                # dropping the hole would emit the footprint solid: skip the whole feature instead
+                out.invalid.append({"id": fid, "reason": f"degenerate inner ring (fewer than 3 distinct points or "
+                                                         f"area < {MIN_HOLE_AREA_M2:g} m2); skipped rather than "
+                                                         "filling the hole"})
+                return []
             if ring_area(h) > 0:
                 h.reverse()
             # nested rings (outer, inner, outer, inner): the hole belongs to the smallest enclosing outer
@@ -556,9 +572,9 @@ def classify(data, area, max_features=50_000):
                 continue
             for k, part in enumerate(parts):
                 out.roads.append(Feature(fid if len(parts) == 1 else f"{fid}#{k}", "road", tags, part))
-        elif tags.get("man_made") == "bridge":
-            out.unsupported.append({"id": fid, "reason": "man_made=bridge outline (bridges not supported in v1)",
-                                    "tags": _subset(tags)})
+        elif tags.get("man_made") in ("bridge", "tunnel"):
+            out.unsupported.append({"id": fid, "reason": f"man_made={tags['man_made']} outline "
+                                                         "(not supported in v1)", "tags": _subset(tags)})
 
     for fid, (polys, tags) in polygons.items():
         if not polys:
@@ -585,6 +601,8 @@ def classify(data, area, max_features=50_000):
                     continue
                 for k, p in enumerate(polys):
                     out.areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area", dict(tags, _class=cls), p))
+            elif tags.get("man_made") in ("bridge", "tunnel") and any(_bbox_overlaps(p.bbox(), area) for p in polys):
+                out.unsupported.append({"id": fid, "reason": _unsupported_reason(tags), "tags": _subset(tags)})
 
     for nid, (lat, lon, tags) in data.nodes.items():
         if tags.get("natural") == "tree":
