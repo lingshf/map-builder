@@ -461,7 +461,7 @@ class Classified:
         # Not generated, kept for the DSM terrain correction mask (core/dsm.py). Selected against the mask
         # extent (the DEM grid extent; default the area) expanded by each feature's mask buffer, so that
         # features just outside the area still mask the edge samples: highway/railway ways tagged bridge=*
-        # (other than "no"), clipped to the extent + dsm.BRIDGE_CANDIDATE_MARGIN_M (kind "bridge"; those in
+        # (other than "no"), clipped to the extent + their own mask reach (half the deck width + dsm.BRIDGE_BUFFER_M, at most dsm.BRIDGE_CANDIDATE_MARGIN_M) (kind "bridge"; those in
         # the area are still reported in ``unsupported``), surface building footprints (surface_mask_eligible,
         # the predicate generation applies in the area) whose centroid lies outside the area (counted in
         # ``outside``) with a bbox within the extent + the building buffer, and
@@ -615,6 +615,14 @@ class _MaskWork:
             raise _MaskWorkExhausted()
 
 
+def _bridge_rect(tags, mask_extent):
+    """The grid extent expanded by this bridge's own mask reach (half its deck width plus the bridge buffer,
+    exactly as :func:`generate.dsm_obstacles` keeps it), so a bridge that cannot reach the grid is not kept."""
+    from .dsm import BRIDGE_BUFFER_M
+    from .generate import road_width
+    return _expand(mask_extent, road_width(tags)[0] / 2.0 + BRIDGE_BUFFER_M)
+
+
 def _feature_count(out):
     return (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
             + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas) + len(out.outline_features))
@@ -730,10 +738,9 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
     candidates actually kept (an outer ring outside the mask extent costs nothing from it), before they are
     stored (:class:`_MaskFeatureLimit`); assembly itself, including every ring and polygon allocated, is
     bounded by ``work``."""
-    from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
+    from .dsm import BUILDING_BUFFER_M, TREE_RADIUS_M
     if allowance is None:
         allowance = _FeatureAllowance(math.inf)
-    bridge_rect = _expand(mask_extent, BRIDGE_CANDIDATE_MARGIN_M)
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
     tree_rect = _expand(mask_extent, TREE_RADIUS_M)
     frame = area.frame
@@ -817,7 +824,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
         elif (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"):
             pts = way_points(nids)
             if pts is not None:
-                bparts = _clip_polyline(pts, area, bridge_rect)
+                bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent))
                 allowance.take(len(bparts))
                 for k, part in enumerate(bparts):
                     out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
@@ -833,8 +840,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
 
 def _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent):
     """:func:`classify` of ``data`` taken as the whole input (everything is content)."""
-    from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
-    bridge_rect = _expand(mask_extent, BRIDGE_CANDIDATE_MARGIN_M)
+    from .dsm import BUILDING_BUFFER_M, TREE_RADIUS_M
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
     tree_rect = _expand(mask_extent, TREE_RADIUS_M)
     if max_part_pair_checks is None:
@@ -1011,7 +1017,7 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
                 continue
             if ("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no":
-                bparts = _clip_polyline(pts, area, bridge_rect)
+                bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent))
                 for k, part in enumerate(bparts):
                     out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
             if "highway" not in tags:
@@ -1046,8 +1052,10 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                 # Not generated: counted as outside the area, and a DSM mask candidate if it is a surface
                 # feature (the inside-area predicate below).
                 out.outside += 1
-                if surface_mask_eligible(tags) and any(_rect_overlaps(p.bbox(), building_rect) for p in polys):
-                    out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys)
+                if surface_mask_eligible(tags):
+                    # each polygon on its own: an off-grid polygon of the same relation is never kept
+                    out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys
+                                                 if _rect_overlaps(p.bbox(), building_rect))
                 continue
             reason = _unsupported_reason(tags)
             if reason:

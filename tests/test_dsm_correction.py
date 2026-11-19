@@ -2107,6 +2107,33 @@ class ReviewRound9Test(unittest.TestCase):
         self.assertIsNone(cl.mask_unavailable)
         self.assertEqual(len(cl.mask_trees), 1)
 
+    def test_off_grid_polygons_of_a_normal_relation_are_not_kept(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        outers = [b.way(square(cx, 0.0, 5.0), closed=True) for cx in (60.0, 600.0, 700.0)]
+        b.relations.append((b._next(), [("way", w, "outer") for w in outers],
+                            {"type": "multipolygon", "building": "yes"}))
+        data = parse_osm_xml(b.xml().encode())
+        cl = classify(data, area, mask_extent=self.EXTENT, max_features=2)   # before: LimitError (3 kept)
+        self.assertEqual((len(cl.buildings), cl.outside, len(cl.outside_buildings)), (0, 1, 1))
+        self.assertLess(abs(cl.outside_buildings[0].geometry.centroid()[0] - 60.0), 1.0)
+
+    def test_bridges_out_of_their_own_reach_are_not_kept(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        normal = parse_osm_xml(b.xml().encode())
+        bridge = {"highway": "service", "bridge": "yes", "width": "4"}      # reach 2 + 15 m < 85 - 50 m
+        b.way([(85.0, -40.0), (85.0, 40.0)], bridge)
+        b.node(0.0, 0.0, {"natural": "tree"})
+        wide = parse_osm_xml(b.xml().encode())
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=1)
+        self.assertIsNone(cl.mask_unavailable)                               # before: the bridge took the slot
+        self.assertEqual((len(cl.bridges), len(cl.mask_trees)), (0, 1))
+        self.assertEqual(len(classify(wide, area, mask_extent=self.EXTENT).bridges), 0)   # the content path too
+        b2 = OsmBuilder()
+        b2.way([(85.0, -40.0), (85.0, 40.0)], dict(bridge, width="60"))     # reach 45 m: within it
+        self.assertEqual(len(classify(parse_osm_xml(b2.xml().encode()), area, mask_extent=self.EXTENT).bridges), 1)
+
 
 def pipeline_mask_message(cls_name):
     from map_builder.core import errors, pipeline
