@@ -1,8 +1,21 @@
 # v0.1.0 demo: editable map baseline
 
 **Preview candidate; not a published release.** All images below show an
-invented **SYNTHETIC** 400 x 300 m area. They are actual Blender Cycles CPU
-renders, not photographs, a real-city reconstruction or a mock UI.
+invented **SYNTHETIC** 400 x 300 m area. The map images are actual Blender
+Cycles CPU renders; the sidebar image is a real Blender window captured
+with Mesa software OpenGL. None is a real-city reconstruction or a mock UI.
+
+## Real Blender interface
+
+![Actual Map Builder sidebar and imported synthetic GLB](panel.png)
+
+Captured by the merged demo kit from #14 using a separate, read-only Blender
+4.2.23 + Mesa llvmpipe runtime. The sidebar shows the real Area, Sources,
+Content and Export controls. The viewport contains the committed CLI sample's
+imported GLB (74 objects), not the separate 76-object edited Blender demo below.
+The source controls show their defaults, including the disabled-online-access
+warning; no online download was performed. An imported GLB does not restore
+the add-on's export metadata, so this is not an export-ready generated collection.
 
 ## Example 1: generate ordinary editable objects
 
@@ -61,10 +74,32 @@ edited GLB into a separate temporary scene, and saves `editable-demo.blend` and
 `evidence.json`. Cameras and lights live outside the exported map collection.
 It never starts a server, so port 8765 and all other demo servers are untouched.
 
-This is a release-specific fallback while the reusable demo kit in
-[#14](https://github.com/lingshf/map-builder/pull/14) is unmerged. Once that kit
-is merged, use its documented command for future sprint reviews rather than
-extending this script.
+The three CPU renders and edit checks were first produced with this
+release-specific script before the reusable demo kit in
+[#14](https://github.com/lingshf/map-builder/pull/14) merged. Keep this command
+to reproduce the exact edit example; use the shared kit for standard sprint
+renders, viewer bundles and real sidebar captures.
+
+To reproduce the sidebar with the shared kit (the Mesa copy is a prerequisite;
+never modify the main Blender installation):
+
+```powershell
+$panelRoot = Join-Path $env:TEMP ("map-builder-panel-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $panelRoot | Out-Null
+Copy-Item examples\synthetic_sample.mbmap "$panelRoot\sample.mbmap"
+$env:BLENDER_USER_RESOURCES = "$panelRoot\blender-profile"
+& $blender --background --factory-startup --python-exit-code 1 `
+    --python tools\demo\run_demo.py -- --preset synthetic `
+    --after "$panelRoot\sample.mbmap" --out "$panelRoot\output" `
+    --bundle-only --panel --mesa-blender "C:\path\to\blender-mesa\blender.exe"
+Remove-Item Env:\BLENDER_USER_RESOURCES
+```
+
+Check that `output\panel.png` exists and that `output\summary.md` reports a
+real sidebar capture: a skipped screenshot is not success. Omit `--bundle-only`
+to also render the kit's three preset views. See
+[demo-kit setup](../../../tools/demo/README.md) for the separate Mesa runtime.
+This command creates a viewer bundle but does not start a web server.
 
 The shared pipeline receives an explicit synthetic OSM licence because the
 baseline Blender UI does not expose that override. The saved demo packages
@@ -87,12 +122,12 @@ identities and geometry check. Timestamps change package identities on rerun.
   a separate temporary Blender resource directory; the installed extension
   enabled and registered the real Map Builder sidebar panel.
 
-**UI screenshot limitation:** graphical Blender startup was attempted in a
-separate window but could not establish the Windows OpenGL/WGL context
-(`WGL_ARB_extensions_string` unavailable). The capture helper was stopped.
-No actual sidebar screenshot is supplied or faked. The sidebar is described in
-the user guide; a graphical machine is still needed for a visual UI acceptance
-check. The renders above do not substitute for that check.
+**Sidebar capture:** native graphical startup lacked the required WGL context,
+but the shared kit's separate Mesa llvmpipe runtime successfully captured the
+real 1920 x 1129 Blender window above. The screenshot uses the committed sample,
+package identity
+`sha256:3bcc75e25368d71ec5c866233969e67fba03a0302594d61ca4767ca22165b0a2`.
+It verifies visible panel layout, not an online-acquisition or simulator test.
 
 **Release gate:** DSM correction (#11) remains unmerged in this candidate.
 Update release notes and the changelog after it merges; these images demonstrate

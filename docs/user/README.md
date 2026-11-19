@@ -9,5 +9,6 @@ visuals plus engine-neutral collision; it is not a flight simulator.
 4. [Understand the simulator handoff](simulator.md).
 
 See the [three-example demo](../demo/v0.1.0/README.md) and
+[real Blender sidebar](../demo/v0.1.0/panel.png), plus the
 [workflow overview](../flows/overview.md). The [package contract](../PACKAGE_FORMAT.md)
 is normative when implementing a reader.

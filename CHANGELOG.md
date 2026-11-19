@@ -36,6 +36,8 @@ DSM correction (#11), release review and coordinator authorization.
   bridges or tunnels; schema 1.x packages must be regenerated (#10).
 - Tag-triggered extension packaging and GitHub pre-release publication. Manual
   workflow runs build an artifact only (#13).
+- Reusable demo kit with Cycles CPU renders, a bundled three.js viewer, probe
+  results and real Blender-sidebar capture using a separate Mesa runtime (#14).
 - End-user installation, generation, export and simulator-handoff guides, UI flow
   diagrams and an offline synthetic demo with reproducible renders (REL-v0.1.0).
 
