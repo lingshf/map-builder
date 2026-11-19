@@ -1817,7 +1817,7 @@ class ReviewRound7Test(unittest.TestCase):
                 finally:
                     tracemalloc.stop()
                 self.assertLess(peak, 20 * 2 ** 20)          # about 119 MiB before
-                self.assertLess(cl.mask_work, 100_000)
+                self.assertLess(cl.mask_work, 1000)   # 14 and 0 measured; the repeated members are charged once
                 self.assertEqual([f.id for f in cl.outside_buildings], [f"osm:relation/{rid}"])
                 self.assertIsNone(cl.mask_work_exceeded)
                 self.assertIsNone(cl.mask_unavailable)

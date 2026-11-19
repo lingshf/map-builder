@@ -1530,21 +1530,43 @@ class ReviewRound2Test(TempDirCase):
             pkg.write_package(self.p("shells_w.mbmap"), members, manifest)
 
     def test_orientation_check_is_linear_in_shells(self):
-        boxes = [(box_mesh(x * 3, y * 3, x * 3 + 1, y * 3 + 1, 0, 1), True) for x in range(60) for y in range(50)]
-        orig, seen = pkg._signed_volume, []
+        m = merged_mesh([(box_mesh(x * 3, y * 3, x * 3 + 1, y * 3 + 1, 0, 1), True)
+                         for x in range(60) for y in range(50)])
+        col = read_collision(write_collision([ColObject("b", "osm:way/9", "building", list(m.vertices),
+                                                        [tuple(t) for t in m.triangles()])]))
+        total = 3000 * 12
+        visits = [0]
 
-        def counting(tris):
-            seen.append(len(tris))
-            return orig(tris)
-        pkg._signed_volume = counting
+        class CountingList(list):
+            def __iter__(self):
+                for t in list.__iter__(self):
+                    visits[0] += 1
+                    yield t
+
+            def __getitem__(self, k):
+                visits[0] += 1
+                return list.__getitem__(self, k)
+
+        def counting(orig):
+            def wrapper(arg, *a, **k):
+                visits[0] += len(arg)
+                return orig(arg, *a, **k)
+            return wrapper
+        names = ("_weld_ids", "_directed_edges", "_shells", "_signed_volume")
+        saved = {n: getattr(pkg, n) for n in names}
+        get = col.object_triangles
+        col.object_triangles = lambda e: CountingList(get(e))
+        for n in names:
+            setattr(pkg, n, counting(saved[n]))
         try:
-            probs = self.orient(boxes)
+            probs = pkg.collision_orientation_problems(col)
         finally:
-            pkg._signed_volume = orig
+            for n in names:
+                setattr(pkg, n, saved[n])
         self.assertEqual(len(probs), 3001)                                            # + "no positive shell"
-        self.assertEqual(len(seen), 3000)                                             # one volume per shell
-        self.assertEqual(sum(seen), 3000 * 12)                                        # each triangle once: linear
-
+        # each pass (weld, edges, shell split, volumes, triangle gathering) touches a triangle a bounded number (6 today)
+        # of times; a per-shell rescan of the object would be about 3000 x total
+        self.assertLessEqual(visits[0], 8 * total, visits[0])
     # 2: the one-to-one matcher is a maximum matching, independent of order
     def test_one_to_one_matching_is_order_independent(self):
         t = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))

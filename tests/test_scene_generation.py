@@ -1667,9 +1667,22 @@ class PartAssociationBoundsTest(unittest.TestCase):
 
     def test_reviewer_dense_overlap_is_bounded(self):
         out = self.dense(1000)
-        with self.assertRaises(LimitError) as cm:
-            osm_mod._resolve_building_parts(out)  # old code: 1M pairs, 2M association references
+        works = []
+
+        class Spy(osm_mod._AssocWork):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                works.append(self)
+        orig, osm_mod._AssocWork = osm_mod._AssocWork, Spy
+        try:
+            with self.assertRaises(LimitError) as cm:
+                osm_mod._resolve_building_parts(out)  # old code: 1M pairs, 2M association references
+        finally:
+            osm_mod._AssocWork = orig
         self.assertIn("pairs", str(cm.exception))
+        # enumeration stops at the candidate cap (200 001 of the 1 000 000 overlapping pairs), before any geometry
+        self.assertEqual(len(works), 1)
+        self.assertLess(works[0].n, 2 * osm_mod.MAX_PART_PAIR_CHECKS)
 
     def test_dense_within_limits_stores_one_outline_per_part(self):
         out = self.dense(30)
