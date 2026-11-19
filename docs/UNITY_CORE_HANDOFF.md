@@ -109,20 +109,42 @@ Rules either way:
   crashing into buildings), but collide with every class unless the design says otherwise.
 * `objects[].name` is the glTF node name (the 1:1 binding). `mb_id` is the stable identity
   across edits and re-exports.
-* v1 does not support flying under bridges, through tunnels or beneath elevated parts. Those
-  are omitted or solid, and listed in `report.json`.
+* Triangles are **two-sided** for every collision query (ray, segment, capsule, sweep): do not
+  cull back faces. The winding gives only the contact normal, which depends on the class kind:
+  outward for solids, up (+Z) for surfaces, and inward into the free space for tubes.
+* Format 2.0 adds the `bridge`, `tunnel` and `structure` classes, but map-builder does not
+  generate them yet: bridges and tunnels are omitted and elevated parts are solid, and these
+  are listed in `report.json`. Core and Unity can implement the mapping below now.
 
-### Class ids
+### Class ids and kinds
 
-| id | class | | id | class |
-|---|---|---|---|---|
-| 0 | user | | 4 | vegetation |
-| 1 | terrain | | 5 | water |
-| 2 | building | | 6 | prop |
-| 3 | road | | | |
+| id | class | kind | Core mapping (suggested) |
+|---|---|---|---|
+| 0 | user | — | static mesh, no winding guarantee |
+| 1 | terrain | surface | ground; landing allowed |
+| 2 | building | solid | crash on contact |
+| 3 | road | surface | ground; landing allowed |
+| 4 | vegetation | — | static mesh, no winding guarantee |
+| 5 | water | surface | water outcome |
+| 6 | prop | — | static mesh, no winding guarantee |
+| 7 | bridge | solid | crash on contact; the deck top is the landing side |
+| 8 | tunnel | tube | inward-facing walls; flyable inside, crash on the walls |
+| 9 | structure | solid | crash on contact |
 
-Ids 7–255 are reserved. A v1 reader rejects them, as the reference readers do; a future minor
-version would add them with an explicit rule.
+`manifest.collision.class_kinds` gives the kind per class name. Ids 10–255 are reserved: a 2.x
+reader rejects them, as the reference readers do. A tube's front faces point into its free
+space, so a contact normal from a tunnel wall points towards the inside of the tunnel. The
+heightfield is terrain-only (NaN where terrain is cut) and cannot represent bridges, tunnels or
+elevated volumes, so option B cannot fly under or through them.
+
+### Passage probes as acceptance tests
+
+`manifest.passage_probes[]` (see PACKAGE_FORMAT.md) lists capsules that must be free of
+collision, for example a path along a bridge deck or through a tunnel. The map-builder validator
+already re-checks them and warns when one is blocked. A consumer should run the same capsule
+check against its **own** loaded collision (after import, with two-sided triangles) and treat a
+blocked probe as a failed acceptance test for that map. The C# reference reader shows a
+brute-force version with an AABB prefilter.
 
 ## 5. Legacy `.flightmap`
 
@@ -151,7 +173,10 @@ validator, the sample and the reference reader.
       based on `MbmapReader.cs` (netstandard2.1 + System.Text.Json package).
 - [ ] Core: a triangle-mesh static collider with a BVH and drone contact queries (option A), or
       the heightfield + per-building triangles interim (option B), with measured accuracy.
-- [ ] Core: decide how classes map to gameplay outcomes (landing, crash, water).
+- [ ] Core: decide how classes map to gameplay outcomes (landing, crash, water), per the
+      class/kind table above.
+- [ ] Core: two-sided triangle queries, and a passage-probe capsule check run as a load-time
+      acceptance test.
 - [ ] Core: store `package_id` in replays and refuse a mismatch.
 - [ ] Core: performance at 250 Hz for about 5k–1M triangles (no budget is promised by
       map-builder).
@@ -166,5 +191,5 @@ validator, the sample and the reference reader.
 - [ ] UI: show NOTICES.txt / attributions.
 - [ ] Tests: run the reader and the simulator loader against `examples/synthetic_sample.mbmap`
       and against a tampered copy.
-- [ ] Not supported in v1, so out of scope: under-bridge, tunnel or elevated flying; streaming
-      and very large areas.
+- [ ] Not generated yet, so out of scope for now: under-bridge, tunnel or elevated flying (the
+      format is ready); streaming and very large areas.

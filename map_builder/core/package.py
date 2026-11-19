@@ -21,18 +21,22 @@ import math
 import os
 import re
 import stat
+import sys
 import tempfile
 import time
 import zipfile
 import zlib
+from fractions import Fraction
 
 from . import (COLLISION_FORMAT_VERSION, GENERATOR_NAME, GENERATOR_VERSION, HEIGHTFIELD_FORMAT_VERSION,
                PACKAGE_SCHEMA, PACKAGE_SCHEMA_VERSION)
-from .collision import (CLASSES, DEGENERATE_EPS, degenerate_triangle_count, is_degenerate, rasterize_heightfield,
-                        read_collision, read_heightfield, strict_json)
+from .collision import (CLASS_KINDS, CLASSES, DEGENERATE_EPS, KIND_SOLID, KIND_TUBE, MAX_ABS_COORD_M,
+                        degenerate_triangle_count, is_degenerate, rasterize_heightfield, read_collision,
+                        read_heightfield, strict_json)
 from .errors import LimitError, PackageError
 from .geodesy import gltf_to_map, map_to_gltf, map_to_unity_x_negated
 from .glb import read_glb
+from .query import capsule_hits
 
 PACKAGE_EXTENSION = ".mbmap"
 MANIFEST = "manifest.json"
@@ -89,6 +93,11 @@ PROBE_MATCH_M = 0.05
 PROBE_MIN_DOT = 0.99
 PROBE_MAX = 3
 HEIGHTFIELD_TOL_M = 1e-3
+PASSAGE_KINDS = ("bridge", "tunnel", "elevated")
+PASSAGE_PROBE_MAX = 256
+PASSAGE_PATH_MIN, PASSAGE_PATH_MAX = 2, 64
+PASSAGE_RADIUS_MAX_M = 10.0
+PASSAGE_QUERY_BUDGET = 2_000_000    # object/triangle visits shared by all passage probes of one package
 
 _MB_ID = re.compile(r"(osm:(node|way|relation)/-?\d+(#\d+)?|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
@@ -145,7 +154,13 @@ def safe_member_name(name):
 
 
 def _num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    """A real number (int or float, not bool) with a finite float value. Integers are bounded exactly before
+    any float conversion, so an oversized integer (e.g. 10**400) is rejected instead of raising OverflowError."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return -sys.float_info.max <= v <= sys.float_info.max
+    return isinstance(v, float) and math.isfinite(v)
 
 
 def _vec(v, n=3):
@@ -154,6 +169,40 @@ def _vec(v, n=3):
 
 def _dist(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+def passage_probe_problems(probes):
+    """Structural problems of a manifest ``passage_probes`` value (docs/PACKAGE_FORMAT.md "Passage probes"),
+    as index-only messages that never echo strings from the input. Extra keys in an entry are ignored."""
+    if not isinstance(probes, list) or len(probes) > PASSAGE_PROBE_MAX:
+        return [f"passage_probes must be an array of at most {PASSAGE_PROBE_MAX}"]
+    problems = []
+    seen = {}
+    for i, p in enumerate(probes):
+        tag = f"passage_probes[{i}]"
+        if not isinstance(p, dict):
+            problems.append(f"{tag} must be an object")
+            continue
+        pid = p.get("id")
+        if not (isinstance(pid, str) and pid):
+            problems.append(f"{tag}.id must be a non-empty string")
+        elif pid in seen:
+            problems.append(f"{tag}.id repeats the id of passage_probes[{seen[pid]}]")
+        else:
+            seen[pid] = i
+        if p.get("kind") not in PASSAGE_KINDS:
+            problems.append(f"{tag}.kind must be one of {list(PASSAGE_KINDS)}")
+        if not (isinstance(p.get("feature"), str) and p["feature"]):
+            problems.append(f"{tag}.feature must be a non-empty mb_id string")
+        path = p.get("path_map")
+        if not (isinstance(path, list) and PASSAGE_PATH_MIN <= len(path) <= PASSAGE_PATH_MAX
+                and all(_vec(q) and all(abs(c) <= MAX_ABS_COORD_M for c in q) for q in path)):
+            problems.append(f"{tag}.path_map must be {PASSAGE_PATH_MIN}..{PASSAGE_PATH_MAX} finite [x, y, z] "
+                            f"points in the map frame with |coordinate| <= {MAX_ABS_COORD_M:g}")
+        rad = p.get("radius_m")
+        if not (_num(rad) and 0.0 < rad <= PASSAGE_RADIUS_MAX_M):
+            problems.append(f"{tag}.radius_m must be a number in (0, {PASSAGE_RADIUS_MAX_M:g}]")
+    return problems
 
 
 def _cross(a, b, c):
@@ -212,7 +261,8 @@ def secrets_message(where, hits):
 # --- manifest ------------------------------------------------------------------
 
 def build_manifest(name, area, sources, vertical_datum, files, collision_info, heightfield_info, objects,
-                   probes, edits_counts, warnings_count, has_report=True, blender_version=None, created_utc=None):
+                   probes, edits_counts, warnings_count, has_report=True, blender_version=None, created_utc=None,
+                   passage_probes=None):
     frame = area.frame
     return {
         "schema": PACKAGE_SCHEMA,
@@ -238,6 +288,7 @@ def build_manifest(name, area, sources, vertical_datum, files, collision_info, h
         "heightfield": heightfield_info,
         "objects": objects,
         "orientation_probes": probes,
+        "passage_probes": copy.deepcopy(list(passage_probes or [])),
         "sources": sources,
         "edits": edits_counts,
         "notices": "NOTICES.txt",
@@ -656,37 +707,63 @@ def _shells(ids):
     return list(groups.values())
 
 
+_EPS = 2.0 ** -53
+
+
 def _signed_volume(tris):
+    """Signed volume of a closed triangle shell whose sign is exact: coordinates are floats or exact
+    ``Fraction`` values (portal-cap centroids). A float sum with an error bound is used unless the result
+    is within that bound of zero; then the volume is recomputed exactly, so rounding can never make a
+    flat shell look like it encloses volume (or flip the sign of a thin one)."""
     r = tris[0][0]                              # a local origin keeps the products small
-    vol = 0.0
+    terms = []
+    mag = 0.0
     for a, b, c in tris:
-        ax, ay, az = a[0] - r[0], a[1] - r[1], a[2] - r[2]
-        bx, by, bz = b[0] - r[0], b[1] - r[1], b[2] - r[2]
-        cx, cy, cz = c[0] - r[0], c[1] - r[1], c[2] - r[2]
-        vol += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
-    return vol / 6.0
+        ax, ay, az, bx, by, bz, cx, cy, cz = (
+            (float(Fraction(v) - Fraction(o)) if type(v) is Fraction or type(o) is Fraction else v - o)
+            for p in (a, b, c) for v, o in zip(p, r))
+        terms.append(ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx))
+        mag += (abs(ax) * (abs(by * cz) + abs(bz * cy)) + abs(ay) * (abs(bz * cx) + abs(bx * cz))
+                + abs(az) * (abs(bx * cy) + abs(by * cx)))
+    vol = math.fsum(terms)
+    if abs(vol) > 32.0 * _EPS * mag:            # generous bound on translation, product and sum rounding
+        return vol / 6.0
+    rf = [Fraction(v) for v in r]
+    exact = Fraction(0)
+    for a, b, c in tris:
+        ax, ay, az, bx, by, bz, cx, cy, cz = (Fraction(v) - o for p in (a, b, c) for v, o in zip(p, rf))
+        exact += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
+    if exact == 0:
+        return 0.0
+    out = float(exact / 6)
+    return out if out != 0.0 else math.copysign(5e-324, exact)
 
 
-def _building_problems(k, tris):
-    """Orientation problems of one building collision object (index ``k`` in the object table)."""
-    tag = f"collision: building object #{k}"
-    ids = _weld_ids(tris)
+def _directed_edges(ids):
     edges = {}
     for a, b, c in ids:
         for p, q in ((a, b), (b, c), (c, a)):
             if p != q:
                 edges[(p, q)] = edges.get((p, q), 0) + 1
+    return edges
+
+
+def _solid_problems(k, cls, tris):
+    """Orientation problems of one solid-kind collision object (index ``k`` in the object table)."""
+    tag = f"collision: {cls} object #{k}"
+    ids = _weld_ids(tris)
+    edges = _directed_edges(ids)
     unbalanced = sum(1 for (p, q), n in edges.items()
                      if edges.get((q, p), 0) != n and ((q, p) not in edges or (p, q) < (q, p)))
     if unbalanced:
         return [f"{tag} is not a closed, consistently oriented solid ({unbalanced} open or inconsistently "
-                "wound edge(s)); building solids must be closed with CCW-outward faces"]
+                "wound edge(s)); solids (building, bridge, structure) must be closed with CCW-outward faces"]
     shells = []
     parts = _shells(ids)
     if parts is None:
         return [f"{tag} has non-manifold edges that do not split into independently closed shells, so its "
-                "orientation cannot be verified; v1 building solids must be closed 2-manifold shells (faces "
-                "or edges shared between shells are not supported)"]
+                "orientation cannot be verified; solids must be closed 2-manifold shells (faces or edges "
+                "shared between shells are not supported)"]
     for ts in parts:
         st = [tris[t] for t in ts]
         shells.append((st, _signed_volume(st)))
@@ -697,36 +774,134 @@ def _building_problems(k, tris):
             continue                            # outward, or only zero-area faces: nothing to orient
         problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3; every shell must have "
                         "positive volume (faces CCW seen from outside). Inverted shells and enclosed "
-                        "cavities are not supported in v1")
+                        "cavities are not supported")
     if not any(vol > 0.0 for _st, vol in shells):
         problems.append(f"{tag} has no closed shell with positive volume (collapsed or flattened, e.g. by a zero "
-                        "scale); a building collision object must be a solid")
+                        f"scale); a {cls} collision object must be a solid")
+    return problems
+
+
+def _tube_problems(k, cls, tris):
+    """Orientation problems of one tube-kind collision object (index ``k`` in the object table).
+
+    After welding (as for solids), every directed edge must be matched by its reverse equally often,
+    except boundary edges (used once, never reversed). Boundary edges must form simple closed loops (the
+    portals: every boundary vertex has exactly one outgoing and one incoming boundary edge). Each loop is
+    capped with a triangle fan around its centroid, wound like the adjacent faces (a cap face uses each
+    boundary edge reversed), which closes the surface; every resulting shell must then have a negative
+    signed volume (faces point inward, toward the free space). Every shell must be open: a shell with no
+    portal loop (a sealed inward box) is an error. Linear in the triangle count."""
+    tag = f"collision: {cls} object #{k}"
+    ids = _weld_ids(tris)
+    pos = {}
+    for t, tri in zip(ids, tris):
+        for i, p in zip(t, tri):
+            pos.setdefault(i, p)
+    edges = _directed_edges(ids)
+    bad = boundary_multi = 0
+    nxt, incoming = {}, {}
+    branching = 0
+    for (p, q), n in edges.items():
+        m = edges.get((q, p), 0)
+        if m:
+            bad += m != n and p < q
+            continue
+        if n != 1:
+            boundary_multi += 1
+            continue
+        if p in nxt:
+            branching += 1
+        nxt[p] = q
+        incoming[q] = incoming.get(q, 0) + 1
+    if bad or boundary_multi:
+        return [f"{tag} is not a consistently oriented tube ({bad} inconsistently wound edge(s), {boundary_multi} "
+                "boundary edge(s) used more than once); tube faces must be consistently wound, CCW facing inward"]
+    branching += (sum(1 for v, c in incoming.items() if c != 1) + sum(1 for v in nxt if v not in incoming)
+                  + sum(1 for v in incoming if v not in nxt))
+    if branching:
+        return [f"{tag}: its boundary edges do not form simple closed loops ({branching} boundary vertex/vertices "
+                "without exactly one incoming and one outgoing boundary edge); a tube may be open only at "
+                "closed portal loops"]
+    capped_ids = list(ids)
+    capped = list(tris)
+    seen = set()
+    loops = 0
+    next_id = max((i for t in ids for i in t), default=-1) + 1
+    for start in nxt:
+        if start in seen:
+            continue
+        loop = []
+        v = start
+        while v not in seen:            # each boundary vertex has one successor: the walk is a simple cycle
+            seen.add(v)
+            loop.append(v)
+            v = nxt[v]
+        if v != start:                  # cannot happen when every vertex has one in and one out edge
+            return [f"{tag}: its boundary edges do not form simple closed loops"]
+        loops += 1
+        n = len(loop)
+        cen = tuple(sum(Fraction(pos[i][a]) for i in loop) / n for a in range(3))     # exact (see _signed_volume)
+        cid = next_id
+        next_id += 1
+        for j in range(n):
+            p, q = loop[j], loop[(j + 1) % n]          # boundary edge p -> q; the cap uses q -> p
+            capped_ids.append((q, p, cid))
+            capped.append((pos[q], pos[p], cen))
+    parts = _shells(capped_ids)
+    if parts is None:
+        return [f"{tag} has non-manifold edges that do not split into independently closed shells once its "
+                f"{loops} portal loop(s) are capped, so its orientation cannot be verified"]
+    problems = []
+    n = len(parts)
+    vols = []
+    first_cap = len(ids)
+    for s, ts in enumerate(parts):
+        if not any(t >= first_cap for t in ts):
+            problems.append(f"{tag}: shell {s} of {n} is sealed (it has no portal loop); every tube shell must be "
+                            "open at one or more portals")
+            continue
+        st = [capped[t] for t in ts]
+        vol = _signed_volume(st)
+        vols.append(vol)
+        if vol < 0.0:
+            continue
+        problems.append(f"{tag}: shell {s} of {n} (portal loops capped) has signed volume {vol:.6g} m^3; every "
+                        "tube shell must have negative volume (faces CCW seen from the free space inside; a "
+                        "shell of only zero-area faces encloses nothing and is an error too)")
+    if len(vols) == n and not any(v < 0.0 for v in vols):      # (sealed shells are reported above)
+        problems.append(f"{tag} has no shell with negative volume once its portals are capped (collapsed or "
+                        "flattened); a tube collision object must enclose free space")
     return problems
 
 
 def collision_orientation_problems(col):
     """Checks the final collision on its own, per docs/PACKAGE_FORMAT.md "Winding" (agreement with the
     visuals does not prove orientation: both could be inverted). Returns a list of error strings, which
-    name objects by table index only (never by their names from the file).
+    name objects by table index only (never by their names from the file). The rule follows the class
+    kind (``collision.CLASS_KINDS``):
 
-    * ``building``: a closed solid with consistently oriented edges (every directed edge, after welding
-      positions within ``WELD_TOL_M``, is matched by its reverse equally often; zero-length edges of
-      degenerate triangles are ignored, degenerate triangles are otherwise kept so slivers still close the
-      surface). Each connected shell (see :func:`_shells`) is checked on its own, so an outward shell
-      cannot hide a separate inverted one: every shell must have positive signed volume. Enclosed
-      cavities (inward-facing inner shells) are not supported in v1 and are errors; courtyards are
-      holes of their own shell, not cavities. Generated buildings, all roof shapes, courtyards and raised
-      parts, are closed outward shells by construction. The work is linear in the triangle count.
-    * ``terrain`` and ``road``: every non-degenerate triangle faces up (normal z > 0).
-    Other classes (vegetation, water, props, user) carry no orientation requirement in the contract."""
+    * solid (building, bridge, structure): a closed solid with consistently oriented edges (every directed
+      edge, after welding positions within ``WELD_TOL_M``, is matched by its reverse equally often;
+      zero-length edges of degenerate triangles are ignored, degenerate triangles are otherwise kept so
+      slivers still close the surface). Each connected shell (see :func:`_shells`) is checked on its own,
+      so an outward shell cannot hide a separate inverted one: every shell must have positive signed
+      volume. Enclosed cavities (inward-facing inner shells) are not supported and are errors; courtyards
+      are holes of their own shell, not cavities. Generated buildings, all roof shapes, courtyards and
+      raised parts, are closed outward shells by construction. The work is linear in the triangle count.
+    * surface (terrain, road, water): every non-degenerate triangle faces up (normal z > 0).
+    * tube (tunnel): see :func:`_tube_problems`.
+    Other classes (vegetation, props, user) carry no orientation requirement in the contract."""
     problems = []
     for k, e in enumerate(col.objects):
         cls = e["class"]
-        if cls not in ("building", "terrain", "road"):
+        kind = CLASS_KINDS.get(cls)
+        if kind is None:
             continue
         tris = col.object_triangles(e)
-        if cls == "building":
-            problems += _building_problems(k, tris)
+        if kind == KIND_SOLID:
+            problems += _solid_problems(k, cls, tris)
+        elif kind == KIND_TUBE:
+            problems += _tube_problems(k, cls, tris)
         else:
             down = sum(1 for t in tris if not is_degenerate(*t) and _cross(*t)[2] <= 0.0)
             if down:
@@ -790,19 +965,23 @@ def file_entry(path, data):
 
 
 def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=None, report=None,
-             edits=None, blender_version=None, created_utc=None):
+             edits=None, blender_version=None, created_utc=None, passage_probes=None):
     """Members + manifest for :func:`write_package`.
 
     ``objects``: manifest object entries ({name, mb_id, class, collision, provenance}).
     ``heightfield``: (mbhf bytes, info dict) or None. ``report``: dict (plan report + diagnostics).
     ``edits``: {"duplicated": [...], "user_added": [...], "removed": [...]} lists (report.json);
-    the manifest stores their counts. Returns (members, manifest, probes).
+    the manifest stores their counts. ``passage_probes``: manifest ``passage_probes`` entries (default none;
+    the key is always written). Returns (members, manifest, probes).
     """
     elevation = [s for s in sources if s.get("kind") == "elevation"]
     if not elevation or not elevation[0].get("vertical_datum"):
         raise PackageError("no elevation source with a vertical datum; refusing to write a package whose "
                            "heights are not georeferenced")
     col = read_collision(collision_bytes)
+    bad = passage_probe_problems(list(passage_probes or []))
+    if bad:
+        raise PackageError("invalid passage probes: " + "; ".join(bad))
     probes = select_orientation_probes(col)
     report = dict(report or {})
     for k in REPORT_KEYS:
@@ -835,12 +1014,13 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
                       "frame": "map", "winding": "ccw_outward", "triangle_count": col.triangle_count,
                       "vertex_count": len(col.vertices),
                       "bounds_min": list(col.bounds[0]), "bounds_max": list(col.bounds[1]),
-                      "classes": dict(CLASSES),
+                      "classes": dict(CLASSES), "class_kinds": dict(CLASS_KINDS),
                       "authority": "authoritative static collision; exported from the same final meshes and "
                                    "world transforms as visual/map.glb"}
     manifest = build_manifest(name, area, sources, elevation[0]["vertical_datum"], files, collision_info, hf_info,
                               objects, probes, {k: len(v) for k, v in edits.items()}, len(report["warnings"]),
-                              blender_version=blender_version, created_utc=created_utc)
+                              blender_version=blender_version, created_utc=created_utc,
+                              passage_probes=passage_probes)
     secrets = find_secrets(manifest, "manifest")
     if secrets:
         raise PackageError("refusing to write the package: " + secrets_message("manifest", secrets))
@@ -1095,7 +1275,7 @@ def _check_manifest(m, r):
     c = m.get("collision")
     if need(isinstance(c, dict), "collision missing"):
         expect = {"path": "collision/map.mbcol", "format": "mbcol", "version": COLLISION_FORMAT_VERSION,
-                  "frame": "map", "winding": "ccw_outward", "classes": CLASSES}
+                  "frame": "map", "winding": "ccw_outward", "classes": CLASSES, "class_kinds": CLASS_KINDS}
         for k, v in expect.items():
             need(c.get(k) == v, f"collision.{k} must be {v!r}")
         need(isinstance(c.get("triangle_count"), int) and isinstance(c.get("vertex_count"), int),
@@ -1125,6 +1305,8 @@ def _check_manifest(m, r):
                     "collision: true, provenance: object}")
     need(isinstance(m.get("orientation_probes"), list) and len(m["orientation_probes"]) <= PROBE_MAX,
          f"orientation_probes must be an array of at most {PROBE_MAX}")
+    for msg in passage_probe_problems(m.get("passage_probes")):
+        err("manifest: " + msg)
     srcs = m.get("sources")
     if need(isinstance(srcs, list) and srcs, "sources must be a non-empty array"):
         for i, s in enumerate(srcs):
@@ -1187,6 +1369,7 @@ def _validate_payloads(m, blobs, r):
         r.warnings.append("collision has no terrain-class triangles")
     r.errors.extend(collision_orientation_problems(col))
     _check_objects(m, col, r)
+    _check_passage_probes(m, col, r)
     try:
         gl, nodes = read_glb(blobs["visual"])
     except PackageError as e:
@@ -1199,6 +1382,29 @@ def _validate_payloads(m, blobs, r):
     _check_notices(m, blobs["notices"], r)
     if "report" in blobs:
         _check_report(m, blobs["report"], r)
+
+
+def _check_passage_probes(m, col, r):
+    """Each probe's feature must name a manifest object; each probe capsule is re-checked against the final
+    collision (a blocked probe is a warning: the free path the generator intended is obstructed). The probes
+    share one query budget; running out is a warning, not an error. Names only indices, never strings."""
+    probes = m["passage_probes"]
+    ids = {o["mb_id"] for o in m["objects"]}
+    for i, p in enumerate(probes):
+        if p["feature"] not in ids:
+            r.errors.append(f"passage_probes[{i}].feature does not match any manifest object mb_id")
+    left = PASSAGE_QUERY_BUDGET
+    for i, p in enumerate(probes):
+        try:
+            res = capsule_hits(col, p["path_map"], p["radius_m"], max_work=left, result=True)
+        except LimitError:
+            r.warnings.append(f"passage_probes: query budget of {PASSAGE_QUERY_BUDGET} unit(s) exhausted; probes "
+                              f"{i}..{len(probes) - 1} were not checked")
+            return
+        left -= res.work
+        if res.objects:
+            more = f" (and {len(res.objects) - 1} more)" if len(res.objects) > 1 else ""
+            r.warnings.append(f"passage probe {i} is blocked by collision object #{res.objects[0]}{more}")
 
 
 def _check_objects(m, col, r):

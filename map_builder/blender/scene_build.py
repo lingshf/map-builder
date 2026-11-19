@@ -101,6 +101,7 @@ def build_scene(context, plan, sources, map_name):
         "sources": sources,
         "report": plan.report,
         "generated_ids": [spec.mb_id for spec in plan.objects],
+        "passage_probes": list(getattr(plan, "passage_probes", [])),
     }
     check_persistable({"collection_metadata": meta,
                        "objects": [{"name": spec.name, "mb_id": spec.mb_id, "mb_class": spec.mb_class,

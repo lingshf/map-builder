@@ -269,11 +269,16 @@ def package_parts(baked, generated_ids, materials):
 
 
 def export_baked(path, name, area, sources, baked, generated_ids, materials, report, blender_version=None,
-                 heightfield_spacing=None, created_utc=None):
+                 heightfield_spacing=None, created_utc=None, passage_probes=()):
     """Write the package atomically (core ``write_package``: a failed write keeps the previous file).
+    ``passage_probes`` come from the plan; a probe whose feature mb_id is among ``generated_ids`` (the
+    original plan) but no longer among the exported objects is dropped and its id listed in report.json
+    ``passage_probes_dropped``; a malformed probe (including None, an explicit JSON null in the scene
+    metadata) or one naming an unknown feature raises PackageError.
     Returns (manifest, ValidationResult, edits)."""
     glb, cols, info, edits = package_parts(baked, generated_ids, materials)
     manifest, result = export_package(path, name, area, sources, glb, cols, report, edits=edits,
                                       blender_version=blender_version, heightfield_spacing=heightfield_spacing,
-                                      object_info=info, created_utc=created_utc)
+                                      object_info=info, created_utc=created_utc, passage_probes=passage_probes,
+                                      plan_ids=generated_ids)
     return manifest, result, edits

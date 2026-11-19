@@ -5,8 +5,8 @@ CPython 3.11+ interpreter and uses only the standard library.
 """
 
 PACKAGE_SCHEMA = "map-builder.package"
-PACKAGE_SCHEMA_VERSION = "1.0.0"
-COLLISION_FORMAT_VERSION = 1
+PACKAGE_SCHEMA_VERSION = "2.0.0"
+COLLISION_FORMAT_VERSION = 2
 HEIGHTFIELD_FORMAT_VERSION = 1
 GENERATOR_NAME = "map-builder"
 GENERATOR_VERSION = "0.1.0"

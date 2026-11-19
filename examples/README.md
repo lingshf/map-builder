@@ -4,8 +4,9 @@
 
 This is a **synthetic** package. It is built with the CLI from the hand-written fixtures in
 [tests/fixtures](../tests/fixtures/README.md), and it is not a real place or real data. It has a
-400 × 300 m area, 74 objects, 4945 collision triangles, a 2 m heightfield and 3 orientation
-probes. Regenerate it from the repository root:
+400 × 300 m area, 74 objects, 4945 collision triangles, a 2 m heightfield, 3 orientation
+probes and no passage probes (no generator emits bridges, tunnels or elevated parts yet). It uses
+package format 2.0.0. Regenerate it from the repository root:
 
 ```powershell
 py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc `
@@ -18,7 +19,7 @@ py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 
 The build is deterministic. With the fixed `--created-utc`, Python 3.12 on Windows x64
 (the platform the sample was generated on) reproduces it byte-identically and gives
-`package_id = sha256:33ca4bc6b0f058ce3c175914a580fd2e52c657b9c75fb258e634c1b3496597b6`.
+`package_id = sha256:3bcc75e25368d71ec5c866233969e67fba03a0302594d61ca4767ca22165b0a2`.
 Validation reports `VALID: 0 error(s), 1 warning(s)`; the warning is two degenerate
 (zero-area) collision triangles, which is allowed. `tests/test_examples.py` checks that the
 committed file still validates and matches a fresh build; on other platforms, where the
@@ -38,6 +39,9 @@ System.Text.Json, with C# 8 code that also compiles for netstandard2.1. It:
 * parses `.mbcol`, `.mbhf` and the GLB with the spec's bounds checks;
 * checks the visual/collision name binding;
 * runs the orientation probes through a simulated X-negating importer, with negative controls;
+* checks the passage-probe capsules against the collision with the validator's shared work budget
+  (2,000,000 visits; probes left when it runs out are reported as unchecked), plus self-test
+  controls on fixed geometry built in code;
 * cross-checks the heightfield against the terrain triangles.
 
 ```powershell

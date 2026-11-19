@@ -1,8 +1,10 @@
-# Map package format: `map-builder.package` 1.0.0
+# Map package format: `map-builder.package` 2.0.0
 
 This is the contract between map-builder (the producer) and any runtime (the consumer).
 Format and schema versions follow semver: a consumer must reject an unknown **major**
-version and must ignore unknown fields.
+version and must ignore unknown fields. Major version 2 (this document) added the `bridge`,
+`tunnel` and `structure` collision classes with per-kind winding rules, `.mbcol` v2 and
+`passage_probes`; 1.x packages are rejected and must be regenerated.
 
 ## Container
 
@@ -71,9 +73,46 @@ All coordinates are in metres.
   this): `unity = (−x, z, −y)`, so +X west, +Y up, +Z south. This is a reflection: triangle
   index order must be reversed to keep front faces. Verify this importer behaviour with
   `orientation_probes`; do not assume it.
-* **Winding:** `.mbcol` triangles are counter-clockwise when seen from outside, in the
-  right-handed map frame. Building solids are closed, and their signed volume is positive.
-  Open surfaces such as terrain and roads face up (+Z).
+* **Winding:** `.mbcol` triangles are counter-clockwise when seen from their front side, in
+  the right-handed map frame. The rule depends on the class **kind** (see "Collision classes"):
+  solids are closed with positive signed volume (front = outside), surfaces face up (+Z), and
+  tubes face inward into the free space they enclose.
+* **Two-sided intersection:** triangles are **two-sided** for intersection, ray casts and
+  capsule/sweep queries. A consumer must not cull back faces in collision queries. The winding
+  only gives the **contact normal**: outward for solids, up for surfaces, and inward into the
+  free space for tubes.
+
+### Collision classes
+
+| id | class | kind | winding rule |
+|---|---|---|---|
+| 0 | `user` | — | none |
+| 1 | `terrain` | surface | normal Z > 0 |
+| 2 | `building` | solid | closed, positive volume |
+| 3 | `road` | surface | normal Z > 0 |
+| 4 | `vegetation` | — | none |
+| 5 | `water` | surface | normal Z > 0 |
+| 6 | `prop` | — | none |
+| 7 | `bridge` | solid | closed, positive volume |
+| 8 | `tunnel` | tube | inward tube (below) |
+| 9 | `structure` | solid | closed, positive volume |
+
+The generator does not emit `bridge`, `tunnel` or `structure` yet (they are listed as
+unsupported features in `report.json`), but the format, the validator and the reference
+readers accept them. `manifest.collision.classes` maps names to ids and
+`manifest.collision.class_kinds` maps names to `"solid"`, `"surface"`, `"tube"` or `null`;
+both must equal the tables above.
+
+**Tube rule.** Vertices are welded exactly as for the solid rule. Every directed edge must be
+matched by its reverse, except boundary edges (edges whose reverse is absent). Each boundary
+edge may occur once, and the boundary edges must form simple closed loops (the portals). Each
+loop is capped with a triangle fan around the loop centroid, oriented consistently with the
+adjacent faces. Every resulting closed shell must contain at least one cap, that is, every
+tube shell must be open at one or more portals; a sealed shell (for example an inward-facing
+closed box) is an error. Every shell, after capping, must have a **negative** signed volume, so
+its faces point inward; there is no exemption for a shell made only of degenerate (zero-area)
+triangles, whose volume is zero. Any violation is an error; diagnostics name the object only
+by `#index`.
 
 ### Orientation probes
 
@@ -126,11 +165,13 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
     out are reported in that warning, not counted as ambiguous.
   * visual triangles with no collision counterpart (visible but not collidable). This is a
     warning.
-  * the collision winding rules above, checked on the collision alone: building solids must be
-    closed (each directed edge matched by its reverse), and each connected shell must have a
-    positive signed volume. Enclosed cavities (inward-facing inner shells) are not supported in
-    v1. Non-degenerate terrain and road triangles must have normal Z > 0. A violation is an
-    error. Degenerate triangles are only a warning.
+  * the collision winding rules above, checked on the collision alone, by class kind: solids
+    (`building`, `bridge`, `structure`) must be closed (each directed edge matched by its
+    reverse), and each connected shell must have a positive signed volume. Enclosed cavities
+    (inward-facing inner shells) in solids are not supported. Non-degenerate surface triangles
+    (`terrain`, `road`, `water`) must have normal Z > 0. Tubes (`tunnel`) follow the tube rule.
+    A violation is an error. Degenerate triangles are only a warning.
+  * the passage probes (below) against the final collision.
   * the credential policy (no URL user-info, credential query keys, Authorization or Bearer
     values, or credential-named keys), applied recursively to the manifest, `report.json`,
     the collision object table and the glTF JSON. Diagnostics name entries by index or fixed
@@ -147,7 +188,7 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
 
 ```jsonc
 {
-  "schema": "map-builder.package", "schema_version": "1.0.0",
+  "schema": "map-builder.package", "schema_version": "2.0.0",
   "name": "…", "created_utc": "…",
   "generator": {"name": "map-builder", "version": "0.1.0", "blender": "4.2.23 LTS" | null},
   "georeference": {"origin": {"lat_deg", "lon_deg"}, "horizontal_datum": "WGS84 (EPSG:4326)",
@@ -158,17 +199,50 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
   "axes": {…},                 // machine-readable map_from_gltf / map_from_unity matrices
   "files": [{"path", "role", "media_type", "sha256", "bytes"}],
   "visual": {"path": "visual/map.glb", …},
-  "collision": {"path", "format": "mbcol", "version": 1, "frame": "map", "winding": "ccw_outward",
-                "triangle_count", "vertex_count", "bounds_min", "bounds_max", "classes": {…}},
+  "collision": {"path", "format": "mbcol", "version": 2, "frame": "map", "winding": "ccw_outward",
+                "triangle_count", "vertex_count", "bounds_min", "bounds_max", "classes": {…},
+                "class_kinds": {…}},
   "heightfield": {"path", "nx", "ny", "x0", "y0", "spacing_m", "nan_cells", …} | null,
   "objects": [{"name", "mb_id", "class", "collision": true, "provenance": {…}}],
   "orientation_probes": [{"node", "point_map", "point_gltf", "point_unity_x_negated",
                           "triangle_map", "normal_map", "normal_unity_x_negated"}],
+  "passage_probes": [{"id", "kind": "bridge"|"tunnel"|"elevated", "feature": "<mb_id>",
+                      "path_map": [[x, y, z], …], "radius_m"}],
   "sources": [{"kind": "elevation"|"features", "provider", "license": {…}, "attribution", …}],
   "edits": {"duplicated": n, "user_added": n, "removed": n},
   "notices": "NOTICES.txt", "report": "report.json", "warnings_count": n
 }
 ```
+
+### Passage probes
+
+`passage_probes[]` is always present (it may be empty) and holds at most 256 probes. A probe
+declares a capsule that a consumer's character or vehicle must be able to pass through, for
+example along a bridge deck, through a tunnel or under an elevated part:
+
+```jsonc
+{"id": "…",                                   // unique within the package
+ "kind": "bridge" | "tunnel" | "elevated",
+ "feature": "<mb_id>",                        // must equal some objects[].mb_id
+ "path_map": [[x, y, z], …],                  // 2..64 points, map frame, finite, |coord| ≤ 1e6 m
+ "radius_m": r}                               // 0 < r ≤ 10
+```
+
+The capsule is the set of points within `radius_m` of the polyline `path_map`. It is
+**blocked** if any collision triangle (two-sided) lies within `radius_m` of the path; the
+comparison allows `radius_m + 1e-9` m, so exact contact is never lost to rounding. The
+validator treats a malformed probe or an unknown `feature` as an error. It re-checks every
+probe against the final collision and reports a blocked probe as a **warning**, naming the
+probe by index and the first blocking collision object by `#k`. The check has a fixed work
+budget of 2,000,000 object/triangle visits shared by all probes of the package (one unit per
+object per path segment, plus one per triangle tested); if it runs out, the remaining probes
+are reported as unchecked in a warning. Degenerate (collapsed or collinear) triangles are
+measured through their edges.
+Consumers should re-run the probes against their own imported collision as acceptance tests.
+When an export drops a probe because its `feature` object was part of the generation plan
+(its `generated_ids`) but no longer exists, the probe id is listed in `report.json`
+`passage_probes_dropped`. The exporter refuses a malformed probe, or one whose `feature`
+names neither an exported object nor a plan feature, with an error instead of dropping it.
 
 ### Object identity (`mb_id`)
 
@@ -284,12 +358,15 @@ counted in `edits.removed` and listed in `report.json`.
     the terrain extent, landcover with invalid ring topology, and rejected building parts
   * counts and warnings
 
-## `collision/map.mbcol` v1 (little-endian)
+## `collision/map.mbcol` v2 (little-endian)
+
+The binary layout is identical to v1; only the version number and the class id set changed.
+Readers accept version 2 only.
 
 | Offset | Type | Field |
 |---|---|---|
 | 0 | char[8] | magic `"MBCOL\0\0\0"` |
-| 8 | u32 | version = 1 |
+| 8 | u32 | version = 2 |
 | 12 | u32 | flags (bit0 = CCW outward winding) |
 | 16 | u32 | vertex_count V |
 | 20 | u32 | triangle_count T |
@@ -301,7 +378,7 @@ counted in `edits.removed` and listed in `report.json`.
 | 64 | f32[3·V] | vertex positions, map frame, world space |
 | … | u32[3·T] | triangle vertex indices |
 | … | u32[T] | object index per triangle |
-| … | u8[T] (+ pad to 4) | class id per triangle: 0 user, 1 terrain, 2 building, 3 road, 4 vegetation, 5 water, 6 prop |
+| … | u8[T] (+ pad to 4) | class id per triangle: 0 user, 1 terrain, 2 building, 3 road, 4 vegetation, 5 water, 6 prop, 7 bridge, 8 tunnel, 9 structure |
 | … | u8[J] | UTF-8 JSON array, `\0`-padded: `{index, name, mb_id, class, tri_start, tri_count, aabb}` |
 
 * Each object's triangles are contiguous: `[tri_start, tri_start + tri_count)`.
@@ -325,10 +402,14 @@ counted in `edits.removed` and listed in `report.json`.
 
 Each value is the maximum z of the *final* terrain-class collision triangles at that grid
 point. The grid is a derived convenience, for example for a Core height-grid path. **Triangles
-are authoritative**; the grid cannot represent overhangs or non-terrain objects.
+are authoritative.** The heightfield is **terrain-only**: it is NaN wherever terrain is absent
+or cut (for example a future tunnel portal or cutting), and it cannot represent bridges,
+tunnels, elevated volumes, overhangs or any other non-terrain object. A consumer that needs
+those must use the `.mbcol` triangles.
 
 ## Reference implementation
 
 * `map_builder/core/package.py`: `validate_package`, `write_package`.
-* `map_builder/core/collision.py`: `.mbcol` and `.mbhf` readers and writers.
+* `map_builder/core/collision.py`: `.mbcol` and `.mbhf` readers and writers, `CLASSES`, `CLASS_KINDS`.
+* `map_builder/core/query.py`: two-sided capsule and ray queries used for passage probes.
 * `tools/mbmap_cli.py validate <file>`: validates a package from the command line.

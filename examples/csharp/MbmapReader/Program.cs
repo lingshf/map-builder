@@ -7,7 +7,9 @@ using MapBuilder.Reference;
 // Usage: dotnet run -c Release -- <package.mbmap>
 // Verifies the package (container rules, files[] one-to-one, sizes, SHA-256), computes package_id,
 // parses .mbcol/.mbhf/GLB, checks the visual/collision name binding, runs the orientation probes against
-// the GLB through a simulated X-negating importer (plus two negative controls), and cross-checks the
+// the GLB through a simulated X-negating importer (plus two negative controls), checks each passage probe
+// capsule against the collision triangles (PASS/BLOCKED, with the validator's shared work budget, plus
+// self-test controls on geometry built in code), and cross-checks the
 // heightfield against vertical ray queries on the authoritative terrain triangles.
 // Exit codes: 0 OK, 1 invalid package or failed self-test, 2 usage.
 static class Program
@@ -101,6 +103,30 @@ static class Program
                               $"{(ok == null ? "PASS" : "FAIL")}; controls rejected: no winding flip={YesNo(noFlip != null)}, no X negation={YesNo(noNegate != null)}, " +
                               $"non-unit normal={YesNo(scaledRejected)}, point off triangle={YesNo(offRejected)}");
         }
+
+        // Passage probes: each capsule must be free of collision (two-sided triangles). BLOCKED is reported, as the
+        // reference validator does with a warning; it does not make the package invalid. All probes share one work
+        // budget (package.py PASSAGE_QUERY_BUDGET); probes left when it runs out are reported as unchecked.
+        if (p.PassageProbes.Count == 0) Console.WriteLine("passage    none");
+        long budget = CapsuleCheck.PassageQueryBudget;
+        for (int i = 0; i < p.PassageProbes.Count; i++)
+        {
+            var pp = p.PassageProbes[i];
+            var hits = CapsuleCheck.Hits(c, pp, ref budget);
+            if (hits == null)
+            {
+                Console.WriteLine($"WARNING: passage_probes: query budget of {CapsuleCheck.PassageQueryBudget} unit(s) exhausted; " +
+                                  $"probes {i}..{p.PassageProbes.Count - 1} were not checked");
+                break;
+            }
+            Console.WriteLine($"passage {i}  {pp.Kind}, {pp.PathMap.Count} points, radius {pp.RadiusM} m: " +
+                              (hits.Count == 0 ? "PASS" : $"BLOCKED by collision object #{hits[0]}" + (hits.Count > 1 ? $" (and {hits.Count - 1} more)" : "")));
+        }
+        // Controls for the capsule check itself, on fixed geometry built in code (so they cannot fail a valid package).
+        var capsuleFailures = CapsuleCheck.SelfTest();
+        foreach (var f in capsuleFailures) failures.Add($"capsule control: {f}");
+        Console.WriteLine($"capsule    controls on a synthetic box, a collapsed triangle, a nearly parallel 100 km edge, a shallow crossing and a grazing segment: " +
+                          (capsuleFailures.Count == 0 ? "all as expected" : $"{capsuleFailures.Count} FAILED"));
 
         if (p.Heightfield != null)
         {

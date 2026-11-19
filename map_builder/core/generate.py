@@ -153,6 +153,8 @@ class ScenePlan:
         self.shared_meshes = {}
         self.report = {"counts": {}, "unsupported_features": [], "invalid_features": [], "warnings": [],
                        "inferred": {}}
+        # manifest passage_probes entries ({id, kind, feature, path_map, radius_m}); no generator emits any yet
+        self.passage_probes = []
 
     def count(self, key, n=1):
         self.report["counts"][key] = self.report["counts"].get(key, 0) + n

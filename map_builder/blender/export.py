@@ -26,6 +26,7 @@ import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
+from ..core.pipeline import filter_passage_probes
 from .bake import (DEFAULT_MATERIAL, WHITE, ExportError, bake_object, degenerate_count, export_baked,
                    export_name_clashes, outside_area, principled_omissions)
 from .scene_build import META_KEY
@@ -415,8 +416,14 @@ def export_map(context, path, name, heightfield_spacing=0.0, root=None):
     parent = os.path.dirname(out)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    # [] only when the key is absent (metadata written before passage probes existed); an explicit null or any
+    # other malformed value reaches filter_passage_probes and fails the export with a PackageError
+    probes = meta["passage_probes"] if "passage_probes" in meta else []
     manifest, result, edits = export_baked(out, name, area, meta["sources"], baked, meta["generated_ids"],
                                            materials, report, blender_version=bpy.app.version_string,
-                                           heightfield_spacing=heightfield_spacing or None)
+                                           heightfield_spacing=heightfield_spacing or None,
+                                           passage_probes=probes)
     report["edits"] = edits
+    report["passage_probes_dropped"] = filter_passage_probes(probes, (o["mb_id"] for o in manifest["objects"]),
+                                                             meta["generated_ids"])[1]
     return manifest, result, report, edits
