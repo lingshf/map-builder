@@ -231,6 +231,7 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
     caller explicitly sets ``allow_cache_override`` for a mirror it knows may be cached; caching such an
     override additionally requires a caller-chosen, credential-free ``cache_dataset_id`` because the
     endpoint URL (whose path may embed a credential) is never used as cache identity or metadata."""
+    grid_layout(area, spacing)  # resource bounds are enforced before any network access
     is_default = _is_default_endpoint(base_url, COPERNICUS_BASE_URL)
     if is_default:
         endpoint = COPERNICUS_BASE_URL  # fixed public label
@@ -440,6 +441,7 @@ def load_ascii_grid(area, path, crs_text, spacing=10.0, vertical_datum="user-dec
 
 def load_local_elevation(area, path, spacing=10.0, crs_text="EPSG:4326", vertical_datum="user-declared (unknown)",
                          license_note="", progress=None):
+    grid_layout(area, spacing)  # resource bounds are enforced before the file is opened
     lower = path.lower()
     if lower.endswith((".tif", ".tiff")):
         return load_local_geotiff(area, path, spacing, vertical_datum, license_note, progress)

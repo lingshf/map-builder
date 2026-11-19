@@ -23,3 +23,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Run unit tests
         run: python -W error::ResourceWarning -m unittest discover -s tests -t . -v
+      - name: Build and validate the SYNTHETIC fixture package (CLI)
+        run: |
+          python tools/mbmap_cli.py build --osm tests/fixtures/synthetic_area.osm --dem tests/fixtures/synthetic_dem.asc \
+            --datum SYNTHETIC --dem-license "SYNTHETIC test data (no licence required)" \
+            --lat 47.0 --lon 8.0 --width 400 --height 300 --name synthetic_sample --out "$RUNNER_TEMP/synthetic_sample.mbmap"
+          python tools/mbmap_cli.py validate "$RUNNER_TEMP/synthetic_sample.mbmap"

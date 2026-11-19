@@ -334,14 +334,21 @@ def heightfield_visit_budget(nx, ny):
 
 
 def heightfield_layout(area_half, spacing):
-    """(x0, y0, nx, ny) of the grid covering the area rectangle; raises LimitError if too large."""
+    """(x0, y0, nx, ny) of the grid covering the area rectangle; raises LimitError if it is too large or
+    below the .mbhf minimum of 2 x 2 points."""
     if not (_is_num(spacing) and spacing > 0):
         raise PackageError("heightfield spacing must be a positive finite number")
     hx, hy = area_half
-    nx = int(math.floor(2 * hx / spacing + 1e-9)) + 1
-    ny = int(math.floor(2 * hy / spacing + 1e-9)) + 1
+    fx, fy = 2 * hx / spacing, 2 * hy / spacing
+    if not (math.isfinite(fx) and math.isfinite(fy)) or (fx + 1) * (fy + 1) > 4 * MAX_HF_POINTS:
+        raise LimitError(f"heightfield spacing {spacing:g} m is far too fine (over {MAX_HF_POINTS} points); "
+                         "use a coarser spacing")
+    nx = int(math.floor(fx + 1e-9)) + 1
+    ny = int(math.floor(fy + 1e-9)) + 1
     if nx * ny > MAX_HF_POINTS:
         raise LimitError(f"heightfield {nx}x{ny} exceeds {MAX_HF_POINTS} points; use a coarser spacing")
+    if nx < 2 or ny < 2:
+        raise LimitError(f"heightfield {nx}x{ny} is below the 2x2 minimum; use a finer spacing")
     return -hx, -hy, nx, ny
 
 

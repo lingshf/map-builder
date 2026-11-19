@@ -12,7 +12,7 @@ import math
 from .cache import DiskCache, NullCache
 from .collision import (CLASSES, ColObject, heightfield_layout, is_degenerate, rasterize_heightfield,
                         read_collision, write_collision, write_heightfield)
-from .dem import COPERNICUS_BASE_URL, fetch_copernicus, load_local_elevation
+from .dem import COPERNICUS_BASE_URL, fetch_copernicus, grid_layout, load_local_elevation
 from .errors import PackageError
 from .generate import MATERIALS, PlanOptions, build_plan
 from .glb import node_scale, write_glb
@@ -80,7 +80,10 @@ class Settings:
 
 
 def acquire(area, settings, client=None, progress=None):
-    """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data."""
+    """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data.
+    The terrain grid limit is checked first, before any file or network access. The heightfield limit
+    belongs to package export (see :func:`build_package`); acquisition and plans produce no heightfield."""
+    grid_layout(area, settings.terrain_spacing)
     client = client or HttpClient()
     cache = DiskCache(settings.cache_dir) if settings.cache_dir else NullCache()
     if settings.elevation_source == "file":
@@ -245,7 +248,10 @@ def generate_plan(area, settings, client=None, progress=None):
 
 
 def build_package(area, settings, path, name, client=None, progress=None, created_utc=None):
-    """acquire -> plan -> validated package. Returns (manifest, ValidationResult)."""
+    """acquire -> plan -> validated package. Returns (manifest, ValidationResult).
+    The heightfield layout (size limit and 2x2 minimum) is checked before any file or network access."""
+    if settings.heightfield_spacing:
+        heightfield_layout(area.half, settings.heightfield_spacing)
     plan, sources = generate_plan(area, settings, client, progress)
     return plan_to_package(plan, path, name, sources, heightfield_spacing=settings.heightfield_spacing,
                            created_utc=created_utc)
