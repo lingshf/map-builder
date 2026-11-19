@@ -178,12 +178,26 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
                 out.timestamp = attrs.get("osm_base")
         elif depth == 3 and state["cur"] is not None:
             cur = state["cur"]
+            # the required attributes are checked here, so no None ever reaches a tag value or reference
+            # (e.g. ``int(None)`` for ``layer``); the message names the element's position, never its text
             if name == "tag":
-                cur[2][attrs.get("k")] = attrs.get("v")
+                k, v = attrs.get("k"), attrs.get("v")
+                if k is None or v is None:
+                    raise FormatError(f"{description}: malformed <tag> in top-level OSM element #{state['top']} "
+                                      "(k and v are required)")
+                cur[2][k] = v
             elif name == "nd" and cur[0] == "way":
-                cur[3].append(attrs.get("ref"))
+                ref = attrs.get("ref")
+                if ref is None:
+                    raise FormatError(f"{description}: malformed <nd> in top-level OSM element #{state['top']} "
+                                      "(ref is required)")
+                cur[3].append(ref)
             elif name == "member" and cur[0] == "relation":
-                cur[3].append((attrs.get("type"), attrs.get("ref"), attrs.get("role") or ""))
+                t, ref = attrs.get("type"), attrs.get("ref")
+                if t is None or ref is None:
+                    raise FormatError(f"{description}: malformed <member> in top-level OSM element "
+                                      f"#{state['top']} (type and ref are required)")
+                cur[3].append((t, ref, attrs.get("role") or ""))
         if name == "remark":
             out.remarks.append("")
             state["remark"] = depth
@@ -348,14 +362,13 @@ class Polygon:
         return not any(point_in_ring(x, y, h) for h in self.holes)
 
 
-def _assemble_rings(way_lists, work=None, max_rings=None):
+def _assemble_rings(way_lists, work=None):
     """Join open member ways into closed rings. Returns (rings, ok). Members are taken in order; an open one
     is extended by the first remaining member (in order) sharing one of its ends. ``work`` (optional, a
     :class:`_MaskWork`) is charged each member and its vertices before it is copied, and for every join the
     scan of the remaining members, the list shift removing the joined one and the vertices it adds. Closed
     members cost O(1) beyond their copy (no front removal), and prepending is O(added vertices) (a deque),
-    so the uncharged work is linear in the input. ``max_rings`` (optional, the DSM mask feature allowance):
-    :class:`_MaskFeatureLimit` is raised as soon as one more ring would be produced, before it is kept."""
+    so the uncharged work is linear in the input and every ring kept was charged its size."""
     segs = []
     for w in way_lists:
         if len(w) >= 2:
@@ -367,8 +380,6 @@ def _assemble_rings(way_lists, work=None, max_rings=None):
     head = 0
 
     def keep(ring):
-        if max_rings is not None and len(rings) >= max_rings:
-            raise _MaskFeatureLimit()
         rings.append(ring if isinstance(ring, list) else list(ring))
     while head < len(segs):
         first = segs[head]
@@ -503,8 +514,8 @@ def _unsupported_reason(tags):
     try:
         if int(tags.get("layer", "0")) < 0:
             return "layer<0 (below-ground feature not supported in v1; omitted)"
-    except ValueError:
-        pass
+    except (TypeError, ValueError):
+        pass   # a non-integer layer (e.g. "1;2", "-1.5") is not treated as below ground
     if tags.get("location") in ("underground", "underwater"):
         return f"location={tags['location']} (not supported in v1; omitted)"
     return None
@@ -536,7 +547,9 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     Assembling the margin-only candidates is charged to ``max_mask_work`` geometric tests (default
     :data:`dsm.MASK_VALIDATION_WORK_BUDGET`), the budget that :func:`generate.dsm_obstacles` then continues
     from (``mask_work``); when it runs out, assembly stops and ``mask_work_exceeded`` is set, so the
-    correction is skipped with a warning. Nothing generated or reported depends on it."""
+    correction is skipped with a warning. Nothing generated or reported depends on it. Any other unexpected
+    error while adding these candidates (not ``LimitError`` or ``MemoryError``) also only sets
+    ``mask_unavailable`` (a fixed message), so the optional wide response can never abort the build."""
     if mask_extent is None:
         mask_extent = (-area.half[0], -area.half[1], area.half[0], area.half[1])
     out = _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
@@ -554,6 +567,14 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     except _MaskFeatureLimit:
         out.mask_unavailable = (f"the DSM mask candidates of the wider DSM mask response exceed the feature limit "
                                 f"({max_features} features, content included)")
+    except (LimitError, MemoryError):
+        raise
+    except Exception:
+        # Defence in depth: the wide response is optional, so unexpected data in it (TypeError, ValueError,
+        # KeyError...) only skips the correction, with a fixed message (the exception text may quote the
+        # response). The content above is already classified and unaffected.
+        out.mask_unavailable = ("the wider DSM mask response could not be processed (unexpected data in its "
+                                "DSM mask candidates)")
     out.mask_work = min(work.n, max_mask_work)
     _check_feature_count(out, max_features)
     return out
@@ -705,9 +726,10 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
     charged to ``work`` (:class:`_MaskWork`), as is every allocation of a candidate (its point list, cleaned
     ring and polygon), so a closed member costs about three times its vertices. A member listed more than
     once in a relation (the same way and role) is used once. ``allowance`` (:class:`_FeatureAllowance`,
-    default unbounded) is the number of features left under ``max_features``: it bounds the outer rings of
-    each relation as they are assembled and is charged every candidate before it is kept, so nothing beyond
-    it is materialised (:class:`_MaskFeatureLimit`)."""
+    default unbounded) is the number of features left under ``max_features``: it is charged only for the
+    candidates actually kept (an outer ring outside the mask extent costs nothing from it), before they are
+    stored (:class:`_MaskFeatureLimit`); assembly itself, including every ring and polygon allocated, is
+    bounded by ``work``."""
     from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
     if allowance is None:
         allowance = _FeatureAllowance(math.inf)
@@ -760,8 +782,9 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
             continue
         if any(r not in data.ways for r, _role in ways):
             continue
-        orings, _ok1 = _assemble_rings([data.ways[r][0] for r, role in ways if role != "inner"], work,
-                                       max_rings=allowance.left)
+        # not bounded by the feature allowance: an outer ring off the grid is never kept, so only retained
+        # candidates are charged to it (in add); the work budget bounds the assembly and its allocations
+        orings, _ok1 = _assemble_rings([data.ways[r][0] for r, role in ways if role != "inner"], work)
         irings, ok2 = _assemble_rings([data.ways[r][0] for r, role in ways if role == "inner"], work)
         if not ok2 or not orings:
             continue

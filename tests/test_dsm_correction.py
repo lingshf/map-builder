@@ -1872,7 +1872,10 @@ class ReviewRound7Test(unittest.TestCase):
         finally:
             osm_mod.Polygon = orig
         self.assertIn("exceed the feature limit (10 features", cl.mask_unavailable)
-        self.assertEqual(made, [1])    # the content building only: the 2000 rings stop at the allowance (9)
+        # round 8: the allowance is charged on retention only, so the rings are assembled (bounded by the mask
+        # work budget, which charges every allocation) and the limit is hit when the relation is kept
+        self.assertEqual(len(made), 2001)
+        self.assertLessEqual(cl.mask_work, dsm.MASK_VALIDATION_WORK_BUDGET)
         self.assertEqual(_summary(cl), _summary(classify(normal, area, mask_extent=self.EXTENT)))
         self.assertLessEqual(len(cl.buildings) + len(cl.outside_buildings) + len(cl.mask_trees), 10)
         g = ReviewRound4Test._grid(self)
@@ -1898,6 +1901,171 @@ class ReviewRound7Test(unittest.TestCase):
         self.assertEqual(len(cl.outside_buildings), 1)
         n = len(wide.ways[w][0])
         self.assertGreaterEqual(cl.mask_work, 3 * n)        # the copy, the point list and the cleaned ring
+
+
+class ReviewRound8Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-8 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+    EXTENT = (-50.0, -50.0, 150.0, 50.0)
+
+    # --- finding 1: a tag without k or v (and other missing required attributes) -----------------------------
+
+    def _layer_without_value(self):
+        """The round-5 fixture plus a wide-only building tagged ``<tag k="layer"/>`` (no ``v``)."""
+        normal, wide = ReviewRound5Test._fixture(self)
+        b = OsmBuilder()
+        b._id = 10_000
+        b.way(square(40.0, -30.0, 4.0), {"building": "yes", "SYNTHETIC_LAYER": "x"}, closed=True)
+        extra = b.xml().encode()
+        body = extra[extra.index(b"<node"):extra.index(b"</osm>")]
+        bad = body.replace(b'<tag k="SYNTHETIC_LAYER" v="x"/>', b'<tag k="layer"/>')
+        self.assertNotEqual(bad, body)
+        return normal, wide.replace(b"</osm>", bad + b"</osm>")
+
+    def test_parser_rejects_missing_required_attributes(self):
+        from map_builder.core.errors import FormatError
+        from map_builder.core.osm import load_osm_file
+        _normal, wide = self._layer_without_value()
+        node = b'<node id="1" lat="0" lon="0"/><node id="2" lat="0" lon="0.001"/>'
+        cases = {"layer without v": wide,
+                 "tag without v": b'<osm><node id="1" lat="0" lon="0"><tag k="token_synthetic"/></node></osm>',
+                 "tag without k": b'<osm><node id="1" lat="0" lon="0"><tag v="token_synthetic"/></node></osm>',
+                 "nd without ref": b'<osm>' + node + b'<way id="5"><nd ref="1"/><nd/></way></osm>',
+                 "member without type": b'<osm>' + node + b'<relation id="9"><member ref="1" role="token_synthetic"/>'
+                                        b'</relation></osm>',
+                 "member without ref": b'<osm><relation id="9"><member type="way" role="token_synthetic"/>'
+                                       b'</relation></osm>'}
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for name, doc in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(FormatError) as cm:
+                    parse_osm_xml(doc, description="SYNTHETIC")
+                self.assertIn("malformed <", str(cm.exception))
+                self.assertNotIn("token_synthetic", str(cm.exception))
+                self.assertIsNone(cm.exception.__cause__)
+                path = os.path.join(tmp.name, "missing.osm")
+                with open(path, "wb") as f:
+                    f.write(doc)
+                with self.assertRaises(FormatError):                          # the local-file path too
+                    load_osm_file(path)
+        # an empty value is still a value; a relation member without a role is still an outer
+        d = parse_osm_xml(b'<osm>' + node + b'<way id="5"><nd ref="1"/><nd ref="2"/><tag k="name" v=""/></way>'
+                          b'<relation id="9"><member type="way" ref="5"/></relation></osm>')
+        self.assertEqual(d.ways[5][1], {"name": ""})
+        self.assertEqual(d.relations[9][0], [("way", 5, "")])
+
+    def test_a_tag_without_value_in_the_mask_response_keeps_the_content(self):
+        normal, wide = self._layer_without_value()
+        grid, cl, sources, queries = ReviewRound5Test._acquire(self, [(200, normal), (200, wide)], True)
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(len(cl.buildings), 1)                                  # the content stands
+        mq = sources[1]["dsm_mask_query"]
+        self.assertEqual((mq["error_class"], mq["error"]), ("FormatError", pipeline_mask_message("FormatError")))
+        self.assertIn("DSM mask request", cl.mask_unavailable)
+        plan = build_plan(Area(*self.AREA), grid, cl, PlanOptions(trees=False), dsm_correction=True)
+        self.assertEqual(plan.report["terrain_correction"]["reason"], "mask candidates unavailable")
+        self.assertTrue(any(w.startswith("DSM terrain correction skipped: the DSM mask request")
+                            for w in plan.report["warnings"]))
+        # the same document as the normal (content) response is a FormatError, as for any malformed content
+        from map_builder.core.errors import FormatError
+        with self.assertRaises(FormatError):
+            ReviewRound5Test._acquire(self, [(200, wide)], True)
+
+    def test_non_integer_layers_are_tolerated_on_both_paths(self):
+        from map_builder.core.osm import surface_mask_eligible
+        for layer in ("1;2", "-1.5", "", "x", "\u0661"):
+            self.assertTrue(surface_mask_eligible({"building": "yes", "layer": layer}), layer)
+        self.assertFalse(surface_mask_eligible({"building": "yes", "layer": "-1"}))
+        self.assertTrue(surface_mask_eligible({"building": "yes", "layer": None}))   # never from the parser
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        b.way(square(0, 0, 5), {"building": "yes", "layer": "1;2"}, closed=True)
+        normal = parse_osm_xml(b.xml().encode())
+        b.way(square(62, 0, 6), {"building": "yes", "layer": "-0.5"}, closed=True)
+        wide = parse_osm_xml(b.xml().encode())
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
+        self.assertEqual((len(cl.buildings), len(cl.outside_buildings)), (1, 1))
+        self.assertIsNone(cl.mask_unavailable)
+
+    def test_unexpected_mask_errors_skip_the_correction(self):
+        from map_builder.core import osm as osm_mod
+        from map_builder.core.errors import LimitError
+        area = Area(*self.AREA)
+        normal, wide = (parse_osm_xml(d) for d in ReviewRound5Test._fixture(self))
+        ref = classify(normal, area, mask_extent=self.EXTENT)
+        orig = osm_mod._mask_polygons
+        for exc in (TypeError("token_synthetic"), ValueError("token_synthetic"), KeyError("token_synthetic"),
+                    MemoryError(), KeyboardInterrupt(), LimitError("SYNTHETIC")):
+            with self.subTest(type(exc).__name__):
+                def boom(*_a, **_kw):
+                    raise exc
+                osm_mod._mask_polygons = boom
+                try:
+                    if isinstance(exc, (MemoryError, KeyboardInterrupt, LimitError)):
+                        with self.assertRaises(type(exc)):                  # never swallowed
+                            classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
+                        continue
+                    cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
+                finally:
+                    osm_mod._mask_polygons = orig
+                self.assertEqual(cl.mask_unavailable, "the wider DSM mask response could not be processed "
+                                                      "(unexpected data in its DSM mask candidates)")
+                self.assertEqual(_summary(cl), _summary(ref))                # the content is unaffected
+                plan = build_plan(area, ReviewRound4Test._grid(self), cl, PlanOptions(trees=False),
+                                  dsm_correction=True)
+                tc = plan.report["terrain_correction"]
+                self.assertEqual((tc["applied"], tc["reason"]), (False, "mask candidates unavailable"))
+                warnings = [w for w in plan.report["warnings"]
+                            if w.startswith("DSM terrain correction skipped: the wider DSM mask response")]
+                self.assertEqual(len(warnings), 1)
+                self.assertNotIn("token_synthetic", json.dumps(plan.report))
+        # content classification is not wrapped: the same failure there still raises
+        orig_reason = osm_mod._unsupported_reason
+
+        def bad_reason(_tags):
+            raise TypeError("SYNTHETIC")
+        osm_mod._unsupported_reason = bad_reason
+        try:
+            with self.assertRaises(TypeError):
+                classify(normal, area, mask_extent=self.EXTENT, mask_data=wide)
+        finally:
+            osm_mod._unsupported_reason = orig_reason
+
+    # --- finding 2: the feature allowance is charged only for retained mask candidates -----------------------
+
+    def _forest_with_off_grid_outers(self):
+        b = OsmBuilder()
+        normal = parse_osm_xml(b.xml().encode())                       # no content: the allowance is max_features
+        outers = [b.way(square(cx, 0.0, 20.0), closed=True) for cx in (-600.0, 100.0, 700.0)]
+        rid = b._next()
+        b.relations.append((rid, [("way", w, "outer") for w in outers],
+                            {"type": "multipolygon", "landuse": "forest"}))
+        return normal, parse_osm_xml(b.xml().encode()), rid
+
+    def test_off_grid_outer_rings_do_not_exhaust_the_allowance(self):
+        area = Area(*self.AREA)
+        normal, wide, rid = self._forest_with_off_grid_outers()
+        for max_features in (1, 3):
+            with self.subTest(max_features=max_features):
+                cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=max_features)
+                self.assertIsNone(cl.mask_unavailable)                       # before (max_features=1): unavailable
+                self.assertEqual([f.id for f in cl.mask_areas], [f"osm:relation/{rid}#1"])
+                plan = build_plan(area, ReviewRound4Test._grid(self), cl, PlanOptions(trees=False),
+                                  dsm_correction=True)
+                tc = plan.report["terrain_correction"]
+                self.assertTrue(tc["applied"], tc)
+                self.assertGreater(tc["masked_points"], 0)
+        # a retained candidate beyond the allowance still skips the correction
+        b = OsmBuilder()
+        normal = parse_osm_xml(b.xml().encode())
+        outers = [b.way(square(cx, 0.0, 20.0), closed=True) for cx in (0.0, 100.0)]
+        b.relations.append((b._next(), [("way", w, "outer") for w in outers],
+                            {"type": "multipolygon", "landuse": "forest"}))
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=parse_osm_xml(b.xml().encode()),
+                      max_features=1)
+        self.assertIn("exceed the feature limit (1 features", cl.mask_unavailable)
 
 
 def pipeline_mask_message(cls_name):
