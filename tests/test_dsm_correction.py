@@ -2260,6 +2260,31 @@ class ReviewRound11Test(unittest.TestCase):
         self.assertEqual(len(bridges), len(cl.bridges))
         self.assertTrue(all(w == 4.0 for _pts, w in bridges))
 
+    def test_ineligible_wide_relation_does_not_spend_the_mask_work(self):
+        # round 15: an underground building multipolygon (never masked) was assembled first, against the budget
+        area = Area(*self.AREA)
+        normal = parse_osm_xml(OsmBuilder().xml().encode())
+
+        def wide(location):
+            b = OsmBuilder()
+            ring = [b.node(88.0 + 5.0 * math.cos(2 * math.pi * k / 400), 5.0 * math.sin(2 * math.pi * k / 400))
+                    for k in range(400)]
+            ways = []
+            for k in range(400):
+                wid = b._next()
+                b.ways.append((wid, [ring[k], ring[(k + 1) % 400]], {}))
+                ways.append(wid)
+            b.relations.append((b._next(), [("way", w, "outer") for w in ways],
+                                dict({"type": "multipolygon", "building": "yes"}, **location)))
+            b.node(0.0, 0.0, {"natural": "tree"})
+            return parse_osm_xml(b.xml().encode())
+        surface = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide({}), max_mask_work=5000)
+        self.assertIsNotNone(surface.mask_work_exceeded)                # the assembly does cost work
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide({"location": "underground"}),
+                      max_mask_work=5000)
+        self.assertIsNone(cl.mask_work_exceeded)                        # before: exceeded, no correction at all
+        self.assertEqual((len(cl.mask_trees), cl.outside_buildings), (1, []))
+
 
 def pipeline_mask_message(cls_name):
     from map_builder.core import errors, pipeline

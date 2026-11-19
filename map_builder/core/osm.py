@@ -803,6 +803,10 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
                     outer_of.setdefault(r, set()).add(fam)
         if fam != "building" and area_class(tags) != "forest":
             continue
+        if not surface_mask_eligible(tags):
+            # never in the mask (e.g. underground): not assembled, so it cannot spend the shared work budget
+            # (its outers above still suppress same-family solid copies)
+            continue
         if any(r not in data.ways for r, _role in ways):
             continue
         # not bounded by the feature allowance: an outer ring off the grid is never kept, so only retained
@@ -832,7 +836,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
             fams = outer_of.get(wid, ())
             as_area = not (None in fams or _area_family(tags) in fams)
         if as_area:
-            pts = way_points(nids)
+            pts = way_points(nids) if surface_mask_eligible(tags) else None
             if pts is not None:
                 add(fid, tags, _mask_polygons([pts], [], work))
         elif (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"):
