@@ -1496,12 +1496,13 @@ class PartContainmentTest(unittest.TestCase):
         self.assertEqual([f.id for f in cl.buildings], [rid, pid])
         self.assertEqual((cl.replaced_outlines, cl.outline_for, cl.outline_parts), ([], {}, {}))
         self.assertEqual(cl.invalid, [])
-        self.assertEqual(len(cl.warnings), 1)
-        self.assertTrue(cl.warnings[0].startswith(pid) and rid in cl.warnings[0])
+        self.assertEqual(cl.overlap_candidates, [{"part": pid, "outline": rid, "kind": "part"}])
         plan = build_plan(tiny_area(), flat_grid(), cl)
         built = {o.mb_id: o for o in plan.objects if o.mb_class == "building"}
         self.assertEqual(set(built), {rid, pid})
-        self.assertIn(cl.warnings[0], plan.report["warnings"])
+        warns = plan.report["warnings"]
+        self.assertEqual(len(warns), 1)
+        self.assertTrue(warns[0].startswith(pid) and rid in warns[0])
 
     def test_part_extending_outside_outline_is_kept_with_warning(self):
         b = OsmBuilder()
@@ -1510,7 +1511,9 @@ class PartContainmentTest(unittest.TestCase):
         cl = classify_xml(b)
         self.assertEqual([f.id for f in cl.buildings], [oid, pid])  # old centroid code: oid replaced
         self.assertEqual((cl.replaced_outlines, cl.invalid), ([], []))
-        self.assertTrue(any(w.startswith(pid) and oid in w for w in cl.warnings))
+        self.assertEqual(cl.overlap_candidates, [{"part": pid, "outline": oid, "kind": "part"}])
+        warns = build_plan(tiny_area(), flat_grid(), cl).report["warnings"]
+        self.assertTrue(any(w.startswith(pid) and oid in w for w in warns))
 
     def test_touching_and_disjoint_parts_are_not_reported(self):
         b = OsmBuilder()
@@ -1585,9 +1588,12 @@ class PartAssociationBoundsTest(unittest.TestCase):
         p2 = f"osm:way/{b.way(rect_ccw(-2, -2, 8, 2), {'building:part': 'yes', 'height': '20'}, closed=True)}"
         cl = classify_xml(b)
         self.assertEqual(cl.invalid, [])
-        self.assertTrue(any(w.startswith(p2) and inner in w for w in cl.warnings))
+        self.assertEqual(cl.warnings, [])  # overlap warnings come from generation (round 7)
+        self.assertEqual(cl.overlap_candidates, [{"part": p2, "outline": inner, "kind": "part"}])
         self.assertEqual(cl.outline_parts, {a: [p1, p2]})
         self.assertEqual([f.id for f in cl.buildings], [inner, p1, p2])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertTrue(any(w.startswith(p2) and inner in w for w in plan.report["warnings"]))
 
     def test_rejected_declared_part_marks_outline_partial(self):
         b = OsmBuilder()
@@ -1670,29 +1676,36 @@ class DeclaredBuildingPartTest(unittest.TestCase):
     def test_reviewer_declared_elevated_part_over_unrelated_building(self):
         cl, rel, o, p, u = self.elevated_scene(True)
         self.assertEqual(cl.invalid, [])  # old code: p rejected for crossing u
-        self.assertEqual(cl.warnings, [])  # [6, 10] m and [0, 4] m do not overlap
+        self.assertEqual(cl.warnings, [])
+        self.assertEqual(cl.overlap_candidates, [{"part": p, "outline": u, "kind": "declared_part"}])
         self.assertEqual(cl.outline_for, {p: [o]})
         self.assertEqual(cl.replaced_outlines, [o])
         self.assertEqual([f.id for f in cl.buildings], [p, u])
         plan = build_plan(tiny_area(), flat_grid(), cl)
         self.assertEqual({x.mb_id for x in plan.objects if x.mb_class == "building"}, {p, u})
         self.assertEqual(plan.report["building_outlines_replaced_by_parts"], [o])
+        self.assertEqual(plan.report["warnings"], [])  # Z [6, 10] m and [-0.3, 4] m do not overlap
+        self.assertNotIn("building_overlaps", plan.report)
 
     def test_declared_part_overlapping_unrelated_building_vertically_warns(self):
         cl, rel, o, p, u = self.elevated_scene(True, other_height="8")
         self.assertEqual(cl.invalid, [])
         self.assertEqual(cl.outline_for, {p: [o]})
-        self.assertEqual(len(cl.warnings), 1)
-        self.assertTrue(cl.warnings[0].startswith(p) and u in cl.warnings[0] and o not in cl.warnings[0])
+        self.assertEqual(cl.warnings, [])
+        warns = build_plan(tiny_area(), flat_grid(), cl).report["warnings"]
+        self.assertEqual(len(warns), 1)
+        self.assertTrue(warns[0].startswith(p) and u in warns[0] and o not in warns[0])
 
     def test_undeclared_elevated_part_over_unrelated_building(self):
         cl, _, o, p, u = self.elevated_scene(False)
         self.assertEqual((cl.invalid, cl.warnings), ([], []))  # old code: rejected
         self.assertEqual(cl.outline_for, {p: [o]})
+        self.assertEqual(build_plan(tiny_area(), flat_grid(), cl).report["warnings"], [])
         cl, _, o, p, u = self.elevated_scene(False, other_height="8")
         self.assertEqual(cl.invalid, [])
         self.assertEqual(cl.outline_for, {p: [o]})  # contained in o: still replaces it
-        self.assertTrue(len(cl.warnings) == 1 and cl.warnings[0].startswith(p) and u in cl.warnings[0])
+        warns = build_plan(tiny_area(), flat_grid(), cl).report["warnings"]
+        self.assertTrue(len(warns) == 1 and warns[0].startswith(p) and u in warns[0])
 
     def courtyard_scene(self, declare):
         b = OsmBuilder()
@@ -1793,3 +1806,81 @@ class DeclaredBuildingPartTest(unittest.TestCase):
         self.assertIn(rel, str(cm.exception))
         cl = classify_xml(b, max_part_pair_checks=4)
         self.assertEqual(len(cl.outline_for), 2)
+
+
+# --- Round 7 -------------------------------------------------------------------
+
+def slope_grid(sx=-0.15):
+    """11 x 11 nodes, 10 m spacing from -50; terrain z = sx * x (exactly planar)."""
+    return make_grid([[sx * (-50 + 10 * i) for i in range(11)] for _ in range(11)], x0=-50, y0=-50)
+
+
+def map_z_range(spec):
+    """Map-frame Z extent of an emitted object, computed independently of the generator."""
+    zs = [v[2] * spec.scale + spec.location[2] for v in spec.mesh.vertices]
+    return min(zs), max(zs)
+
+
+class EmittedOverlapWarningTest(unittest.TestCase):
+    """Round 7: overlap warnings compare the emitted solids' map-frame Z extents."""
+
+    def scene(self, outline_tags, part_tags, other_rect, other_tags):
+        b = OsmBuilder()
+        o = b.way(rect_ccw(-30, -10, 0, 10), dict(outline_tags), closed=True)
+        p = b.way(rect_ccw(-12, -6, -2, 6), dict(part_tags), closed=True)
+        u = b.way(rect_ccw(*other_rect), dict(other_tags), closed=True)
+        return classify_xml(b), *(f"osm:way/{x}" for x in (o, p, u))
+
+    def test_reviewer_sloped_terrain_disjoint_z_no_warning(self):
+        # Tag ranges [6, 10] m and [0, 8] m overlap, but on the slope the part stands on higher
+        # ground: the emitted solids are disjoint in map-frame Z.
+        cl, o, p, u = self.scene({"building": "yes", "height": "12"},
+                                 {"building:part": "yes", "min_height": "6", "height": "10"},
+                                 (-5, -2, 25, 2), {"building": "yes", "height": "8"})
+        self.assertEqual(cl.outline_for, {p: [o]})
+        plan = build_plan(tiny_area(), slope_grid(), cl)
+        objs = {x.mb_id: x for x in plan.objects if x.mb_class == "building"}
+        self.assertEqual(set(objs), {p, u})
+        (plo, phi), (ulo, uhi) = map_z_range(objs[p]), map_z_range(objs[u])
+        self.assertGreater(plo, uhi)  # disjoint: part 14.3..18.3 m, other 3.95..12.25 m
+        self.assertAlmostEqual(plo, 14.3, places=3)
+        self.assertAlmostEqual(uhi, 12.25, places=3)
+        self.assertEqual([w for w in plan.report["warnings"] if p in w], [])  # old code warned
+        self.assertNotIn("building_overlaps", plan.report)
+        self.assertEqual(cl.overlap_candidates, [{"part": p, "outline": u, "kind": "part"}])
+
+    def test_reviewer_flat_skillion_roof_reaching_part_warns(self):
+        # building:levels=2 gives a 6 m eave; the inferred skillion roof (0.3 x 16 m) rises to
+        # 10.8 m, into the part's 8..12 m range. Tag heights alone ([0, 6] m) miss it.
+        cl, o, p, u = self.scene({"building": "yes", "height": "12"},
+                                 {"building:part": "yes", "min_height": "8", "height": "12"},
+                                 (-5, -8, 15, 8), {"building": "yes", "building:levels": "2",
+                                                   "roof:shape": "skillion"})
+        self.assertEqual(cl.warnings, [])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        objs = {x.mb_id: x for x in plan.objects if x.mb_class == "building"}
+        self.assertEqual(set(objs), {p, u})
+        self.assertAlmostEqual(map_z_range(objs[u])[1], 10.8, places=3)
+        self.assertAlmostEqual(map_z_range(objs[p])[0], 8.0, places=3)
+        warns = [w for w in plan.report["warnings"] if w.startswith(p)]
+        self.assertEqual(len(warns), 1)  # old code: no warning
+        self.assertIn(u, warns[0])
+        self.assertNotIn(o, warns[0])
+        self.assertIn("intersect", warns[0])
+        self.assertEqual(cl.overlap_candidates, [{"part": p, "outline": u, "kind": "part"}])
+        self.assertEqual(plan.report["building_overlaps"],
+                         [{"part": p, "outline": u, "kind": "part", "part_z_m": [8.0, 12.0],
+                           "outline_z_m": [-0.3, 10.8]}])
+
+    def test_no_warning_when_one_side_is_not_generated(self):
+        cl, o, p, u = self.scene({"building": "yes", "height": "12"},
+                                 {"building:part": "yes", "height": "12"},
+                                 (-5, -2, 25, 2), {"building": "yes", "height": "8"})
+        self.assertEqual(len(cl.overlap_candidates), 1)
+        plan = build_plan(tiny_area(), flat_grid(), cl, PlanOptions(buildings=False))
+        self.assertEqual(plan.report["warnings"], [])
+        grid = flat_grid()
+        grid.heights[5][7] = 20.0  # node (20, 0): terrain inside u reaches its roof -> u rejected
+        plan = build_plan(tiny_area(), grid, cl)
+        self.assertIn(u, {e["id"] for e in plan.report["invalid_features"]})
+        self.assertEqual([w for w in plan.report["warnings"] if p in w], [])

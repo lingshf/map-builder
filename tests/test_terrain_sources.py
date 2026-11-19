@@ -7,11 +7,13 @@ import random
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from unittest import mock
 
 from map_builder.core import dem as dem_mod
+from map_builder.core import osm as osm_mod
 from map_builder.core import tiff as tiff_mod
 from map_builder.core.cache import MAX_META_BYTES, DiskCache
 from map_builder.core.dem import COPERNICUS_BASE_URL, AsciiGrid, fetch_copernicus, load_local_elevation, parse_crs
@@ -485,6 +487,50 @@ class OverpassValidationTest(unittest.TestCase):
         data = fetch_overpass(self.area, HttpClient(ScriptedTransport()), cache=cache)
         self.assertTrue(data.source["from_cache"])
 
+
+class OverpassBuildingRelationTest(unittest.TestCase):
+    """Round 7: type=building relations (no building tags) are fetched, with their members, and
+    an Overpass import classifies like a local XML import of the same data."""
+
+    def response(self):
+        b = OsmBuilder()
+        big = b.way(rect(0, 0, 60, 60), {"building": "yes", "height": "20"}, closed=True)
+        small = b.way(rect(0, 0, 20, 20), {"building": "yes", "height": "20"}, closed=True)
+        part = b.way(rect(0, 0, 4, 4), {"building:part": "yes", "height": "20"}, closed=True)
+        rid = b._next()
+        b.relations.append((rid, [("way", big, "outline"), ("way", part, "part")], {"type": "building"}))
+        return b.xml().encode("utf-8"), *(f"osm:way/{x}" for x in (big, small, part))
+
+    def test_query_selects_building_relations_and_their_members(self):
+        q = osm_mod.overpass_query(1.0, 2.0, 3.0, 4.0)
+        bb = "(1.0000000,2.0000000,3.0000000,4.0000000)"
+        self.assertIn(f'relation["type"="building"]{bb};', q)
+        self.assertIn('rel(bw.feat)["type"="building"];', q)  # parents of building:part ways
+        self.assertIn('rel(br.feat)["type"="building"];', q)  # parents of building:part relations
+        self.assertIn("rel(r.bldg);", q)  # member relations (multipolygon outlines / parts)
+        # the relations feed the final recursion that fetches member ways and their nodes
+        self.assertLess(q.index("->.bldg;"), q.index("(.feat; .bldg; rel(r.bldg););"))
+        self.assertLess(q.index("(.feat; .bldg; rel(r.bldg););"), q.index("(._;>;);"))
+        self.assertTrue(q.startswith(f"[out:xml][timeout:90][maxsize:{osm_mod.MAX_OSM_BYTES}];"))
+        self.assertTrue(q.endswith("out body qt;\n"))
+
+    def test_fetch_to_classification_honours_declared_ownership(self):
+        body, big, small, part = self.response()
+        area = Area(*ORIGIN, AREA_W, AREA_H)
+        tr = ScriptedTransport(Response(200, body))
+        cache = MemoryCache()
+        data = fetch_overpass(area, HttpClient(tr), cache=cache)
+        sent = urllib.parse.parse_qs(tr.requests[0][3].decode("ascii"))["data"][0]
+        self.assertIn('relation["type"="building"](', sent)
+        self.assertIn('relation["type"="building"](', cache.puts[0][1])  # new query text -> new cache key
+        self.assertEqual(data.source["query"], sent)
+        cl = classify(data, area)
+        # declared: the relation names ``big``; spatial matching alone would pick ``small``
+        self.assertEqual(cl.outline_for, {part: [big]})
+        self.assertEqual(cl.replaced_outlines, [big])
+        local = classify(parse_osm_xml(body), area)
+        self.assertEqual((local.outline_for, [f.id for f in local.buildings]),
+                         (cl.outline_for, [f.id for f in cl.buildings]))
 
 class OsmClassifyTest(unittest.TestCase):
     def setUp(self):

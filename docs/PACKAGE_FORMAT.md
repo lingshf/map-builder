@@ -206,7 +206,11 @@ counted in `edits.removed` and listed in `report.json`.
     outline's outer ring and outside all of its courtyards, and no courtyard may lie inside the
     part. Coincident or touching boundaries are allowed within 0.05 m. Centroids are never used.
   * Declared parts: a `type=building` relation names its `outline` (a way, or a building
-    multipolygon relation) and its `part` members (ways or relations). A declared part is
+    multipolygon relation) and its `part` members (ways or relations). Online imports fetch
+    these relations even when they carry no building tags (those in the area, and the parent
+    relations of the fetched building/building:part features), together with their member
+    relations, ways and nodes, so an Overpass import classifies like a local `.osm` file with
+    the same data. A declared part is
     checked against its declared outline only. If it lies within it, it belongs to that outline
     (if several declared outlines contain it, the smallest; the others get a `warnings` entry).
     If it does not (it crosses the outline boundary or lies in one of its courtyards), it is
@@ -221,12 +225,17 @@ counted in `edits.removed` and listed in `report.json`.
     within. A part lying in an outline's courtyard does not overlap that outline: it is a
     standalone part and is generated as such (the courtyard is empty space), with no diagnostic.
   * Overlaps: a part (declared or not) whose footprint overlaps an outline it neither belongs
-    to nor lies within is kept, and so is the outline; the part never replaces it. If their
-    vertical extents `[min_height, height]` (as generated, above each one's own base) overlap,
-    a `warnings` entry names both, since their solids intersect; if the extents are disjoint
-    (for example a part from 6 m to 10 m over a 4 m building) this is not a conflict and nothing
-    is reported. Overlapping buildings are a property of the OSM data, so nothing is dropped.
-    Touching footprints never count as overlapping.
+    to nor lies within is kept, and so is the outline; the part never replaces it.
+    Classification only records the pair (`overlap_candidates`, bounded by the pair limit
+    below). After the buildings are generated, if both were emitted and the map-frame Z extents
+    of their meshes (vertices with the object transform applied: terrain base, foundation,
+    `min_height`, and the roof actually built, including inferred roof heights) overlap, a
+    `warnings` entry names both, since their solids intersect, and `building_overlaps` lists
+    `{part, outline, kind, part_z_m, outline_z_m}`. Stacked solids with disjoint Z extents (for
+    example a part from 6 m to 10 m over a 4 m building on flat ground, or a part on higher
+    ground of a slope) are not a conflict and nothing is reported; neither is a pair where one
+    side was not generated. Overlapping buildings are a property of the OSM data, so nothing
+    is dropped. Touching footprints never count as overlapping.
   * Limits: retained (replaced) outlines count toward the feature limit, which is checked
     before matching. Candidate pairs come from a bounding-box grid plus the declared pairs;
     more than 200,000 part/outline pairs (declared pairs across all `type=building` relations

@@ -1373,6 +1373,45 @@ def _id_list(ids, limit=10):
     return shown if len(ids) <= limit else f"{shown} and {len(ids) - limit} more"
 
 
+OVERLAP_Z_TOL_M = 1e-6  # Z ranges sharing less than this count as disjoint (stacked solids)
+
+
+def object_z_range(spec):
+    """(min, max) map-frame Z of an emitted object's mesh: vertices with the object's transform
+    applied (rotation is about Z, so only scale and location affect Z)."""
+    zs = [v[2] for v in spec.mesh.vertices]
+    a, b = min(zs) * spec.scale + spec.location[2], max(zs) * spec.scale + spec.location[2]
+    return min(a, b), max(a, b)
+
+
+def _check_building_overlaps(plan, candidates, built_specs):
+    """Warn about kept footprint overlaps (``Classified.overlap_candidates``) whose emitted solids
+    share a vertical range: both objects were generated and their map-frame Z extents overlap.
+    Pairs with one side not generated, or stacked solids (disjoint Z), are not reported."""
+    zr = {}
+    hits = {}
+    for c in candidates:
+        pid, oid = c.get("part"), c.get("outline")
+        sp, so = built_specs.get(pid), built_specs.get(oid)
+        if sp is None or so is None:
+            continue
+        for fid, s in ((pid, sp), (oid, so)):
+            if fid not in zr:
+                zr[fid] = object_z_range(s)
+        (plo, phi), (olo, ohi) = zr[pid], zr[oid]
+        if plo < ohi - OVERLAP_Z_TOL_M and olo < phi - OVERLAP_Z_TOL_M:
+            hits.setdefault(pid, []).append(oid)
+            plan.report.setdefault("building_overlaps", []).append(
+                {"part": pid, "outline": oid, "kind": c.get("kind"),
+                 "part_z_m": [round(plo, 2), round(phi, 2)], "outline_z_m": [round(olo, 2), round(ohi, 2)]})
+    for pid, oids in hits.items():
+        plan.report["warnings"].append(
+            f"{pid}: building:part overlaps building outline(s) {_id_list(oids)} without lying within them, "
+            f"and their generated solids share a vertical range (map-frame Z {zr[pid][0]:.2f}..{zr[pid][1]:.2f} m "
+            f"vs {', '.join(f'{zr[o][0]:.2f}..{zr[o][1]:.2f} m' for o in oids[:10])}); both are kept as mapped "
+            "(the part does not replace them), so their solids intersect")
+
+
 # --- Vegetation -------------------------------------------------------------
 
 def tree_mesh():
@@ -1535,13 +1574,16 @@ def build_plan(area, terrain, classified, options=None):
                 plan.report["warnings"].append(f"{f.id}: {prov['terrain_warning']}")
             if "rejected_tags" in prov:
                 plan.report["warnings"].append(f"{f.id}: out-of-range tags ignored ({prov['rejected_tags']})")
-            add(ObjectSpec(mesh.name, f.id, "building", "Buildings", mesh=mesh, location=origin, provenance=prov))
+            spec = ObjectSpec(mesh.name, f.id, "building", "Buildings", mesh=mesh, location=origin, provenance=prov)
+            add(spec)
+            built_specs[f.id] = spec
             footprints.append((f.geometry, f.geometry.bbox()))
             if f.geometry.holes:
                 plan.count("buildings_with_courtyards")
             plan.count("buildings")
             return True
 
+        built_specs = {}
         built = set()
         for f in classified.buildings:
             if build_one(f):
@@ -1587,6 +1629,7 @@ def build_plan(area, terrain, classified, options=None):
             plan.report["building_outlines_restored"] = restored
         if partial:
             plan.report["building_outlines_partially_represented"] = partial
+        _check_building_overlaps(plan, getattr(classified, "overlap_candidates", ()), built_specs)
     elif classified.replaced_outlines:
         plan.report["building_outlines_replaced_by_parts"] = list(classified.replaced_outlines)
     road_segments = []

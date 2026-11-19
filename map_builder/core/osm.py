@@ -29,6 +29,15 @@ _MAX_REMARK_CHARS = 1024
 
 
 def overpass_query(s, w, n, e, timeout_s=90):
+    """Overpass QL for everything :func:`classify` uses, so that an Overpass import and a local
+    XML import of the same data classify alike.
+
+    Simple 3D Buildings ``type=building`` relations usually carry no building tags, so they are
+    selected explicitly: those in the bbox, and the parents of the selected building /
+    building:part ways and relations (a relation whose own members fall outside the bbox still
+    owns the parts inside it). Their member relations (building multipolygon outlines, part
+    relations) are added, and the final ``>`` recursion brings in every member way and node.
+    The query text is part of the cache key, so changing it never reuses stale cached data."""
     b = f"{s:.7f},{w:.7f},{n:.7f},{e:.7f}"
     return (
         f"[out:xml][timeout:{timeout_s}][maxsize:{MAX_OSM_BYTES}];\n(\n"
@@ -40,7 +49,11 @@ def overpass_query(s, w, n, e, timeout_s=90):
         f"  way[\"leisure\"]({b});\n  relation[\"leisure\"]({b});\n"
         f"  way[\"waterway\"]({b});\n  way[\"man_made\"=\"bridge\"]({b});\n"
         f"  node[\"natural\"=\"tree\"]({b});\n"
-        ");\n(._;>;);\nout body qt;\n"
+        ")->.feat;\n(\n"
+        f"  relation[\"type\"=\"building\"]({b});\n"
+        "  rel(bw.feat)[\"type\"=\"building\"];\n  rel(br.feat)[\"type\"=\"building\"];\n"
+        ")->.bldg;\n"
+        "(.feat; .bldg; rel(r.bldg););\n(._;>;);\nout body qt;\n"
     )
 
 
@@ -372,6 +385,12 @@ class Classified:
         self.outline_features = {}
         self.outline_parts = {}
         self.outline_for = {}
+        # Footprint overlaps that are kept as mapped: dicts {part, outline, kind} for a
+        # building:part whose footprint overlaps a building outline it neither belongs to nor lies
+        # within. Classification cannot know whether the generated solids intersect (that depends
+        # on terrain and on the roof actually built), so generation checks the emitted meshes'
+        # map-frame Z extents and warns only then. Bounded by the part/outline pair limit.
+        self.overlap_candidates = []
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -811,16 +830,6 @@ def _ids(ids, limit=10):
     return ", ".join(ids[:limit]) + (f", ... ({len(ids) - limit} more)" if len(ids) > limit else "")
 
 
-def _vertical_range(f, cache):
-    """(min_height, height) above ground of ``f`` as the generator will build it."""
-    r = cache.get(id(f))
-    if r is None:
-        from .generate import building_height  # deferred: generation helpers, no import cycle
-        h, min_h, _, _ = building_height(f.tags)
-        r = cache[id(f)] = (min_h, h)
-    return r
-
-
 def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=MAX_ASSOCIATION_WORK,
                             declared=None):
     """Simple 3D Buildings: an outline is replaced by the building:part features that belong to it.
@@ -837,8 +846,9 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
     * Undeclared parts are matched spatially: a part belongs to its *smallest* containing outline.
       A part lying in an outline's courtyard does not overlap it and is a standalone part.
     * A part (declared or not) whose footprint overlaps an outline it neither belongs to nor lies
-      within is kept, never replaces that outline, and the outline is kept too; a warning names
-      both, unless their vertical extents ``[min_height, height]`` are disjoint (no conflict).
+      within is kept, never replaces that outline, and the outline is kept too. The pair is
+      recorded in ``out.overlap_candidates`` (no warning here): generation warns if both are
+      emitted and their meshes' map-frame Z extents overlap.
 
     A replaced outline leaves ``out.buildings`` but is kept in ``out.outline_features`` with the
     ids of its parts (``out.outline_parts`` / ``out.outline_for``, one outline per part), so the
@@ -920,7 +930,6 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
     # Phase 2: declared validation / containment, then conflicts with other outlines.
     owner = {}       # part index -> outline index it belongs to (or is counted under, if rejected)
     rejected = set()
-    heights = {}
     for pi, part in enumerate(parts):
         g = part.geometry
         dec = decl_of[pi]
@@ -958,8 +967,6 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
             exempt = within
         if pi in rejected:
             continue
-        crossing = []
-        lo, hi = None, None
         for oi in candidates[pi]:
             if oi in exempt:
                 continue
@@ -968,16 +975,8 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                 continue  # nested inside an unrelated outline: no conflict
             if not footprints_overlap(g, o.geometry, tol, work):
                 continue
-            if lo is None:
-                lo, hi = _vertical_range(part, heights)
-            olo, ohi = _vertical_range(o, heights)
-            if olo < hi and lo < ohi:
-                crossing.append(o.id)
-        if crossing:
-            out.warnings.append(
-                f"{part.id}: building:part overlaps building outline(s) {_ids(crossing)} without lying within "
-                "them, at overlapping heights; both are kept as mapped (the part does not replace them), so "
-                "their solids intersect")
+            out.overlap_candidates.append({"part": part.id, "outline": o.id,
+                                           "kind": "declared_part" if dec is not None else "part"})
     members = {}
     for pi in sorted(owner):
         members.setdefault(owner[pi], []).append(pi)
