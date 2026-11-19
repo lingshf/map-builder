@@ -70,12 +70,19 @@ the surrounding ground before the terrain, roads and buildings are built.
 * Mask candidates are selected against the terrain grid extent, not the area: buildings, trees and
   bridge ways just outside the area still mask the edge samples within their buffer, but are not
   generated. Online acquisition fetches OSM for the area plus 30 m; only when the correction is
-  enabled does it also fetch the grid's overshoot of the area (below one spacing). Features that
-  are in the response only because of that wider margin (that the normal 30 m query would not
-  return) are mask candidates and nothing else: they never colour the terrain, drive scatter, or
-  appear in counts, `invalid_features` or `unsupported_features`. So the generated scene (objects,
-  colours, materials) is the same with the correction on or off; only terrain heights and the
-  correction's report fields differ.
+  enabled does it fetch wider: the grid's overshoot of the area (below one spacing) plus 45 m, the
+  farthest a mask can reach (a bridge centreline: at most 30 m half deck width plus its 15 m
+  buffer), rounded up to a whole metre. The response of the normal 30 m query is then
+  reconstructed exactly from the wider one (the same tag selectors, bbox tests and relation
+  recursion as the Overpass query) and classified on its own, so buildings, `building:part`
+  ownership, multipolygon outer suppression, landcover, roads, trees, counts, `invalid_features`
+  and `unsupported_features` come from it alone. Everything else in the wider response (including
+  relations that merely reference content ways) only adds mask candidates — surface building
+  footprints, forest/wood polygons, bridge ways and trees: they never colour the terrain, drive
+  scatter, or appear in counts, `invalid_features` or `unsupported_features`, and their ring
+  topology is checked only by the budgeted, deduplicated mask validation below. So the generated
+  scene (objects, colours, materials, report) is the same with the correction on or off; only
+  terrain heights and the correction's report fields differ.
 * Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The
   equation is solved coarse to fine (multigrid: a nested-iteration guess from coarsened grids, with
   semi-coarsening along the long axis of elongated grids, then V- or W-cycles of red-black
@@ -177,9 +184,9 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
   forest, cuttings, or river banks under a bridge. Where a masked area touches the edge of the
   area, the fill there is levelled towards the edge (zero slope across it). `man_made=bridge`
   outlines are not masked (only the bridge ways are). Features outside the area mask the edge only
-  if they are in the OSM input: online that is the area plus 30 m (plus the grid overshoot when the
-  correction is enabled, used for the mask only), so a very wide bridge deck more than about 30 m
-  outside can be missed; a local OSM file is used in full (all of it is content). Invalid and
+  if they are in the OSM input: online, with the correction enabled, that covers every mask reach
+  around the grid (see above); a local OSM file is used in full (all of it is content), so it should
+  extend about 45 m beyond the area for full edge masking. Invalid and
   below-ground footprints and forest polygons are not masked; `natural=tree` nodes are masked as
   generation uses them (no surface check). A scene whose mask polygons are too costly to validate
   within the budget is left uncorrected rather than partly corrected.

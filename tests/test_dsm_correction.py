@@ -681,7 +681,7 @@ class ReviewRound1Test(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         _, dem, _ = write_synthetic_fixtures(tmp.name)
 
-        def acquire(dsm_correction):
+        def acquire(dsm_correction, spacing=30.0):
             seen = {}
 
             def fake_fetch(area, client, *a, **kw):
@@ -697,7 +697,7 @@ class ReviewRound1Test(unittest.TestCase):
             pipeline.classify = spy_classify
             try:
                 settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
-                                    elevation_license="SYNTHETIC", terrain_spacing=30.0,
+                                    elevation_license="SYNTHETIC", terrain_spacing=spacing,
                                     dsm_correction=dsm_correction)
                 grid, cl, _ = pipeline.acquire(Area(*self.AREA), settings, client=object())
             finally:
@@ -705,12 +705,20 @@ class ReviewRound1Test(unittest.TestCase):
                 pipeline.classify = orig_classify
             return grid, cl, seen
         grid, cl, seen = acquire(True)
-        # 100 m at 30 m spacing: 5 points, -50..70, so the grid overshoots the area by 20 m
+        # 100 m at 30 m spacing: 5 points, -50..70, so the grid overshoots the area by 20 m; review round 3,
+        # finding 3: the margin covers the overshoot plus the widest mask reach (a bridge centreline up to
+        # dsm.BRIDGE_CANDIDATE_MARGIN_M = 45 m from the grid), rounded up
         self.assertEqual((grid.nx, grid.x0), (5, -50.0))
-        self.assertEqual(seen["margin_m"], 50.0)
+        self.assertEqual(dsm.BRIDGE_CANDIDATE_MARGIN_M, 45.0)
+        self.assertEqual(seen["margin_m"], 65.0)
         expect = tuple(round(v, 7) for v in Area(*self.AREA).geographic_bbox(margin_m=30.0))
         self.assertEqual(seen["content_bbox"], expect)   # only the normal 30 m extent is content
         self.assertTrue(all(abs(p[1] + 62.0) < 1e-3 for p in cl.bridges[0].geometry))
+        # no overshoot (100 m at 25 m spacing: -50..50): still the full bridge reach, wider than the normal 30 m
+        grid, _, seen = acquire(True, spacing=25.0)
+        self.assertEqual((grid.nx, grid.x0), (5, -50.0))
+        self.assertEqual(seen["margin_m"], 45.0)
+        self.assertEqual(seen["content_bbox"], expect)
         # review round 2, finding 2c: with the correction off (the local-file default, or explicitly) the
         # normal 30 m margin is requested and everything fetched is content
         for setting in (None, False):
@@ -910,6 +918,263 @@ class ReviewRound2Test(unittest.TestCase):
         self.assertTrue(tc["applied"])
         self.assertEqual(tc["mask"]["validation_work"], one)
         self.assertEqual(tc["mask"]["features"]["buildings"], 1)
+
+
+def _star(cx, cy, r):
+    """A self-intersecting pentagram (non-zero signed area)."""
+    pts = [(cx + r * math.cos(math.pi / 2 + 2 * math.pi * k / 5), cy + r * math.sin(math.pi / 2 + 2 * math.pi * k / 5))
+           for k in range(5)]
+    return [pts[k] for k in (0, 2, 4, 1, 3)]
+
+
+def _without(data, ways=(), relations=(), nodes=()):
+    """``data`` minus the listed elements (and the untagged nodes nothing kept references): the response of a
+    query that does not select them, in ``data``'s element order."""
+    from map_builder.core.osm import OsmData
+    sub = OsmData()
+    sub.relations = {k: v for k, v in data.relations.items() if k not in set(relations)}
+    sub.ways = {k: v for k, v in data.ways.items() if k not in set(ways)}
+    used = {n for nids, _ in sub.ways.values() for n in nids}
+    used.update(r for members, _ in sub.relations.values() for t, r, _ in members if t == "node")
+    sub.nodes = {k: v for k, v in data.nodes.items() if k in used or (v[2] and k not in set(nodes))}
+    sub.timestamp, sub.generator, sub.remarks, sub.source = data.timestamp, data.generator, data.remarks, data.source
+    return sub
+
+
+def _summary(cl):
+    """Everything classify produces that affects generation or the report (mask candidates excluded)."""
+    def poly(p):
+        return [tuple(map(tuple, p.outer))] + [tuple(map(tuple, h)) for h in p.holes]
+    return json.loads(json.dumps({
+        "buildings": [(f.id, f.kind, f.tags, poly(f.geometry)) for f in cl.buildings],
+        "areas": [(f.id, f.tags, poly(f.geometry)) for f in cl.areas],
+        "roads": [(f.id, f.tags, f.geometry) for f in cl.roads],
+        "trees": [(f.id, f.geometry) for f in cl.trees],
+        "invalid": cl.invalid, "unsupported": cl.unsupported, "outside": cl.outside, "warnings": cl.warnings,
+        "replaced": [getattr(f, "id", f) for f in cl.replaced_outlines],
+        "outline_features": sorted(cl.outline_features), "outline_parts": cl.outline_parts,
+        "outline_for": cl.outline_for, "overlaps": cl.overlap_candidates}, sort_keys=True, default=str))
+
+
+class ReviewRound3Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-3 review findings. All data SYNTHETIC. The area is 100 m wide
+    (edges at +-50 m); the normal-extent content bbox reaches about +-80 m, margin-only elements lie beyond 90 m."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+    EXTENT = (-50.0, -50.0, 150.0, 50.0)   # a grid overshooting the area by 100 m on +x
+
+    def _cb(self, area):
+        return tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0))
+
+    # --- finding 1: the content is exactly the normal-extent response ---------------------------------------
+
+    def _repro(self):
+        """A building way in the area; an untagged multipolygon using it as an outer with an inner ring; a
+        type=building relation with that multipolygon as outline and a margin-only way as part. None of the
+        relations (nor the untagged inner way) is selected by the normal query."""
+        b = OsmBuilder()
+        w = b.way(square(0, 0, 10), {"building": "yes"}, closed=True)
+        inner = b.way(square(0, 0, 3), closed=True)
+        m = b._next()
+        b.relations.append((m, [("way", w, "outer"), ("way", inner, "inner")], {"type": "multipolygon"}))
+        part = b.way(square(100, 0, 4), {"building:part": "yes"}, closed=True)
+        rel = b._next()
+        b.relations.append((rel, [("relation", m, "outline"), ("way", part, "part")], {"type": "building"}))
+        data = parse_osm_xml(b.xml().encode())
+        return data, w, _without(data, ways=(inner, part), relations=(m, rel))
+
+    def test_a_margin_only_relation_does_not_remove_a_building(self):
+        from map_builder.core.osm import _normal_subset
+        data, w, normal = self._repro()
+        area = Area(*self.AREA)
+        self.assertEqual((list(normal.ways), list(normal.relations)), ([w], []))
+        sub = _normal_subset(data, self._cb(area))
+        self.assertEqual((list(sub.ways), list(sub.relations), list(sub.nodes)),
+                         (list(normal.ways), list(normal.relations), list(normal.nodes)))
+        ref = classify(normal, area, mask_extent=self.EXTENT)
+        self.assertEqual([f.id for f in ref.buildings], [f"osm:way/{w}"])
+        self.assertEqual(ref.invalid, [])
+        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        self.assertEqual([f.id for f in cl.buildings], [f"osm:way/{w}"])
+        self.assertEqual(cl.invalid, [])
+        self.assertEqual(_summary(cl), _summary(ref))
+        part = list(data.ways)[2]
+        self.assertEqual([f.id for f in cl.outside_buildings], [f"osm:way/{part}"])   # a mask candidate only
+
+    def _config_landcover(self):
+        b = OsmBuilder()
+        b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
+        forest = b.way(square(-30, 30, 15), {"landuse": "forest"}, closed=True)
+        hole = b.way(square(-30, 30, 4), closed=True)
+        m = b._next()   # untagged, so not selected: under the old-style rule it would suppress the forest way
+        b.relations.append((m, [("way", forest, "outer"), ("way", hole, "inner")], {"type": "multipolygon"}))
+        b.way([(-60.0, 10.0), (60.0, 10.0)], {"highway": "residential"})
+        b.way([(-60.0, -20.0), (60.0, -20.0)], {"highway": "primary", "bridge": "yes"})   # unsupported, content
+        b.node(-20.0, 20.0, {"natural": "tree"})
+        margin = {"ways": [b.way(square(100, 0, 8), {"landuse": "forest"}, closed=True),
+                           b.way(square(100, -30, 3), {"building": "yes"}, closed=True),
+                           b.way(_star(100, 35, 6), {"building": "yes"}, closed=True),
+                           b.way([(90.0, -45.0), (140.0, -45.0)], {"highway": "primary", "bridge": "yes"}),
+                           b.way(square(130, 20, 3), {"building": "yes", "layer": "-1"}, closed=True)],
+                  "nodes": [b.node(120.0, 0.0, {"natural": "tree"})], "relations": []}
+        mo, mi = b.way(square(125, -20, 10), closed=True), b.way(square(125, -20, 3), closed=True)
+        margin["ways"] += [mo, mi, hole]
+        rid = b._next()
+        b.relations.append((rid, [("way", mo, "outer"), ("way", mi, "inner")],
+                            {"type": "multipolygon", "natural": "wood"}))
+        margin["relations"] += [rid, m]
+        data = parse_osm_xml(b.xml().encode())
+        return data, _without(data, **margin)
+
+    def _config_building_relations(self):
+        b = OsmBuilder()
+        outline = b.way(square(0, -25, 10), {"building": "yes"}, closed=True)
+        x = b.way(square(0, -25, 4), {"building:part": "yes", "building:levels": "3"}, closed=True)
+        # outside the content bbox, but a member of a selected type=building relation: content
+        y = b.way(square(100, -25, 4), {"building:part": "yes"}, closed=True)
+        r = b._next()
+        b.relations.append((r, [("way", outline, "outline"), ("way", x, "part"), ("way", y, "part")],
+                            {"type": "building"}))
+        b.multipolygon(square(20, 20, 12), [square(20, 20, 4)], {"building": "yes"})
+        margin = {"ways": [b.way(square(120, 0, 5), {"building": "yes"}, closed=True),
+                           b.way(square(120, 0, 2), {"building:part": "yes"}, closed=True)]}
+        r2 = b._next()
+        b.relations.append((r2, [("way", margin["ways"][0], "outline"), ("way", margin["ways"][1], "part")],
+                            {"type": "building"}))
+        mo = b.way(square(110, 30, 6), {"building": "yes"}, closed=True)   # outer of a margin-only multipolygon
+        mi = b.way(square(110, 30, 2), closed=True)
+        r3 = b._next()
+        b.relations.append((r3, [("way", mo, "outer"), ("way", mi, "inner")], {"type": "multipolygon",
+                                                                                 "building": "yes"}))
+        margin["ways"] += [mo, mi]
+        margin["relations"] = [r2, r3]
+        data = parse_osm_xml(b.xml().encode())
+        return data, _without(data, **margin), y
+
+    def _config_random(self, seed):
+        rng = random.Random(seed)
+        b = OsmBuilder()
+        margin = {"ways": [], "nodes": []}
+        tag_sets = ({"building": "yes"}, {"building:part": "yes"}, {"landuse": "forest"}, {"landuse": "grass"},
+                    {"natural": "wood"}, {"building": "yes", "location": "underground"})
+        for _ in range(40):
+            inside = rng.random() < 0.5
+            cx = rng.uniform(-60, 60) if inside else rng.uniform(95, 140)
+            cy = rng.uniform(-60, 60) if inside else rng.uniform(-40, 40)
+            ring = _star(cx, cy, 4) if rng.random() < 0.1 else square(cx, cy, rng.uniform(1.0, 8.0))
+            wid = b.way(ring, dict(rng.choice(tag_sets)), closed=True)
+            if not inside:
+                margin["ways"].append(wid)
+        for _ in range(20):
+            inside = rng.random() < 0.5
+            nid = b.node(rng.uniform(-49, 49) if inside else rng.uniform(95, 140), rng.uniform(-49, 49),
+                         {"natural": "tree"})
+            if not inside:
+                margin["nodes"].append(nid)
+        data = parse_osm_xml(b.xml().encode())
+        return data, _without(data, **margin)
+
+    def test_wide_classification_matches_the_normal_response(self):
+        from map_builder.core.osm import _normal_subset
+        area = Area(*self.AREA)
+        cb = self._cb(area)
+        configs = {"repro": self._repro()[::2], "landcover": self._config_landcover(),
+                   "building relations": self._config_building_relations()[:2]}
+        configs.update({f"random {s}": self._config_random(s) for s in range(3)})
+        for name, (wide, normal) in configs.items():
+            with self.subTest(name):
+                sub = _normal_subset(wide, cb)
+                self.assertEqual((list(sub.nodes), list(sub.ways), list(sub.relations)),
+                                 (list(normal.nodes), list(normal.ways), list(normal.relations)))
+                ref = classify(normal, area, mask_extent=self.EXTENT)
+                cl = classify(wide, area, mask_extent=self.EXTENT, content_bbox=cb)
+                self.assertEqual(_summary(cl), _summary(ref))
+                self.assertTrue(ref.buildings or ref.areas)
+                # the margin only adds mask candidates
+                for key in ("outside_buildings", "mask_trees", "mask_areas", "bridges"):
+                    ids = {f.id for f in getattr(cl, key)}
+                    self.assertLessEqual({f.id for f in getattr(ref, key)}, ids, (name, key))
+
+    def test_margin_only_elements_are_mask_candidates(self):
+        area = Area(*self.AREA)
+        wide, normal = self._config_landcover()
+        cl = classify(wide, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        margin_ways = [w for w in wide.ways if w not in normal.ways and wide.ways[w][1]]   # tagged ones
+        forest, bldg, star, bridge, under = (f"osm:way/{w}" for w in margin_ways[:5])
+        wood = next(f"osm:relation/{r}" for r, (_m, t) in wide.relations.items() if t.get("natural") == "wood")
+        self.assertIn(f"osm:way/{list(normal.ways)[1]}", {f.id for f in cl.areas})   # the forest way is kept
+        self.assertEqual(sorted(f.id for f in cl.mask_areas), sorted([forest, wood]))
+        self.assertEqual(len(next(f for f in cl.mask_areas if f.id == wood).geometry.holes), 1)
+        self.assertEqual(sorted(f.id for f in cl.outside_buildings), sorted([bldg, star]))   # layer=-1 excluded
+        self.assertIn(bridge, {f.id for f in cl.bridges})
+        self.assertEqual(len(cl.mask_trees), 1)
+        # the self-intersecting margin-only footprint is rejected by the budgeted mask validation
+        excluded = {}
+        buildings, trees, forests, bridges = dsm_obstacles(cl, extent=self.EXTENT, excluded=excluded)
+        self.assertEqual(excluded.get("buildings"), 1)
+        self.assertEqual(len(forests), 3)   # content forest (with no hole), margin forest, margin wood relation
+
+    def test_building_relation_members_outside_the_bbox_stay_content(self):
+        area = Area(*self.AREA)
+        wide, normal, y = self._config_building_relations()
+        self.assertIn(y, normal.ways)
+        cl = classify(wide, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        self.assertEqual(cl.outside, 1)   # the far part, counted as in the normal response
+        self.assertEqual(_summary(cl), _summary(classify(normal, area, mask_extent=self.EXTENT)))
+
+    # --- finding 2: margin-only polygons are not topology checked in classify ---------------------------
+
+    def _shared_ring(self):
+        b = OsmBuilder()
+        ring = b.way([(110.0 + 20.0 * math.cos(2 * math.pi * k / 1500), 20.0 * math.sin(2 * math.pi * k / 1500))
+                      for k in range(1500)], closed=True)
+        for _ in range(5):
+            b.relations.append((b._next(), [("way", ring, "outer")], {"type": "multipolygon", "landuse": "forest"}))
+        b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
+        return parse_osm_xml(b.xml().encode())
+
+    def test_margin_only_multipolygons_sharing_a_large_ring_classify_quickly(self):
+        area = Area(*self.AREA)
+        data = self._shared_ring()
+        t = time.perf_counter()
+        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        self.assertLess(time.perf_counter() - t, 2.0)
+        self.assertEqual(len(cl.mask_areas), 5)
+        self.assertEqual(len(cl.buildings), 1)
+        self.assertEqual(cl.invalid, [])
+        # the grid: -50..150 x -50..50 at 10 m; 30 m high bumps under the ring
+        nx, ny = 21, 11
+        heights = [[100.0 + (30.0 if math.hypot(-50 + i * 10.0 - 110.0, -50 + j * 10.0) < 19 else 0.0)
+                    for i in range(nx)] for j in range(ny)]
+        g = ElevationGrid(-50.0, -50.0, 10.0, nx, ny, heights, dict(COPERNICUS))
+        # default budget: the shared ring is validated once (deduplicated) and masks
+        plan = build_plan(area, g, cl, PlanOptions(trees=False))
+        tc = plan.report["terrain_correction"]
+        self.assertTrue(tc["applied"])
+        self.assertEqual(tc["mask"]["features"]["forest_areas"], 1)
+        self.assertLess(tc["mask"]["validation_work"], dsm.MASK_VALIDATION_WORK_BUDGET)
+        # exhausted budget: the correction is skipped with the usual warning, never raising or stalling
+        t = time.perf_counter()
+        plan = build_plan(area, g, cl, PlanOptions(trees=False, max_mask_validation_work=1000))
+        self.assertLess(time.perf_counter() - t, 2.0)
+        tc = plan.report["terrain_correction"]
+        self.assertFalse(tc["applied"])
+        self.assertEqual(tc["reason"], "mask validation work budget exceeded")
+        self.assertTrue(any("DSM terrain correction skipped" in x and "mask validation work budget" in x
+                            for x in plan.report["warnings"]))
+        terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+        z = plan.report["z_offset_m"]
+        for (i, j, x, y), v in zip(points(g), terrain.mesh.vertices):
+            self.assertAlmostEqual(v[2] + z, g.heights[j][i], places=6)
+
+    def test_content_polygons_keep_their_topology_checks(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        star = b.way(_star(0, 0, 10), {"building": "yes"}, closed=True)
+        data = parse_osm_xml(b.xml().encode())
+        cl = classify(data, area, mask_extent=self.EXTENT, content_bbox=self._cb(area))
+        self.assertEqual(cl.invalid, [{"id": f"osm:way/{star}", "reason": "self-intersecting ring"}])
+        self.assertEqual(cl.buildings, [])
 
 
 if __name__ == "__main__":

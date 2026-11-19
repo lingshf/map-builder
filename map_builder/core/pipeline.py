@@ -114,15 +114,17 @@ def acquire(area, settings, client=None, progress=None):
         content_bbox = None
     else:
         # The grid may overshoot the area on the +x/+y sides by up to one spacing. When the DSM correction
-        # is enabled, Overpass also fetches that overshoot (DSM mask candidates are selected against the
-        # grid extent, osm.classify mask_extent); otherwise the normal extent (area + OSM_FETCH_MARGIN_M) is
-        # fetched. Either way only features the normal-extent query returns are content (classify
-        # content_bbox): those fetched only for the margin are mask candidates, so the generated scene is
-        # the same with the correction on or off.
+        # is enabled, Overpass fetches every DSM mask candidate the grid can use (selected against the grid
+        # extent, osm.classify mask_extent): the overshoot plus the widest mask reach, a bridge centreline up
+        # to dsm.BRIDGE_CANDIDATE_MARGIN_M away (more than the normal margin); otherwise the normal extent
+        # (area + OSM_FETCH_MARGIN_M) is fetched. Either way the normal-extent response is reconstructed and
+        # is the only content (classify content_bbox): the rest is mask candidates only, so the generated
+        # scene is the same with the correction on or off.
         enabled, _ = dsm.resolve(settings.dsm_correction, grid.provenance)
         overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
                         y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
-        margin = OSM_FETCH_MARGIN_M + (math.ceil(overshoot) if enabled else 0.0)
+        margin = (max(OSM_FETCH_MARGIN_M, float(math.ceil(overshoot + dsm.BRIDGE_CANDIDATE_MARGIN_M)))
+                  if enabled else OSM_FETCH_MARGIN_M)
         osm = fetch_overpass(area, client, settings.overpass_url, cache,
                              allow_cache_override=settings.allow_cache_override,
                              cache_dataset_id=settings.osm_cache_dataset_id, margin_m=margin)
