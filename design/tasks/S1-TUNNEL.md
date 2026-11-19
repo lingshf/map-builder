@@ -1,6 +1,6 @@
-# M3-TUNNEL: road tunnels
+# S1-TUNNEL: road tunnels
 
-Milestone M3 · depends on M2-SEAMS · decisions D20, D22, D24
+Sprint S1 · depends on S1-SEAMS (parallel with S1-BRIDGE; the shared sweep lands in S1-SEAMS) · decisions D21, D23, D25
 
 ## Goal
 
@@ -17,7 +17,7 @@ flyable tubes (class `tunnel`) with open portals cut into the terrain.
   and 2.5–10 m, sets the clearance (`measured`).
 * **Tube:** `structures.sweep` with open ends → inward tube, floor material `MB Road`, walls
   `MB Tunnel`. Clip at the area edge (open portal there).
-* **Terrain cut (D22):** inside the tunnel stage, remove from the terrain object's mesh the
+* **Terrain cut (D23):** inside the tunnel stage, remove from the terrain object's mesh the
   triangles that intersect the tube's interior volume (cross-section grown by 0.1 m). No
   approach trench is dug; where terrain near a portal is lower than the roof, the tube simply
   runs in the open (a short gallery). Heightfield cells without terrain become NaN (format
@@ -49,7 +49,7 @@ flyable tubes (class `tunnel`) with open portals cut into the terrain.
 5. The fixture tunnel (`way/1072`, `layer=-1`) is generated; regenerated sample `VALID`; C#
    reader CI shows the probe PASS.
 6. Blender round trip; a mirrored tunnel keeps the tube rule after bake.
-7. `tunnel=culvert`, railway tunnels and `man_made=tunnel` stay unsupported (D24).
+7. `tunnel=culvert`, railway tunnels and `man_made=tunnel` stay unsupported (D25).
 8. Docs updated as in the common definition of done (heightfield NaN note now real).
 
 ## Performance considerations
@@ -57,7 +57,7 @@ flyable tubes (class `tunnel`) with open portals cut into the terrain.
 * Terrain cut: only cells in the tube's XY bounding corridor are tested (grid indexing), O(cells
   in corridor × profile segments); no full-terrain scan.
 * Tube + headwalls ≤ (profile points × samples) + 200 triangles per tunnel; budget reserved.
-* Probe as in M3-BRIDGE; fixture build ≤ +20 %.
+* Probe as in S1-BRIDGE; fixture build ≤ +20 %.
 
 ## Expected tests
 
@@ -69,4 +69,4 @@ determinism); acceptance case; `tests/blender/checks_tunnels.py`; sample regener
 
 Hard: `core/tunnels.py`, `core/generate.py` (tunnel hook only; the cut edits the terrain
 spec's mesh inside the stage), `tests/test_tunnels.py`, `tests/blender/checks_tunnels.py`. Soft: sample,
-fixture, docs bullets. Parallel with M3-BRIDGE and M4-ELEV.
+fixture, docs bullets. Parallel with S1-BRIDGE and S2-ELEV.

@@ -1,11 +1,11 @@
-# M3-PIERS: bridge piers and parapets
+# S1-PIERS: bridge piers and parapets
 
-Milestone M3 · depends on M3-BRIDGE
+Sprint S1 · depends on S1-BRIDGE
 
 ## Goal
 
 Make long bridges look and collide like bridges: piers under long spans and low parapets on the
-deck edges, without blocking the passages M3-BRIDGE guarantees.
+deck edges, without blocking the passages S1-BRIDGE guarantees.
 
 ## Approach
 
@@ -21,7 +21,7 @@ deck edges, without blocking the passages M3-BRIDGE guarantees.
 
 ## Acceptance criteria
 
-1. All M3-BRIDGE acceptance tests still pass; both probes still PASS on the synthetic valley.
+1. All S1-BRIDGE acceptance tests still pass; both probes still PASS on the synthetic valley.
 2. Synthetic 120 m valley bridge: 2 piers, each a closed positive-volume shell, touching the deck
    underside within 1 cm; no pier intersects the `under` capsule or an at-grade road ribbon.
 3. Bridge object stays a valid solid (validator), visual/collision binding exact.

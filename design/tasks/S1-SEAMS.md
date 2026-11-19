@@ -1,6 +1,6 @@
-# M2-SEAMS: structure seams
+# S1-SEAMS: structure seams
 
-Milestone M2 · depends on #11 merged · decision D17
+Sprint S1 · depends on #11 merged · decision D18
 
 ## Goal
 
@@ -18,7 +18,7 @@ modules, **without changing any output**.
    Until the feature task lands, each list is still reported in `unsupported_features` with the
    current wording (the stage stub does this), so the report is unchanged. Railway/waterway,
    `man_made=bridge|tunnel`, `building=bridge`, `layer<0` without tunnel, `location=underground`
-   stay unsupported (D24).
+   stay unsupported (D25).
 2. **Stage hooks in `core/generate.py`.** `build_plan` calls, in this order, after roads and
    before trees: `bridges.build(plan, ctx)`, `tunnels.build(plan, ctx)`; and
    `passages.split(...)` inside the building loop before `build_one`. `ctx` is a small plain
@@ -33,7 +33,7 @@ modules, **without changing any output**.
      piece, or reject with `InvalidFeature`).
    * `polyline_z_profile(points_xy, z_func, ...)` arc-length helpers shared by bridges/tunnels.
    * `check_probes(plan, probes, max_work)` → (kept, blocked[{id, blocker mb_id}]) using
-     `query.capsule_hits` on the plan meshes (world transforms applied); D20.
+     `query.capsule_hits` on the plan meshes (world transforms applied); D21.
 4. **Blender.** `scene_build` maps classes to collections `Bridges`, `Tunnels`, `Structures`;
    adds materials `MB Concrete` (deck sides, piers, headwalls) and `MB Tunnel` (tube walls).
    Bake/export already carry `mb_class`; confirm tube objects survive bake with mirrored
@@ -71,4 +71,4 @@ routing assertions (lists populated, report unchanged); Blender harness re-run.
 Hard: `core/osm.py` (`_unsupported_reason`, `Classified`, `classify` routing),
 `core/generate.py` (`ScenePlan`, `build_plan` hook calls), new `core/structures.py`,
 `core/bridges.py`, `core/tunnels.py`, `core/passages.py` (stubs), `blender/scene_build.py`,
-`tests/blender/*`. Can run in parallel with M4-ROOF (different functions of `generate.py`).
+`tests/blender/*`. Can run in parallel with S2-ROOF (different functions of `generate.py`).

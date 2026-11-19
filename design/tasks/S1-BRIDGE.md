@@ -1,6 +1,6 @@
-# M3-BRIDGE: bridge decks
+# S1-BRIDGE: bridge decks
 
-Milestone M3 · depends on M2-SEAMS · decisions D15, D20, D21, D24
+Sprint S1 · depends on S1-SEAMS · decisions D15, D21, D22, D25
 
 ## Goal
 
@@ -14,7 +14,7 @@ passage probes over and under the deck.
 * **End heights:** at an endpoint shared with an at-grade road, `z = road z there` (terrain +
   `ROAD_LIFT_M`), so the deck meets the road within 5 cm. At a free endpoint (no at-grade
   neighbour, or clipped at the area edge), `z = terrain + ROAD_LIFT_M`.
-* **Profile (D21):** linear in arc length between the end heights; where the ground under the
+* **Profile (D22):** linear in arc length between the end heights; where the ground under the
   deck (DSM-corrected) plus `max(1, layer) × 5.0 m` clearance is higher than that line, raise
   the profile, with ramps ≤ 8 % grade back to the line. Sample at ≤ 10 m and at every OSM
   node. Provenance names the rule and whether it was raised.
@@ -29,7 +29,7 @@ passage probes over and under the deck.
     half-width + 3 m on one side to the other, at `ground max along the segment + 1.5 m`;
     emitted only if clearance under the deck ≥ 4 m.
   Checked with `structures.check_probes`; blocked probes go to `report.json`
-  `passage_probes_blocked` (D20). Probe ids: `<mb_id>:deck`, `<mb_id>:under`.
+  `passage_probes_blocked` (D21). Probe ids: `<mb_id>:deck`, `<mb_id>:under`.
 * **Report:** bridges leave `unsupported_features`; new count `bridges`; a bridge that cannot be
   built (degenerate, too short < 2 m, sharp turn) goes to `invalid_features` with the reason.
 
@@ -45,7 +45,7 @@ passage probes over and under the deck.
    C# reader CI step shows its probes PASS.
 4. Blender: generate → export → validate round trip; moving the deck down onto the road makes
    the `under` probe a validator **warning** (not an error), naming the probe by index.
-5. `man_made=bridge`, `building=bridge`, railway bridges stay in `unsupported_features` (D24).
+5. `man_made=bridge`, `building=bridge`, railway bridges stay in `unsupported_features` (D25).
 6. Docs: PACKAGE_FORMAT (unsupported list, `passage_probes_blocked`), README Limits,
    UNITY_CORE_HANDOFF ("not generated yet" → generated), VALIDATION matrix row.
 
@@ -68,4 +68,4 @@ an acceptance case in `tests/test_acceptance.py` (ray under deck, probe PASS);
 
 Hard: `core/bridges.py`, `core/generate.py` (bridge hook call only), `tests/test_bridges.py`,
 `tests/blender/checks_bridges.py`. Soft: sample, fixture, docs bullets. Parallel with
-M3-TUNNEL and M4-ELEV.
+S1-TUNNEL and S2-ELEV.

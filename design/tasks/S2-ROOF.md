@@ -1,6 +1,6 @@
-# M4-ROOF: roof shapes
+# S2-ROOF: roof shapes
 
-Milestone M4 · depends on #11 merged (both touch `core/generate.py`)
+Sprint S2 (may start early as a parallel lane in S1; ships in v0.3.0) · depends on #11 merged (both touch `core/generate.py`)
 
 ## Goal
 
@@ -48,5 +48,5 @@ Dome/onion triangles = rings × footprint vertices; cap rings so a 2000-vertex f
 
 Hard: `core/generate.py` roof section of `build_building` (and its call sites inside that
 function only), new `core/roofs.py`, `tests/test_roofs.py`, roof tests in
-`tests/test_scene_generation.py`. Parallel with M2-SEAMS and M4-ELEV (neither edits
+`tests/test_scene_generation.py`. Parallel with S1-SEAMS and S2-ELEV (neither edits
 `build_building`).

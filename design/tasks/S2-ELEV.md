@@ -1,6 +1,6 @@
-# M4-ELEV: elevated parts and building passages
+# S2-ELEV: elevated parts and building passages
 
-Milestone M4 · depends on M2-SEAMS · decisions D20, D23
+Sprint S2 · depends on S1-SEAMS · decisions D21, D24
 
 ## Goal
 
@@ -15,9 +15,9 @@ volume.
    `<mb_id>:under`): a straight segment across the footprint's longest axis at
    `max ground under the footprint + r + 0.3 m`, `r = min(1.0, (clearance − 0.6) / 2)`; emitted
    only if clearance ≥ 2.6 m. If another solid (its own outline's other parts, a neighbour)
-   blocks it, D20 applies.
+   blocks it, D21 applies.
 2. **Building passages** (`Classified.passages`: highways with `tunnel=building_passage` or
-   `covered=yes`) crossing a building footprint (D23). In `core/passages.py`, before the
+   `covered=yes`) crossing a building footprint (D24). In `core/passages.py`, before the
    building is built:
    * corridor = passage way buffered by road width / 2 + 0.5 m, restricted to the footprint;
    * passage height = `maxheight` (2.5–10 m, measured) else min(4.5 m, building eave − 1 m)
@@ -64,5 +64,5 @@ regeneration.
 
 Hard: `core/passages.py`, `core/generate.py` (building loop in `build_plan` and the elevated
 report entry only — not `build_building`), `tests/test_passages.py`,
-`tests/blender/checks_passages.py`. Parallel with M3-BRIDGE / M3-TUNNEL; with M4-ROOF only if
+`tests/blender/checks_passages.py`. Parallel with S1-BRIDGE / S1-TUNNEL; with S2-ROOF only if
 ROOF has merged or ROOF keeps out of the building loop (it should).
