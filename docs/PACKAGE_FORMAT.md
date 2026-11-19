@@ -170,9 +170,99 @@ counted in `edits.removed` and listed in `report.json`.
 * `provenance` values that start with `measured:` come from source data, for example the OSM
   `height` tag.
 * Values that start with `inferred:` or `fallback:` are defaults chosen by map-builder.
+* Numeric tags outside sane ranges (levels > 200, lengths > 1000 m, non-finite values) are
+  not used; they are listed in the object's `rejected_tags` provenance and in `warnings`.
+* Building heights follow OSM semantics. An explicit `height` is the total height and the
+  roof is built within it. Without `height`, `building:levels` × 3 m is the **eave** height
+  (`height` = `inferred:building:levels x 3 m to the eave, roof height added on top`). The roof
+  rise is then added above it: from `roof:height`, from `roof:levels` × 3 m, or
+  `inferred:0.3 x footprint short side (1-6 m), added above the storey-derived eave`.
+  `height_m` is the total height and `eave_height_m` the eave (lowest wall top).
+* Buildings are rejected when the terrain reaches the roof underside, that is, the eave plane,
+  or the sloped plane of a skillion roof. The check compares both surfaces at the same XY
+  positions over the whole footprint. When the terrain rises above the lowest eave but still
+  clears the underside everywhere, `terrain_clearance` records that.
+* Roads: all generated roads are at grade, and no two road objects share ground. Where roads
+  overlap, the area belongs to the higher-priority road:
+  1. the road class (`motorway` … `path`);
+  2. then the wider ribbon;
+  3. then the feature id.
+
+  A road that loses area records it in `overlap` (m² and the owning road ids). A road with no
+  area left is not generated; it is listed in `warnings` and counted in
+  `counts.roads_fully_covered`. Ribbons are trimmed at the terrain edge (`terrain_edge`,
+  `counts.roads_trimmed_at_terrain_edge`).
+* Nothing is generated outside the terrain extent. Building footprints and OSM trees outside
+  it (1 mm tolerance) are listed in `invalid_features`. Procedural scatter is placed only on
+  terrain. Landcover only colours terrain cells. If the terrain does not cover the scene area,
+  `warnings` says so.
+* Landcover (water, forest, grass, sand) polygons are checked with the same ring-topology rules
+  as building footprints (simple rings, holes strictly inside the outer ring, no contacts).
+  A polygon that fails, or cannot be checked within the work budget, is listed in
+  `invalid_features` and is used neither for terrain colouring nor for scatter.
+* Building parts (Simple 3D Buildings): an outline is replaced by the `building:part` features
+  that belong to it. The parts are built first.
+  * Containment test: the part's boundary (outer ring and holes) must lie inside or on the
+    outline's outer ring and outside all of its courtyards, and no courtyard may lie inside the
+    part. Coincident or touching boundaries are allowed within 0.05 m. Centroids are never used.
+  * Declared parts: a `type=building` relation names its `outline` (a way, or a building
+    multipolygon relation) and its `part` members (ways or relations). Online imports fetch
+    these relations even when they carry no building tags (those in the area, and the parent
+    relations of the fetched building/building:part features), together with their member
+    relations, ways and nodes, so an Overpass import classifies like a local `.osm` file with
+    the same data. A declared part is
+    checked against its declared outline only. If it lies within it, it belongs to that outline
+    (if several declared outlines contain it, the smallest; the others get a `warnings` entry).
+    If it does not (it crosses the outline boundary or lies in one of its courtyards), it is
+    listed in `invalid_features` with the reason `building:part does not lie within its declared
+    outline <outline ids> (building relation <relation ids>) ...`; the outline is kept, and the
+    rejected part counts among its rejected parts below.
+  * Declared outline unavailable: if no declared outline exists as a building outline (member
+    missing from the data, outside the area, invalid or unsupported, or the relation has no
+    `outline` member), the part is generated standalone with a `warnings` entry naming the
+    relation. It is never matched spatially to an outline the relation does not name.
+  * Undeclared parts are matched spatially: a part belongs to the smallest outline it lies
+    within. A part lying in an outline's courtyard does not overlap that outline: it is a
+    standalone part and is generated as such (the courtyard is empty space), with no diagnostic.
+  * Overlaps: a part (declared or not) whose footprint overlaps an outline it neither belongs
+    to nor lies within is kept, and so is the outline; the part never replaces it.
+    Classification only records the pair (`overlap_candidates`, bounded by the pair limit
+    below). After the buildings are generated, if both were emitted and the map-frame Z extents
+    of their meshes (vertices with the object transform applied: terrain base, foundation,
+    `min_height`, and the roof actually built, including inferred roof heights) overlap, a
+    `warnings` entry names both as possibly intersecting, and `building_overlaps` lists
+    `{part, outline, kind, part_z_m, outline_z_m}`. This is a conservative screen, not an
+    exact solid intersection test: whole-object Z extents can overlap while the solids still
+    clear each other inside the shared footprint (for example under a sloped roof), so
+    consumers must not treat an entry as proof of intersection. Stacked solids with disjoint Z extents (for
+    example a part from 6 m to 10 m over a 4 m building on flat ground, or a part on higher
+    ground of a slope) are not a conflict and nothing is reported; neither is a pair where one
+    side was not generated. Overlapping buildings are a property of the OSM data, so nothing
+    is dropped. Touching footprints never count as overlapping.
+  * Limits: retained (replaced) outlines count toward the feature limit, which is checked
+    before matching. Candidate pairs come from a bounding-box grid plus the declared pairs;
+    more than 200,000 part/outline pairs (declared pairs across all `type=building` relations
+    are also counted while parsing, before they are stored), or more than 10,000,000 geometric
+    tests, raise `LimitError`.
+  * All parts generated: the outline is listed in `building_outlines_replaced_by_parts`.
+  * No part generated: the outline is generated instead. It is listed in
+    `building_outlines_restored` (`{id, rejected_parts}`), has the provenance
+    `building_parts = fallback:outline generated because all of its building:part features
+    (…) were rejected`, and gets a `warnings` entry. The rejected parts are in
+    `invalid_features`. If the outline fails too, its `invalid_features` reason starts with
+    `building outline (fallback after all of its building:part features … were rejected)`.
+  * Some parts generated: the surviving parts are kept and the outline is **not** generated,
+    so solids never overlap. The outline is listed in `building_outlines_replaced_by_parts`
+    and in `building_outlines_partially_represented` (`{id, built_parts, rejected_parts}`),
+    with a `warnings` entry; the rejected parts are in `invalid_features`.
+* Scene budget: a road's exact vertex/triangle count is computed one terrain triangle at a
+  time and stops as soon as it exceeds what remains of the budget (`LimitError` naming the
+  road). A road that exactly fits is accepted.
 * `report.json` lists:
-  * `unsupported_features`: bridges, tunnels, elevated parts
-  * `invalid_features`: for example self-intersecting footprints
+  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, elevated parts
+  * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
+    buildings where the terrain reaches the roof underside, footprints or trees outside
+    the terrain extent, landcover with invalid ring topology, and rejected building parts
   * counts and warnings
 
 ## `collision/map.mbcol` v1 (little-endian)
