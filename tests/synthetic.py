@@ -152,16 +152,22 @@ def write_synthetic_fixtures(directory):
 
 
 def synthetic_inputs(directory, spacing=10.0):
-    """Returns (area, grid, classified, ids, sources) built from the SYNTHETIC fixtures."""
+    """Returns (area, grid, classified, ids, sources) built from the SYNTHETIC fixtures.
+
+    Mirrors ``pipeline.acquire`` for local files without importing the pipeline layer."""
+    from map_builder.core.dem import load_local_elevation
     from map_builder.core.geodesy import Area
-    from map_builder.core.pipeline import Settings, acquire
+    from map_builder.core.osm import OSM_ATTRIBUTION, OSM_LICENSE, classify, load_osm_file
     osm, dem, ids = write_synthetic_fixtures(directory)
     area = Area(*ORIGIN, AREA_W, AREA_H)
-    settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
-                        elevation_license="SYNTHETIC test data (no licence required)", osm_source="file",
-                        osm_file=osm, terrain_spacing=spacing)
-    grid, classified, sources = acquire(area, settings)
-    return area, grid, classified, ids, sources
+    grid = load_local_elevation(area, dem, spacing, "EPSG:4326", "SYNTHETIC",
+                                "SYNTHETIC test data (no licence required)")
+    data = load_osm_file(osm)
+    classified = classify(data, area)
+    osm_src = {"kind": "features", "provider": data.source.get("provider"), "product": "OpenStreetMap",
+               "license": OSM_LICENSE, "attribution": OSM_ATTRIBUTION, "osm_base_timestamp": data.timestamp}
+    osm_src.update({k: v for k, v in data.source.items() if k not in ("provider", "query")})
+    return area, grid, classified, ids, [grid.provenance, osm_src]
 
 
 if __name__ == "__main__":
