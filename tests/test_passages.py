@@ -229,6 +229,41 @@ class ReviewRound2Test(unittest.TestCase):
         self.assertEqual(fast[1], generic[1])
         self.assertEqual(generic[1][1], [])      # kept: nothing blocks it, no work-budget exhaustion
 
+    def test_grid_fast_path_includes_faces_touching_the_box(self):
+        import random
+        from map_builder.core import passages as P
+        n = 21
+        rnd = random.Random(7)
+        h = [[rnd.choice([0.0, 0.0, 1.0, 3.0]) for _ in range(n)] for _ in range(n)]
+        grid = make_grid(h, spacing=5.0, x0=-50.0, y0=-50.0)
+        plan = plan_for([], grid=grid)
+
+        def faces(local):
+            o = [o for o in local.objects if o.mb_class == "terrain"]
+            if not o:
+                return set()
+            m = o[0].mesh
+            return {tuple(sorted(m.vertices[i] for i in f)) for f in m.faces}
+
+        def both(probe):
+            fast = P._local_plan(plan, [probe], grid)
+            generic = P._local_plan(plan, [probe], None)
+            self.assertEqual(faces(fast), faces(generic), probe["path_map"])
+            return fast, generic
+
+        # radius 0.95 + 0.05 pad = 1.0 m: integer path coordinates put the padded box exactly on grid lines
+        def probe(a, b, z):
+            return {"id": "p", "kind": "elevated", "feature": "f", "radius_m": 0.95,
+                    "path_map": [[a[0], a[1], z], [b[0], b[1], z]]}
+
+        fast, generic = both(probe((-24, -24), (-9, -9), 1.0))     # box edges at -25 and -5: on grid lines
+        self.assertGreater(len(faces(generic)), 0)
+        for _ in range(200):
+            on_line = rnd.random() < 0.5
+            lo = [rnd.randrange(-9, 8) * 5 + (1 if on_line else rnd.randrange(0, 5)) for _ in range(2)]
+            hi = [c + rnd.randrange(0, 4) * 5 + (0 if on_line else rnd.randrange(0, 5)) for c in lo]
+            both(probe(lo, hi, float(rnd.randrange(-1, 5))))
+
     def test_replacement_parts_reserve_before_allocation(self):
         from map_builder.core import generate
         whole = plan_for([building(BLD, height="9")])

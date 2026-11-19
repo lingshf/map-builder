@@ -432,10 +432,10 @@ def _local_plan(plan, probes, grid=None):
             verts = md.vertices
             keep = []
             for bi, (lx, ly, lz, hx, hy, hz) in enumerate(boxes):
-                i0 = max(0, int(math.floor((lx - grid.x0) / grid.spacing)))
-                i1 = min(grid.nx - 2, int(math.floor((hx - grid.x0) / grid.spacing)))
-                j0 = max(0, int(math.floor((ly - grid.y0) / grid.spacing)))
-                j1 = min(grid.ny - 2, int(math.floor((hy - grid.y0) / grid.spacing)))
+                i0 = max(0, int(math.floor((lx - grid.x0) / grid.spacing - 1e-9)))
+                i1 = min(grid.nx - 2, int(math.floor((hx - grid.x0) / grid.spacing + 1e-9)))
+                j0 = max(0, int(math.floor((ly - grid.y0) / grid.spacing - 1e-9)))
+                j1 = min(grid.ny - 2, int(math.floor((hy - grid.y0) / grid.spacing + 1e-9)))
                 for j in range(j0, j1 + 1):
                     for i in range(i0, i1 + 1):
                         for k in (0, 1):
