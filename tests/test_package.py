@@ -1527,7 +1527,7 @@ class ReviewRound2Test(TempDirCase):
         boxes = [(box_mesh(x * 3, y * 3, x * 3 + 1, y * 3 + 1, 0, 1), True) for x in range(60) for y in range(50)]
         t0 = time.perf_counter()
         probs = self.orient(boxes)
-        self.assertEqual(len(probs), 3000)
+        self.assertEqual(len(probs), 3001)                                            # + "no positive shell"
         self.assertLess(time.perf_counter() - t0, 10.0)
 
     # 2: the one-to-one matcher is a maximum matching, independent of order
