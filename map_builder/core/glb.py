@@ -90,7 +90,7 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
         if key in mesh_ids:
             return mesh_ids[key]
         if not all(_finite3(v) for v in md.vertices):
-            raise PackageError(f"mesh {md.name!r} has a non-finite vertex")
+            raise PackageError(f"glb: mesh #{len(gl['meshes'])} has a non-finite vertex")   # names not echoed
         prims = []
         by_mat = {}
         for f, mi in enumerate(md.face_materials):
@@ -128,12 +128,12 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
         mesh_ids[key] = len(gl["meshes"]) - 1
         return mesh_ids[key]
 
-    for n in nodes:
+    for ni, n in enumerate(nodes):
         rz = float(n.get("rotation_z", 0.0))
         sx, sy, sz = node_scale(n.get("scale", 1.0))
         loc = tuple(n.get("location", (0.0, 0.0, 0.0)))
         if not (_finite3(loc) and math.isfinite(rz) and all(math.isfinite(v) for v in (sx, sy, sz))):
-            raise PackageError(f"node {n['name']!r} has a non-finite transform")
+            raise PackageError(f"glb: node #{ni} has a non-finite transform")
         node = {"name": n["name"], "mesh": mesh_index(n["mesh"]), "translation": list(map_to_gltf(loc))}
         if rz:
             # rotation about map +Z == rotation about glTF +Y by the same angle
@@ -262,7 +262,8 @@ def _read_glb(data, max_triangles):
     if not isinstance(gl, dict) or not isinstance(gl.get("asset"), dict) or gl["asset"].get("version") != "2.0":
         raise PackageError("glb: asset.version must be 2.0")
     if gl.get("extensionsRequired"):
-        raise PackageError(f"glb: required extensions are not allowed: {gl['extensionsRequired']}")
+        n = len(gl["extensionsRequired"]) if isinstance(gl["extensionsRequired"], list) else 1
+        raise PackageError(f"glb: required extensions are not allowed ({n} listed)")   # names not echoed
     buffers = gl.get("buffers", [])
     if not isinstance(buffers, list) or len(buffers) > 1:
         raise PackageError("glb: at most one (GLB-stored) buffer is allowed")
@@ -396,7 +397,7 @@ def _mesh_triangles(mesh, read_acc, budget, max_triangles):
         if mode in (5, 6):
             raise PackageError("glb: triangle strips/fans are not supported; use mode 4 (TRIANGLES)")
         if mode not in (0, 1, 2, 3, 4):
-            raise PackageError(f"glb: invalid primitive mode {mode!r}")
+            raise PackageError("glb: invalid primitive mode (expected an integer 0-6)")
         if p.get("targets"):
             raise PackageError("glb: morph targets are not allowed in static maps")
         if mode != 4:

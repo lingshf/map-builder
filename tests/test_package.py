@@ -595,7 +595,7 @@ class BindingTest(TempDirCase):
         objs = scene()
         nodes = [world_node(o, reverse=True) if o["name"] == "chiral" else node_of(o) for o in objs]
         r = self.assertInvalid(self.write("flip.mbmap", objs, nodes)[0], "winding mismatch")
-        self.assertTrue(any("orientation probe 'chiral'" in e for e in r.errors), r.errors)
+        self.assertTrue(any("orientation probe 0 (collision object #1)" in e for e in r.errors), r.errors)
 
     def test_whole_scene_x_mirror_rejected(self):
         objs = scene()
@@ -612,7 +612,7 @@ class BindingTest(TempDirCase):
         nodes = [world_node(x, mirror_cx=cx) if x is o else node_of(x) for x in objs]
         r = validate_package(self.write("selfmirror.mbmap", objs, nodes)[0])
         self.assertFalse(any("AABB" in e for e in r.errors), r.errors)  # same box: only probes/winding catch it
-        self.assertTrue(any("orientation probe 'chiral'" in e for e in r.errors), r.errors)
+        self.assertTrue(any("orientation probe 0 (collision object #1)" in e for e in r.errors), r.errors)
         self.assertTrue(any("unambiguous visual match" in w for w in r.warnings), r.warnings)
 
     def test_moved_visual_and_visual_only_node_rejected(self):
@@ -1195,8 +1195,8 @@ class ReviewFixesTest(TempDirCase):
         raw_write(self.p("extra_raw.mbmap"), members, manifest)
         r = validate_package(self.p("extra_raw.mbmap"))
         self.assertTrue(r.ok, r.summary())   # consumer side: a warning, per the contract
-        self.assertTrue(any("'chiral': 1 visual triangle(s) have no collision counterpart" in w for w in r.warnings),
-                        r.warnings)
+        self.assertTrue(any("collision object #1 / glTF node #1: 1 visual triangle(s) have no collision counterpart"
+                            in w for w in r.warnings), r.warnings)
         # the unchanged scene still exports
         members, manifest, _ = scene_members(scene())
         self.assertTrue(pkg.write_package(self.p("ok.mbmap"), members, manifest).ok)
@@ -1234,7 +1234,7 @@ class ReviewFixesTest(TempDirCase):
         down = [obj("terrain", "terrain:grid", "terrain", flipped_mesh(grid_terrain_mesh(AREA_W, AREA_H, 20.0)))]
         members, manifest, _ = scene_members(down + base[1:])
         raw_write(self.p("orient_terrain.mbmap"), members, manifest)
-        self.assertInvalid(self.p("orient_terrain.mbmap"), "terrain 'terrain' has")
+        self.assertInvalid(self.p("orient_terrain.mbmap"), "terrain object #0 has")
         # degenerate triangles stay a warning and do not break closure or the up test
         col = read_collision(write_collision([ColObject("t", "terrain:grid", "terrain",
                                                         [(0, 0, 0), (1, 0, 0), (0, 1, 0), (2, 0, 0)],
@@ -1440,6 +1440,186 @@ class ReviewFixesTest(TempDirCase):
         members, manifest, _ = scene_members(scene(), sources=srcs)
         self.assertIn("Line one of the licence.\nLine two.", members["NOTICES.txt"].decode())
         self.assertTrue(pkg.write_package(self.p("notice_text.mbmap"), members, manifest).ok)
+
+
+def merged_mesh(parts, name="shells"):
+    """One mesh holding several boxes; ``parts`` = [(mesh, reversed?)]."""
+    m = MeshData(name)
+    for src, flip in parts:
+        base = len(m.vertices)
+        for v in src.vertices:
+            m.add_vertex(*v)
+        for f in src.faces:
+            f = tuple(base + i for i in f)
+            m.add_face(tuple(reversed(f)) if flip else f, "MB Wall", (0.7, 0.7, 0.7))
+    return m
+
+
+def shifted(tri, dx):
+    return tuple((p[0] + dx, p[1], p[2]) for p in tri)
+
+
+class ReviewRound2Test(TempDirCase):
+    """Second gpt-6.2-sol review of PR #4."""
+
+    def orient(self, parts, **kw):
+        m = merged_mesh(parts)
+        col = read_collision(write_collision([ColObject("b", "osm:way/9", "building", list(m.vertices),
+                                                        [tuple(t) for t in m.triangles()])]))
+        return pkg.collision_orientation_problems(col, **kw)
+
+    # 1: per-shell orientation (an outward shell cannot hide a separate inverted one)
+    def test_inverted_shell_not_hidden_by_outward_shell(self):
+        outer = box_mesh(0, 0, 10, 10, 0, 10)
+        apart = box_mesh(20, 0, 25, 5, 0, 5)
+        cavity = box_mesh(2, 2, 7, 7, 2, 7)
+        big_cavity = box_mesh(1, 1, 9, 9, 1, 9)
+        island = box_mesh(3, 3, 6, 6, 3, 6)
+        probs = self.orient([(outer, False), (apart, True)])
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("is not inside an outward shell", probs[0])
+        self.assertIn("building object #0: shell 1 of 2", probs[0])
+        self.assertTrue(self.orient([(apart, True), (outer, False)]))                # order does not matter
+        self.assertTrue(self.orient([(outer, True)]))                                # a lone inverted solid
+        self.assertEqual(self.orient([(outer, False), (cavity, True)]), [])          # legitimate cavity
+        self.assertEqual(self.orient([(outer, False), (big_cavity, True), (island, False)]), [])
+        self.assertEqual(self.orient([(outer, False), (apart, False)]), [])          # two outward shells
+        probs = self.orient([(outer, False), (cavity, True)], max_work=1)
+        self.assertTrue(probs and "work budget" in probs[0], probs)
+        # package level: visual and collision agree, so only the independent orientation check catches it
+        bad = obj("twin", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
+                                                                (box_mesh(80, 60, 85, 65, 0, 5), True)]))
+        members, manifest, _ = scene_members(scene() + [bad])
+        raw_write(self.p("shells.mbmap"), members, manifest)
+        r = self.assertInvalid(self.p("shells.mbmap"), "is not inside an outward shell")
+        self.assertFalse(any("winding mismatch" in e for e in r.errors), r.errors)
+        with self.assertRaises(PackageError):
+            pkg.write_package(self.p("shells_w.mbmap"), members, manifest)
+        ok = obj("hollow", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
+                                                                 (box_mesh(62, 62, 67, 67, 2, 7), True)]))
+        members, manifest, _ = scene_members(scene() + [ok])
+        self.assertTrue(pkg.write_package(self.p("hollow.mbmap"), members, manifest).ok)
+
+    # 2: the one-to-one matcher is a maximum matching, independent of order
+    def test_one_to_one_matching_is_order_independent(self):
+        t = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        col = [shifted(t, 0.002), shifted(t, 0.0)]
+        vis = [shifted(t, 0.001), shifted(t, 0.0065)]                  # tolerance 5 mm
+        for c, v in ((col, vis), (col[::-1], vis), (col, vis[::-1]), (col[::-1], vis[::-1])):
+            st = pkg.match_one_to_one(c, v)
+            self.assertEqual((st["matched"], st["unmatched"], st["visual_only"]), (2, 0, 0), st)
+            self.assertFalse(st["work_exhausted"])
+        # a real shortage is still reported
+        st = pkg.match_one_to_one(col, vis[1:])
+        self.assertEqual((st["matched"], st["unmatched"]), (1, 1))
+        # the export refuses explicitly when the matcher runs out of budget
+        members, manifest, _ = scene_members(scene())
+        with mock.patch.object(pkg, "MATCH_WORK_PER_TRIANGLE", 0), mock.patch.object(pkg, "MATCH_WORK_SLACK", 1):
+            with self.assertRaises(PackageError) as cm:
+                pkg.write_package(self.p("match_budget.mbmap"), members, manifest)
+        self.assertIn("cannot verify binding: work budget", str(cm.exception))
+
+    # 3a: the credential policy covers every parsed JSON payload, not only the manifest
+    def test_payload_json_credential_policy(self):
+        secret = "S3KR1Tvalue"
+        members, manifest, _ = scene_members(scene())
+
+        def report(ms):
+            rep = json.loads(ms["report.json"])
+            rep["counts"]["api_key"] = secret
+            ms["report.json"] = json.dumps(rep).encode()
+
+        def table(ms):
+            data = ms["collision/map.mbcol"]
+            _, _, _, nv, nt, *_ = COL_HEADER.unpack_from(data, 0)
+            t = json.loads(data[collision_size(nv, nt, 0):].rstrip(b"\0"))
+            t[1]["meta"] = {"password": secret}
+            ms["collision/map.mbcol"] = replace_table(data, json.dumps(t).encode())
+
+        def glb(ms):
+            ms["visual/map.glb"] = patch_glb(ms["visual/map.glb"],
+                                             lambda gl: gl["nodes"][1]["extras"].update(token=secret))
+
+        for label, change in (("report", report), ("mbcol", table), ("glb", glb)):
+            with self.subTest(label):
+                ms = dict(members)
+                change(ms)
+                m = rehash(ms, copy.deepcopy(manifest))
+                raw_write(self.p(f"psec_{label}.mbmap"), ms, m)
+                r = self.assertInvalid(self.p(f"psec_{label}.mbmap"), "credential-like")
+                self.assertFalse(any(secret in e for e in r.errors + r.warnings), r.errors)
+                with self.assertRaises(PackageError) as cm:
+                    pkg.write_package(self.p(f"psec_{label}_w.mbmap"), ms, m)
+                self.assertIn("credential-like", str(cm.exception))
+                self.assertNotIn(secret, str(cm.exception))
+        self.assertTrue(validate_package(self.p("psec_report.mbmap")).errors)
+        r = pkg.find_secrets({"a": [{"b": {"c": [[{"access_token": "x"}]]}}]}, "$")
+        self.assertEqual(len(r), 1)
+        deep = cur = {}
+        for _ in range(5000):                                         # deeper than the recursion limit
+            cur["k"] = {}
+            cur = cur["k"]
+        cur["password"] = "x"
+        self.assertEqual(len(pkg.find_secrets(deep, "$")), 1)
+
+    # 3b: diagnostics name entries by index, never by strings taken from the package
+    def test_diagnostics_do_not_echo_package_strings(self):
+        token = "ZZtok3n_9f8e7d"
+        members, manifest, _ = scene_members(scene())
+        data = members["collision/map.mbcol"]
+        _, _, _, nv, nt, *_ = COL_HEADER.unpack_from(data, 0)
+        off = collision_size(nv, nt, 0)
+        table = json.loads(data[off:].rstrip(b"\0"))
+
+        def renamed(ms):
+            t = copy.deepcopy(table)
+            t[1]["name"] = token
+            ms["collision/map.mbcol"] = replace_table(data, json.dumps(t).encode())
+
+        def dup_key(ms):
+            raw = b'[{"%s": 1, "%s": 2, ' % (token.encode(), token.encode()) + json.dumps(table).encode()[2:]
+            ms["collision/map.mbcol"] = replace_table(data, raw)
+
+        def bad_class(ms):
+            t = copy.deepcopy(table)
+            t[1]["class"] = token
+            ms["collision/map.mbcol"] = replace_table(data, json.dumps(t).encode())
+
+        def glb_ext(ms):
+            ms["visual/map.glb"] = patch_glb(ms["visual/map.glb"],
+                                             lambda gl: gl.update(extensionsRequired=[token]))
+
+        def glb_name(ms):
+            ms["visual/map.glb"] = patch_glb(ms["visual/map.glb"],
+                                             lambda gl: gl["nodes"][1].update(name=token))
+
+        for label, change in (("renamed", renamed), ("dupkey", dup_key), ("class", bad_class),
+                              ("glbext", glb_ext), ("glbname", glb_name)):
+            with self.subTest(label):
+                ms = dict(members)
+                change(ms)
+                raw_write(self.p(f"echo_{label}.mbmap"), ms, rehash(ms, copy.deepcopy(manifest)))
+                r = validate_package(self.p(f"echo_{label}.mbmap"))
+                self.assertFalse(r.ok, label)
+                self.assertFalse(any(token in s for s in r.errors + r.warnings), r.errors + r.warnings)
+        m = copy.deepcopy(manifest)
+        m["objects"][1]["name"] = token                               # manifest object name
+        raw_write(self.p("echo_manifest.mbmap"), members, m)
+        r = validate_package(self.p("echo_manifest.mbmap"))
+        self.assertFalse(r.ok)
+        self.assertFalse(any(token in s for s in r.errors + r.warnings), r.errors)
+        raw_write(self.p("echo_entry.mbmap"), dict(members, **{f"extra/{token}.txt": b"x"}), manifest)
+        r = self.assertInvalid(self.p("echo_entry.mbmap"), "unlisted file in package")
+        self.assertFalse(any(token in s for s in r.errors + r.warnings), r.errors)
+        # writer-side messages do not echo names either
+        with self.assertRaises(PackageError) as cm:
+            write_collision([ColObject(token, "osm:way/1", "building", [(0, 0, 0), (1, 0, 0), (0, 1, 0)],
+                                       [(0, 1, 5)])])
+        self.assertNotIn(token, str(cm.exception))
+        bad = box_mesh(0, 0, 1, 1, 0, 1, name=token)
+        with self.assertRaises(PackageError) as cm:
+            write_glb([{"name": token, "mesh": bad, "location": (math.nan, 0.0, 0.0)}], MATERIALS)
+        self.assertNotIn(token, str(cm.exception))
 
 
 if __name__ == "__main__":

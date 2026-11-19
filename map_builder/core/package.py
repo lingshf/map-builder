@@ -166,22 +166,28 @@ def _key_label(path, k, i):
 def find_secrets(obj, path="$"):
     """Locations of credential-like strings (see ``_SECRET``) anywhere in ``obj``: string values, dict keys,
     and non-empty strings stored under credential-named keys. Locations are built from field names that are
-    plain identifiers and from indices, so they never echo the offending text."""
+    plain identifiers and from indices, so they never echo the offending text. Iterative (depth-first, in
+    document order), so arbitrarily nested parsed JSON cannot exhaust the interpreter stack; linear in the
+    size of ``obj``."""
     hits = []
-    if isinstance(obj, dict):
-        for i, (k, v) in enumerate(obj.items()):
-            where = _key_label(path, k, i)
-            if isinstance(k, str) and _SECRET.search(k):
-                hits.append(f"{path}[key #{i}]")
-            if isinstance(k, str) and _SECRET_KEY.fullmatch(k) and isinstance(v, str) and v.strip():
-                hits.append(where)
-                continue
-            hits += find_secrets(v, where)
-    elif isinstance(obj, (list, tuple)):
-        for i, v in enumerate(obj):
-            hits += find_secrets(v, f"{path}[{i}]")
-    elif isinstance(obj, str) and _SECRET.search(obj):
-        hits.append(path)
+    stack = [(obj, path)]
+    while stack:
+        obj, path = stack.pop()
+        if isinstance(obj, dict):
+            children = []
+            for i, (k, v) in enumerate(obj.items()):
+                where = _key_label(path, k, i)
+                if isinstance(k, str) and _SECRET.search(k):
+                    hits.append(f"{path}[key #{i}]")
+                if isinstance(k, str) and _SECRET_KEY.fullmatch(k) and isinstance(v, str) and v.strip():
+                    hits.append(where)
+                    continue
+                children.append((v, where))
+            stack.extend(reversed(children))
+        elif isinstance(obj, (list, tuple)):
+            stack.extend((obj[i], f"{path}[{i}]") for i in range(len(obj) - 1, -1, -1))
+        elif isinstance(obj, str) and _SECRET.search(obj):
+            hits.append(path)
     return hits
 
 
@@ -467,100 +473,340 @@ def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, m
     """Exporter-side binding (stricter than the consumer diagnostic of :func:`match_winding`): pair every
     collision triangle with a *distinct* visual triangle whose vertices are each within ``tol`` in the same
     cyclic order (any order for a degenerate collision triangle, which has no orientation), and leave no
-    visual triangle unpaired. Greedy in collision order, taking the closest unused candidate; exports come
-    from the same evaluated meshes, so pairs coincide to float32 precision and greedy choice is exact.
-    Bounded by ``max_work`` candidate visits like :func:`match_winding`.
+    visual triangle unpaired.
+
+    A maximum bipartite matching over those candidate sets, so the result does not depend on triangle order:
+    a greedy closest-first pass pairs the unambiguous majority (exports come from the same evaluated meshes,
+    so pairs coincide to float32 precision), then Kuhn augmenting paths (iterative) are searched from each
+    collision triangle left free; such a search only walks the component of overlapping candidates it
+    starts in. One budget, ``max_work`` (see :func:`match_winding`), covers candidate visits while building
+    the sets and edge visits while augmenting; when it runs out ``work_exhausted`` is set and the counts
+    are incomplete (callers must refuse, not pass).
 
     Returns {"matched", "reversed", "unmatched", "visual_only", "work_exhausted"}: ``reversed`` counts
-    collision triangles whose only free counterparts have reversed winding; ``visual_only`` counts visual
-    triangles left unpaired."""
+    unpaired collision triangles that have no same-winding candidate but a reversed one; ``visual_only``
+    counts visual triangles left unpaired."""
     collision_triangles = list(collision_triangles)
     visual_triangles = list(visual_triangles)
     cs = 2.0 * tol
     grid = {}
     for k, v in enumerate(visual_triangles):
         grid.setdefault(_cell(_centroid(v), cs), []).append(k)
-    used = [False] * len(visual_triangles)
     st = {"matched": 0, "reversed": 0, "unmatched": 0, "visual_only": 0, "work_exhausted": False}
     budget = _match_budget(len(collision_triangles), max_work)
     work = 0
+    cands = []            # per collision triangle: [(distance, visual index)], closest first
+    reversed_only = []
     for tri in collision_triangles:
         degenerate = is_degenerate(*tri, DEGENERATE_EPS)
-        best, best_k, reversed_only = math.inf, None, False
+        row, rev_seen = [], False
         for cell in _centroid_cells(tri, tol):
             for k in grid.get(cell, ()):
                 work += 1
                 if work > budget:
                     st["work_exhausted"] = True
                     return st
-                if used[k]:
-                    continue
                 same, rev = _correspondence(tri, visual_triangles[k], tol)
                 d = min(same, rev) if degenerate else same
-                if d < best:
-                    best, best_k = d, k
+                if d < math.inf:
+                    row.append((d, k))
                 elif rev < math.inf:
-                    reversed_only = True
-        if best_k is not None:
-            used[best_k] = True
+                    rev_seen = True
+        row.sort()
+        cands.append([k for _, k in row])
+        reversed_only.append(rev_seen and not row)
+    owner = [-1] * len(visual_triangles)          # visual index -> collision index
+    mate = [-1] * len(collision_triangles)        # collision index -> visual index
+    for u, row in enumerate(cands):               # fast path: closest free candidate
+        for k in row:
+            if owner[k] < 0:
+                owner[k], mate[u] = u, k
+                break
+    for root in range(len(cands)):
+        if mate[root] >= 0 or not cands[root]:
+            continue
+        # iterative DFS for an augmenting path: alternate free edge (u -> k), matched edge (k -> owner[k])
+        seen = set()
+        stack = [(root, 0)]
+        via = {}                                  # visual k -> collision u it was reached from
+        end = -1
+        while stack and end < 0:
+            u, i = stack[-1]
+            if i >= len(cands[u]):
+                stack.pop()
+                continue
+            stack[-1] = (u, i + 1)
+            work += 1
+            if work > budget:
+                st["work_exhausted"] = True
+                return st
+            k = cands[u][i]
+            if k in seen:
+                continue
+            seen.add(k)
+            via[k] = u
+            if owner[k] < 0:
+                end = k
+            else:
+                stack.append((owner[k], 0))
+        k = end
+        while k >= 0:                             # flip the path back to the root
+            u = via[k]
+            prev = mate[u]
+            owner[k], mate[u] = u, k
+            k = prev
+    for u, k in enumerate(mate):
+        if k >= 0:
             st["matched"] += 1
-        elif reversed_only:
+        elif reversed_only[u]:
             st["reversed"] += 1
         else:
             st["unmatched"] += 1
-    st["visual_only"] = used.count(False)
+    st["visual_only"] = owner.count(-1)
     return st
 
 
 # --- independent collision orientation ------------------------------------------------------
 
-def collision_orientation_problems(col):
+WELD_TOL_M = 1e-4                 # building shell vertices closer than this are one vertex (float32 noise)
+# Work budget for shell nesting (ray/triangle tests), over the whole collision: per building triangle plus a
+# constant. Generated buildings have no inverted shells and need no ray tests at all; a legitimate cavity
+# costs a few passes over its container.
+ORIENT_WORK_PER_TRIANGLE = 64
+ORIENT_WORK_SLACK = 1 << 16
+NEST_TEST_POINTS = 4              # face centroids of a shell tried as the point-in-solid sample
+_RAY_DIRS = tuple(_unit(d) for d in ((0.5383, 0.3101, 0.7837), (-0.4231, 0.6687, 0.6115),
+                                     (0.2719, -0.8129, 0.5150)))   # generic: no axis or diagonal alignment
+_RAY_EPS_BARY = 1e-9
+_RAY_EPS_T = 1e-7
+
+
+class _OrientBudget(Exception):
+    pass
+
+
+def _weld_ids(tris, tol=WELD_TOL_M):
+    """Welded vertex id triples. Each distinct position joins the first representative within ``tol`` in
+    the 27 surrounding cells of size ``tol``, or becomes one. Representatives are kept more than ``tol``
+    apart, so a cell holds only a few of them and every lookup is bounded."""
+    exact, reps, out = {}, {}, []
+    nrep = 0
+    for t in tris:
+        ids = []
+        for p in t:
+            i = exact.get(p)
+            if i is None:
+                cx, cy, cz = _cell(p, tol)
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            for q, j in reps.get((cx + dx, cy + dy, cz + dz), ()):
+                                if i is None and _dist(p, q) <= tol:
+                                    i = j
+                if i is None:
+                    i = nrep
+                    nrep += 1
+                    reps.setdefault((cx, cy, cz), []).append((p, i))
+                exact[p] = i
+            ids.append(i)
+        out.append(tuple(ids))
+    return out
+
+
+def _find(parent, a):
+    while parent[a] != a:
+        parent[a] = parent[parent[a]]
+        a = parent[a]
+    return a
+
+
+def _union(parent, a, b):
+    a, b = _find(parent, a), _find(parent, b)
+    if a != b:
+        parent[max(a, b)] = min(a, b)
+
+
+def _shells(ids):
+    """Split a building's triangles (welded id triples) into shells: triangles joined across manifold
+    edges (one use in each direction). Components that are not closed on their own, which only happens at
+    non-manifold edges, are then merged across every edge they share; since the whole object is closed,
+    each merged group is closed. Triangles with no edge of non-zero length (collapsed to a point) belong
+    to no shell. Returns lists of triangle indices, in first-triangle order."""
+    edges = {}                                  # undirected edge -> [(triangle, forward)]
+    for t, (a, b, c) in enumerate(ids):
+        for p, q in ((a, b), (b, c), (c, a)):
+            if p != q:
+                edges.setdefault((min(p, q), max(p, q)), []).append((t, p < q))
+    parent = list(range(len(ids)))
+    for uses in edges.values():
+        if len(uses) == 2 and uses[0][1] != uses[1][1]:
+            _union(parent, uses[0][0], uses[1][0])
+    balance = {}                                # (component, undirected edge) -> forward minus backward
+    for e, uses in edges.items():
+        for t, fwd in uses:
+            key = (_find(parent, t), e)
+            balance[key] = balance.get(key, 0) + (1 if fwd else -1)
+    open_comps = {c for (c, _), n in balance.items() if n}
+    if open_comps:
+        for uses in edges.values():
+            ts = [t for t, _ in uses if _find(parent, t) in open_comps]
+            for t in ts[1:]:
+                _union(parent, ts[0], t)
+    groups = {}
+    for t in range(len(ids)):
+        if len(set(ids[t])) > 1:
+            groups.setdefault(_find(parent, t), []).append(t)
+    return list(groups.values())
+
+
+def _signed_volume(tris):
+    r = tris[0][0]                              # a local origin keeps the products small
+    vol = 0.0
+    for a, b, c in tris:
+        ax, ay, az = a[0] - r[0], a[1] - r[1], a[2] - r[2]
+        bx, by, bz = b[0] - r[0], b[1] - r[1], b[2] - r[2]
+        cx, cy, cz = c[0] - r[0], c[1] - r[1], c[2] - r[2]
+        vol += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
+    return vol / 6.0
+
+
+def _ray_parity(p, d, tris):
+    """Number of crossings of the ray p + t*d (t > 0) with ``tris`` mod 2, or None when the ray grazes an
+    edge or vertex or starts on a triangle (undecidable from this ray)."""
+    odd = False
+    for a, b, c in tris:
+        e1 = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        e2 = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        pv = (d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0])
+        det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2]
+        if det == 0.0:
+            continue                            # parallel to the ray (or degenerate): no transversal crossing
+        s = (p[0] - a[0], p[1] - a[1], p[2] - a[2])
+        u = (s[0] * pv[0] + s[1] * pv[1] + s[2] * pv[2]) / det
+        if u < -_RAY_EPS_BARY or u > 1.0 + _RAY_EPS_BARY:
+            continue
+        qv = (s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0])
+        v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) / det
+        if v < -_RAY_EPS_BARY or u + v > 1.0 + _RAY_EPS_BARY:
+            continue
+        t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det
+        if t < -_RAY_EPS_T:
+            continue
+        if t <= _RAY_EPS_T or u <= _RAY_EPS_BARY or v <= _RAY_EPS_BARY or u + v >= 1.0 - _RAY_EPS_BARY:
+            return None
+        odd = not odd
+    return odd
+
+
+def _inside(points, tris, work):
+    """Whether the closed surface ``tris`` contains the sample points (the first point and direction that
+    give a clean ray decide), or None if none does. ``work`` = [used, budget] ray/triangle tests."""
+    for p in points:
+        for d in _RAY_DIRS:
+            work[0] += len(tris)
+            if work[0] > work[1]:
+                raise _OrientBudget
+            res = _ray_parity(p, d, tris)
+            if res is not None:
+                return res
+    return None
+
+
+def _contains_aabb(outer, inner, eps=1e-6):
+    return all(outer[i] <= inner[i] + eps for i in range(3)) and all(outer[i] >= inner[i] - eps for i in range(3, 6))
+
+
+def _building_problems(k, tris, work):
+    """Orientation problems of one building collision object (index ``k`` in the object table)."""
+    tag = f"collision: building object #{k}"
+    ids = _weld_ids(tris)
+    edges = {}
+    for a, b, c in ids:
+        for p, q in ((a, b), (b, c), (c, a)):
+            if p != q:
+                edges[(p, q)] = edges.get((p, q), 0) + 1
+    unbalanced = sum(1 for (p, q), n in edges.items()
+                     if edges.get((q, p), 0) != n and ((q, p) not in edges or (p, q) < (q, p)))
+    if unbalanced:
+        return [f"{tag} is not a closed, consistently oriented solid ({unbalanced} open or inconsistently "
+                "wound edge(s)); building solids must be closed with CCW-outward faces"]
+    shells = []
+    for ts in _shells(ids):
+        st = [tris[t] for t in ts]
+        shells.append((st, _signed_volume(st), _aabb([p for t in st for p in t])))
+    problems = []
+    n = len(shells)
+    for s, (st, vol, box) in enumerate(shells):
+        if vol > 0.0:
+            continue
+        # An inverted shell is legitimate only as a cavity: inside a shell that faces outward.
+        nd = [t for t in st if not is_degenerate(*t)]
+        if not nd:
+            continue                            # only zero-area faces: no orientation to check
+        points = [_centroid(nd[(i * len(nd)) // NEST_TEST_POINTS]) for i in range(min(NEST_TEST_POINTS, len(nd)))]
+        verdict = False
+        for o, (ot, ovol, obox) in enumerate(shells):
+            if o == s or not ovol > 0.0 or not _contains_aabb(obox, box):
+                continue
+            res = _inside(points, ot, work)
+            if res:
+                verdict = True
+                break
+            if res is None:
+                verdict = None
+        if verdict is None:
+            problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3 and whether it is a cavity "
+                            "inside an outward shell could not be decided (every sample ray grazed an edge)")
+        elif not verdict:
+            problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3 and is not inside an outward "
+                            "shell; every top-level shell must have positive volume (faces CCW seen from outside)")
+    return problems
+
+
+def collision_orientation_problems(col, max_work=None):
     """Checks the final collision on its own, per docs/PACKAGE_FORMAT.md "Winding" (agreement with the
-    visuals does not prove orientation: both could be inverted). Returns a list of error strings.
+    visuals does not prove orientation: both could be inverted). Returns a list of error strings, which
+    name objects by table index only (never by their names from the file).
 
     * ``building``: a closed solid with consistently oriented edges (every directed edge, after welding
-      identical float32 positions, is matched by its reverse equally often; zero-length edges of degenerate
-      triangles are ignored, degenerate triangles are otherwise kept so slivers still close the surface)
-      and positive signed volume (outward-facing). Generated buildings, all roof shapes, courtyards and
-      raised parts, are closed by construction; an edit that opens one is refused, as the contract
-      requires closed building solids.
+      positions within ``WELD_TOL_M``, is matched by its reverse equally often; zero-length edges of
+      degenerate triangles are ignored, degenerate triangles are otherwise kept so slivers still close the
+      surface). Each connected shell (see :func:`_shells`) is checked on its own, so an outward shell
+      cannot hide a separate inverted one: a shell must have positive signed volume unless it is a cavity,
+      i.e. inside a shell of positive volume (ray parity from sample face centroids). Courtyards are holes
+      of their own shell, not cavities. Generated buildings, all roof shapes, courtyards and raised parts,
+      are closed by construction.
     * ``terrain`` and ``road``: every non-degenerate triangle faces up (normal z > 0).
-    Other classes (vegetation, water, props, user) carry no orientation requirement in the contract."""
+    Other classes (vegetation, water, props, user) carry no orientation requirement in the contract.
+
+    Nesting tests are bounded by ``max_work`` ray/triangle tests over the whole collision (default
+    ``ORIENT_WORK_PER_TRIANGLE`` per building triangle + ``ORIENT_WORK_SLACK``); running out is reported as
+    an error, not passed."""
     problems = []
-    for e in col.objects:
+    if max_work is None:
+        nb = sum(e["tri_count"] for e in col.objects if e["class"] == "building")
+        max_work = ORIENT_WORK_PER_TRIANGLE * nb + ORIENT_WORK_SLACK
+    work = [0, max_work]
+    exhausted = False
+    for k, e in enumerate(col.objects):
         cls = e["class"]
         if cls not in ("building", "terrain", "road"):
             continue
         tris = col.object_triangles(e)
         if cls == "building":
-            edges = {}
-            for t in tris:
-                for p, q in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
-                    if p != q:
-                        edges[(p, q)] = edges.get((p, q), 0) + 1
-            unbalanced = sum(1 for (p, q), n in edges.items()
-                             if edges.get((q, p), 0) != n and ((q, p) not in edges or (p, q) < (q, p)))
-            if unbalanced:
-                problems.append(f"collision: building {e['name']!r} is not a closed, consistently oriented solid "
-                                f"({unbalanced} open or inconsistently wound edge(s)); building solids must be "
-                                "closed with CCW-outward faces")
+            if exhausted:
                 continue
-            rx, ry, rz = ((e["aabb"][0] + e["aabb"][3]) / 2, (e["aabb"][1] + e["aabb"][4]) / 2,
-                          (e["aabb"][2] + e["aabb"][5]) / 2)
-            vol = 0.0
-            for a, b, c in tris:
-                ax, ay, az = a[0] - rx, a[1] - ry, a[2] - rz
-                bx, by, bz = b[0] - rx, b[1] - ry, b[2] - rz
-                cx, cy, cz = c[0] - rx, c[1] - ry, c[2] - rz
-                vol += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
-            vol /= 6.0
-            if not vol > 0.0:
-                problems.append(f"collision: building {e['name']!r} has signed volume {vol:.6g} m^3; it must be "
-                                "positive (faces CCW seen from outside)")
+            try:
+                problems += _building_problems(k, tris, work)
+            except _OrientBudget:
+                exhausted = True
+                problems.append(f"collision: building object #{k}: shell nesting could not be verified within the "
+                                f"work budget of {max_work} ray/triangle tests; building orientation is unverified "
+                                "from here on")
         else:
             down = sum(1 for t in tris if not is_degenerate(*t) and _cross(*t)[2] <= 0.0)
             if down:
-                problems.append(f"collision: {cls} {e['name']!r} has {down} non-degenerate triangle(s) whose "
+                problems.append(f"collision: {cls} object #{k} has {down} non-degenerate triangle(s) whose "
                                 "normal does not point up (z <= 0); open surfaces must face +Z")
     return problems
 
@@ -707,19 +953,30 @@ _ZIP_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError, Ru
                OverflowError, MemoryError)
 
 
+def _member_label(name, i):
+    """A zip entry or listed path in diagnostics: the contract's own member paths verbatim, anything else
+    by position only (raw strings from the package are never echoed)."""
+    return repr(name) if name == MANIFEST or name in MEMBERS else f"#{i}"
+
+
 def validate_package(path, strict=False):
     """Validate a package file; never raises for malformed input (errors are collected).
 
     ``strict`` is the exporter's mode (used by :func:`write_package`): on top of the consumer checks, each
     node's visual and collision triangles must correspond one-to-one with the same winding.
-    ``package_id`` is published only if the package is valid; after any error it is None."""
+    ``package_id`` is published only if the package is valid; after any error it is None.
+
+    Diagnostics never echo strings taken from the package (entry and object names, JSON keys, exception
+    text that may quote them): they refer to entries by index or by the contract's fixed member paths."""
     r = ValidationResult()
     r.strict = strict
     try:
         with zipfile.ZipFile(path, "r") as z:
             _validate_zip(z, r)
     except _ZIP_ERRORS as e:
-        r.errors.append(f"not a readable package: {type(e).__name__}: {e}")
+        # zipfile messages can quote entry names from the archive; only the OS reason (no file name) is kept
+        reason = f" ({e.strerror})" if isinstance(e, OSError) and isinstance(e.strerror, str) else ""
+        r.errors.append(f"not a readable package: {type(e).__name__}{reason}")
     except PackageError as e:
         r.errors.append(str(e))
     if r.errors:
@@ -732,26 +989,28 @@ def _validate_zip(z, r):
     if len(infos) > MAX_ENTRIES:
         r.errors.append(f"too many entries ({len(infos)} > {MAX_ENTRIES})")
         return
-    names, lowered = {}, set()
+    names, lowered, position = {}, set(), {}
     total = 0
-    for zi in infos:
+    for i, zi in enumerate(infos):
         raw = zi.orig_filename
+        tag = f"entry {_member_label(raw, i)}"
         if not safe_member_name(raw) or raw != zi.filename:
-            r.errors.append(f"unsafe entry name {raw!r}")
+            r.errors.append(f"unsafe entry name ({tag})")
         if raw.lower() in lowered:
-            r.errors.append(f"duplicate entry {raw!r}")
+            r.errors.append(f"duplicate entry ({tag}; names differ at most in case)")
         lowered.add(raw.lower())
         names[raw] = zi
+        position.setdefault(raw, i)
         mode = (zi.external_attr >> 16) & 0o170000
         if zi.is_dir() or (mode and mode != stat.S_IFREG):
-            r.errors.append(f"entry {raw!r} is not a regular file (directory or symlink)")
+            r.errors.append(f"{tag} is not a regular file (directory or symlink)")
         if zi.flag_bits & 0x1:
-            r.errors.append(f"entry {raw!r} is encrypted")
+            r.errors.append(f"{tag} is encrypted")
         if zi.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
-            r.errors.append(f"entry {raw!r} uses unsupported compression {zi.compress_type}")
+            r.errors.append(f"{tag} uses unsupported compression {zi.compress_type}")
         total += zi.file_size
         if zi.file_size and (zi.compress_size == 0 or zi.file_size / zi.compress_size > MAX_RATIO):
-            r.errors.append(f"entry {raw!r} compression ratio exceeds {MAX_RATIO}")
+            r.errors.append(f"{tag} compression ratio exceeds {MAX_RATIO}")
     if total > MAX_TOTAL_UNCOMPRESSED:
         r.errors.append(f"uncompressed size {total} exceeds {MAX_TOTAL_UNCOMPRESSED} bytes")
     if r.errors:
@@ -768,7 +1027,8 @@ def _validate_zip(z, r):
         with z.open(zi) as f:
             data = f.read(zi.file_size + 1)
         if len(data) != zi.file_size:
-            raise PackageError(f"{name}: uncompressed size differs from its zip header")
+            raise PackageError(f"entry {_member_label(name, position[name])}: uncompressed size differs from its "
+                               "zip header")
         return data
 
     raw = read(MANIFEST)
@@ -787,22 +1047,25 @@ def _validate_zip(z, r):
     if r.errors:
         return
     # files[] <-> archive members, one-to-one, then sizes and hashes
-    listed = {f["path"]: f for f in m["files"]}
+    listed = {f["path"]: (j, f) for j, f in enumerate(m["files"])}
     members = set(names) - {MANIFEST}
-    for p in sorted(members - set(listed)):
-        r.errors.append(f"unlisted file in package: {p}")
-    for p in sorted(set(listed) - members):
-        r.errors.append(f"listed file missing from package: {p}")
+    def file_tag(p):
+        return f"files[{listed[p][0]}]" + (f" ({p})" if p in MEMBERS else "")
+    for p in sorted(members - set(listed), key=position.get):
+        r.errors.append(f"unlisted file in package: entry {_member_label(p, position[p])}")
+    for p in sorted(set(listed) - members, key=lambda q: listed[q][0]):
+        r.errors.append(f"listed file missing from package: {file_tag(p)}")
     if r.errors:
         return
     blobs = {}
-    for p, f in listed.items():
+    for p, (j, f) in listed.items():
+        tag = file_tag(p)
         if f["bytes"] != names[p].file_size:
-            r.errors.append(f"{p}: size {names[p].file_size} != manifest bytes {f['bytes']}")
+            r.errors.append(f"{tag}: size {names[p].file_size} != manifest bytes {f['bytes']}")
             continue
         data = read(p)
         if f["sha256"] != sha256(data):
-            r.errors.append(f"{p}: SHA-256 mismatch")
+            r.errors.append(f"{tag}: SHA-256 mismatch")
             continue
         blobs[f["role"]] = data
     if r.errors:
@@ -973,6 +1236,13 @@ def _aabb(points):
     return [min(xs), min(ys), min(zs), max(xs), max(ys), max(zs)]
 
 
+def _payload_secrets(r, where, obj):
+    """The manifest's credential policy, applied to a parsed JSON payload member (never echoes values)."""
+    hits = find_secrets(obj, "$")
+    if hits:
+        r.errors.append(secrets_message(where, hits))
+
+
 def _validate_payloads(m, blobs, r):
     try:
         col = read_collision(blobs["collision"])
@@ -980,6 +1250,7 @@ def _validate_payloads(m, blobs, r):
         r.errors.append(str(e))
         return
     r.collision = col
+    _payload_secrets(r, "collision/map.mbcol object table", col.objects)
     ci = m["collision"]
     if ci["triangle_count"] != col.triangle_count or ci["vertex_count"] != len(col.vertices):
         r.errors.append("collision: triangle/vertex counts differ from the manifest")
@@ -993,10 +1264,11 @@ def _validate_payloads(m, blobs, r):
     r.errors.extend(collision_orientation_problems(col))
     _check_objects(m, col, r)
     try:
-        _, nodes = read_glb(blobs["visual"])
+        gl, nodes = read_glb(blobs["visual"])
     except PackageError as e:
         r.errors.append(str(e))
         return
+    _payload_secrets(r, "visual/map.glb JSON chunk", gl)
     _check_binding(m, col, nodes, r)
     if "heightfield" in blobs:
         _check_heightfield(m["heightfield"], blobs["heightfield"], col, r)
@@ -1006,51 +1278,57 @@ def _validate_payloads(m, blobs, r):
 
 
 def _check_objects(m, col, r):
+    # names and identities are compared, never echoed: manifest objects by objects[i], collision by #k
     man = {}
-    for o in m["objects"]:
+    for i, o in enumerate(m["objects"]):
         if o["name"] in man:
-            r.errors.append(f"manifest: object {o['name']!r} listed twice")
-        man[o["name"]] = o
+            r.errors.append(f"manifest: objects[{i}] repeats the name of objects[{man[o['name']][0]}]")
+        man.setdefault(o["name"], (i, o))
     ids = {}
-    for o in m["objects"]:
+    for i, o in enumerate(m["objects"]):
         if o["mb_id"] in ids:
-            r.errors.append(f"duplicate object identity {o['mb_id']!r} ({ids[o['mb_id']]!r} and {o['name']!r})")
-        ids[o["mb_id"]] = o["name"]
+            r.errors.append(f"duplicate object identity: objects[{ids[o['mb_id']]}] and objects[{i}] share an mb_id")
+        ids.setdefault(o["mb_id"], i)
         base = o["mb_id"].split("~", 1)[0]
         if "~" in o["mb_id"]:
             if o["mb_id"] != f"{base}~{o['name']}" or not _MB_ID.fullmatch(base):
-                r.warnings.append(f"object {o['name']!r}: duplicate identity {o['mb_id']!r} is not "
-                                  "'<generated id>~<object name>'")
+                r.warnings.append(f"objects[{i}]: duplicate identity mb_id is not '<generated id>~<object name>'")
         elif o["mb_id"].startswith("user:"):
             if o["mb_id"] != f"user:{o['name']}":
-                r.warnings.append(f"object {o['name']!r}: user identity {o['mb_id']!r} is not 'user:<object name>'")
+                r.warnings.append(f"objects[{i}]: user identity mb_id is not 'user:<object name>'")
         elif not _MB_ID.fullmatch(o["mb_id"]):
-            r.warnings.append(f"object {o['name']!r}: unrecognised mb_id form {o['mb_id']!r}")
-    table = {e["name"]: e for e in col.objects}
-    for name in sorted(set(table) - set(man)):
-        r.errors.append(f"collision object {name!r} missing from manifest objects")
-    for name in sorted(set(man) - set(table)):
-        r.errors.append(f"manifest object {name!r} has no collision object")
-    for name in set(man) & set(table):
-        if man[name]["mb_id"] != table[name]["mb_id"] or man[name]["class"] != table[name]["class"]:
-            r.errors.append(f"object {name!r}: mb_id/class differ between manifest and collision")
+            r.warnings.append(f"objects[{i}]: unrecognised mb_id form")
+    table = {e["name"]: (k, e) for k, e in enumerate(col.objects)}
+    for name in sorted(set(table) - set(man), key=lambda n: table[n][0]):
+        r.errors.append(f"collision object #{table[name][0]} has no manifest object of the same name")
+    for name in sorted(set(man) - set(table), key=lambda n: man[n][0]):
+        r.errors.append(f"manifest objects[{man[name][0]}] has no collision object of the same name")
+    for name in sorted(set(man) & set(table), key=lambda n: man[n][0]):
+        (i, o), (k, e) = man[name], table[name]
+        if o["mb_id"] != e["mb_id"] or o["class"] != e["class"]:
+            r.errors.append(f"objects[{i}] / collision object #{k}: mb_id/class differ between manifest and "
+                            "collision")
 
 
 def _check_binding(m, col, nodes, r):
+    # glTF nodes are named by node index and collision objects by table index, never by their names
     by_name = {}
     for n in nodes:
         if n.triangles:
             if n.name in by_name:
-                r.errors.append(f"glb: duplicate node name {n.name!r}")
-            by_name[n.name] = n
-    table = {e["name"]: e for e in col.objects}
-    for name in sorted(set(by_name) - set(table)):
-        r.errors.append(f"glTF node {name!r} has triangles but no collision object (visible but not collidable)")
-    for e in col.objects:
+                r.errors.append(f"glb: glTF node #{n.index} repeats the name of glTF node #{by_name[n.name].index}")
+            by_name.setdefault(n.name, n)
+    table = {e["name"]: k for k, e in enumerate(col.objects)}
+    for name in sorted(set(by_name) - set(table), key=lambda n: by_name[n].index):
+        r.errors.append(f"glTF node #{by_name[name].index} has triangles but no collision object of the same name "
+                        "(visible but not collidable)")
+    for k, e in enumerate(col.objects):
+        tag = f"collision object #{k}"
         node = by_name.get(e["name"])
         if node is None:
-            r.errors.append(f"collision object {e['name']!r} has no glTF node with triangles of the same name")
+            r.errors.append(f"{tag} has no glTF node with triangles of the same name")
             continue
+        tag = f"collision object #{k} / glTF node #{node.index}"
         vis = [tuple(gltf_to_map(p) for p in t) for t in node.triangles]
         ctris = col.object_triangles(e)
         va = _aabb([p for t in vis for p in t])
@@ -1058,38 +1336,38 @@ def _check_binding(m, col, nodes, r):
         size = max(ca[3] - ca[0], ca[4] - ca[1], ca[5] - ca[2])
         tol = AABB_TOL_M + AABB_TOL_REL * size
         if any(abs(x - y) > tol for x, y in zip(va, ca)):
-            r.errors.append(f"visual/collision AABB mismatch for {e['name']!r}: glTF {[round(v, 3) for v in va]} vs "
+            r.errors.append(f"visual/collision AABB mismatch for {tag}: glTF {[round(v, 3) for v in va]} vs "
                             f"collision {[round(v, 3) for v in ca]}")
             continue
         st = match_winding(ctris, vis)
         r.winding[e["name"]] = st
         if st["reversed"]:
-            r.errors.append(f"visual/collision winding mismatch for {e['name']!r}: {st['reversed']} collision "
+            r.errors.append(f"visual/collision winding mismatch for {tag}: {st['reversed']} collision "
                             f"triangle(s) match visual triangles with reversed winding, e.g. "
                             f"{st['reversed_examples'][0]}")
         elif st["considered"] and st["same"] < WINDING_MIN_MATCHED * st["considered"]:
-            r.warnings.append(f"{e['name']!r}: only {st['same']}/{st['considered']} collision triangles have an "
+            r.warnings.append(f"{tag}: only {st['same']}/{st['considered']} collision triangles have an "
                               f"unambiguous visual match ({st['ambiguous']} ambiguous, {st['unmatched']} unmatched)")
         if st["work_exhausted"]:
-            r.warnings.append(f"{e['name']!r}: winding check stopped at its work budget; {st['unchecked']} "
+            r.warnings.append(f"{tag}: winding check stopped at its work budget; {st['unchecked']} "
                               "collision triangle(s) were not checked (not counted as ties)")
         if r.strict:
             one = match_one_to_one(ctris, vis)
             if one["work_exhausted"]:
-                r.errors.append(f"export binding for {e['name']!r}: the one-to-one visual/collision triangle "
-                                "correspondence could not be verified within its work budget")
+                r.errors.append(f"export binding for {tag}: cannot verify binding: work budget exhausted before "
+                                "the one-to-one visual/collision triangle correspondence was established")
             elif one["reversed"] or one["unmatched"] or one["visual_only"]:
-                r.errors.append(f"export binding for {e['name']!r}: visual and collision triangles must correspond "
+                r.errors.append(f"export binding for {tag}: visual and collision triangles must correspond "
                                 f"one-to-one with the same winding; {one['unmatched']} collision triangle(s) have "
                                 f"no free visual counterpart, {one['reversed']} only a reversed one, and "
                                 f"{one['visual_only']} visual triangle(s) have no collision counterpart")
         else:
             vst = match_winding(vis, ctris)
             if vst["unmatched"]:
-                r.warnings.append(f"{e['name']!r}: {vst['unmatched']} visual triangle(s) have no collision "
+                r.warnings.append(f"{tag}: {vst['unmatched']} visual triangle(s) have no collision "
                                   "counterpart (visible but not collidable)")
             if vst["work_exhausted"]:
-                r.warnings.append(f"{e['name']!r}: visual-only triangle check stopped at its work budget; "
+                r.warnings.append(f"{tag}: visual-only triangle check stopped at its work budget; "
                                   f"{vst['unchecked']} visual triangle(s) were not checked")
     _check_probes(m, col, by_name, r)
 
@@ -1097,16 +1375,16 @@ def _check_binding(m, col, nodes, r):
 def _check_probes(m, col, by_name, r):
     probes = m["orientation_probes"]
     expected = select_orientation_probes(col)
+    table = {e["name"]: (k, e) for k, e in enumerate(col.objects)}
     if not probes:
         r.warnings.append(PROBES_UNAVAILABLE)
         if expected:
-            r.errors.append(f"orientation_probes is empty although node {expected[0]['node']!r} has a qualifying "
-                            "vertex")
+            r.errors.append(f"orientation_probes is empty although collision object #{table[expected[0]['node']][0]} "
+                            "has a qualifying vertex")
         return
     if len(probes) != len(expected):
         r.errors.append(f"orientation_probes has {len(probes)} probe(s); {len(expected)} node(s) qualify (max "
                         f"{PROBE_MAX})")
-    table = {e["name"]: e for e in col.objects}
     seen = set()
     n_non_terrain = 0
     for k, p in enumerate(probes):
@@ -1120,14 +1398,14 @@ def _check_probes(m, col, by_name, r):
             r.errors.append(f"{tag}: needs {list(keys)} with 3-vectors")
             continue
         node, pm, nm = p["node"], p["point_map"], p["normal_map"]
-        tag = f"orientation probe {node!r}"
         if node in seen:
             r.errors.append(f"{tag}: more than one probe for the node")
         seen.add(node)
-        entry = table.get(node)
-        if entry is None or node not in by_name:
+        if node not in table or node not in by_name:
             r.errors.append(f"{tag}: node does not exist in both glTF and collision")
             continue
+        ci, entry = table[node]
+        tag = f"orientation probe {k} (collision object #{ci})"
         n_non_terrain += entry["class"] != "terrain"
         if (_dist(p["point_gltf"], map_to_gltf(pm)) > 1e-6
                 or _dist(p["point_unity_x_negated"], map_to_unity_x_negated(pm)) > 1e-6
@@ -1167,7 +1445,7 @@ def _check_probes(m, col, by_name, r):
         reason = verify_probe_in_unity(p, unity_import(by_name[node].triangles))
         if reason:
             r.errors.append(f"{tag} fails against the visual mesh: {reason}")
-    if n_non_terrain != sum(1 for e in expected if table[e["node"]]["class"] != "terrain"):
+    if n_non_terrain != sum(1 for e in expected if table[e["node"]][1]["class"] != "terrain"):
         r.errors.append("orientation_probes must prefer non-terrain nodes that have a qualifying vertex")
 
 
@@ -1220,6 +1498,7 @@ def _check_report(m, data, r):
     except PackageError as e:
         r.errors.append(str(e))
         return
+    _payload_secrets(r, "report.json", rep)
     if not isinstance(rep, dict) or not isinstance(rep.get("counts"), dict) or not all(
             isinstance(rep.get(k), list) for k in REPORT_KEYS[1:]):
         r.errors.append(f"report.json must be an object with {list(REPORT_KEYS)}")

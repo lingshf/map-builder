@@ -55,9 +55,9 @@ def strict_json(data, what):
 
     def no_dupes(pairs):
         out = {}
-        for k, v in pairs:
+        for i, (k, v) in enumerate(pairs):
             if k in out:
-                raise ValueError(f"duplicate key {k!r}")
+                raise ValueError(f"duplicate key (member #{i} of an object)")   # never echo the key text
             out[k] = v
         return out
     try:
@@ -97,33 +97,34 @@ def write_collision(objects):
     flat, idx, tri_obj, tri_cls, table = [], [], [], [], []
     nv = 0
     for oi, o in enumerate(objects):
+        tag = f"collision object #{oi}"           # names are caller strings: never echoed in diagnostics
         if not isinstance(o.name, str) or not o.name:
             raise PackageError("collision object names must be non-empty strings")
         if o.name in names:
-            raise PackageError(f"duplicate collision object name {o.name!r}")
+            raise PackageError(f"{tag}: duplicate collision object name")
         names.add(o.name)
         if not isinstance(o.mb_id, str) or not o.mb_id:
-            raise PackageError(f"collision object {o.name!r} has no mb_id")
+            raise PackageError(f"{tag} has no mb_id")
         if not isinstance(o.cls, str) or o.cls not in CLASSES:
-            raise PackageError(f"collision object {o.name!r} has an unknown class; expected one of "
-                               f"{sorted(CLASSES)}")
+            raise PackageError(f"{tag} has an unknown class; expected one of {sorted(CLASSES)}")
         tris = [tuple(t) for t in o.triangles]
         if not tris:
-            raise PackageError(f"collision object {o.name!r} has no triangles")
+            raise PackageError(f"{tag} has no triangles")
         remap = {}
         start = len(tri_obj)
         lo = [math.inf] * 3
         hi = [-math.inf] * 3
         for t in tris:
             if len(t) != 3:
-                raise PackageError(f"{o.name!r}: triangles must have 3 indices")
+                raise PackageError(f"{tag}: triangles must have 3 indices")
             for vi in t:
                 if not _is_int(vi) or not 0 <= vi < len(o.vertices):
-                    raise PackageError(f"{o.name!r}: triangle index {vi!r} out of range")
+                    raise PackageError(f"{tag}: triangle vertex index out of range (must be an integer in "
+                                       f"[0, {len(o.vertices)}))")
                 if vi not in remap:
                     p = o.vertices[vi]
                     if len(p) != 3 or not all(_is_num(c) and abs(c) <= MAX_ABS_COORD_M for c in p):
-                        raise PackageError(f"non-finite or out-of-range vertex in {o.name!r}")
+                        raise PackageError(f"non-finite or out-of-range vertex in {tag}")
                     q = (f32(p[0]), f32(p[1]), f32(p[2]))
                     for k in range(3):
                         lo[k] = min(lo[k], q[k])
@@ -259,40 +260,39 @@ def read_collision(data, max_triangles=MAX_TRIANGLES, max_vertices=MAX_VERTICES)
     table = strict_json(body, "collision: object table")
     if not isinstance(table, list) or len(table) != no:
         raise PackageError("collision: object table count does not match the header")
+    # Diagnostics name entries by table index only: names and other strings from the file are never echoed.
     names = set()
     total = 0
     for k, e in enumerate(table):
+        tag = f"collision: object entry {k}"
         if not isinstance(e, dict) or any(key not in e for key in TABLE_KEYS):
-            raise PackageError(f"collision: object entry {k} lacks {list(TABLE_KEYS)}")
+            raise PackageError(f"{tag} lacks {list(TABLE_KEYS)}")
         name = e["name"]
         if e["index"] != k or not _is_int(e["index"]):
-            raise PackageError(f"collision: object entry {k} has index {e['index']!r}")
+            raise PackageError(f"{tag} has an index other than {k}")
         if not isinstance(name, str) or not name or name in names:
-            raise PackageError(f"collision: object entry {k} has a missing or duplicate name")
+            raise PackageError(f"{tag} has a missing or duplicate name")
         names.add(name)
         if not isinstance(e["mb_id"], str) or not e["mb_id"]:
-            raise PackageError(f"collision: object {name!r} has no mb_id")
+            raise PackageError(f"{tag} has no mb_id")
         if not isinstance(e["class"], str) or e["class"] not in CLASSES:
-            raise PackageError(f"collision: object entry {k} has an unknown class; expected a string, one "
-                               f"of {sorted(CLASSES)}")
+            raise PackageError(f"{tag} has an unknown class; expected a string, one of {sorted(CLASSES)}")
         s, c = e["tri_start"], e["tri_count"]
         if not (_is_int(s) and _is_int(c) and s >= 0 and c >= 1 and s + c <= nt):
-            raise PackageError(f"collision: bad triangle range for {name!r}")
+            raise PackageError(f"{tag} has a bad triangle range")
         if tri_obj[s:s + c].count(k) != c:
-            raise PackageError(f"collision: triangles of {name!r} are not contiguous in [tri_start, "
-                               "tri_start + tri_count)")
+            raise PackageError(f"{tag}: its triangles are not contiguous in [tri_start, tri_start + tri_count)")
         if tri_cls[s:s + c].count(CLASSES[e["class"]]) != c:
-            raise PackageError(f"collision: per-triangle class ids of {name!r} differ from its class "
-                               f"{e['class']!r}")
+            raise PackageError(f"{tag}: per-triangle class ids differ from its class {e['class']!r}")
         total += c
         aabb = e["aabb"]
         if not (isinstance(aabb, list) and len(aabb) == 6 and all(_is_num(v) for v in aabb)):
-            raise PackageError(f"collision: object {name!r} has a malformed aabb")
+            raise PackageError(f"{tag} has a malformed aabb")
         pts = [verts[i] for i in idx[3 * s:3 * (s + c)]]
         want = [min(p[0] for p in pts), min(p[1] for p in pts), min(p[2] for p in pts),
                 max(p[0] for p in pts), max(p[1] for p in pts), max(p[2] for p in pts)]
         if any(abs(a - b) > AABB_TABLE_TOL_M for a, b in zip(aabb, want)):
-            raise PackageError(f"collision: aabb of {name!r} does not match its triangles")
+            raise PackageError(f"{tag}: aabb does not match its triangles")
     if total != nt:
         raise PackageError("collision: object triangle ranges do not cover every triangle")
     return Collision(verts, idx, tri_obj, tri_cls, table, bounds, flags)
