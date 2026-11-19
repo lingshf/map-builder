@@ -2068,6 +2068,46 @@ class ReviewRound8Test(unittest.TestCase):
         self.assertIn("exceed the feature limit (1 features", cl.mask_unavailable)
 
 
+class ReviewRound9Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-9 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+    EXTENT = (-50.0, -50.0, 50.0, 50.0)
+
+    def test_off_grid_building_polygons_do_not_exhaust_the_allowance(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        normal = parse_osm_xml(b.xml().encode())
+        outers = [b.way(square(cx, 0.0, 20.0), closed=True) for cx in (-600.0, 0.0, 700.0)]
+        rid = b._next()
+        b.relations.append((rid, [("way", w, "outer") for w in outers],
+                            {"type": "multipolygon", "building": "yes"}))
+        wide = parse_osm_xml(b.xml().encode())
+        for max_features in (1, 3):
+            with self.subTest(max_features=max_features):
+                cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=max_features)
+                self.assertIsNone(cl.mask_unavailable)                       # before (max_features=1): unavailable
+                self.assertEqual(len(cl.outside_buildings), 1)               # only the polygon near the grid
+                self.assertLess(abs(cl.outside_buildings[0].geometry.centroid()[0]), 1.0)
+
+    def test_replaced_outlines_count_toward_the_mask_allowance(self):
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        b.way(square(0.0, 0.0, 10.0), {"building": "yes"}, closed=True)
+        b.way(square(0.0, 0.0, 10.0), {"building:part": "yes", "building:levels": "2"}, closed=True)
+        normal = parse_osm_xml(b.xml().encode())
+        b.node(5.0, 0.0, {"natural": "tree"})
+        wide = parse_osm_xml(b.xml().encode())
+        ref = classify(normal, area, mask_extent=self.EXTENT)
+        self.assertEqual((len(ref.buildings), len(ref.outline_features)), (1, 1))   # the outline was replaced
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=2)
+        self.assertEqual(cl.mask_trees, [])
+        self.assertIn("exceed the feature limit (2 features", cl.mask_unavailable)   # before: None, 3 kept
+        cl = classify(normal, area, mask_extent=self.EXTENT, mask_data=wide, max_features=3)
+        self.assertIsNone(cl.mask_unavailable)
+        self.assertEqual(len(cl.mask_trees), 1)
+
+
 def pipeline_mask_message(cls_name):
     from map_builder.core import errors, pipeline
     return pipeline._mask_error_message(getattr(errors, cls_name)("SYNTHETIC"))

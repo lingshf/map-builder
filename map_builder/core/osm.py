@@ -617,7 +617,7 @@ class _MaskWork:
 
 def _feature_count(out):
     return (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
-            + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas))
+            + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas) + len(out.outline_features))
 
 
 def _check_feature_count(out, max_features):
@@ -756,9 +756,11 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
         if not polys or not surface_mask_eligible(tags):
             return
         if "building" in tags or "building:part" in tags:
-            if any(_rect_overlaps(p.bbox(), building_rect) for p in polys):
-                allowance.take(len(polys))
-                out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys)
+            # each polygon filtered on its own: an off-grid polygon of the same relation is never kept or charged
+            for p in polys:
+                if _rect_overlaps(p.bbox(), building_rect):
+                    allowance.take()
+                    out.outside_buildings.append(Feature(fid, "building", tags, p))
         elif area_class(tags) == "forest":
             for k, p in enumerate(polys):
                 if _rect_overlaps(p.bbox(), mask_extent):
