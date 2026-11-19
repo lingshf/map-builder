@@ -1866,7 +1866,7 @@ class EmittedOverlapWarningTest(unittest.TestCase):
         self.assertEqual(len(warns), 1)  # old code: no warning
         self.assertIn(u, warns[0])
         self.assertNotIn(o, warns[0])
-        self.assertIn("intersect", warns[0])
+        self.assertIn("may intersect", warns[0])
         self.assertEqual(cl.overlap_candidates, [{"part": p, "outline": u, "kind": "part"}])
         self.assertEqual(plan.report["building_overlaps"],
                          [{"part": p, "outline": u, "kind": "part", "part_z_m": [8.0, 12.0],

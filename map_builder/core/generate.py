@@ -1387,7 +1387,9 @@ def object_z_range(spec):
 def _check_building_overlaps(plan, candidates, built_specs):
     """Warn about kept footprint overlaps (``Classified.overlap_candidates``) whose emitted solids
     share a vertical range: both objects were generated and their map-frame Z extents overlap.
-    Pairs with one side not generated, or stacked solids (disjoint Z), are not reported."""
+    Pairs with one side not generated, or stacked solids (disjoint Z), are not reported.
+    This is a conservative screen: overlapping whole-object Z extents may still clear each other
+    within the shared footprint (e.g. under a sloped roof), so the report says "may intersect"."""
     zr = {}
     hits = {}
     for c in candidates:
@@ -1409,7 +1411,8 @@ def _check_building_overlaps(plan, candidates, built_specs):
             f"{pid}: building:part overlaps building outline(s) {_id_list(oids)} without lying within them, "
             f"and their generated solids share a vertical range (map-frame Z {zr[pid][0]:.2f}..{zr[pid][1]:.2f} m "
             f"vs {', '.join(f'{zr[o][0]:.2f}..{zr[o][1]:.2f} m' for o in oids[:10])}); both are kept as mapped "
-            "(the part does not replace them), so their solids intersect")
+            "(the part does not replace them), so their solids may intersect (conservative check: "
+            "footprint overlap plus whole-object Z extents, not an exact solid intersection test)")
 
 
 # --- Vegetation -------------------------------------------------------------

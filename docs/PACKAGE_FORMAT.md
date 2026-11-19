@@ -230,8 +230,11 @@ counted in `edits.removed` and listed in `report.json`.
     below). After the buildings are generated, if both were emitted and the map-frame Z extents
     of their meshes (vertices with the object transform applied: terrain base, foundation,
     `min_height`, and the roof actually built, including inferred roof heights) overlap, a
-    `warnings` entry names both, since their solids intersect, and `building_overlaps` lists
-    `{part, outline, kind, part_z_m, outline_z_m}`. Stacked solids with disjoint Z extents (for
+    `warnings` entry names both as possibly intersecting, and `building_overlaps` lists
+    `{part, outline, kind, part_z_m, outline_z_m}`. This is a conservative screen, not an
+    exact solid intersection test: whole-object Z extents can overlap while the solids still
+    clear each other inside the shared footprint (for example under a sloped roof), so
+    consumers must not treat an entry as proof of intersection. Stacked solids with disjoint Z extents (for
     example a part from 6 m to 10 m over a 4 m building on flat ground, or a part on higher
     ground of a slope) are not a conflict and nothing is reported; neither is a pair where one
     side was not generated. Overlapping buildings are a property of the OSM data, so nothing
