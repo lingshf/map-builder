@@ -102,8 +102,8 @@ remains **2.0.0**.
 
 **Limits:** this is not survey-quality bare earth or a true DTM. Hidden hills
 and hollows inside large masks are smoothed, fills touching an area edge level
-off, and buildings or trees missing from OSM remain uncorrected. Masking a
-bridge deck does not generate a flyable bridge.
+off, and buildings or trees missing from OSM remain uncorrected. Highway bridges are generated
+separately as deck solids.
 
 ## Roof shapes and road-export diagnostics
 
@@ -118,7 +118,7 @@ On steep real terrain, a road face thinner than float32 can represent may be
 omitted if storing it would make it non-upward-facing. `slivers_dropped` in the
 road's provenance records the count, maximum width and total area. This is
 not general road simplification: wider folded faces remain invalid and package
-validation is not relaxed. Bridges are still omitted even though
+validation is not relaxed. Railway tunnels are still omitted even though
 internal structure routing is in place.
 
 Road tunnels (`highway=*` with `tunnel=yes`) are generated as flyable tubes with

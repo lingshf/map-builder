@@ -112,9 +112,11 @@ Rules either way:
 * Triangles are **two-sided** for every collision query (ray, segment, capsule, sweep): do not
   cull back faces. The winding gives only the contact normal, which depends on the class kind:
   outward for solids, up (+Z) for surfaces, and inward into the free space for tubes.
-* Format 2.0 adds the `bridge`, `tunnel` and `structure` classes. map-builder now generates road
+* Format 2.0 adds the `bridge`, `tunnel` and `structure` classes. map-builder generates road
   tunnels (`tunnel` tubes, portal-headwall `structure` solids and a `kind: "tunnel"` bore probe, with
-  the terrain cut out and the heightfield NaN there); bridges are still omitted, listed in `report.json`.
+  the terrain cut out and the heightfield NaN there) and highway bridges (`bridge` decks with a `deck` and a
+  conditional `under` passage probe: `under` only where clearance is at least 4 m; blocked or unchecked probes
+  are omitted and listed in `report.json`).
   Elevated building parts and building passages are generated and emit `elevated` / `tunnel` passage
   probes. Core and Unity can implement the mapping below now.
 
@@ -193,5 +195,5 @@ validator, the sample and the reference reader.
 - [ ] UI: show NOTICES.txt / attributions.
 - [ ] Tests: run the reader and the simulator loader against `examples/synthetic_sample.mbmap`
       and against a tampered copy.
-- [ ] Not generated yet, so out of scope for now: under-bridge or elevated flying (the
-      format is ready); road-tunnel flying is available through the `tunnel` bore probe; streaming and very large areas.
+- [ ] Not generated yet, so out of scope for now: elevated flying (the
+      format is ready); road-tunnel flying is available through the `tunnel` bore probe, bridge flying through the `deck` and `under` probes; streaming and very large areas.

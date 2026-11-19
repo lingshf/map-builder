@@ -199,21 +199,24 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
 
 ## Limits
 
-* **Road tunnels, elevated building parts and building passages are generated; bridges are not.**
+* **Road tunnels, highway bridges, elevated building parts and building passages are generated.**
   `highway=*` ways with `tunnel=yes` (and similar) become flyable tubes (floor = road width + 2 m, 4.5 m walls
   plus a 1 m arch, or `maxheight`; linear floor profile between the portal heights) with a bore passage probe,
   a terrain cut of the bore volume only (terrain between the floor and the roof; ground below the floor stays)
   and 1 m portal headwalls where the terrain rises above the roof. No tree stands in a portal or cut zone.
   Cut-and-cover or underpass tunnels with almost no cover are generated as tubes with a warning. Railway
-  tunnels, `tunnel=culvert` and `man_made=tunnel` stay unsupported. Bridges are still omitted and listed under
-  `unsupported_features` in `report.json`.
+  tunnels, `tunnel=culvert` and `man_made=tunnel` stay unsupported.
+* **Highway bridges.** `bridge=*` (not `no`) highways are generated as `bridge` solids with a `deck`
+  and an `under` passage probe. The `under` probe is emitted only where the clearance over the ground
+  or crossing road is at least 4 m, so a low bridge has a `deck` probe only. Trees inside the deck
+  footprint are not generated; a clearance or grade shortfall is a report warning.
 * **Elevated building parts and building passages.** A part with `min_height` at least 2.6 m above
   the ground gets an `elevated` passage probe along its longest edge, and a
   `tunnel=building_passage` way through a building cuts a straight corridor: the building becomes two
   lower parts (`<id>#1`, `#2`) and an upper part (`<id>#3`) with a `building_passage` probe. A
   passage that cannot be cut cleanly (dead end, bend, courtyard, several passages, too low) is listed
-  under `unsupported_features` and the building stays solid. A probe that edits block is not exported
-  and is listed under `passage_probes_blocked` in `report.json`.
+  under `unsupported_features` and the building stays solid. A probe that is blocked by other geometry is
+  not exported and is listed under `passage_probes_blocked` in `report.json`.
 * Each building is a set of closed, outward-facing, positive-volume shells with no interior
   cavities: no rooms, passages or flyable interiors.
 * The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or

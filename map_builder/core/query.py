@@ -254,21 +254,36 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
         bounds.append(((min(p[0], q[0]), min(p[1], q[1]), min(p[2], q[2])),
                        (max(p[0], q[0]), max(p[1], q[1]), max(p[2], q[2]))))
     v, idx = col.vertices, col.indices
+    whole = (tuple(min(b[0][a] for b in bounds) for a in range(3)), tuple(max(b[1][a] for b in bounds) for a in range(3)))
     hits = []
     for k, e in enumerate(col.objects):
         box = e["aabb"]
         s0, n = e["tri_start"], e["tri_count"]
+        if len(segs) > 1 and not _box_overlap(whole[0], whole[1], box, pad):   # whole path misses the object
+            budget.spend()
+            continue
         hit = False
+        grid = _tri_grid(col, k, s0, n) if n > _GRID_MIN_TRIS else None
+        boxes = grid[2] if grid is not None else _tri_boxes(col, k, s0, n)
         for (p, q), (lo, hi) in zip(segs, bounds):
             budget.spend()
             if not _box_overlap(lo, hi, box, pad):
                 continue
-            for t in range(s0, s0 + n):
-                budget.spend()
-                a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
-                tb = (min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
-                      max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2]))
+            scan = False
+            cand = _grid_candidates(grid, lo, hi, reach) if grid is not None else None
+            if cand is not None:
+                budget.spend(len(cand))
+                tris = ((t, boxes[t - s0]) for t in cand)
+            else:
+                scan = True
+                tris = ((t, boxes[t - s0]) for t in range(s0, s0 + n))
+            for t, tb in tris:
+                if scan:
+                    budget.spend()
                 if not _box_overlap(lo, hi, tb, reach):
+                    continue
+                a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
+                if _plane_clear(p, q, a, b, c, reach):
                     continue
                 if segment_triangle_distance(p, q, a, b, c) <= reach:
                     hit = True
@@ -278,6 +293,88 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
         if hit:
             hits.append(k)
     return CapsuleResult(hits, budget.work) if result else hits
+
+
+def _tri_boxes(col, k, s0, n):
+    """Cached per-triangle boxes of collision object ``k`` (built once, O(triangles))."""
+    cache = col.__dict__.setdefault("_tri_box_cache", {})
+    boxes = cache.get(k)
+    if boxes is None:
+        v, idx = col.vertices, col.indices
+        boxes = cache[k] = []
+        for t in range(s0, s0 + n):
+            a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
+            boxes.append((min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
+                          max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2])))
+    return boxes
+
+
+def _plane_clear(p, q, a, b, c, reach):
+    """True when both segment ends lie farther than ``reach`` from the triangle's plane on the same side: no
+    contact is possible (the distance to a triangle is at least the distance to its plane)."""
+    ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+    nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+    nn = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if nn < 1e-12:
+        return False
+    dp = nx * (p[0] - a[0]) + ny * (p[1] - a[1]) + nz * (p[2] - a[2])
+    dq = nx * (q[0] - a[0]) + ny * (q[1] - a[1]) + nz * (q[2] - a[2])
+    lim = (reach + 1e-6) * nn
+    return (dp > lim and dq > lim) or (dp < -lim and dq < -lim)
+
+
+_GRID_MIN_TRIS = 256
+_GRID_CELL_M = 8.0
+_GRID_MAX_TRI_CELLS = 64        # a triangle spanning more cells is kept in a short "big" list instead
+_GRID_MAX_QUERY_CELLS = 1024    # a query spanning more cells falls back to the (budgeted) triangle scan
+
+
+def _tri_grid(col, k, s0, n):
+    """Cached ``(cell dict, cell size, per-triangle boxes, big triangle ids)`` of collision object ``k``: map
+    cells -> triangle ids. Cells per triangle are capped, so the build is O(triangles)."""
+    cache = col.__dict__.setdefault("_tri_grids", {})
+    if k in cache:
+        return cache[k]
+    v, idx = col.vertices, col.indices
+    cells, boxes, big, cs = {}, [], [], _GRID_CELL_M
+    inserted, limit = 0, _GRID_MAX_TRI_CELLS * n     # enumeration guard: the per-triangle cap keeps it below
+    for t in range(s0, s0 + n):
+        a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
+        tb = (min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]),
+              max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2]))
+        boxes.append(tb)
+        i0, i1 = math.floor(tb[0] / cs), math.floor(tb[3] / cs)
+        j0, j1 = math.floor(tb[1] / cs), math.floor(tb[4] / cs)
+        if (i1 - i0 + 1) * (j1 - j0 + 1) > _GRID_MAX_TRI_CELLS:
+            big.append(t)
+            continue
+        for i in range(i0, i1 + 1):
+            for j in range(j0, j1 + 1):
+                inserted += 1
+                if inserted > limit:
+                    raise LimitError("triangle grid cell enumeration exceeded its bound")
+                cells.setdefault((i, j), []).append(t)
+    cache[k] = (cells, cs, boxes, big)
+    return cache[k]
+
+
+def _grid_candidates(grid, lo, hi, reach):
+    """Triangle ids near the box, or None when it spans too many cells (the caller scans instead)."""
+    cells, cs, _, big = grid
+    i0, i1 = math.floor((lo[0] - reach) / cs), math.floor((hi[0] + reach) / cs)
+    j0, j1 = math.floor((lo[1] - reach) / cs), math.floor((hi[1] + reach) / cs)
+    if (i1 - i0 + 1) * (j1 - j0 + 1) > _GRID_MAX_QUERY_CELLS:
+        return None
+    out = set(big)
+    seen = 0
+    for i in range(i0, i1 + 1):
+        for j in range(j0, j1 + 1):
+            seen += 1
+            if seen > _GRID_MAX_QUERY_CELLS:   # enumeration guard: the cap above keeps it from firing
+                raise LimitError("triangle grid query cell enumeration exceeded its bound")
+            out.update(cells.get((i, j), ()))
+    return sorted(out)
 
 
 def _ray_box(o, inv, box, tmax):

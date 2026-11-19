@@ -446,6 +446,7 @@ class Feature:
         self.kind = kind       # building | building_part | road | area | tree
         self.tags = tags
         self.geometry = geometry
+        self.node_ids = None   # roads / structure bridges: the OSM node id of each vertex (None where clipped)
 
 
 class Classified:
@@ -1110,7 +1111,8 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                     out.unsupported.append({"id": fid, "reason": f"{kind} lines are not generated in v1",
                                             "tags": _subset(tags)})
                 continue
-            parts = _clip_polyline(pts, area)
+            part_ids = []
+            parts = _clip_polyline(pts, area, nids=nids, ids_out=part_ids)
             if not parts:
                 continue
             # Bridges/tunnels/building passages are reported before any generic exclusion so that
@@ -1124,6 +1126,7 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                     target = {"bridge": out.structure_bridges, "tunnel": out.tunnels, "passage": out.passages}[kind]
                     for k, part in enumerate(parts):
                         feat = Feature(fid if len(parts) == 1 else f"{fid}#{k}", kind, tags, part)
+                        feat.node_ids = part_ids[k]
                         # where the entry sat in ``unsupported`` before routing: the stages report in place
                         feat.report_pos = (len(out.unsupported), out.route_seq)
                         out.route_seq += 1
@@ -1132,7 +1135,9 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             if tags["highway"] in ROAD_EXCLUDE:
                 continue
             for k, part in enumerate(parts):
-                out.roads.append(Feature(fid if len(parts) == 1 else f"{fid}#{k}", "road", tags, part))
+                road = Feature(fid if len(parts) == 1 else f"{fid}#{k}", "road", tags, part)
+                road.node_ids = part_ids[k]
+                out.roads.append(road)
         elif tags.get("man_made") in ("bridge", "tunnel"):
             out.unsupported.append({"id": fid, "reason": f"man_made={tags['man_made']} outline "
                                                          "(not supported in v1)", "tags": _subset(tags)})
@@ -1589,40 +1594,55 @@ def _subset(tags):
     return {k: v for k, v in tags.items() if k in _KEEP_TAGS}
 
 
-def _clip_polyline(pts, area, rect=None, max_parts=None):
+def _clip_polyline(pts, area, rect=None, max_parts=None, nids=None, ids_out=None):
     """Clip a polyline to the area rectangle (or ``rect`` = (x0, y0, x1, y1)); returns list of parts (>=2 pts),
-    or None as soon as it would hold more than ``max_parts`` parts (bounding the allocation, not only the result)."""
+    or None as soon as it would hold more than ``max_parts`` parts (bounding the allocation, not only the result).
+    With ``nids`` (one OSM node id per point) and ``ids_out``, the node id of every part vertex is appended to
+    ``ids_out`` (one list per part), carried from the source vertex index; a vertex the clipping creates gets None."""
     if rect is None:
         hx, hy = area.half
         rect = (-hx, -hy, hx, hy)
     parts = []
-    cur = []
-    for a, b in zip(pts, pts[1:]):
-        seg = _clip_segment(a, b, *rect)
+    cur, cur_ids = [], []
+
+    def flush():
+        parts.append(cur)
+        if ids_out is not None:
+            ids_out.append(cur_ids)
+
+    for i, (a, b) in enumerate(zip(pts, pts[1:])):
+        seg = _clip_segment(a, b, *rect, exact=True)
         if seg is None:
             if len(cur) >= 2:
-                parts.append(cur)
+                flush()
                 if max_parts is not None and len(parts) > max_parts:
                     return None
-            cur = []
+            cur, cur_ids = [], []
             continue
-        p, q = seg
+        p, q, t0, t1 = seg
+        pid = nids[i] if nids is not None and t0 == 0.0 else None
+        qid = nids[i + 1] if nids is not None and t1 == 1.0 else None
         if cur and math.dist(cur[-1], p) < 1e-6:
+            if cur_ids[-1] is None:
+                cur_ids[-1] = pid
             cur.append(q)
+            cur_ids.append(qid)
         else:
             if len(cur) >= 2:
-                parts.append(cur)
+                flush()
                 if max_parts is not None and len(parts) > max_parts:
                     return None
-            cur = [p, q]
+            cur, cur_ids = [p, q], [pid, qid]
     if len(cur) >= 2:
-        parts.append(cur)
+        flush()
     if max_parts is not None and len(parts) > max_parts:
         return None
     return parts
 
 
-def _clip_segment(a, b, x0, y0, x1, y1):
+def _clip_segment(a, b, x0, y0, x1, y1, exact=False):
+    """Clip a segment to a rectangle; ``exact`` also returns the parameters and keeps an unclipped end identical
+    to the source vertex."""
     dx, dy = b[0] - a[0], b[1] - a[1]
     t0, t1 = 0.0, 1.0
     for p, q in ((-dx, a[0] - x0), (dx, x1 - a[0]), (-dy, a[1] - y0), (dy, y1 - a[1])):
@@ -1637,4 +1657,5 @@ def _clip_segment(a, b, x0, y0, x1, y1):
             t1 = min(t1, r)
         if t0 > t1:
             return None
-    return (a[0] + t0 * dx, a[1] + t0 * dy), (a[0] + t1 * dx, a[1] + t1 * dy)
+    p, q = (a[0] + t0 * dx, a[1] + t0 * dy), (a[0] + t1 * dx, a[1] + t1 * dy)
+    return (p, q, t0, t1) if exact else (p, q)
