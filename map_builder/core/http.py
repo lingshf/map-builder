@@ -218,12 +218,38 @@ def _shutdown_quietly(sock):
         pass
 
 
+class _RegisteringContext:
+    """SSLContext proxy: registers the live SSLSocket with the watchdog *before* the handshake.
+
+    Wrapping detaches the raw TCP socket (its descriptor moves to the SSLSocket), so the raw
+    registration alone could not interrupt a stalled handshake or TLS reads."""
+
+    def __init__(self, ctx, watchdog):
+        self._ctx, self._watchdog = ctx, watchdog
+
+    def wrap_socket(self, sock, server_hostname=None, **kwargs):
+        kwargs["do_handshake_on_connect"] = False
+        ssock = self._ctx.wrap_socket(sock, server_hostname=server_hostname, **kwargs)
+        self._watchdog.register(ssock)
+        try:
+            ssock.do_handshake()
+        except BaseException:
+            ssock.close()  # the connection never receives it, so it must be closed here
+            raise
+        return ssock
+
+    def __getattr__(self, name):
+        return getattr(self._ctx, name)
+
+
 def _watched(conn_class, watchdog):
     class Watched(conn_class):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             create = self._create_connection
             self._create_connection = lambda *a, **k: watchdog.register(create(*a, **k))
+            if getattr(self, "_context", None) is not None:
+                self._context = _RegisteringContext(self._context, watchdog)
     return Watched
 
 

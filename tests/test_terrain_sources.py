@@ -1005,6 +1005,36 @@ class RoundFourTest(unittest.TestCase):
         self.assertLess(time_mod.monotonic() - start, 3.0)
         self.assertIn("time limit", str(cm.exception))
 
+    def test_stalled_tls_handshake_hits_deadline(self):
+        import socket as socket_mod
+        import threading
+        import time as time_mod
+        srv = socket_mod.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        self.addCleanup(srv.close)
+        stop = threading.Event()
+        self.addCleanup(stop.set)
+
+        def serve():  # TLS handshake record header announcing 16 KiB, then one byte per 50 ms
+            conn, _ = srv.accept()
+            with conn:
+                conn.recv(4096)
+                try:
+                    conn.sendall(b"\x16\x03\x03\x40\x00")
+                    while not stop.is_set():
+                        conn.sendall(b"\x00")
+                        time_mod.sleep(0.05)
+                except OSError:
+                    return
+        threading.Thread(target=serve, daemon=True).start()
+        port = srv.getsockname()[1]
+        start = time_mod.monotonic()
+        with self.assertRaises(NetworkError) as cm:  # each receive makes progress: only the watchdog stops it
+            UrllibTransport(total_timeout=0.6).request("GET", f"https://127.0.0.1:{port}/", {}, None, 10.0, 1000)
+        self.assertLess(time_mod.monotonic() - start, 3.0)
+        self.assertIn("time limit", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
