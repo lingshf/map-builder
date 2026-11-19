@@ -3,11 +3,16 @@
 import types
 import unittest
 
+from map_builder.core.geodesy import Area
+from map_builder.core.osm import classify, parse_osm_xml, structure_kind
+
 from map_builder.core.collision import ColObject, read_collision, write_collision
 from map_builder.core.generate import InvalidFeature, ObjectSpec
 from map_builder.core.mesh import MeshData
 from map_builder.core.package import collision_orientation_problems
 from map_builder.core.structures import check_probes, plan_collision, polyline_z_profile, sweep
+
+from .synthetic import OsmBuilder
 
 BOX = [(-1.0, 0.0), (1.0, 0.0), (1.0, 2.0), (-1.0, 2.0)]
 STRAIGHT = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
@@ -59,6 +64,15 @@ class SweepTest(unittest.TestCase):
                 sweep(profile, path, True)
 
 
+    def test_short_segment_at_a_bend_would_fold_the_mitre(self):
+        wide = [(-4.0, 0.0), (4.0, 0.0), (4.0, 2.0), (-4.0, 2.0)]
+        bend = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (8.0, 7.0, 0.0)]   # 45 degrees after a 1 m segment
+        with self.assertRaises(InvalidFeature):
+            sweep(wide, bend, True)
+        long_enough = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (17.0, 7.0, 0.0)]
+        self.assertEqual(problems(sweep(wide, long_enough, True), "bridge"), [])
+
+
 class ZProfileTest(unittest.TestCase):
     def test_arc_length_and_subdivision(self):
         out = polyline_z_profile([(0, 0), (3, 4), (3, 14)], lambda x, y: x + y, max_step=5.0)
@@ -80,6 +94,11 @@ class ProbeTest(unittest.TestCase):
         kept, blocked = check_probes(self.plan(), [self.PROBE])
         self.assertEqual((kept, blocked), ([self.PROBE], []))
 
+    def test_probe_touching_its_own_tunnel_wall_is_blocked(self):
+        probe = dict(self.PROBE, path_map=[(-5.0, 0.8, 1.0), (25.0, 0.8, 1.0)])   # wall at y=1, radius 0.3
+        kept, blocked = check_probes(self.plan(), [probe])
+        self.assertEqual((kept, blocked), ([], [{"id": "p1", "blocker": "osm:way/9"}]))
+
     def test_blocker_is_named(self):
         plan = self.plan(("osm:way/77", box_mesh("blocker", 8, 12, -0.5, 0.5, 0.5, 1.5)))
         kept, blocked = check_probes(plan, [self.PROBE])
@@ -91,6 +110,42 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertEqual([b["id"] for b in blocked], ["p1", "p2"])
         self.assertTrue(all(b["blocker"] is None and "budget" in b["reason"] for b in blocked))
+
+
+class RoutingTest(unittest.TestCase):
+    AREA = Area(47.0, 8.0, 100.0, 100.0)
+
+    def classify(self, tags_list, **kw):
+        b = OsmBuilder()
+        ids = [b.way([(-40, 10 * k), (40, 10 * k)], tags) for k, tags in enumerate(tags_list)]
+        return ids, classify(parse_osm_xml(b.xml().encode()), self.AREA, **kw)
+
+    def test_d25_exclusions_never_route(self):
+        for tags in ({"man_made": "tunnel", "tunnel": "yes"}, {"man_made": "bridge", "bridge": "yes"},
+                     {"building": "bridge", "bridge": "yes"}, {"location": "underground", "tunnel": "yes"},
+                     {"tunnel": "culvert"}, {"layer": "-1"}):
+            with self.subTest(tags=tags):
+                self.assertIsNone(structure_kind(dict(tags, highway="residential")))
+        self.assertEqual(structure_kind({"highway": "x", "tunnel": "building_passage"}), "passage")
+        self.assertEqual(structure_kind({"highway": "x", "covered": "yes"}), "passage")
+        self.assertEqual(structure_kind({"highway": "x", "tunnel": "yes"}), "tunnel")
+        self.assertEqual(structure_kind({"highway": "x", "bridge": "viaduct"}), "bridge")
+
+    def test_excluded_highway_stays_unsupported_in_classify(self):
+        ids, cl = self.classify([{"highway": "residential", "man_made": "tunnel", "tunnel": "yes"}])
+        self.assertEqual([u["id"] for u in cl.unsupported], [f"osm:way/{ids[0]}"])
+        self.assertEqual(cl.tunnels, [])
+
+    def test_dropped_dsm_mask_keeps_the_structure_bridge(self):
+        b = OsmBuilder()
+        # leaves and re-enters the area: two clipped parts, more than the mask allowance of 1
+        wid = b.way([(-40, 0), (-500, 0), (-500, 20), (-40, 20), (0, 20), (0, -20)],
+                    {"highway": "primary", "bridge": "yes"})
+        cl = classify(parse_osm_xml(b.xml().encode()), self.AREA, max_features=1)
+        self.assertTrue(cl.mask_unavailable)
+        self.assertEqual(cl.bridges, [])
+        self.assertTrue(cl.structure_bridges)
+        self.assertTrue(all(f.id.startswith(f"osm:way/{wid}") for f in cl.structure_bridges))
 
 
 if __name__ == "__main__":

@@ -85,7 +85,7 @@ def _norm(a):
     return (a[0] / n, a[1] / n, a[2] / n), n
 
 
-def _frames(path):
+def _frames(path, half_width=0.0):
     """Per path point (tangent, side, up) with a horizontal side vector (the path never rolls); the tangent at
     a joint is the mitre direction and the returned scale lengthens the side offset to keep the section width."""
     dirs = []
@@ -95,6 +95,7 @@ def _frames(path):
             raise _invalid("structure path has a zero-length segment")
         dirs.append(d)
     out = []
+    shift = [0.0] * len(path)   # how far the inner mitre corner moves along the path at each joint
     for i, p in enumerate(path):
         if i == 0:
             t, miter = dirs[0], 1.0
@@ -112,11 +113,16 @@ def _frames(path):
             t, _ = _norm((d0[0] + d1[0], d0[1] + d1[1], d0[2] + d1[2]))
             half = math.acos(cosang) / 2
             miter = 1.0 / max(math.cos(half), 0.5)
+            shift[i] = half_width * math.tan(half)
         th = math.hypot(t[0], t[1])
         if th < _EPS:
             raise _invalid("structure path is vertical")
         side = (t[1] / th, -t[0] / th, 0.0)          # to the right of the direction of travel
         out.append((t, side, miter))
+    for k, (a, b) in enumerate(zip(path, path[1:])):
+        if shift[k] + shift[k + 1] >= math.hypot(b[0] - a[0], b[1] - a[1]):
+            raise _invalid(f"structure segment {k} is too short for the profile width at its mitred joints "
+                           "(the inner corner would fold back)")
     return out
 
 
@@ -127,13 +133,14 @@ def sweep(profile_2d, path_3d, closed_ends, name="sweep", material="MB Concrete"
     ``closed_ends=True``: a solid, end caps added, faces CCW outward (positive volume). ``False``: a tube open
     at both ends, faces CCW seen from the inside (the validator's tube rule: negative volume once the portal
     loops are capped). Raises :class:`InvalidFeature` for fewer than 2 path points, a profile under 3 points,
-    a zero-length segment, or a turn above ``MAX_TURN_DEG`` degrees (split the path there instead)."""
+    a zero-length segment, a turn above ``MAX_TURN_DEG`` degrees (split the path there instead) or a segment
+    too short for the profile width at its mitred joints (the inner corner would fold back)."""
     if len(profile_2d) < 3:
         raise _invalid("structure profile needs at least 3 points")
     path = [tuple(float(c) for c in p) for p in path_3d]
     if len(path) < 2:
         raise _invalid("structure path needs at least 2 points")
-    frames = _frames(path)
+    frames = _frames(path, max(abs(u) for u, _ in profile_2d))
     mesh = MeshData(name)
     n = len(profile_2d)
     rings = []
@@ -204,7 +211,8 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
     """Passage probes ``{id, feature, path_map, radius_m, ...}`` against the plan meshes (D21).
 
     Returns ``(kept, blocked)``: ``blocked`` entries are ``{id, blocker}`` (the blocking object's ``mb_id``;
-    the probe's own ``feature`` is not a blocker). The work budget is shared: when it runs out the remaining
+    the probe's own ``feature`` counts like any other mesh, so a probe touching its own tunnel wall is blocked,
+    as the package validator does). The work budget is shared: when it runs out the remaining
     probes are returned in ``blocked`` with ``blocker=None`` and ``reason="work budget exhausted"``, never
     silently kept."""
     kept, blocked = [], []
@@ -213,7 +221,6 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
     col, _ = plan_collision(plan)
     left = max_work
     for i, pr in enumerate(probes):
-        own = pr.get("feature")
         try:
             res = capsule_hits(col, [tuple(p) for p in pr["path_map"]], pr["radius_m"], left, result=True)
         except Exception as exc:   # LimitError: budget exhausted
@@ -223,7 +230,7 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
                 blocked.append({"id": rest["id"], "blocker": None, "reason": "work budget exhausted"})
             break
         left -= res.work
-        hits = [col.objects[k]["mb_id"] for k in res.objects if col.objects[k]["mb_id"] != own]
+        hits = [col.objects[k]["mb_id"] for k in res.objects]
         if hits:
             blocked.append({"id": pr["id"], "blocker": hits[0]})
         else:
