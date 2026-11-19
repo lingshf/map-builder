@@ -21,6 +21,7 @@ OSM_LICENSE = {
 DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OSM_DATASET_ID = "openstreetmap-overpass-xml"
 MAX_OSM_BYTES = 64 * 1024 * 1024
+OSM_FETCH_MARGIN_M = 30.0   # normal Overpass fetch extent: the area plus this on each side
 MAX_ELEMENTS = 2_000_000          # top-level node/way/relation/... elements
 MAX_TOTAL_ELEMENTS = 20_000_000   # all XML elements, including <tag>/<nd>/<member>
 MAX_DEPTH = 16
@@ -67,9 +68,10 @@ def _validated_overpass(body, description):
 
 
 def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False,
-                   cache_dataset_id=None, margin_m=30.0):
-    """Fetches the area plus ``margin_m`` on each side (the margin supplies DSM mask candidates near the
-    edge, see :func:`classify`; generated content is still selected against the area). ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
+                   cache_dataset_id=None, margin_m=OSM_FETCH_MARGIN_M):
+    """Fetches the area plus ``margin_m`` on each side (wider than :data:`OSM_FETCH_MARGIN_M` only for DSM
+    mask candidates near the grid edge, see :func:`classify` ``content_bbox``; generated content is still
+    selected against the area). ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
     by a caller that knows the alternative endpoint's terms permit caching. Caching an override also
     requires a caller-chosen, credential-free ``cache_dataset_id``: endpoint paths (which may embed
     credentials) never appear in cache keys, metadata, diagnostics or provenance."""
@@ -396,12 +398,16 @@ class Classified:
         # extent (the DEM grid extent; default the area) expanded by each feature's mask buffer, so that
         # features just outside the area still mask the edge samples: highway/railway ways tagged bridge=*
         # (other than "no"), clipped to the extent + dsm.BRIDGE_CANDIDATE_MARGIN_M (kind "bridge"; those in
-        # the area are still reported in ``unsupported``), building footprints whose centroid lies outside
-        # the area (counted in ``outside``) with a bbox within the extent + the building buffer, and
+        # the area are still reported in ``unsupported``), surface building footprints (surface_mask_eligible,
+        # the predicate generation applies in the area) whose centroid lies outside the area (counted in
+        # ``outside``) with a bbox within the extent + the building buffer, and
         # natural=tree nodes outside the area within the extent + the tree radius (``mask_trees``).
+        # ``mask_areas``: forest/wood polygons that are in the input only because of the DSM fetch margin
+        # (classify ``content_bbox``); never used for terrain colouring, scatter or any generated content.
         self.bridges = []
         self.outside_buildings = []
         self.mask_trees = []
+        self.mask_areas = []
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -437,15 +443,86 @@ def _unsupported_reason(tags):
     return None
 
 
+def surface_mask_eligible(tags):
+    """True if a building footprint or forest polygon with ``tags`` is a surface feature that may enter the
+    DSM terrain correction mask. It is the same predicate (:func:`_unsupported_reason`) that keeps a feature
+    in the area out of generation (underground, ``layer<0``, tunnels, covered, bridges...), applied to the
+    mask candidates on both sides of the area boundary, so a below-ground footprint never lowers terrain."""
+    return _unsupported_reason(tags) is None
+
+
+def _bbox_hit_test(data, content_bbox):
+    """Predicate over lists of node-id lists: True if any listed node lies in ``content_bbox`` (south, west,
+    north, east) or any segment between consecutive listed nodes crosses it (Overpass's bbox semantics for
+    ways; a relation is selected by its member ways). Always True when ``content_bbox`` is None."""
+    if content_bbox is None:
+        return lambda node_lists: True
+    s, w, n, e = content_bbox
+
+    def hits(node_lists):
+        for nids in node_lists:
+            ll = [(data.nodes[x][1], data.nodes[x][0]) for x in nids if x in data.nodes]
+            if any(w <= p[0] <= e and s <= p[1] <= n for p in ll):
+                return True
+            if any(_clip_segment(a, b, w, s, e, n) is not None for a, b in zip(ll, ll[1:])):
+                return True
+        return False
+    return hits
+
+
+def _content_ids(data, content_bbox):
+    """(relation ids, way ids) of ``data`` that the normal-extent query (:func:`overpass_query` with
+    ``content_bbox``) would also return, or None when ``content_bbox`` is None (everything is content).
+
+    Mirrors the query: a relation is selected when one of its member ways (or nodes) touches the bbox, a
+    ``type=building`` relation also when a member relation does, and the members of selected
+    ``type=building`` relations are added (``rel(r.bldg)``); the downward recursion then brings in every
+    member way of a selected relation, so such a way is content even if it lies outside the bbox."""
+    if content_bbox is None:
+        return None
+    hits = _bbox_hit_test(data, content_bbox)
+    way_hit = {}
+
+    def way_hits(wid):
+        if wid not in way_hit:
+            w = data.ways.get(wid)
+            way_hit[wid] = w is not None and hits([w[0]])
+        return way_hit[wid]
+
+    def direct(members):
+        return any((t == "way" and way_hits(r)) or (t == "node" and r in data.nodes and hits([[r]]))
+                   for t, r, _role in members)
+    rels = {rid for rid, (members, _tags) in data.relations.items() if direct(members)}
+    bldg = [rid for rid, (members, tags) in data.relations.items() if tags.get("type") == "building"
+            and (rid in rels or any(t == "relation" and r in rels for t, r, _role in members))]
+    rels.update(bldg)
+    for rid in bldg:
+        rels.update(r for t, r, _role in data.relations[rid][0] if t == "relation" and r in data.relations)
+    ways = {wid for wid in data.ways if way_hits(wid)}
+    for rid in rels:
+        ways.update(r for t, r, _role in data.relations[rid][0] if t == "way")
+    return rels, ways
+
+
 def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None,
-             mask_extent=None):
+             mask_extent=None, content_bbox=None):
     """Classified features of ``data`` for ``area``. ``mask_extent`` (x0, y0, x1, y1 in the map frame,
     default the area rectangle) is the terrain grid extent used to select the DSM mask candidates
-    (``bridges``, ``outside_buildings``, ``mask_trees``); generated features are always selected against
-    the area. Every kept feature, mask candidates included, counts toward ``max_features``."""
+    (``bridges``, ``outside_buildings``, ``mask_trees``, ``mask_areas``); generated features are always
+    selected against the area. Every kept feature, mask candidates included, counts toward ``max_features``.
+
+    ``content_bbox`` (south, west, north, east), when ``data`` was fetched with a wider DSM margin than the
+    normal acquisition extent, is that normal extent: features the normal-extent query would not return
+    (:func:`_content_ids`) are in the input only because of the margin. Margin-only building footprints and
+    forest/wood polygons become DSM mask candidates only (``outside_buildings``/``mask_areas``), never
+    landcover colouring, scatter, report counts (``outside``, ``invalid``, ``unsupported``) or any generated
+    content, so the generated scene does not depend on whether the correction widened the fetch. None (a
+    local file, or no wider fetch): everything is content."""
     from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
     if mask_extent is None:
         mask_extent = (-area.half[0], -area.half[1], area.half[0], area.half[1])
+    content_ids = _content_ids(data, content_bbox)
+    in_content = {}  # polygon feature id -> in the normal-extent input
     bridge_rect = _expand(mask_extent, BRIDGE_CANDIDATE_MARGIN_M)
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
     tree_rect = _expand(mask_extent, TREE_RADIUS_M)
@@ -580,6 +657,7 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
             else:
                 polys = make_polygons(fid, o_pts, i_pts)
                 polygons[fid] = (polys, tags)
+                in_content[fid] = content_ids is None or rid in content_ids[0]
         if fam and polys:
             rel_outer_ways.setdefault(fam, set()).update(outer_ids)
         elif fam:
@@ -618,6 +696,7 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
                 continue
             polygons[fid] = (make_polygons(fid, [pts], []), tags)
+            in_content[fid] = content_ids is None or wid in content_ids[1]
         elif "highway" in tags or "railway" in tags or "waterway" in tags:
             pts = way_points(nids)
             if pts is None:
@@ -654,10 +733,14 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
         if not polys:
             continue
         cx, cy = polys[0].centroid()
+        content = in_content.get(fid, True)
         if "building" in tags or "building:part" in tags:
-            if not area.contains(cx, cy):
-                out.outside += 1
-                if any(_rect_overlaps(p.bbox(), building_rect) for p in polys):
+            if not content or not area.contains(cx, cy):
+                # Not generated. Counted as outside the area only if it is in the normal input extent;
+                # a DSM mask candidate only if it is a surface feature (the inside-area predicate below).
+                if content:
+                    out.outside += 1
+                if surface_mask_eligible(tags) and any(_rect_overlaps(p.bbox(), building_rect) for p in polys):
                     out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys)
                 continue
             reason = _unsupported_reason(tags)
@@ -669,7 +752,13 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
                 out.buildings.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", kind, tags, p))
         else:
             cls = area_class(tags)
-            if cls:
+            if cls and not content:
+                # only fetched for the DSM margin: a mask candidate (forest/wood) and nothing else
+                if cls == "forest" and surface_mask_eligible(tags):
+                    for k, p in enumerate(polys):
+                        out.mask_areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area",
+                                                      dict(tags, _class=cls), p))
+            elif cls:
                 reason = _unsupported_reason(tags)
                 if reason:
                     if any(_bbox_overlaps(p.bbox(), area) for p in polys):
@@ -677,21 +766,29 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
                     continue
                 for k, p in enumerate(polys):
                     out.areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area", dict(tags, _class=cls), p))
-            elif tags.get("man_made") in ("bridge", "tunnel") and any(_bbox_overlaps(p.bbox(), area) for p in polys):
+            elif (content and tags.get("man_made") in ("bridge", "tunnel")
+                  and any(_bbox_overlaps(p.bbox(), area) for p in polys)):
                 out.unsupported.append({"id": fid, "reason": _unsupported_reason(tags), "tags": _subset(tags)})
 
     for nid, (lat, lon, tags) in data.nodes.items():
         if tags.get("natural") == "tree":
+            # a tree in the area always lies in content_bbox; one outside it is a mask candidate only
             x, y = frame.to_local(lat, lon)
             if area.contains(x, y):
                 out.trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
             elif tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]:
                 out.mask_trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
 
+    if content_ids is not None:
+        # problems of margin-only features are not reported: the normal-extent input does not contain them
+        margin_only = ({f"osm:relation/{r}" for r in data.relations if r not in content_ids[0]}
+                       | {f"osm:way/{w}" for w in data.ways if w not in content_ids[1]})
+        out.invalid = [e for e in out.invalid if e.get("id") not in margin_only]
+        out.unsupported = [e for e in out.unsupported if e.get("id") not in margin_only]
     # Enforced before building:part matching: replaced outlines are retained (outline_features)
     # and so count, exactly like the parts and the other buildings still in ``out.buildings``.
     total = (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
-             + len(out.outside_buildings) + len(out.mask_trees))
+             + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas))
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
     _resolve_building_parts(out, max_pair_checks=max_part_pair_checks, max_work=max_association_work,

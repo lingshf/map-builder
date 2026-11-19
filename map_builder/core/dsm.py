@@ -22,7 +22,9 @@ separately (``report.json`` ``terrain_correction``).
 Work is linear in the grid size (the multigrid solve is bounded by :func:`vcycle_cap` cycles) and in the
 total length of the mask geometry: polygons are rasterised by a scanline sweep holding one row's crossings
 (memory O(edges + crossings of one row)), and the cumulative rasterisation work (edges plus row
-crossings) is bounded by :data:`MASK_WORK_BUDGET`, checked before any terrain change. Work limits skip the
+crossings) is bounded by :data:`MASK_WORK_BUDGET`, checked before any terrain change. The ring topology
+validation of the mask polygons (generate.dsm_obstacles) is bounded by one cumulative budget,
+:data:`MASK_VALIDATION_WORK_BUDGET`, checked as it goes. Work limits skip the
 correction with a warning rather than failing the build (the uncorrected surface model is used); hard input
 limits (``max_features``, :data:`dem.MAX_GRID_POINTS`) remain LimitError.
 """
@@ -40,6 +42,7 @@ MAX_BRIDGE_HALF_WIDTH_M = 30.0  # generate.road_width never exceeds 60 m
 # extent expanded by these reaches; bridge polylines are clipped to the extent expanded by the largest one.
 BRIDGE_CANDIDATE_MARGIN_M = MAX_BRIDGE_HALF_WIDTH_M + BRIDGE_BUFFER_M
 MASK_WORK_BUDGET = 20_000_000  # cumulative rasterisation work units (edges plus row crossings / capsule rows)
+MASK_VALIDATION_WORK_BUDGET = 5_000_000  # cumulative ring topology tests validating the mask polygons (~2 s)
 FINE_PASSES = 2               # initial-guess Gauss-Seidel passes at the finest level; doubled per coarser level
 MAX_LEVEL_PASSES = 256        # cap on the initial-guess passes of any level
 COARSEST_PASSES = 200         # passes on a coarsest level of at most 64 cells
@@ -53,6 +56,11 @@ MIN_UNMASKED_FRACTION = 0.05
 SURFACE_MODEL_PROVIDERS = ("copernicus-glo30-aws",)   # elevation providers that are surface models (DSM)
 
 _EPS = 1e-9   # grid units; points exactly on a mask boundary are masked
+
+
+class MaskWorkExceeded(LimitError):
+    """The cumulative DSM mask validation work (:data:`MASK_VALIDATION_WORK_BUDGET`) was used up: the
+    correction is skipped with a warning, never failing the build."""
 
 
 def is_surface_model(provenance):
@@ -626,15 +634,18 @@ def correct_grid(grid, mask, passes=FINE_PASSES, min_unmasked_fraction=MIN_UNMAS
 
 
 def apply_correction(grid, requested, buildings=(), trees=(), forests=(), bridges=(), excluded_invalid=None,
-                     work_budget=MASK_WORK_BUDGET):
+                     work_budget=MASK_WORK_BUDGET, validation_work=None, validation_skipped=None):
     """(grid to use, report entry, warning or None). ``requested``: the ``dsm_correction`` setting.
 
     The report entry is ``{applied, enabled, setting, masked_points, lowered_points, total_points,
     max_lowering_m, mean_lowering_m, reason, ...}`` plus ``fill_cycles``, ``fill_residual_m`` and
     ``fill_converged`` once the fill ran; when the correction is not applied the input grid is returned.
-    ``excluded_invalid`` (optional dict) counts mask features dropped for invalid geometry.
+    ``excluded_invalid`` (optional dict) counts mask features dropped for invalid geometry;
+    ``validation_work`` (optional) is the ring topology tests used validating the mask polygons
+    (``mask.validation_work``).
 
-    Work limits never fail the build: when the mask rasterisation would exceed ``work_budget`` or the fill
+    Work limits never fail the build: when the mask validation ran out of its budget (``validation_skipped``,
+    the :class:`MaskWorkExceeded` message), the mask rasterisation would exceed ``work_budget`` or the fill
     does not converge within its bounded cycles, the correction is skipped with a warning and the
     uncorrected surface model is used (like the "too few unmasked points" skip)."""
     enabled, reason = resolve(requested, grid.provenance)
@@ -650,11 +661,17 @@ def apply_correction(grid, requested, buildings=(), trees=(), forests=(), bridge
                                   "bridges": len(bridges)}}
     if excluded_invalid:
         entry["mask"]["excluded_invalid"] = dict(excluded_invalid)
+    if validation_work is not None:
+        entry["mask"]["validation_work"] = validation_work
     entry["method"] = ("harmonic (Laplace, 5-point) interpolation of the masked points from the unmasked ones, "
                        "solved coarse to fine (multigrid: nested-iteration initial guess from coarsened levels "
                        "- 2 x 2 blocks, semi-coarsening along the long axis of elongated grids - then a bounded "
                        "number of V- or W-cycles of red-black Gauss-Seidel until the largest update is below "
                        f"{VCYCLE_TOLERANCE_M:g} m; skipped if not converged), min(original, filled)")
+    if validation_skipped:
+        entry["reason"] = "mask validation work budget exceeded"
+        return grid, entry, (f"DSM terrain correction skipped: {validation_skipped}; the terrain is the "
+                             "uncorrected surface model")
     try:
         mask = build_mask(grid, buildings, trees, forests, bridges, work_budget=work_budget)
     except LimitError as exc:

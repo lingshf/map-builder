@@ -676,27 +676,47 @@ class ReviewRound1Test(unittest.TestCase):
 
     def test_online_acquisition_fetches_the_grid_overshoot_plus_a_margin(self):
         from map_builder.core import pipeline
-        seen = {}
         data, _ = self._edge_osm()
-
-        def fake_fetch(area, client, *a, **kw):
-            seen.update(kw)
-            return data
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         _, dem, _ = write_synthetic_fixtures(tmp.name)
-        orig = pipeline.fetch_overpass
-        pipeline.fetch_overpass = fake_fetch
-        try:
-            settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
-                                elevation_license="SYNTHETIC", terrain_spacing=30.0)
-            grid, cl, _ = pipeline.acquire(Area(*self.AREA), settings, client=object())
-        finally:
-            pipeline.fetch_overpass = orig
+
+        def acquire(dsm_correction):
+            seen = {}
+
+            def fake_fetch(area, client, *a, **kw):
+                seen.update(kw)
+                return data
+            orig = pipeline.fetch_overpass
+            orig_classify = pipeline.classify
+
+            def spy_classify(*a, **kw):
+                seen["content_bbox"] = kw.get("content_bbox")
+                return orig_classify(*a, **kw)
+            pipeline.fetch_overpass = fake_fetch
+            pipeline.classify = spy_classify
+            try:
+                settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
+                                    elevation_license="SYNTHETIC", terrain_spacing=30.0,
+                                    dsm_correction=dsm_correction)
+                grid, cl, _ = pipeline.acquire(Area(*self.AREA), settings, client=object())
+            finally:
+                pipeline.fetch_overpass = orig
+                pipeline.classify = orig_classify
+            return grid, cl, seen
+        grid, cl, seen = acquire(True)
         # 100 m at 30 m spacing: 5 points, -50..70, so the grid overshoots the area by 20 m
         self.assertEqual((grid.nx, grid.x0), (5, -50.0))
         self.assertEqual(seen["margin_m"], 50.0)
+        expect = tuple(round(v, 7) for v in Area(*self.AREA).geographic_bbox(margin_m=30.0))
+        self.assertEqual(seen["content_bbox"], expect)   # only the normal 30 m extent is content
         self.assertTrue(all(abs(p[1] + 62.0) < 1e-3 for p in cl.bridges[0].geometry))
+        # review round 2, finding 2c: with the correction off (the local-file default, or explicitly) the
+        # normal 30 m margin is requested and everything fetched is content
+        for setting in (None, False):
+            _, _, seen = acquire(setting)
+            self.assertEqual(seen["margin_m"], 30.0, setting)
+            self.assertIsNone(seen["content_bbox"], setting)
 
     # --- finding 5: lowered points and the provenance note --------------------------------------------------
 
@@ -722,6 +742,174 @@ class ReviewRound1Test(unittest.TestCase):
         self.assertIn("lowered no points", note)
         self.assertNotIn("were lowered", note)
         self.assertIsNone(elevation_correction_note({"applied": False}))
+
+
+class ReviewRound2Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-2 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+
+    # --- finding 1: only surface features outside the area enter the mask ---------------------------------
+
+    def test_below_ground_footprints_outside_the_area_do_not_lower_terrain(self):
+        g = make_grid(lambda x, y: 120.0 if (x, y) == (50.0, 0.0) else 100.0, n=21, spacing=5.0)   # -50..50
+        cases = (({"building": "yes", "location": "underground"}, False), ({"building": "yes", "layer": "-1"}, False),
+                 ({"building": "yes", "tunnel": "yes"}, False), ({"building": "yes"}, True))
+        for tags, lowered in cases:
+            b = OsmBuilder()
+            b.way(square(56, 0, 3), tags, closed=True)     # x 53..59: 3 m outside the area, centroid outside
+            area = Area(*self.AREA)
+            cl = classify(parse_osm_xml(b.xml().encode()), area, mask_extent=(-50.0, -50.0, 50.0, 50.0))
+            self.assertEqual(cl.outside, 1, tags)           # still counted as a footprint outside the area
+            self.assertEqual(len(cl.outside_buildings), 1 if lowered else 0, tags)
+            plan = build_plan(area, g, cl, PlanOptions(trees=False))
+            terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+            z = terrain.mesh.vertices[_idx(g, 50.0, 0.0)][2] + plan.report["z_offset_m"]
+            if lowered:
+                self.assertAlmostEqual(z, 100.0, places=2)
+            else:
+                self.assertEqual(z, 120.0, tags)
+                self.assertFalse(plan.report["terrain_correction"]["applied"])
+
+    # --- finding 2: margin-only features are mask candidates only -----------------------------------------
+
+    def test_margin_only_features_affect_only_the_mask(self):
+        area = Area(*self.AREA)
+        content_bbox = tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0))
+        b = OsmBuilder()
+        ids = {"forest": b.way(square(-70, 0, 15), {"landuse": "forest"}, closed=True),   # x -85..-55: in the margin
+               "bldg": b.way(square(-70, 40, 3), {"building": "yes"}, closed=True),
+               "m_forest": b.way(square(100, 0, 8), {"landuse": "forest"}, closed=True),  # x 92..108: margin-only
+               "m_under": b.way(square(100, 30, 8), {"landuse": "forest", "layer": "-1"}, closed=True),
+               "m_bldg": b.way(square(100, -30, 3), {"building": "yes"}, closed=True),
+               "m_ug": b.way(square(100, -42, 3), {"building": "yes", "location": "underground"}, closed=True),
+               "m_bowtie": b.way([(95, 40), (105, 50), (105, 40), (95, 50)], {"building": "yes"}, closed=True)}
+        # a content multipolygon with a margin-only outer: its member ways come with it, so it is all content
+        o1, o2 = b.way(square(-60, -30, 5), closed=True), b.way(square(-110, -30, 5), closed=True)
+        rid = b._next()
+        b.relations.append((rid, [("way", o1, "outer"), ("way", o2, "outer")],
+                            {"type": "multipolygon", "landuse": "forest"}))
+        data = parse_osm_xml(b.xml().encode())
+        extent = (-60.0, -50.0, 150.0, 50.0)
+        cl = classify(data, area, mask_extent=extent, content_bbox=content_bbox)
+        w = {k: f"osm:way/{v}" for k, v in ids.items()}
+        self.assertEqual(sorted(f.id for f in cl.areas),
+                         sorted([w["forest"], f"osm:relation/{rid}#0", f"osm:relation/{rid}#1"]))
+        self.assertEqual([f.id for f in cl.mask_areas], [w["m_forest"]])   # below-ground forest excluded
+        self.assertEqual(sorted(f.id for f in cl.outside_buildings), sorted([w["bldg"], w["m_bldg"]]))
+        self.assertEqual(cl.outside, 1)                                   # margin-only footprints not counted
+        self.assertEqual(cl.invalid, [])                                  # nor their problems reported
+        self.assertEqual((cl.buildings, cl.trees, cl.roads), ([], [], []))
+        _, _, forests, _ = dsm_obstacles(cl, extent=extent)
+        self.assertEqual(len(forests), 3)   # forest, relation#0 (relation#1 is far from the grid), m_forest
+        # without content_bbox (a local file) everything is content
+        cl = classify(data, area, mask_extent=extent)
+        self.assertIn(w["m_forest"], {f.id for f in cl.areas})
+        self.assertEqual(cl.mask_areas, [])
+        self.assertEqual(cl.outside, 3)
+        self.assertIn(w["m_bowtie"], {e["id"] for e in cl.invalid})
+
+    def _scene_osm(self, wide):
+        b = OsmBuilder()
+        b.way(square(0, 0, 5), {"building": "yes"}, closed=True)
+        b.way(square(30, -30, 8), {"landuse": "grass"}, closed=True)
+        b.way(square(-30, 30, 12), {"landuse": "forest"}, closed=True)
+        b.node(-20.0, 20.0, {"natural": "tree"})
+        b.way([(-60.0, 10.0), (60.0, 10.0)], {"highway": "residential"})
+        if wide:   # only in the response widened for the DSM margin (the area is 101 m wide: edge x = 50.5)
+            b.way([(91.5, -60.0), (107.5, -60.0), (107.5, 60.0), (91.5, 60.0)], {"landuse": "forest"}, closed=True)
+            b.way(square(140, -40, 4), {"building": "yes"}, closed=True)
+            b.way([(95, 40), (105, 50), (105, 40), (95, 50)], {"building": "yes"}, closed=True)
+            b.node(110.0, -20.0, {"natural": "tree"})
+        return parse_osm_xml(b.xml().encode())
+
+    def test_generated_scene_is_identical_with_the_correction_on_or_off(self):
+        from map_builder.core.dem import grid_layout
+        from map_builder.core.generate import LANDCOVER_COLORS
+        geo = (47.0, 8.0, 101.0, 100.0)
+        x0, y0, nx, ny = grid_layout(Area(*geo), 100.0)
+        self.assertEqual((x0, nx, ny), (-50.5, 3, 2))   # the grid overshoots to x = 149.5
+        heights = [[130.0 if (i, j) == (2, 0) else 100.0 for i in range(nx)] for j in range(ny)]
+        g = ElevationGrid(x0, y0, 100.0, nx, ny, heights, dict(COPERNICUS))
+        extent = (x0, y0, x0 + (nx - 1) * 100.0, y0 + (ny - 1) * 100.0)
+        plans = {}
+        for on in (True, False):
+            area = Area(*geo)
+            cb = tuple(round(v, 7) for v in area.geographic_bbox(margin_m=30.0)) if on else None
+            cl = classify(self._scene_osm(wide=on), area, mask_extent=extent, content_bbox=cb)
+            plans[on] = build_plan(area, g, cl, PlanOptions(seed=3), dsm_correction=on)
+        tc = plans[True].report["terrain_correction"]
+        self.assertTrue(tc["applied"])
+        self.assertEqual(tc["mask"]["features"]["forest_areas"], 2)   # the margin-only forest masks
+        self.assertEqual(tc["mask"]["features"]["buildings"], 2)
+        self.assertFalse(plans[False].report["terrain_correction"]["applied"])
+
+        def scene(plan):
+            objs = []
+            for o in plan.objects:
+                m = o.mesh
+                prov = {k: v for k, v in o.provenance.items() if not (o.mb_class == "terrain" and k == "surface")}
+                objs.append((o.name, o.mb_id, o.mb_class, o.collection, o.mesh_key, o.location[:2], o.rotation_z,
+                             o.scale, json.dumps(prov, sort_keys=True, default=str),
+                             None if m is None else (m.materials, m.faces, m.face_materials, m.face_colors,
+                                                     [v[:2] for v in m.vertices])))
+            report = {k: v for k, v in plan.report.items() if k not in ("terrain_correction", "z_offset_m")}
+            report["warnings"] = [x for x in report.get("warnings", ()) if "DSM" not in x]
+            report["inferred"] = {k: v for k, v in report.get("inferred", {}).items() if k != "terrain.surface"}
+            return objs, json.loads(json.dumps(report, default=str))
+        on, off = scene(plans[True]), scene(plans[False])
+        self.assertEqual(on[0], off[0])
+        self.assertEqual(on[1], off[1])
+        terrain = next(o for o in plans[True].objects if o.mb_class == "terrain")
+        # the overshoot cell (i 1, j 0; centre x 99.5) is not forest coloured
+        self.assertEqual(terrain.mesh.face_colors[2], tuple(LANDCOVER_COLORS[None]))
+        self.assertNotEqual(tuple(LANDCOVER_COLORS[None]), tuple(LANDCOVER_COLORS["forest"]))
+
+    # --- finding 3: one shared mask validation work budget ------------------------------------------------
+
+    def _holed(self, distinct, n=20):
+        outer = square(75, 0, 24)
+        holes = [square(52.0 + 1.5 * i, -22.0 + 1.5 * j, 0.4)[::-1] for i in range(30) for j in range(15)]   # 450
+        cl = Classified()
+        for k in range(n):
+            dx = 0.001 * k if distinct else 0.0
+            cl.outside_buildings.append(Feature(f"osm:relation/{k}", "building", {"building": "yes"},
+                                                Polygon([(x + dx, y) for x, y in outer], [list(h) for h in holes])))
+        return cl
+
+    def test_mask_validation_is_charged_to_one_budget(self):
+        extent = (-50.0, -50.0, 50.0, 50.0)
+        stats = {}
+        buildings, _, _, _ = dsm_obstacles(self._holed(False), extent=extent, stats=stats)
+        self.assertEqual(len(buildings), 1)              # identical geometry validated and masked once
+        one = stats["validation_work"]
+        self.assertGreater(one, 100_000)
+        stats = {}
+        with self.assertRaises(dsm.MaskWorkExceeded):
+            dsm_obstacles(self._holed(True), extent=extent, work_budget=3 * one, stats=stats)
+        self.assertLessEqual(stats["validation_work"], 3 * one)
+        # in the plan: skipped with a warning and a clear reason, terrain unchanged, quickly
+        g = make_grid(lambda x, y: ground(x, y) + (10.0 if x >= 45 else 0.0), n=21, spacing=5.0)
+        t = time.perf_counter()
+        plan = build_plan(Area(*self.AREA), g, self._holed(True), PlanOptions(trees=False,
+                                                                              max_mask_validation_work=1000))
+        self.assertLess(time.perf_counter() - t, 2.0)
+        tc = plan.report["terrain_correction"]
+        self.assertFalse(tc["applied"])
+        self.assertEqual(tc["reason"], "mask validation work budget exceeded")
+        self.assertLessEqual(tc["mask"]["validation_work"], 1000)
+        self.assertTrue(any("DSM terrain correction skipped" in x and "mask validation work budget" in x
+                            for x in plan.report["warnings"]))
+        terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+        z = plan.report["z_offset_m"]
+        for (i, j, x, y), v in zip(points(g), terrain.mesh.vertices):
+            self.assertAlmostEqual(v[2] + z, g.heights[j][i], places=6)
+        # with the default budget the identical relations of the repro are validated once
+        plan = build_plan(Area(*self.AREA), g, self._holed(False), PlanOptions(trees=False))
+        tc = plan.report["terrain_correction"]
+        self.assertTrue(tc["applied"])
+        self.assertEqual(tc["mask"]["validation_work"], one)
+        self.assertEqual(tc["mask"]["features"]["buildings"], 1)
 
 
 if __name__ == "__main__":

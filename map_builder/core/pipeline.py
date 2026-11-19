@@ -9,6 +9,7 @@ import hashlib
 import json
 import math
 
+from . import dsm
 from .cache import DiskCache, NullCache
 from .collision import (CLASSES, ColObject, heightfield_layout, is_degenerate, rasterize_heightfield,
                         read_collision, write_collision, write_heightfield)
@@ -17,7 +18,8 @@ from .errors import PackageError
 from .generate import MATERIALS, PlanOptions, build_plan
 from .glb import node_scale, write_glb
 from .http import HttpClient, redact
-from .osm import DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_LICENSE, classify, fetch_overpass, load_osm_file
+from .osm import (DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_FETCH_MARGIN_M, OSM_LICENSE, classify, fetch_overpass,
+                  load_osm_file)
 from .package import assemble, passage_probe_problems, write_package
 
 ELEVATION_SOURCES = ("copernicus", "file")
@@ -98,11 +100,6 @@ def acquire(area, settings, client=None, progress=None):
     The terrain grid limit is checked first, before any file or network access. The heightfield limit
     belongs to package export (see :func:`build_package`); acquisition and plans produce no heightfield."""
     x0, y0, nx, ny = grid_layout(area, settings.terrain_spacing)
-    # The grid may overshoot the area on the +x/+y sides by up to one spacing; DSM mask candidates are
-    # selected against the grid extent (osm.classify mask_extent), so Overpass fetches that overshoot plus
-    # the usual 30 m margin (generated content is still selected against the area).
-    overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
-                    y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
     client = client or HttpClient()
     cache = DiskCache(settings.cache_dir) if settings.cache_dir else NullCache()
     if settings.elevation_source == "file":
@@ -114,14 +111,27 @@ def acquire(area, settings, client=None, progress=None):
                                 cache_dataset_id=settings.elevation_cache_dataset_id)
     if settings.osm_source == "file":
         osm = load_osm_file(settings.osm_file)
+        content_bbox = None
     else:
+        # The grid may overshoot the area on the +x/+y sides by up to one spacing. When the DSM correction
+        # is enabled, Overpass also fetches that overshoot (DSM mask candidates are selected against the
+        # grid extent, osm.classify mask_extent); otherwise the normal extent (area + OSM_FETCH_MARGIN_M) is
+        # fetched. Either way only features the normal-extent query returns are content (classify
+        # content_bbox): those fetched only for the margin are mask candidates, so the generated scene is
+        # the same with the correction on or off.
+        enabled, _ = dsm.resolve(settings.dsm_correction, grid.provenance)
+        overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
+                        y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
+        margin = OSM_FETCH_MARGIN_M + (math.ceil(overshoot) if enabled else 0.0)
         osm = fetch_overpass(area, client, settings.overpass_url, cache,
                              allow_cache_override=settings.allow_cache_override,
-                             cache_dataset_id=settings.osm_cache_dataset_id,
-                             margin_m=30.0 + math.ceil(overshoot))
+                             cache_dataset_id=settings.osm_cache_dataset_id, margin_m=margin)
+        # the normal extent's bbox exactly as its query writes it (7 decimals); None when nothing wider was fetched
+        content_bbox = (tuple(round(v, 7) for v in area.geographic_bbox(margin_m=OSM_FETCH_MARGIN_M))
+                        if margin > OSM_FETCH_MARGIN_M else None)
     s = grid.spacing
     classified = classify(osm, area, mask_extent=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * s,
-                                                  grid.y0 + (grid.ny - 1) * s))
+                                                  grid.y0 + (grid.ny - 1) * s), content_bbox=content_bbox)
     return grid, classified, [dict(grid.provenance), osm_source_entry(osm, settings.osm_license)]
 
 

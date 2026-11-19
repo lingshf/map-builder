@@ -359,8 +359,9 @@ counted in `edits.removed` and listed in `report.json`.
   * `terrain_correction`: the DSM correction outcome (`applied`, `setting`, `reason`,
     `masked_points`, `lowered_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, and
     once the fill ran `fill_cycles`, `fill_residual_m`, `fill_converged`; mask parameters, feature
-    counts, `excluded_invalid` and `rasterisation_work`). A fill that did not converge is not
-    applied (`reason: fill did not converge`).
+    counts, `excluded_invalid`, `validation_work` and `rasterisation_work`). A fill that did not converge is not
+    applied (`reason: fill did not converge`); nor is a mask whose polygon validation used up its
+    work budget (`reason: mask validation work budget exceeded`).
     Informative only; when applied, the elevation entry in `sources` also has an optional
     `processing` string (sources are an open object, so this is not a format change)
   * counts and warnings
