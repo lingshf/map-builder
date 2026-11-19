@@ -121,7 +121,25 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
     as ambiguous and are skipped. A best correspondence that is a reversed cyclic order is an
     error. If fewer than 99 % of an object's collision triangles find an unambiguous match,
     the validator issues a warning.
+    Candidates are first pruned to those with a vertex correspondence; the candidate cap and
+    a per-object work budget apply after that. Triangles left unchecked because the budget ran
+    out are reported in that warning, not counted as ambiguous.
+  * visual triangles with no collision counterpart (visible but not collidable). This is a
+    warning.
+  * the collision winding rules above, checked on the collision alone: building solids must be
+    closed (each directed edge matched by its reverse), and each connected shell must have a
+    positive signed volume. Enclosed cavities (inward-facing inner shells) are not supported in
+    v1. Non-degenerate terrain and road triangles must have normal Z > 0. A violation is an
+    error. Degenerate triangles are only a warning.
+  * the credential policy (no URL user-info, credential query keys, Authorization or Bearer
+    values, or credential-named keys), applied recursively to the manifest, `report.json`,
+    the collision object table and the glTF JSON. Diagnostics name entries by index or fixed
+    format value and never echo strings taken from the package.
   * the orientation probes (points, triangles and normals) against the visual mesh.
+* The reference exporter is stricter than the validator. It refuses to publish unless each
+  node's visual and collision triangles correspond one-to-one with the same winding. The
+  correspondence is a bounded order-independent matching; if the budget runs out, the export
+  fails with "cannot verify binding" instead of passing.
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
 
