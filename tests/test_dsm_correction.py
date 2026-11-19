@@ -2245,6 +2245,21 @@ class ReviewRound11Test(unittest.TestCase):
             self.assertIn("exceed the feature limit (100 features", cl.mask_unavailable)
             self.assertLess(p, 1.5 * peak(*base)[1])                    # before: all 20 000 fragments held
 
+    def test_bridge_width_parsed_once_per_way(self):
+        # round 14: dsm_obstacles parsed each fragment's (possibly huge) width tag again
+        from unittest import mock
+        from map_builder.core import generate
+        area = Area(*self.AREA)
+        b = OsmBuilder()
+        b.way([(55.0, 0.0), (80.0, 5.0), (80.0, -5.0)] * 300, {"highway": "service", "bridge": "yes", "width": "4"})
+        cl = classify(parse_osm_xml(b.xml().encode()), area, mask_extent=(-50.0, -50.0, 50.0, 50.0))
+        self.assertGreater(len(cl.bridges), 250)
+        with mock.patch.object(generate, "road_width", wraps=generate.road_width) as rw:
+            _, _, _, bridges = generate.dsm_obstacles(cl, extent=(-50.0, -50.0, 50.0, 50.0))
+        self.assertEqual(rw.call_count, 1)                              # before: once per fragment
+        self.assertEqual(len(bridges), len(cl.bridges))
+        self.assertTrue(all(w == 4.0 for _pts, w in bridges))
+
 
 def pipeline_mask_message(cls_name):
     from map_builder.core import errors, pipeline

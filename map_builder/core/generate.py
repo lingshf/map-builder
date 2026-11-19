@@ -1626,8 +1626,12 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
         if stats is not None:
             stats["validation_work"] = used[0]
     bridges = []
+    widths = {}   # fragments of one way share its tags: its width is parsed once, not per fragment
     for f in getattr(classified, "bridges", ()):
-        pts, width = list(f.geometry), road_width(f.tags)[0]
+        key = id(f.tags)
+        if key not in widths:
+            widths[key] = (f.tags, road_width(f.tags)[0])   # the tags kept alive so the id stays unique
+        pts, width = list(f.geometry), widths[key][1]
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         if near((min(xs), min(ys), max(xs), max(ys)), width / 2.0 + dsm.BRIDGE_BUFFER_M):
             bridges.append((pts, width))
