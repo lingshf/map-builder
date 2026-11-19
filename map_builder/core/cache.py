@@ -1,17 +1,40 @@
 """Content cache for permitted sources (OSM ODbL data, Copernicus DEM tiles).
 
 Entries are keyed by a caller-provided string that must not contain secrets
-(use :func:`map_builder.core.http.redact` on URLs). Writes are atomic.
+(dataset ids and fixed provider labels, never endpoint paths). Writes are atomic.
 """
 
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 
 
 MAX_META_BYTES = 64 * 1024
+_DATASET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def check_cache_dataset_id(value, endpoint_url=""):
+    """Validate a caller-supplied, credential-free identity for caching a non-default endpoint.
+
+    Endpoint URLs are never used as cache identity (their path/query may embed a
+    credential), so callers that opt into caching an override must name the dataset
+    explicitly. Returns the id or raises ``ValueError``.
+    """
+    if not isinstance(value, str) or not _DATASET_ID.match(value):
+        raise ValueError("cache_dataset_id must be 1-64 characters of [A-Za-z0-9._-] when caching a "
+                         "caller-supplied endpoint")
+    try:
+        from urllib.parse import unquote, urlsplit
+        p = urlsplit(str(endpoint_url))
+        private = " ".join(unquote(s) for s in (p.username or "", p.password or "", p.path, p.query, p.fragment))
+    except ValueError:
+        private = ""
+    if len(value) >= 6 and value.lower() in private.lower():
+        raise ValueError("cache_dataset_id must not be copied from the endpoint URL path, query or credentials")
+    return value
 
 
 def _read_capped(path, limit):
@@ -69,10 +92,22 @@ class DiskCache:
                     os.unlink(tmp)
                 raise
 
+    def delete(self, namespace, key):
+        """Remove an entry (e.g. one that later failed validation); missing entries are ignored."""
+        p = self._path(namespace, key)
+        for suffix in (".json", ".bin"):
+            try:
+                os.unlink(p + suffix)
+            except FileNotFoundError:
+                pass
+
 
 class NullCache:
     def get(self, namespace, key):
         return None
 
     def put(self, namespace, key, body, meta=None):
+        pass
+
+    def delete(self, namespace, key):
         pass

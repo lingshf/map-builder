@@ -188,7 +188,7 @@ class HttpTest(unittest.TestCase):
         r = redact(u)
         self.assertNotIn("secret", r)
         self.assertNotIn("abc", r)
-        self.assertIn("host.example/path/x.tif", r)
+        self.assertEqual(r, "https://host.example")
 
     def test_status_mapping_never_leaks_query(self):
         url = "https://h.example/a?api_key=SECRET123"
@@ -278,6 +278,9 @@ class MemoryCache:
         self.puts.append((namespace, key, meta))
         self.store[(namespace, key)] = body
 
+    def delete(self, namespace, key):
+        self.store.pop((namespace, key), None)
+
 
 def osm_doc(inner, header='<?xml version="1.0" encoding="UTF-8"?>'):
     return f'{header}<osm version="0.6">{inner}</osm>'.encode("utf-8")
@@ -338,9 +341,10 @@ class SecretLeakTest(unittest.TestCase):
         tr = FakeTransport({f"{base}/{name}/{name}.tif": CopernicusTest().tile()})
         cache = MemoryCache()
         g = fetch_copernicus(Area(47.5, 8.5, 400, 400), HttpClient(tr), 20.0, cache, base,
-                             allow_cache_override=True)
+                             allow_cache_override=True, cache_dataset_id="example-mirror")
         self.assertNotIn("SECRET", json.dumps(g.provenance))
-        self.assertIn("example.invalid/cop", g.provenance["access"])
+        self.assertIn("https://example.invalid", g.provenance["access"])
+        self.assertNotIn("/cop", g.provenance["access"])
         self.assertTrue(cache.puts)
         self.assertFalse(any("SECRET" in json.dumps(p) for p in cache.puts))
 
@@ -637,8 +641,8 @@ class CachePermissionTest(unittest.TestCase):
         self.assertEqual(self.run_cop("https://mirror.example/cop").gets, [])
         cache = self.run_cop(COPERNICUS_BASE_URL)
         self.assertTrue(cache.puts)
-        cache = self.run_cop("https://mirror.example/cop", allow_cache_override=True)
-        self.assertTrue(all(k.startswith(f"copernicus-dem-glo30-public|https://mirror.example/cop|{self.NAME}#")
+        cache = self.run_cop("https://mirror.example/cop", allow_cache_override=True, cache_dataset_id="mirror-1")
+        self.assertTrue(all(k.startswith(f"copernicus-dem-glo30-public|override:mirror-1|{self.NAME}#")
                             for _, k, _ in cache.puts))
 
     def test_overpass(self):
@@ -648,8 +652,8 @@ class CachePermissionTest(unittest.TestCase):
         fetch_overpass(area, HttpClient(ScriptedTransport(Response(200, good))), "https://op.example/api", cache)
         self.assertEqual((cache.gets, cache.puts), ([], []))
         fetch_overpass(area, HttpClient(ScriptedTransport(Response(200, good))), "https://op.example/api", cache,
-                       allow_cache_override=True)
-        self.assertTrue(cache.puts[0][1].startswith("openstreetmap-overpass-xml|https://op.example/api\n"))
+                       allow_cache_override=True, cache_dataset_id="op-mirror")
+        self.assertTrue(cache.puts[0][1].startswith("openstreetmap-overpass-xml|override:op-mirror\n"))
         fetch_overpass(area, HttpClient(ScriptedTransport(Response(200, good))), DEFAULT_OVERPASS_URL, cache)
         self.assertEqual(len(cache.puts), 2)
 
@@ -691,6 +695,246 @@ class BoundedReadsTest(unittest.TestCase):
         c.put("ns", "big", b"y", {"pad": "p" * MAX_META_BYTES})
         self.assertIsNone(c.get("ns", "big"))
         self.assertFalse(os.path.exists(c._path("ns", "big") + ".bin"))
+
+
+# --- review round 3 ----------------------------------------------------------
+
+class _BombBody(io.BytesIO):
+    """A redirect body that must never be read (reading it would bypass the byte cap and deadline)."""
+
+    msg = "Found"
+
+    def __init__(self):
+        super().__init__(b"x" * 64)
+        self.read_calls = 0
+
+    def read(self, *args):
+        self.read_calls += 1
+        raise AssertionError("redirect body was read")
+
+    readline = read
+
+
+class _FakeNet(urllib.request.BaseHandler):
+    """Network-free https handler: /start redirects to /final; advances a fake clock per hop."""
+
+    handler_order = 100
+
+    def __init__(self, clock, step):
+        self.clock, self.step = clock, step
+        self.timeouts, self.bombs = [], []
+
+    def https_open(self, req):
+        import email.message
+        import urllib.response
+        self.timeouts.append(req.timeout)
+        self.clock.t += self.step
+        hdrs = email.message.Message()
+        if "/start" in req.full_url:
+            hdrs["Location"] = "https://h.example/final"
+            bomb = _BombBody()
+            self.bombs.append(bomb)
+            return urllib.response.addinfourl(bomb, hdrs, req.full_url, 302)
+        resp = urllib.response.addinfourl(io.BytesIO(b"payload"), hdrs, req.full_url, 200)
+        resp.msg = "OK"
+        return resp
+
+
+class RedirectBodyAndDeadlineTest(unittest.TestCase):
+    """Round 3, finding 1: redirect bodies are closed unread; all hops share one absolute deadline."""
+
+    def transport(self, step):
+        clock = FakeClock()
+        net = _FakeNet(clock, step)
+        real = urllib.request.build_opener
+        patch = mock.patch.object(urllib.request, "build_opener", lambda *h: real(*h, net))
+        patch.start()
+        self.addCleanup(patch.stop)
+        return UrllibTransport(total_timeout=25.0, clock=clock), net
+
+    def test_redirect_body_closed_unread_and_next_hop_gets_remaining_time(self):
+        t, net = self.transport(step=10.0)
+        resp = t.request("GET", "https://h.example/start", {}, None, 20.0, 1000)
+        self.assertEqual(resp.body, b"payload")
+        self.assertEqual(net.bombs[0].read_calls, 0)
+        self.assertTrue(net.bombs[0].closed)
+        self.assertEqual(net.timeouts, [20.0, 15.0])  # second hop limited to the 15 s left of 25 s
+
+    def test_deadline_expired_before_following_redirect(self):
+        t, net = self.transport(step=30.0)
+        with self.assertRaises(NetworkError) as cm:
+            t.request("GET", "https://h.example/start?k=SECRET", {}, None, 20.0, 1000)
+        self.assertIn("time limit", str(cm.exception))
+        self.assertNotIn("SECRET", str(cm.exception))
+        self.assertEqual(len(net.timeouts), 1)  # the redirect target was never opened
+        self.assertEqual(net.bombs[0].read_calls, 0)
+        self.assertTrue(net.bombs[0].closed)
+
+
+class RejectedMultipolygonOuterTest(unittest.TestCase):
+    """Round 3, finding 2: outers of rejected multipolygons never become solid buildings."""
+
+    def setUp(self):
+        self.area = Area(*ORIGIN, AREA_W, AREA_H)
+
+    def check(self, b, outer):
+        cl = classify(parse_osm_xml(b.xml()), self.area)
+        self.assertEqual(cl.buildings, [])
+        self.assertFalse(any(f.geometry.contains(0, 0) for f in cl.buildings + cl.areas))
+        reasons = {i["id"]: i["reason"] for i in cl.invalid}
+        self.assertIn(f"osm:way/{outer}", reasons)  # reported, not silently dropped
+        self.assertIn(f"osm:way/{outer}", ids_of(cl.roads))  # independent role kept
+        return reasons[f"osm:way/{outer}"]
+
+    def test_rejected_relation_suppresses_tagged_outer(self):
+        outer_tags = {"building": "yes", "highway": "footway"}
+        for case in ("missing", "unclosed", "outside"):
+            with self.subTest(case=case):
+                b = OsmBuilder()
+                o = b.way(rect(0, 0, 40, 40), outer_tags, closed=True)
+                if case == "missing":
+                    inner = 999999
+                elif case == "unclosed":
+                    inner = b.way(rect(0, 0, 16, 16)[::-1])
+                else:  # inner ring lies outside the outer: relation is invalid
+                    inner = b.way(rect(100, 100, 10, 10)[::-1], closed=True)
+                b.relations.append((7, [("way", o, "outer"), ("way", inner, "inner")],
+                                    {"type": "multipolygon", "building": "yes"}))
+                reason = self.check(b, o)
+                self.assertIn("osm:relation/7", reason)
+
+    def test_old_style_untagged_relation_with_holes_suppresses_outer(self):
+        b = OsmBuilder()
+        rid = b.multipolygon(rect(0, 0, 40, 40), [rect(0, 0, 16, 16)[::-1]], {},
+                             outer_tags={"building": "yes", "highway": "footway"})
+        outer = b.relations[-1][1][0][1]
+        self.assertIn(f"osm:relation/{rid}", self.check(b, outer))
+
+    def test_other_family_outer_is_kept(self):
+        b = OsmBuilder()
+        o = b.way(rect(0, 0, 40, 40), {"building": "yes"}, closed=True)
+        b.relations.append((8, [("way", o, "outer"), ("way", 999999, "inner")],
+                            {"type": "multipolygon", "landuse": "grass"}))
+        cl = classify(parse_osm_xml(b.xml()), self.area)
+        self.assertEqual([f.id for f in cl.buildings], [f"osm:way/{o}"])
+
+
+class EndpointRedactionTest(unittest.TestCase):
+    """Round 3, finding 3: endpoint paths never reach errors, provenance, cache keys or metadata."""
+
+    TOKEN = "S3cr3tPathToken"
+    NAME = "Copernicus_DSM_COG_10_N47_00_E008_00_DEM"
+
+    def test_redact_is_origin_only(self):
+        self.assertEqual(redact(f"https://u:p@H.example:8443/api/{self.TOKEN}/x?q=1#f"), "https://h.example:8443")
+        self.assertEqual(redact("not a url"), "<invalid url>")
+        self.assertEqual(redact("https://h.example:99999/x"), "<invalid url>")
+
+    def test_error_messages_omit_path(self):
+        with self.assertRaises(NetworkError) as cm:
+            HttpClient(FakeTransport(status=500)).fetch(f"https://h.example/{self.TOKEN}/f")
+        self.assertNotIn(self.TOKEN, str(cm.exception))
+        self.assertNotIn(self.TOKEN, str(cm.exception.url))
+
+    def test_overpass_override_requires_dataset_id_and_never_persists_path(self):
+        area = Area(*ORIGIN, 200, 200)
+        url = f"https://op.example/{self.TOKEN}/api/interpreter"
+        good = OverpassValidationTest.GOOD
+        with self.assertRaises(ValueError):
+            fetch_overpass(area, HttpClient(ScriptedTransport()), url, MemoryCache(), allow_cache_override=True)
+        with self.assertRaises(ValueError):  # dataset id copied from the secret path
+            fetch_overpass(area, HttpClient(ScriptedTransport()), url, MemoryCache(), allow_cache_override=True,
+                           cache_dataset_id=self.TOKEN)
+        cache = MemoryCache()
+        data = fetch_overpass(area, HttpClient(ScriptedTransport(Response(200, good))), url, cache,
+                              allow_cache_override=True, cache_dataset_id="team-mirror")
+        self.assertEqual(data.source["endpoint"], "https://op.example")
+        dumped = json.dumps([data.source, cache.puts, [k for k in cache.store]])
+        self.assertNotIn(self.TOKEN, dumped)
+        self.assertNotIn("/api", dumped)
+        default = fetch_overpass(area, HttpClient(ScriptedTransport(Response(200, good))))
+        self.assertEqual(default.source["endpoint"], DEFAULT_OVERPASS_URL)  # known public label kept
+
+    def test_copernicus_override_cache_keys_and_metadata_omit_path(self):
+        base = f"https://mirror.example/{self.TOKEN}/cop"
+        tr = FakeTransport({f"{base}/{self.NAME}/{self.NAME}.tif": CopernicusTest().tile()})
+        cache = MemoryCache()
+        g = fetch_copernicus(Area(47.5, 8.5, 400, 400), HttpClient(tr), 20.0, cache, base,
+                             allow_cache_override=True, cache_dataset_id="team-mirror")
+        self.assertTrue(cache.puts)
+        self.assertNotIn(self.TOKEN, json.dumps([g.provenance, cache.puts]))
+        with self.assertRaises(ValueError):
+            fetch_copernicus(Area(47.5, 8.5, 400, 400), HttpClient(tr), 20.0, MemoryCache(), base,
+                             allow_cache_override=True)
+        # Without a cache, an override needs no dataset id.
+        self.assertIsNotNone(fetch_copernicus(Area(47.5, 8.5, 400, 400), HttpClient(tr), 20.0, None, base))
+
+
+class FlakyTransport(FakeTransport):
+    """First request for each URL gets a non-TIFF 200 (e.g. a provider error page); later ones are real."""
+
+    def __init__(self, files):
+        super().__init__(files)
+        self.seen = set()
+
+    def request(self, method, url, headers, data, timeout, max_bytes):
+        if url not in self.seen:
+            self.seen.add(url)
+            self.requests.append((method, url, dict(headers), data))
+            return Response(200, b"<html>Service temporarily unavailable</html>")
+        return super().request(method, url, headers, data, timeout, max_bytes)
+
+
+class RangeCacheValidationTest(unittest.TestCase):
+    """Round 3, finding 4: ranges are cached only after TIFF validation; bad entries are evicted."""
+
+    NAME = CachePermissionTest.NAME
+    BASE = COPERNICUS_BASE_URL
+
+    def setUp(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.cache = DiskCache(td.name)
+        self.root = td.name
+        self.url = f"{self.BASE}/{self.NAME}/{self.NAME}.tif"
+
+    def fetch(self, transport):
+        return fetch_copernicus(Area(47.5, 8.5, 400, 400), HttpClient(transport), 20.0, self.cache)
+
+    def cached_files(self):
+        return [f for _, _, fs in os.walk(self.root) for f in fs]
+
+    def test_non_tiff_response_not_cached_then_valid_import_succeeds(self):
+        tr = FlakyTransport({self.url: CopernicusTest().tile()})
+        with self.assertRaises(FormatError):
+            self.fetch(tr)
+        self.assertEqual(self.cached_files(), [])
+        g = self.fetch(tr)  # same cache: must not replay the error page
+        self.assertIsNotNone(g)
+        self.assertTrue(self.cached_files())
+        offline = FakeTransport({})
+        self.assertIsNotNone(self.fetch(offline))  # now served from the validated cache
+        self.assertEqual(offline.requests, [])
+
+    def test_poisoned_cache_entry_is_evicted_and_refetched_once(self):
+        key = f"copernicus-dem-glo30-public|{self.BASE}|{self.NAME}#0+{HttpRangeSource.HEAD_BYTES}"
+        self.cache.put("ranges", key, b"<html>stale error page</html>")
+        tr = FakeTransport({self.url: CopernicusTest().tile()})
+        self.assertIsNotNone(self.fetch(tr))
+        self.assertTrue(tr.requests)
+        self.assertNotEqual(self.cache.get("ranges", key)[:2], b"<h")
+
+    def test_corrupt_block_invalidates_cached_ranges(self):
+        data = make_geotiff(TiffBoundsTest.VALS, 8.0, 47.0, 0.1, 0.1, compression=8,
+                            payload_hook=lambda raw: b"\x78\x9cnot-deflate")
+        cache = MemoryCache()
+        src = HttpRangeSource(HttpClient(FakeTransport({"https://h.example/t.tif": data})),
+                              "https://h.example/t.tif", "t", cache=cache)
+        t = GeoTiff(src)
+        self.assertTrue(cache.store)  # header/IFD validated -> committed
+        with self.assertRaises(FormatError):
+            t.pixel(0, 0)
+        self.assertEqual(cache.store, {})
 
 
 if __name__ == "__main__":

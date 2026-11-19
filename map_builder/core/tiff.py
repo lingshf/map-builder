@@ -12,6 +12,7 @@ GeoTIFFs such as the Copernicus DEM on AWS) without downloading whole files.
 """
 
 import array
+import contextlib
 import math
 import struct
 import sys
@@ -30,6 +31,10 @@ MAX_TAG_BYTES = 16 * 1024 * 1024   # aggregate out-of-line tag data decoded from
 # Only the tags this reader interprets are decoded; everything else is skipped unread.
 NEEDED_TAGS = frozenset({256, 257, 258, 259, 273, 277, 278, 279, 317, 322, 323, 324, 325, 339,
                          33550, 33922, 34264, 34735, 42113})
+
+
+def _noop():
+    pass
 
 
 class FileSource:
@@ -69,11 +74,18 @@ class BytesSource:
 
 
 class HttpRangeSource:
-    """Reads a remote file via HTTP Range requests with a prefetched header."""
+    """Reads a remote file via HTTP Range requests with a prefetched header.
+
+    Downloaded ranges are only *staged*: the reader (:class:`GeoTiff`) calls
+    :meth:`commit` after the bytes passed header/IFD or block validation and
+    :meth:`invalidate` when any validation fails, which also deletes every cache
+    entry this source read or wrote, so malformed provider data never persists.
+    """
 
     HEAD_BYTES = 256 * 1024
 
-    def __init__(self, client, url, description, cache=None, max_total_bytes=96 * 1024 * 1024, cache_key=None):
+    def __init__(self, client, url, description, cache=None, max_total_bytes=96 * 1024 * 1024, cache_key=None,
+                 read_cache=True):
         self.client = client
         self.url = url
         self.description = description
@@ -81,13 +93,19 @@ class HttpRangeSource:
         # Cache identity: must be stable and credential-free (defaults to the description).
         self.cache_key = cache_key or description
         self.max_total_bytes = max_total_bytes
+        self.read_cache = read_cache
         self.fetched = 0
+        self.cache_hits = []
+        self._pending = {}
+        self._committed = []
         self._head = self._get(0, self.HEAD_BYTES, allow_short=True)
         self.size = None
 
     def _get(self, offset, length, allow_short=False):
         key = f"{self.cache_key}#{offset}+{length}"
-        body = self.cache.get("ranges", key) if self.cache else None
+        body = self.cache.get("ranges", key) if (self.cache and self.read_cache) else None
+        if body is not None:
+            self.cache_hits.append(key)
         if body is None:
             remaining = self.max_total_bytes - self.fetched
             if length > remaining:
@@ -103,10 +121,32 @@ class HttpRangeSource:
             if self.fetched > self.max_total_bytes:
                 raise LimitError(f"{self.description}: download budget of {self.max_total_bytes} bytes exceeded")
             if self.cache:
-                self.cache.put("ranges", key, body, {"source": self.cache_key})
+                self._pending[key] = body  # cached only once the reader has validated it
         if len(body) < length and not allow_short:
             raise FormatError(f"{self.description}: short read at {offset}")
         return body
+
+    def commit(self):
+        """Persist staged ranges; called after they passed validation."""
+        pending, self._pending = self._pending, {}
+        if self.cache:
+            for key, body in pending.items():
+                self.cache.put("ranges", key, body, {"source": self.cache_key})
+                self._committed.append(key)
+
+    def discard(self):
+        """Drop staged ranges whose validation did not complete (e.g. a network failure)."""
+        self._pending = {}
+
+    def invalidate(self):
+        """The data failed validation: drop staged ranges and delete every cache entry this
+        source read or wrote, so a malformed response never persists."""
+        self._pending = {}
+        delete = getattr(self.cache, "delete", None)
+        if delete:
+            for key in dict.fromkeys(self.cache_hits + self._committed):
+                delete("ranges", key)
+        self._committed = []
 
     def read(self, offset, length):
         if offset + length <= len(self._head):
@@ -181,6 +221,30 @@ def inflate_capped(data, max_out):
 class GeoTiff:
     def __init__(self, source):
         self.src = source
+        with self._validating():
+            self._read_header()
+        self._blocks = {}
+        self._cache_bytes = 0
+        self.max_cache_bytes = MAX_BLOCK_CACHE_BYTES
+
+    @contextlib.contextmanager
+    def _validating(self):
+        """Commit the source's staged bytes only if the enclosed parse/decode succeeds."""
+        try:
+            yield
+        except struct.error:
+            getattr(self.src, "invalidate", _noop)()
+            raise FormatError(f"{self.src.description}: truncated or corrupt TIFF structure") from None
+        except (FormatError, LimitError):
+            getattr(self.src, "invalidate", _noop)()
+            raise
+        except BaseException:
+            getattr(self.src, "discard", _noop)()
+            raise
+        getattr(self.src, "commit", _noop)()
+
+    def _read_header(self):
+        source = self.src
         head = source.read(0, 8)
         if head[:2] == b"II":
             self.bo = "<"
@@ -196,9 +260,6 @@ class GeoTiff:
         ifd = struct.unpack(self.bo + "I", head[4:8])[0]
         self.tags = self._read_ifd(ifd)
         self._parse()
-        self._blocks = {}
-        self._cache_bytes = 0
-        self.max_cache_bytes = MAX_BLOCK_CACHE_BYTES
 
     # -- parsing ---------------------------------------------------------
     def _read_ifd(self, off):
@@ -356,6 +417,17 @@ class GeoTiff:
             return self._blocks[idx]
         if idx >= len(self.offsets):
             raise FormatError(f"{self.src.description}: block index out of range")
+        with self._validating():
+            vals = self._decode_block(idx)
+        nbytes = len(vals) * vals.itemsize
+        while self._blocks and self._cache_bytes + nbytes > self.max_cache_bytes:
+            old = self._blocks.pop(next(iter(self._blocks)))
+            self._cache_bytes -= len(old) * old.itemsize
+        self._blocks[idx] = vals
+        self._cache_bytes += nbytes
+        return vals
+
+    def _decode_block(self, idx):
         cap = self.block_bytes
         count = self.counts[idx]
         if self.compression == 1:
@@ -381,14 +453,7 @@ class GeoTiff:
             need = n * self.bytes_ps
         raw = raw[:need]
         rows = n // self.block_w
-        vals = self._unpredict(raw, rows)
-        nbytes = len(vals) * vals.itemsize
-        while self._blocks and self._cache_bytes + nbytes > self.max_cache_bytes:
-            old = self._blocks.pop(next(iter(self._blocks)))
-            self._cache_bytes -= len(old) * old.itemsize
-        self._blocks[idx] = vals
-        self._cache_bytes += nbytes
-        return vals
+        return self._unpredict(raw, rows)
 
     def _unpredict(self, raw, rows):
         """Decoded samples as a compact native ``array.array`` (bounded memory)."""
@@ -434,6 +499,7 @@ class GeoTiff:
         vals = self._block(by * self.blocks_across + bx)
         i = (row - by * self.block_h) * self.block_w + (col - bx * self.block_w)
         if i >= len(vals):
+            getattr(self.src, "invalidate", _noop)()
             raise FormatError(f"{self.src.description}: truncated block")
         v = float(vals[i])
         if not math.isfinite(v):

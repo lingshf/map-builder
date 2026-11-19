@@ -17,6 +17,7 @@ import math
 import os
 from array import array
 
+from .cache import check_cache_dataset_id
 from .errors import CoverageError, FormatError, LimitError, NoDataError
 from .geodesy import utm_forward
 from .http import redact
@@ -201,14 +202,44 @@ def _is_default_endpoint(url, default):
     return isinstance(url, str) and url.strip().rstrip("/") == default.rstrip("/")
 
 
+def _open_remote_tiff(client, url, description, cache, cache_key, name):
+    """Open a remote GeoTIFF; ranges are cached only after validation. If data served from the
+    cache fails validation, those entries are evicted and the tile is fetched once more."""
+    for attempt in (0, 1):
+        try:
+            src = HttpRangeSource(client, url, description=description, cache=cache, cache_key=cache_key,
+                                  read_cache=attempt == 0)
+        except CoverageError:
+            raise CoverageError(
+                f"Copernicus DEM tile {name} is not published (ocean, or excluded from the public "
+                "GLO-30 release); no terrain was generated - import a local elevation file instead") from None
+        try:
+            return GeoTiff(src)  # invalidates the source's cache entries on failure
+        except (FormatError, LimitError):
+            if attempt or not src.cache_hits:
+                raise
+    raise AssertionError("unreachable")
+
+
 def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS_BASE_URL, progress=None,
-                     allow_cache_override=False):
+                     allow_cache_override=False, cache_dataset_id=None):
     """``cache`` is used only for the public default endpoint (whose licence permits caching) unless the
-    caller explicitly sets ``allow_cache_override`` for a mirror it knows may be cached."""
+    caller explicitly sets ``allow_cache_override`` for a mirror it knows may be cached; caching such an
+    override additionally requires a caller-chosen, credential-free ``cache_dataset_id`` because the
+    endpoint URL (whose path may embed a credential) is never used as cache identity or metadata."""
     is_default = _is_default_endpoint(base_url, COPERNICUS_BASE_URL)
-    if not (is_default or allow_cache_override):
-        cache = None
-    endpoint = redact(base_url.rstrip("/"))
+    if is_default:
+        endpoint = COPERNICUS_BASE_URL  # fixed public label
+        cache_scope = COPERNICUS_BASE_URL
+    else:
+        endpoint = redact(base_url)  # origin only
+        cache_scope = None
+        if not allow_cache_override:
+            cache = None
+        elif cache is not None:
+            if cache_dataset_id is None:
+                raise ValueError("allow_cache_override requires an explicit, credential-free cache_dataset_id")
+            cache_scope = "override:" + check_cache_dataset_id(cache_dataset_id, base_url)
     s, w, n, e = area.geographic_bbox(margin_m=2 * spacing + 60.0)
     tiles = {}
     for la in range(math.floor(s), math.floor(n) + 1):
@@ -219,14 +250,8 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
     rasters = {}
     for key, name in tiles.items():
         url = f"{base_url.rstrip('/')}/{name}/{name}.tif"
-        try:
-            src = HttpRangeSource(client, url, description=f"copernicus:{name}", cache=cache,
-                                  cache_key=f"{COPERNICUS_DATASET_ID}|{endpoint}|{name}")
-        except CoverageError:
-            raise CoverageError(
-                f"Copernicus DEM tile {name} is not published (ocean, or excluded from the public "
-                "GLO-30 release); no terrain was generated - import a local elevation file instead") from None
-        tiff = GeoTiff(src)
+        tiff = _open_remote_tiff(client, url, f"copernicus:{name}", cache,
+                                 f"{COPERNICUS_DATASET_ID}|{cache_scope}|{name}", name)
         if tiff.crs["kind"] != "geographic":
             raise FormatError(f"{name}: unexpected CRS {tiff.crs}")
         rasters[key] = _Raster(tiff)

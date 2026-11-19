@@ -53,19 +53,32 @@ def _validated_overpass(body, description):
     return data
 
 
-def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False):
+def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False,
+                   cache_dataset_id=None):
     """``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
-    by a caller that knows the alternative endpoint's terms permit caching."""
+    by a caller that knows the alternative endpoint's terms permit caching. Caching an override also
+    requires a caller-chosen, credential-free ``cache_dataset_id``: endpoint paths (which may embed
+    credentials) never appear in cache keys, metadata, diagnostics or provenance."""
     import urllib.parse
+    from .cache import check_cache_dataset_id
     from .http import redact
-    endpoint = redact(url)
     is_default = isinstance(url, str) and url.strip().rstrip("/") == DEFAULT_OVERPASS_URL.rstrip("/")
-    if not (is_default or allow_cache_override):
-        cache = None
+    if is_default:
+        endpoint = DEFAULT_OVERPASS_URL  # fixed public label
+        cache_scope = DEFAULT_OVERPASS_URL
+    else:
+        endpoint = redact(url)  # origin only
+        cache_scope = None
+        if not allow_cache_override:
+            cache = None
+        elif cache is not None:
+            if cache_dataset_id is None:
+                raise ValueError("allow_cache_override requires an explicit, credential-free cache_dataset_id")
+            cache_scope = "override:" + check_cache_dataset_id(cache_dataset_id, url)
     s, w, n, e = area.geographic_bbox(margin_m=30.0)
     q = overpass_query(s, w, n, e)
     description = f"overpass:{endpoint}"
-    key = f"{OSM_DATASET_ID}|{endpoint}\n{q}"
+    key = f"{OSM_DATASET_ID}|{cache_scope}\n{q}"
     data = None
     if cache:
         body = cache.get("osm", key)
@@ -80,7 +93,7 @@ def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cac
                             headers={"Content-Type": "application/x-www-form-urlencoded"}, max_bytes=MAX_OSM_BYTES)
         data = _validated_overpass(body, description)
         if cache:
-            cache.put("osm", key, body, {"source": endpoint, "dataset": OSM_DATASET_ID})
+            cache.put("osm", key, body, {"source": cache_scope, "dataset": OSM_DATASET_ID})
     data.source = {"provider": "overpass", "endpoint": endpoint, "from_cache": from_cache, "query": q}
     return data
 
@@ -398,6 +411,7 @@ def classify(data, area, max_features=50_000):
     used_as_member = set()
     polygons = {}  # feature id -> [Polygon]
     rel_outer_ways = {}  # area family -> way ids that are outers of an area relation with geometry
+    suppressed_outers = {}  # way id -> (family or None for any, reason): outers of rejected multipolygons
 
     def make_polygons(fid, outers, inners):
         polys = []
@@ -461,25 +475,39 @@ def classify(data, area, max_features=50_000):
                 outer_ids.append(ref)
         orings, ok1 = _assemble_rings(outer_ways)
         irings, ok2 = _assemble_rings(inner_ways)
+        fam = _area_family(tags)
+        has_inner = bool(inner_ways) or missing_inner
+        polys = []
         if missing_inner or not ok2:
             # Emitting the outer without its hole would fill a courtyard: skip and report.
             out.invalid.append({"id": fid, "reason": "multipolygon has a missing or unclosed inner ring; "
                                                      "skipped rather than filling the hole"})
-            continue
-        if missing_outer or not ok1:
+        elif (missing_outer or not ok1) and not orings:
             out.invalid.append({"id": fid, "reason": "multipolygon has missing or unclosed member ways"})
-            if not orings:
-                continue
-        o_pts = [way_points(r) for r in orings]
-        i_pts = [way_points(r) for r in irings]
-        if any(p is None for p in o_pts + i_pts):
-            out.invalid.append({"id": fid, "reason": "multipolygon references missing nodes"})
-            continue
-        polys = make_polygons(fid, o_pts, i_pts)
-        polygons[fid] = (polys, tags)
-        fam = _area_family(tags)
-        if polys and fam:
+        else:
+            if missing_outer or not ok1:
+                out.invalid.append({"id": fid, "reason": "multipolygon has missing or unclosed member ways"})
+            o_pts = [way_points(r) for r in orings]
+            i_pts = [way_points(r) for r in irings]
+            if any(p is None for p in o_pts + i_pts):
+                out.invalid.append({"id": fid, "reason": "multipolygon references missing nodes"})
+            else:
+                polys = make_polygons(fid, o_pts, i_pts)
+                polygons[fid] = (polys, tags)
+        if fam and polys:
             rel_outer_ways.setdefault(fam, set()).update(outer_ids)
+        elif fam:
+            # Rejected relation: a standalone solid copy of its outer would cover the courtyard.
+            for wid in outer_ids:
+                suppressed_outers.setdefault(wid, (fam, f"outer member of rejected multipolygon {fid}; "
+                                                        "footprint not generated rather than filling its hole"))
+        elif has_inner:
+            # Old-style tagging (area tags on the outer way, untagged relation): the way alone has no holes.
+            for wid in outer_ids:
+                suppressed_outers.setdefault(wid, (None, f"outer member of multipolygon {fid} with inner rings "
+                                                         "but no area tags on the relation (old-style tagging "
+                                                         "unsupported); footprint not generated rather than "
+                                                         "filling its hole"))
 
     for wid, (nids, tags) in data.ways.items():
         fid = f"osm:way/{wid}"
@@ -492,6 +520,12 @@ def classify(data, area, max_features=50_000):
             # Already represented (with its holes) by a multipolygon of the same class: a standalone
             # solid copy would fill the courtyard. Other roles of the way (e.g. highway) still apply.
             as_area = False
+        elif as_area and wid in suppressed_outers:
+            sfam, reason = suppressed_outers[wid]
+            if sfam is None or sfam == _area_family(tags):
+                # Never fill a courtyard; report instead of silently dropping. Other roles still apply.
+                as_area = False
+                out.invalid.append({"id": fid, "reason": reason})
         if as_area:
             pts = way_points(nids)
             if pts is None:

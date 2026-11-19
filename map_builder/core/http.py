@@ -5,9 +5,11 @@
 * Redirects are limited and never carry Authorization/X-API-Key/Cookie to
   another origin or from https to http.
 * Credentials are never placed in error messages or logs: callers pass them via
-  ``headers`` and :func:`redact` strips query/userinfo from URLs before they
-  are shown anywhere. Errors carry only the redacted URL, the status code or a
+  ``headers`` and :func:`redact` reduces URLs to their origin (no userinfo, path,
+  query or fragment) before they are shown anywhere. Errors carry only the
+  redacted origin, the status code or a
   transport exception class name - never provider bodies or exception text.
+* Redirect bodies are closed unread and every hop shares the total deadline.
 * Partial (206) responses are checked against ``Content-Range``.
 * A transport may be injected (``Transport`` protocol) so tests never touch
   the network.
@@ -34,15 +36,23 @@ _CONTENT_RANGE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", re.IGNORECA
 
 
 def redact(url):
-    """Drop userinfo, query and fragment so URLs are safe to log/persist."""
+    """Origin only (``scheme://host[:port]``) so URLs are safe to log/persist.
+
+    Userinfo, path, query and fragment are all dropped: a caller-supplied endpoint
+    may embed a credential in any of them (e.g. ``/api/<token>/interpreter``).
+    """
     try:
-        p = urllib.parse.urlsplit(url)
+        p = urllib.parse.urlsplit(str(url))
+        port = p.port
     except ValueError:
         return "<invalid url>"
-    host = p.hostname or ""
-    if p.port:
-        host += f":{p.port}"
-    return urllib.parse.urlunsplit((p.scheme, host, p.path, "", ""))
+    host = (p.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    if port:
+        host += f":{port}"
+    scheme = re.sub(r"[^a-z0-9+.-]", "", (p.scheme or "").lower())
+    return f"{scheme}://{host}" if scheme else (host or "<invalid url>")
 
 
 class Response:
@@ -76,19 +86,66 @@ def _header(headers, name):
     return None
 
 
+class _DrainedBody:
+    """Stand-in for a redirect response body that was closed unread.
+
+    urllib's ``HTTPRedirectHandler.http_error_30x`` calls ``fp.read()`` (unbounded,
+    outside the byte cap and deadline) before following a redirect; handing it this
+    object instead guarantees no redirect body is ever downloaded.
+    """
+
+    def read(self, *_args):
+        return b""
+
+    def readline(self, *_args):
+        return b""
+
+    def readlines(self, *_args):
+        return []
+
+    def __iter__(self):
+        return iter(())
+
+    def close(self):
+        pass
+
+
+def _close_quietly(fp):
+    try:
+        if fp is not None:
+            fp.close()
+    except Exception:  # noqa: BLE001 - closing is best effort
+        pass
+
+
 class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Follows at most ``max_redirects`` redirects and never leaks credentials.
 
     When any of :data:`SENSITIVE_HEADERS` is present, a redirect that changes
     origin (scheme/host/port) or downgrades https->http is refused instead of
     forwarding the credential. Only http/https targets are ever followed.
+    Redirect response bodies are closed without being read, and every hop is
+    bounded by the same absolute deadline (``remaining`` returns the seconds left).
     """
 
-    def __init__(self, max_redirects=MAX_REDIRECTS, check_deadline=None):
+    def __init__(self, max_redirects=MAX_REDIRECTS, check_deadline=None, remaining=None):
         super().__init__()
         self.max_redirections = max_redirects
         self.max_repeats = max_redirects
         self._check_deadline = check_deadline
+        self._remaining = remaining
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        _close_quietly(fp)  # never drain the redirect body
+        if self._check_deadline:
+            self._check_deadline()
+        if self._remaining is not None:
+            # OpenerDirector re-opens the next hop with req.timeout: clamp it to the time left.
+            left = max(0.001, self._remaining())
+            req.timeout = left if req.timeout is None else max(0.001, min(req.timeout, left))
+        return super().http_error_302(req, _DrainedBody(), code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         safe = redact(req.full_url)
@@ -103,10 +160,7 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
                 _origin(old) != _origin(new) or (old.scheme.lower() == "https" and new.scheme.lower() != "https")):
             reason = "redirect to a different origin refused because the request carries credentials"
         if reason:
-            try:
-                fp.close()
-            except Exception:  # noqa: BLE001 - closing is best effort
-                pass
+            _close_quietly(fp)
             raise NetworkError(f"{safe}: {reason} (HTTP {code})", code, safe)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -132,7 +186,8 @@ class UrllibTransport:
             if self.clock() > deadline:
                 raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s", url=safe)
 
-        opener = self.opener or urllib.request.build_opener(SafeRedirectHandler(self.max_redirects, check_deadline))
+        opener = self.opener or urllib.request.build_opener(
+            SafeRedirectHandler(self.max_redirects, check_deadline, lambda: deadline - self.clock()))
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             resp = opener.open(req, timeout=max(0.001, min(timeout, deadline - self.clock())))
