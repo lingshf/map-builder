@@ -12,7 +12,7 @@ import math
 from .cache import DiskCache, NullCache
 from .collision import (CLASSES, ColObject, heightfield_layout, is_degenerate, rasterize_heightfield,
                         read_collision, write_collision, write_heightfield)
-from .dem import COPERNICUS_BASE_URL, fetch_copernicus, load_local_elevation
+from .dem import COPERNICUS_BASE_URL, fetch_copernicus, grid_layout, load_local_elevation
 from .errors import PackageError
 from .generate import MATERIALS, PlanOptions, build_plan
 from .glb import node_scale, write_glb
@@ -80,7 +80,11 @@ class Settings:
 
 
 def acquire(area, settings, client=None, progress=None):
-    """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data."""
+    """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data.
+    Size limits (terrain grid, heightfield) are checked first, before any file or network access."""
+    grid_layout(area, settings.terrain_spacing)
+    if settings.heightfield_spacing:
+        heightfield_layout(area.half, settings.heightfield_spacing)
     client = client or HttpClient()
     cache = DiskCache(settings.cache_dir) if settings.cache_dir else NullCache()
     if settings.elevation_source == "file":

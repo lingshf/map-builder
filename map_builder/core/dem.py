@@ -231,6 +231,7 @@ def fetch_copernicus(area, client, spacing=10.0, cache=None, base_url=COPERNICUS
     caller explicitly sets ``allow_cache_override`` for a mirror it knows may be cached; caching such an
     override additionally requires a caller-chosen, credential-free ``cache_dataset_id`` because the
     endpoint URL (whose path may embed a credential) is never used as cache identity or metadata."""
+    grid_layout(area, spacing)  # resource bounds are enforced before any network access
     is_default = _is_default_endpoint(base_url, COPERNICUS_BASE_URL)
     if is_default:
         endpoint = COPERNICUS_BASE_URL  # fixed public label
