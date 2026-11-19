@@ -1762,7 +1762,32 @@ class ClassKindTest(unittest.TestCase):
         self.assertRegex(probs[0], r"tunnel object #0: shell \d of 2 \(portal loops capped\) has signed volume 0 ")
         self.assertIn("must have negative volume", probs[0])
 
-    def test_bridge_and_structure_are_solids(self):
+    def test_flattened_tilted_tube_is_an_error_in_both_windings(self):
+        """Review round 3: a tube whose triangular cross-section is collinear (all faces in one tilted plane,
+        two portals) has zero capped volume; rounding must not make either winding look inward."""
+        o, u, v = (63, 77, 51), (2, -3, 6), (1, 1, 2)     # a case the old float-only volume accepted (flip)
+
+        def pt(s, t):
+            return tuple(o[i] + s * u[i] + t * v[i] for i in range(3))
+
+        for flip in (False, True):
+            with self.subTest(flip=flip):
+                m = MeshData("flat")
+                rows = [[m.add_vertex(*pt(s, t)) for t in (0, 5, 3)] for s in (0, 5)]   # collinear section
+                for j in range(3):
+                    f = (rows[0][j], rows[0][(j + 1) % 3], rows[1][(j + 1) % 3], rows[1][j])
+                    m.add_face(tuple(reversed(f)) if flip else f, "MB Wall", (0.7, 0.7, 0.7))
+                probs = orient_one("tunnel", m)
+                self.assertTrue(probs, "a flattened tube must not validate")
+                self.assertTrue(any("signed volume 0 " in p for p in probs), probs)
+
+    def test_signed_volume_is_exact_near_zero(self):
+        from fractions import Fraction
+        from map_builder.core.package import _signed_volume
+        a, b, c = (50.1, 60.3, 70.7), (93.9, 77.1, 81.3), (57.3, 51.9, 107.1)
+        d = tuple(Fraction(a[i]) + Fraction(b[i]) - Fraction(c[i]) for i in range(3))   # coplanar, exact
+        flat = [(a, b, c), (a, c, d), (a, c, b), (a, d, c)]
+        self.assertEqual(_signed_volume(flat), 0.0)
         box = box_mesh(0, 0, 10, 4, 5, 6)
         for cls in ("bridge", "structure"):
             with self.subTest(cls):

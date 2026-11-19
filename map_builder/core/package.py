@@ -26,6 +26,7 @@ import tempfile
 import time
 import zipfile
 import zlib
+from fractions import Fraction
 
 from . import (COLLISION_FORMAT_VERSION, GENERATOR_NAME, GENERATOR_VERSION, HEIGHTFIELD_FORMAT_VERSION,
                PACKAGE_SCHEMA, PACKAGE_SCHEMA_VERSION)
@@ -706,15 +707,36 @@ def _shells(ids):
     return list(groups.values())
 
 
+_EPS = 2.0 ** -53
+
+
 def _signed_volume(tris):
+    """Signed volume of a closed triangle shell whose sign is exact: coordinates are floats or exact
+    ``Fraction`` values (portal-cap centroids). A float sum with an error bound is used unless the result
+    is within that bound of zero; then the volume is recomputed exactly, so rounding can never make a
+    flat shell look like it encloses volume (or flip the sign of a thin one)."""
     r = tris[0][0]                              # a local origin keeps the products small
-    vol = 0.0
+    terms = []
+    mag = 0.0
     for a, b, c in tris:
-        ax, ay, az = a[0] - r[0], a[1] - r[1], a[2] - r[2]
-        bx, by, bz = b[0] - r[0], b[1] - r[1], b[2] - r[2]
-        cx, cy, cz = c[0] - r[0], c[1] - r[1], c[2] - r[2]
-        vol += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
-    return vol / 6.0
+        ax, ay, az, bx, by, bz, cx, cy, cz = (
+            (float(Fraction(v) - Fraction(o)) if type(v) is Fraction or type(o) is Fraction else v - o)
+            for p in (a, b, c) for v, o in zip(p, r))
+        terms.append(ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx))
+        mag += (abs(ax) * (abs(by * cz) + abs(bz * cy)) + abs(ay) * (abs(bz * cx) + abs(bx * cz))
+                + abs(az) * (abs(bx * cy) + abs(by * cx)))
+    vol = math.fsum(terms)
+    if abs(vol) > 32.0 * _EPS * mag:            # generous bound on translation, product and sum rounding
+        return vol / 6.0
+    rf = [Fraction(v) for v in r]
+    exact = Fraction(0)
+    for a, b, c in tris:
+        ax, ay, az, bx, by, bz, cx, cy, cz = (Fraction(v) - o for p in (a, b, c) for v, o in zip(p, rf))
+        exact += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
+    if exact == 0:
+        return 0.0
+    out = float(exact / 6)
+    return out if out != 0.0 else math.copysign(5e-324, exact)
 
 
 def _directed_edges(ids):
@@ -818,7 +840,7 @@ def _tube_problems(k, cls, tris):
             return [f"{tag}: its boundary edges do not form simple closed loops"]
         loops += 1
         n = len(loop)
-        cen = tuple(sum(pos[i][a] for i in loop) / n for a in range(3))
+        cen = tuple(sum(Fraction(pos[i][a]) for i in loop) / n for a in range(3))     # exact (see _signed_volume)
         cid = next_id
         next_id += 1
         for j in range(n):
