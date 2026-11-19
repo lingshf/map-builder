@@ -1660,10 +1660,16 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
     if opts.buildings:
         def build_one(f, extra_prov=None, reason_prefix=""):
             """Build one footprint; returns True if generated, else reports it in invalid_features."""
+            pre = passages.take_prebuilt(ctx, f.id)
             try:
-                mesh, origin, prov = build_building(
-                    f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
-                    max_work=opts.max_triangulation_work, reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
+                if pre is not None:
+                    mesh, origin, prov = pre
+                    budget.reserve(f.id, len(mesh.vertices), sum(len(fc) - 2 for fc in mesh.faces))
+                else:
+                    mesh, origin, prov = build_building(
+                        f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
+                        max_work=opts.max_triangulation_work,
+                        reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
             except TriangulationError as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": f"{reason_prefix}triangulation failed: {e}"})

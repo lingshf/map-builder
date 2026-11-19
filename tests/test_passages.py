@@ -176,6 +176,20 @@ class ReviewRound1Test(unittest.TestCase):
         self.assertEqual(len(dropped), 1)
         self.assertIn("at most 2", dropped[0]["reason"])
 
+    def test_replacement_parts_are_built_once(self):
+        from map_builder.core import generate
+        calls = []
+        real = generate.build_building
+
+        def spy(feature, *a, **k):
+            calls.append(feature.id)
+            return real(feature, *a, **k)
+
+        with mock.patch.object(generate, "build_building", spy):
+            plan = plan_for([building(BLD, height="9")], [passage()])
+        self.assertEqual(sorted(calls), ["osm:way/1#1", "osm:way/1#2", "osm:way/1#3"])
+        self.assertEqual(len(parts(plan)), 3)
+
     def test_finished_scene_check_is_local(self):
         from map_builder.core import passages as structures
         seen = []

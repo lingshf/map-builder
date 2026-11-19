@@ -36,6 +36,7 @@ class _State:
         self.probes = []      # ids of the probes this module emitted
         self.boxes = None     # passage feature id -> bbox, computed once
         self.dropped = []     # probes not exported: {id, reason}
+        self.prebuilt = {}    # piece id -> build_building result computed while checking the split
 
 
 def _state(ctx):
@@ -248,12 +249,15 @@ def split(plan, ctx, feature):
     # The replacement is all-or-nothing: every part must be buildable (terrain humps can make a part fail), else
     # the original building stays and nothing of the passage is staged.
     opts = ctx.options
+    built = {}
     for piece in lows + [upper]:
         try:
-            gen.build_building(piece, terrain, ctx.z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
-                               max_work=opts.max_triangulation_work)
+            built[piece.id] = gen.build_building(piece, terrain, ctx.z_offset, opts.seed,
+                                                 max_ring_vertices=opts.max_ring_vertices,
+                                                 max_work=opts.max_triangulation_work)
         except (gen.TriangulationError, gen.InvalidFeature) as e:
             return refuse(f"the replacement part {piece.id} cannot be generated ({e})")
+    st.prebuilt.update(built)   # build_plan reuses these results instead of building the parts a second time
     st.handled[passage.id] = {"a": a, "b": b, "t0": t0, "t1": t1, "height": clearance, "feature": passage,
                               "note": f"{_tag_label(passage.tags)} way generated at grade under the building cut by it "
                                       f"(passage height {clearance:.2f} m)"}
@@ -280,6 +284,11 @@ def _emit(plan, ctx, probe):
     if probe:
         plan.passage_probes.append(probe)
         _state(ctx).probes.append(probe["id"])
+
+
+def take_prebuilt(ctx, piece_id):
+    """The ``build_building`` result computed for a replacement part while the split was checked, or None."""
+    return _state(ctx).prebuilt.pop(piece_id, None)
 
 
 def handled_roads(ctx):
@@ -371,7 +380,7 @@ def _local_plan(plan, probes):
     gen = _gen()
     boxes = []
     for p in probes:
-        pad = p["radius_m"] + 1.0
+        pad = p["radius_m"] + 0.05
         xs, ys, zs = [q[0] for q in p["path_map"]], [q[1] for q in p["path_map"]], [q[2] for q in p["path_map"]]
         boxes.append((min(xs) - pad, min(ys) - pad, min(zs) - pad, max(xs) + pad, max(ys) + pad, max(zs) + pad))
 
@@ -411,18 +420,28 @@ def _local_plan(plan, probes):
         # Cohen-Sutherland style: a face is dropped for a box when all its vertices lie beyond the same side of it
         codes = []
         for b in boxes:
-            lx, ly, hx, hy = b[0] - x0, b[1] - y0, b[3] - x0, b[4] - y0
-            codes.append([(x < lx) | ((x > hx) << 1) | ((y < ly) << 2) | ((y > hy) << 3) for x, y in zip(vx, vy)])
+            lx, ly, lz, hx, hy, hz = b[0] - x0, b[1] - y0, b[2] - z0, b[3] - x0, b[4] - y0, b[5] - z0
+            codes.append([(x < lx) | ((x > hx) << 1) | ((y < ly) << 2) | ((y > hy) << 3) | ((z < lz) << 4)
+                          | ((z > hz) << 5) for x, y, z in md.vertices])
 
-        def kept(f):
+        faces = md.faces
+        if all(len(f) == 3 for f in faces):
+            alive = [False] * len(faces)
             for c in codes:
-                acc = 15
-                for i in f:
-                    acc &= c[i]
-                    if not acc:
-                        return True
-            return False
-        keep = [f for f in md.faces if kept(f)]
+                for k, ok in enumerate([not (c[a] & c[b] & c[d]) for a, b, d in faces]):
+                    if ok:
+                        alive[k] = True
+            keep = [f for f, ok in zip(faces, alive) if ok]
+        else:
+            def kept(f):
+                for c in codes:
+                    acc = 63
+                    for i in f:
+                        acc &= c[i]
+                        if not acc:
+                            return True
+                return False
+            keep = [f for f in faces if kept(f)]
         if len(keep) == len(md.faces):
             objs.append(spec)
         elif keep:
