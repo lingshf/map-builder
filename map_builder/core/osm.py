@@ -826,7 +826,9 @@ def _base_id(fid):
 
 
 def _ids(ids, limit=10):
-    ids = list(ids)
+    """Up to ``limit`` ids joined for a message; O(limit) for lists and tuples (no full copy)."""
+    if not isinstance(ids, (list, tuple)):
+        ids = list(ids)
     return ", ".join(ids[:limit]) + (f", ... ({len(ids) - limit} more)" if len(ids) > limit else "")
 
 
@@ -956,11 +958,20 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
             if within:
                 owner[pi] = min(within, key=size)
                 bases = {_base_id(outlines[oi].id) for oi in within}
-                missed = [o for o in oids if o not in bases]
-                if missed:
+                n_missed = len(oids) - len(bases)  # bases is a subset of oids
+                if n_missed > 0:
+                    shown = []
+                    for o in oids:  # stops after at most len(bases) + 10 ids
+                        work.add(1)
+                        if o not in bases:
+                            shown.append(o)
+                            if len(shown) == 10:
+                                break
+                    more = f", ... ({n_missed - len(shown)} more)" if n_missed > len(shown) else ""
+                    work.add(min(len(rels), 10))
                     out.warnings.append(
                         f"{part.id}: building:part is declared (building relation {_ids(rels)}) for outline(s) "
-                        f"{_ids(missed)} too but does not lie within them; it belongs to "
+                        f"{', '.join(shown)}{more} too but does not lie within them; it belongs to "
                         f"{outlines[owner[pi]].id} only")
             elif ois:
                 if dec[3] is None:

@@ -1835,6 +1835,22 @@ class DeclaredBuildingPartTest(unittest.TestCase):
         self.assertEqual(out.outline_for["osm:relation/2#7"], ["osm:relation/1#7"])
         self.assertEqual(out.invalid, [])
 
+    def test_declaration_warning_scan_is_bounded(self):
+        # 440 x 440 declared pairs stay within the parse-time declared-pair limit (200,000).
+        n = 440
+        out = Classified()
+        for k in range(n):
+            x, y = -48 + 4 * (k % 22), -48 + 4 * (k // 22)
+            out.buildings.append(building(rect_ccw(x, y, x + 3, y + 3), fid=f"osm:way/{k}"))
+            out.buildings.append(Feature(f"osm:way/{100000 + k}", "building_part", {"building:part": "yes"},
+                                         Polygon(rect_ccw(x + 1, y + 1, x + 2, y + 2))))
+        pairs = {("osm:relation/9", f"osm:way/{k}") for k in range(n)}  # one relation declares all
+        declared = {f"osm:way/{100000 + k}": pairs for k in range(n)}
+        osm_mod._resolve_building_parts(out, max_pair_checks=n, declared=declared)
+        self.assertEqual(len(out.warnings), n)
+        self.assertIn(f"({n - 11} more)", out.warnings[0])  # 10 of the n - 1 missed ids shown
+        self.assertEqual(out.outline_for["osm:way/100007"], ["osm:way/7"])
+
 
 # --- Round 7 -------------------------------------------------------------------
 
