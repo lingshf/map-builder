@@ -5,6 +5,7 @@ integration test tests/blender/run_integration.py, which needs Blender and is no
 import hashlib
 import json
 import math
+import os
 import shutil
 import tempfile
 import unittest
@@ -188,6 +189,11 @@ class BakeExportTest(unittest.TestCase):
         self.assertEqual(manifest["passage_probes"], [keep])
         with zipfile.ZipFile(path) as z:
             self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"], ["p-gone"])
+        stray = dict(keep, id="p-stray", feature="osm:way/999999")      # never part of the plan: refused
+        with self.assertRaises(PackageError):
+            export_baked(f"{self.tmp}/stray.mbmap", "probes", self.area, self.sources, baked, self.generated,
+                         MATERIALS, {}, created_utc=UTC, passage_probes=[keep, stray])
+        self.assertFalse(os.path.exists(f"{self.tmp}/stray.mbmap"))
 
     def test_failed_export_keeps_previous_package(self):
         baked, *_ = self.edited_scene()

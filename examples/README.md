@@ -39,6 +39,9 @@ System.Text.Json, with C# 8 code that also compiles for netstandard2.1. It:
 * parses `.mbcol`, `.mbhf` and the GLB with the spec's bounds checks;
 * checks the visual/collision name binding;
 * runs the orientation probes through a simulated X-negating importer, with negative controls;
+* checks the passage-probe capsules against the collision with the validator's shared work budget
+  (2,000,000 visits; probes left when it runs out are reported as unchecked), plus self-test
+  controls on fixed geometry built in code;
 * cross-checks the heightfield against the terrain triangles.
 
 ```powershell

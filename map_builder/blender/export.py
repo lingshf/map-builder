@@ -422,5 +422,6 @@ def export_map(context, path, name, heightfield_spacing=0.0, root=None):
                                            heightfield_spacing=heightfield_spacing or None,
                                            passage_probes=probes)
     report["edits"] = edits
-    report["passage_probes_dropped"] = filter_passage_probes(probes, (o["mb_id"] for o in manifest["objects"]))[1]
+    report["passage_probes_dropped"] = filter_passage_probes(probes, (o["mb_id"] for o in manifest["objects"]),
+                                                             meta["generated_ids"])[1]
     return manifest, result, report, edits

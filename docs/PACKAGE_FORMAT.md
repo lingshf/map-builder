@@ -107,9 +107,10 @@ both must equal the tables above.
 matched by its reverse, except boundary edges (edges whose reverse is absent). Each boundary
 edge may occur once, and the boundary edges must form simple closed loops (the portals). Each
 loop is capped with a triangle fan around the loop centroid, oriented consistently with the
-adjacent faces. Every resulting closed shell must have a **negative** signed volume, so its
-faces point inward. A tube without portals is therefore an inward-facing closed shell. Any
-violation is an error; diagnostics name the object only by `#index`.
+adjacent faces. Every resulting closed shell must contain at least one cap, that is, every
+tube shell must be open at one or more portals; a sealed shell (for example an inward-facing
+closed box) is an error. Every shell must have a **negative** signed volume, so its faces
+point inward. Any violation is an error; diagnostics name the object only by `#index`.
 
 ### Orientation probes
 
@@ -230,10 +231,15 @@ The capsule is the set of points within `radius_m` of the polyline `path_map`. I
 validator treats a malformed probe or an unknown `feature` as an error. It re-checks every
 probe against the final collision and reports a blocked probe as a **warning**, naming the
 probe by index and the first blocking collision object by `#k`. The check has a fixed work
-budget; if it runs out, the remaining probes are reported as unchecked in a warning.
+budget of 2,000,000 object/triangle visits shared by all probes of the package (one unit per
+object per path segment, plus one per triangle tested); if it runs out, the remaining probes
+are reported as unchecked in a warning. Degenerate (collapsed or collinear) triangles are
+measured through their edges.
 Consumers should re-run the probes against their own imported collision as acceptance tests.
-When an export drops a probe because its `feature` object no longer exists, the probe id is
-listed in `report.json` `passage_probes_dropped`.
+When an export drops a probe because its `feature` object was part of the generation plan
+(its `generated_ids`) but no longer exists, the probe id is listed in `report.json`
+`passage_probes_dropped`. The exporter refuses a malformed probe, or one whose `feature`
+names neither an exported object nor a plan feature, with an error instead of dropping it.
 
 ### Object identity (`mb_id`)
 

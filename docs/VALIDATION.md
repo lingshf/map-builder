@@ -78,6 +78,8 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
 | format 2.0.0 | Unit + acceptance (Python 3.12, Windows) | 322 tests OK (adds `test_query.py`, class-kind, tube-rule and passage-probe tests) |
 | format 2.0.0 | CLI validate of the regenerated sample | `VALID: 0 error(s), 1 warning(s)` (2 degenerate collision triangles); 74 objects, 4945 triangles, no passage probes |
 | format 2.0.0 | C# reader (.NET 8, Windows) on `examples/synthetic_sample.mbmap` | `OK`: schema 2.0.0, mbcol v2, 3 orientation probes PASS, `passage none`, capsule controls BLOCKED/PASS as expected; tampered copy → `INVALID: collision/map.mbcol: SHA-256 mismatch`, exit 1 |
+| format 2.0.0 review | Unit + acceptance (Python 3.12, Windows) | 329 tests OK (adds degenerate-triangle, nearly-parallel capsule, extreme ray direction, sealed-tube and probe-filter regressions) |
+| format 2.0.0 review | C# reader (.NET 8, Windows) | sample `OK` with capsule self-test controls (synthetic box, collapsed triangle, nearly parallel 100 km edge, budget) as expected; a scratch package with three passage probes (one blocked only by a collapsed triangle) gives the same PASS/BLOCKED results as the Python validator |
 
 ## Not validated
 

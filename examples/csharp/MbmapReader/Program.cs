@@ -8,7 +8,8 @@ using MapBuilder.Reference;
 // Verifies the package (container rules, files[] one-to-one, sizes, SHA-256), computes package_id,
 // parses .mbcol/.mbhf/GLB, checks the visual/collision name binding, runs the orientation probes against
 // the GLB through a simulated X-negating importer (plus two negative controls), checks each passage probe
-// capsule against the collision triangles (PASS/BLOCKED, plus two controls), and cross-checks the
+// capsule against the collision triangles (PASS/BLOCKED, with the validator's shared work budget, plus
+// self-test controls on geometry built in code), and cross-checks the
 // heightfield against vertical ray queries on the authoritative terrain triangles.
 // Exit codes: 0 OK, 1 invalid package or failed self-test, 2 usage.
 static class Program
@@ -104,33 +105,28 @@ static class Program
         }
 
         // Passage probes: each capsule must be free of collision (two-sided triangles). BLOCKED is reported, as the
-        // reference validator does with a warning; it does not make the package invalid.
+        // reference validator does with a warning; it does not make the package invalid. All probes share one work
+        // budget (package.py PASSAGE_QUERY_BUDGET); probes left when it runs out are reported as unchecked.
         if (p.PassageProbes.Count == 0) Console.WriteLine("passage    none");
+        long budget = CapsuleCheck.PassageQueryBudget;
         for (int i = 0; i < p.PassageProbes.Count; i++)
         {
             var pp = p.PassageProbes[i];
-            var hits = CapsuleCheck.Hits(c, pp);
+            var hits = CapsuleCheck.Hits(c, pp, ref budget);
+            if (hits == null)
+            {
+                Console.WriteLine($"WARNING: passage_probes: query budget of {CapsuleCheck.PassageQueryBudget} unit(s) exhausted; " +
+                                  $"probes {i}..{p.PassageProbes.Count - 1} were not checked");
+                break;
+            }
             Console.WriteLine($"passage {i}  {pp.Kind}, {pp.PathMap.Count} points, radius {pp.RadiusM} m: " +
                               (hits.Count == 0 ? "PASS" : $"BLOCKED by collision object #{hits[0]}" + (hits.Count > 1 ? $" (and {hits.Count - 1} more)" : "")));
         }
-        // Controls for the capsule check: a capsule through the middle of a solid object's box must be
-        // BLOCKED, one 10 m above the collision bounds must PASS.
-        CollisionObject solid = Array.Find(c.Objects, o => CollisionMesh.ClassKinds[Array.IndexOf(CollisionMesh.ClassNames, o.Class)] == "solid");
-        if (solid != null)
-        {
-            var a = solid.Aabb;
-            double cy = (a[1] + a[4]) / 2, cz = (a[2] + a[5]) / 2;
-            var through = new PassageProbe { Kind = "bridge", RadiusM = 0.5 };
-            through.PathMap.Add(new Vec3(a[0] - 5, cy, cz));
-            through.PathMap.Add(new Vec3(a[3] + 5, cy, cz));
-            var above = new PassageProbe { Kind = "bridge", RadiusM = 0.5 };
-            above.PathMap.Add(new Vec3(c.BoundsMin[0], c.BoundsMin[1], c.BoundsMax[2] + 10));
-            above.PathMap.Add(new Vec3(c.BoundsMax[0], c.BoundsMax[1], c.BoundsMax[2] + 10));
-            bool blocked = CapsuleCheck.Hits(c, through).Contains(solid.Index), clear = CapsuleCheck.Hits(c, above).Count == 0;
-            if (!blocked) failures.Add("capsule control through a solid was not BLOCKED");
-            if (!clear) failures.Add("capsule control above the collision bounds was not clear");
-            Console.WriteLine($"capsule    controls: through solid object #{solid.Index} {(blocked ? "BLOCKED" : "PASS")} (expected BLOCKED), above the map {(clear ? "PASS" : "BLOCKED")} (expected PASS)");
-        }
+        // Controls for the capsule check itself, on fixed geometry built in code (so they cannot fail a valid package).
+        var capsuleFailures = CapsuleCheck.SelfTest();
+        foreach (var f in capsuleFailures) failures.Add($"capsule control: {f}");
+        Console.WriteLine($"capsule    controls on a synthetic box, a collapsed triangle and a nearly parallel 100 km edge: " +
+                          (capsuleFailures.Count == 0 ? "all as expected" : $"{capsuleFailures.Count} FAILED"));
 
         if (p.Heightfield != null)
         {

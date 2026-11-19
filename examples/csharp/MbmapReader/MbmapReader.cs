@@ -709,70 +709,84 @@ namespace MapBuilder.Reference
     }
 
     /// <summary>Capsule-vs-collision check for passage probes. Brute force with a per-object and per-triangle
-    /// AABB prefilter; triangles are two-sided. Mirrors map_builder/core/query.py capsule_hits.</summary>
+    /// AABB prefilter; triangles are two-sided. Mirrors map_builder/core/query.py capsule_hits, including its
+    /// handling of degenerate triangles and nearly parallel segments and its work counting.</summary>
     public static class CapsuleCheck
     {
+        /// <summary>Object/triangle visits shared by all passage probes of one package (package.py PASSAGE_QUERY_BUDGET).</summary>
+        public const long PassageQueryBudget = 2_000_000;
+        /// <summary>query.py DEGENERATE_SIN: |(b - a) x (c - a)| &lt;= this x longest squared edge = degenerate.</summary>
+        public const double DegenerateSin = 1e-9;
+        /// <summary>query.py PARALLEL_SIN2: segments with sin^2(angle) &lt;= this are treated as parallel.</summary>
+        public const double ParallelSin2 = 1e-24;
+
         static Vec3 Add(Vec3 a, Vec3 d, double t) => new Vec3(a.X + d.X * t, a.Y + d.Y * t, a.Z + d.Z * t);
         static double Clamp01(double x) => x < 0 ? 0 : x > 1 ? 1 : x;
+        static double Dist2(Vec3 a, Vec3 b) { var d = a - b; return Vec3.Dot(d, d); }
+
+        static double SegmentParam(Vec3 p, Vec3 a, Vec3 ab, double den) => den == 0 ? 0 : Clamp01(Vec3.Dot(p - a, ab) / den);
 
         static Vec3 ClosestOnSegment(Vec3 p, Vec3 a, Vec3 b)
         {
             var ab = b - a;
-            double den = Vec3.Dot(ab, ab);
-            return den == 0 ? a : Add(a, ab, Clamp01(Vec3.Dot(p - a, ab) / den));
+            return Add(a, ab, SegmentParam(p, a, ab, Vec3.Dot(ab, ab)));
         }
 
-        /// <summary>Closest point on triangle abc (Ericson, Real-Time Collision Detection 5.1.5).</summary>
-        static Vec3 ClosestOnTriangle(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
+        /// <summary>Collapsed (two or three equal vertices) or (nearly) collinear triangle (query.py triangle_is_degenerate).</summary>
+        public static bool IsDegenerate(Vec3 a, Vec3 b, Vec3 c)
         {
-            Vec3 ab = b - a, ac = c - a, ap = p - a;
-            double d1 = Vec3.Dot(ab, ap), d2 = Vec3.Dot(ac, ap);
-            if (d1 <= 0 && d2 <= 0) return a;
-            var bp = p - b;
-            double d3 = Vec3.Dot(ab, bp), d4 = Vec3.Dot(ac, bp);
-            if (d3 >= 0 && d4 <= d3) return b;
-            double vc = d1 * d4 - d3 * d2;
-            if (vc <= 0 && d1 >= 0 && d3 <= 0) return Add(a, ab, d1 / (d1 - d3));
-            var cp = p - c;
-            double d5 = Vec3.Dot(ab, cp), d6 = Vec3.Dot(ac, cp);
-            if (d6 >= 0 && d5 <= d6) return c;
-            double vb = d5 * d2 - d1 * d6;
-            if (vb <= 0 && d2 >= 0 && d6 <= 0) return Add(a, ac, d2 / (d2 - d6));
-            double va = d3 * d6 - d5 * d4;
-            if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return Add(b, c - b, (d4 - d3) / ((d4 - d3) + (d5 - d6)));
-            double den = va + vb + vc;
-            if (den == 0)
-            {
-                Vec3 best = ClosestOnSegment(p, a, b);
-                foreach (var q in new[] { ClosestOnSegment(p, b, c), ClosestOnSegment(p, c, a) })
-                    if (Vec3.Distance(p, q) < Vec3.Distance(p, best)) best = q;
-                return best;
-            }
-            double v = vb / den, w = vc / den;
-            return new Vec3(a.X + ab.X * v + ac.X * w, a.Y + ab.Y * v + ac.Y * w, a.Z + ab.Z * v + ac.Z * w);
+            Vec3 ab = b - a, ac = c - a, bc = c - b;
+            double longest = Math.Max(Vec3.Dot(ab, ab), Math.Max(Vec3.Dot(ac, ac), Vec3.Dot(bc, bc)));
+            var n = Vec3.Cross(ab, ac);
+            return Math.Sqrt(Vec3.Dot(n, n)) <= DegenerateSin * longest;
         }
 
-        /// <summary>Closest distance between segments p1q1 and p2q2 (Ericson 5.1.9).</summary>
-        static double SegmentSegment(Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2)
+        static Vec3 ClosestOnEdges(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
         {
-            Vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
-            double a = Vec3.Dot(d1, d1), e = Vec3.Dot(d2, d2), f = Vec3.Dot(d2, r), s, t;
-            if (a == 0 && e == 0) return r.Length;
-            if (a == 0) { s = 0; t = Clamp01(f / e); }
-            else
+            Vec3 best = ClosestOnSegment(p, a, b), q = ClosestOnSegment(p, b, c), r = ClosestOnSegment(p, c, a);
+            if (Dist2(p, q) < Dist2(p, best)) best = q;
+            if (Dist2(p, r) < Dist2(p, best)) best = r;
+            return best;
+        }
+
+        /// <summary>Closest point on triangle abc (query.py closest_point_triangle): degenerate triangles through
+        /// their edges; otherwise the projection onto the plane if it lies inside, else the nearest edge point.</summary>
+        public static Vec3 ClosestOnTriangle(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
+        {
+            if (IsDegenerate(a, b, c)) return ClosestOnEdges(p, a, b, c);
+            Vec3 ab = b - a, ac = c - a, ap = p - a, n = Vec3.Cross(ab, ac);
+            double h = Vec3.Dot(ap, n) / Vec3.Dot(n, n);
+            var q = new Vec3(ap.X - n.X * h, ap.Y - n.Y * h, ap.Z - n.Z * h);   // projection, relative to a
+            if (Vec3.Dot(Vec3.Cross(ab, q), n) >= 0 && Vec3.Dot(Vec3.Cross(c - b, q - ab), n) >= 0
+                && Vec3.Dot(Vec3.Cross(a - c, q - ac), n) >= 0)
+                return new Vec3(a.X + q.X, a.Y + q.Y, a.Z + q.Z);
+            return ClosestOnEdges(p, a, b, c);
+        }
+
+        /// <summary>Closest distance between segments p1q1 and p2q2 (query.py segment_segment_distance): the
+        /// smaller of the four endpoint-to-segment distances and, for non-parallel segments, the interior critical
+        /// point solved with Lagrange's identity and refined by re-projection.</summary>
+        public static double SegmentSegment(Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2)
+        {
+            Vec3 d1 = q1 - p1, d2 = q2 - p2;
+            double a = Vec3.Dot(d1, d1), e = Vec3.Dot(d2, d2);
+            double best = Math.Min(Math.Min(Dist2(p1, ClosestOnSegment(p1, p2, q2)), Dist2(q1, ClosestOnSegment(q1, p2, q2))),
+                                   Math.Min(Dist2(p2, ClosestOnSegment(p2, p1, q1)), Dist2(q2, ClosestOnSegment(q2, p1, q1))));
+            if (a > 0 && e > 0)
             {
-                double c = Vec3.Dot(d1, r);
-                if (e == 0) { t = 0; s = Clamp01(-c / a); }
-                else
+                var n = Vec3.Cross(d1, d2);
+                double den = Vec3.Dot(n, n);
+                if (den > ParallelSin2 * a * e)
                 {
-                    double b = Vec3.Dot(d1, d2), den = a * e - b * b;
-                    s = den != 0 ? Clamp01((b * f - c * e) / den) : 0;
-                    t = (b * s + f) / e;
-                    if (t < 0) { t = 0; s = Clamp01(-c / a); }
-                    else if (t > 1) { t = 1; s = Clamp01((b - c) / a); }
+                    var r = p1 - p2;
+                    double s = Clamp01(Vec3.Dot(n, Vec3.Cross(d2, r)) / den);
+                    double t = SegmentParam(Add(p1, d1, s), p2, d2, e);
+                    s = SegmentParam(Add(p2, d2, t), p1, d1, a);
+                    t = SegmentParam(Add(p1, d1, s), p2, d2, e);
+                    best = Math.Min(best, Dist2(Add(p1, d1, s), Add(p2, d2, t)));
                 }
             }
-            return Vec3.Distance(Add(p1, d1, s), Add(p2, d2, t));
+            return Math.Sqrt(best);
         }
 
         /// <summary>Two-sided segment/triangle intersection parameter along p + t (q - p), or NaN.</summary>
@@ -793,47 +807,135 @@ namespace MapBuilder.Reference
 
         public static double SegmentTriangleDistance(Vec3 p, Vec3 q, Triangle tri)
         {
-            double t = SegmentHit(p, q - p, tri.A, tri.B, tri.C);
-            if (t >= 0 && t <= 1) return 0;
-            double best = Math.Min(Vec3.Distance(p, ClosestOnTriangle(p, tri.A, tri.B, tri.C)), Vec3.Distance(q, ClosestOnTriangle(q, tri.A, tri.B, tri.C)));
+            double best = double.PositiveInfinity;
+            if (!IsDegenerate(tri.A, tri.B, tri.C))
+            {
+                double t = SegmentHit(p, q - p, tri.A, tri.B, tri.C);
+                if (t >= 0 && t <= 1) return 0;
+                best = Math.Sqrt(Math.Min(Dist2(p, ClosestOnTriangle(p, tri.A, tri.B, tri.C)), Dist2(q, ClosestOnTriangle(q, tri.A, tri.B, tri.C))));
+            }
             best = Math.Min(best, SegmentSegment(p, q, tri.A, tri.B));
             best = Math.Min(best, SegmentSegment(p, q, tri.B, tri.C));
             return Math.Min(best, SegmentSegment(p, q, tri.C, tri.A));
         }
 
-        static bool Overlap(double[] lo, double[] hi, double[] box, double pad)
+        static bool Overlap(Vec3 lo, Vec3 hi, double x0, double y0, double z0, double x1, double y1, double z1, double pad) =>
+            x0 - pad <= hi.X && lo.X <= x1 + pad && y0 - pad <= hi.Y && lo.Y <= y1 + pad && z0 - pad <= hi.Z && lo.Z <= z1 + pad;
+
+        /// <summary>Indices of the collision objects with a triangle within radius_m of the probe path (empty = clear),
+        /// without a work limit.</summary>
+        public static List<int> Hits(CollisionMesh col, PassageProbe probe)
         {
-            for (int a = 0; a < 3; a++)
-                if (box[a] - pad > hi[a] || lo[a] > box[a + 3] + pad) return false;
-            return true;
+            long unlimited = long.MaxValue;
+            return Hits(col, probe, ref unlimited);
         }
 
-        /// <summary>Indices of the collision objects with a triangle within radius_m of the probe path (empty = clear).</summary>
-        public static List<int> Hits(CollisionMesh col, PassageProbe probe)
+        /// <summary>As <see cref="Hits(CollisionMesh, PassageProbe)"/>, spending one unit of <paramref name="budget"/> per
+        /// object per path segment and one per triangle tested, exactly as query.py capsule_hits counts work. Returns
+        /// null when the budget runs out (the probe is then unchecked); share one budget, starting at
+        /// <see cref="PassageQueryBudget"/>, across all probes of a package.</summary>
+        public static List<int> Hits(CollisionMesh col, PassageProbe probe, ref long budget)
         {
             var hits = new List<int>();
             double r = probe.RadiusM, pad = r + Limits.AabbTableTolM;
+            int segments = Math.Max(1, probe.PathMap.Count - 1);
             foreach (var obj in col.Objects)
             {
                 bool hit = false;
-                for (int s = 0; s + 1 < probe.PathMap.Count && !hit; s++)
+                var box = obj.Aabb;
+                for (int s = 0; s < segments && !hit; s++)
                 {
-                    Vec3 p = probe.PathMap[s], q = probe.PathMap[s + 1];
-                    var lo = new[] { Math.Min(p.X, q.X), Math.Min(p.Y, q.Y), Math.Min(p.Z, q.Z) };
-                    var hi = new[] { Math.Max(p.X, q.X), Math.Max(p.Y, q.Y), Math.Max(p.Z, q.Z) };
-                    if (!Overlap(lo, hi, obj.Aabb, pad)) continue;
+                    if (--budget < 0) return null;
+                    Vec3 p = probe.PathMap[s], q = probe.PathMap[Math.Min(s + 1, probe.PathMap.Count - 1)];
+                    var lo = new Vec3(Math.Min(p.X, q.X), Math.Min(p.Y, q.Y), Math.Min(p.Z, q.Z));
+                    var hi = new Vec3(Math.Max(p.X, q.X), Math.Max(p.Y, q.Y), Math.Max(p.Z, q.Z));
+                    if (!Overlap(lo, hi, box[0], box[1], box[2], box[3], box[4], box[5], pad)) continue;
                     for (int t = obj.TriStart; t < obj.TriStart + obj.TriCount && !hit; t++)
                     {
+                        if (--budget < 0) return null;
                         var tri = col.GetTriangle(t);
-                        var tb = new[] { Math.Min(tri.A.X, Math.Min(tri.B.X, tri.C.X)), Math.Min(tri.A.Y, Math.Min(tri.B.Y, tri.C.Y)), Math.Min(tri.A.Z, Math.Min(tri.B.Z, tri.C.Z)),
-                                         Math.Max(tri.A.X, Math.Max(tri.B.X, tri.C.X)), Math.Max(tri.A.Y, Math.Max(tri.B.Y, tri.C.Y)), Math.Max(tri.A.Z, Math.Max(tri.B.Z, tri.C.Z)) };
-                        if (!Overlap(lo, hi, tb, r)) continue;
+                        Vec3 a = tri.A, b = tri.B, c = tri.C;
+                        if (!Overlap(lo, hi, Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Y, Math.Min(b.Y, c.Y)), Math.Min(a.Z, Math.Min(b.Z, c.Z)),
+                                     Math.Max(a.X, Math.Max(b.X, c.X)), Math.Max(a.Y, Math.Max(b.Y, c.Y)), Math.Max(a.Z, Math.Max(b.Z, c.Z)), r)) continue;
                         hit = SegmentTriangleDistance(p, q, tri) <= r;
                     }
                 }
                 if (hit) hits.Add(obj.Index);
             }
             return hits;
+        }
+
+        /// <summary>A collision mesh built in code from (class, vertices, triangle indices) objects, for controls.</summary>
+        public static CollisionMesh Synthetic(params (CollisionClass cls, Vec3[] vertices, int[] indices)[] objects)
+        {
+            var verts = new List<float>();
+            var idx = new List<uint>();
+            var triObj = new List<uint>();
+            var triCls = new List<byte>();
+            var objs = new CollisionObject[objects.Length];
+            for (int k = 0; k < objects.Length; k++)
+            {
+                var (cls, vs, ix) = objects[k];
+                uint baseV = (uint)(verts.Count / 3);
+                var box = new[] { double.MaxValue, double.MaxValue, double.MaxValue, double.MinValue, double.MinValue, double.MinValue };
+                foreach (var v in vs)
+                {
+                    verts.Add((float)v.X); verts.Add((float)v.Y); verts.Add((float)v.Z);
+                    box[0] = Math.Min(box[0], (float)v.X); box[1] = Math.Min(box[1], (float)v.Y); box[2] = Math.Min(box[2], (float)v.Z);
+                    box[3] = Math.Max(box[3], (float)v.X); box[4] = Math.Max(box[4], (float)v.Y); box[5] = Math.Max(box[5], (float)v.Z);
+                }
+                objs[k] = new CollisionObject { Index = k, Name = $"control{k}", MbId = $"control:{k}", Class = CollisionMesh.ClassNames[(int)cls],
+                                                TriStart = triObj.Count, TriCount = ix.Length / 3, Aabb = box };
+                foreach (var i in ix) idx.Add(baseV + (uint)i);
+                for (int t = 0; t < ix.Length / 3; t++) { triObj.Add((uint)k); triCls.Add((byte)cls); }
+            }
+            return new CollisionMesh { Version = 2, Vertices = verts.ToArray(), Indices = idx.ToArray(), TriangleObject = triObj.ToArray(),
+                                       TriangleClass = triCls.ToArray(), Objects = objs };
+        }
+
+        static PassageProbe Capsule(double radius, params Vec3[] path)
+        {
+            var p = new PassageProbe { Id = "control", Kind = "bridge", Feature = "control:0", RadiusM = radius };
+            p.PathMap.AddRange(path);
+            return p;
+        }
+
+        /// <summary>Controls of the capsule check on fixed geometry built in code (independent of any package):
+        /// a box hit through its middle and missed above and beside it (grazing at radius +/- 1 mm), a collapsed
+        /// (a == b) triangle measured through its edges, a nearly parallel 100 km segment that must keep 0.1 mm
+        /// precision (Python test_query regression case), and budget exhaustion. Returns the failed checks.</summary>
+        public static List<string> SelfTest()
+        {
+            var failed = new List<string>();
+            var bv = new List<Vec3>();
+            foreach (var z in new[] { 0.0, 10.0 })
+                foreach (var (x, y) in new[] { (10.0, -5.0), (20.0, -5.0), (20.0, 5.0), (10.0, 5.0) }) bv.Add(new Vec3(x, y, z));
+            var quads = new[] { (0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7) };
+            var bi = new List<int>();
+            foreach (var (a, b, c, d) in quads) bi.AddRange(new[] { a, b, c, a, c, d });
+            var box = Synthetic((CollisionClass.Building, bv.ToArray(), bi.ToArray()));
+            void Expect(string what, CollisionMesh col, PassageProbe probe, bool hit)
+            {
+                var h = Hits(col, probe);
+                if ((h.Count > 0) != hit) failed.Add($"{what}: expected {(hit ? "BLOCKED" : "PASS")}");
+            }
+            const double r = 1.5, eps = 1e-3;
+            Expect("through the box", box, Capsule(1.0, new Vec3(0, 0, 5), new Vec3(25, 0, 5)), true);
+            Expect("above the box", box, Capsule(2.0, new Vec3(0, 0, 13), new Vec3(25, 0, 13)), false);
+            Expect("beside the box at r + 1 mm", box, Capsule(r, new Vec3(0, -5 - r - eps, 5), new Vec3(25, -5 - r - eps, 5)), false);
+            Expect("beside the box at r - 1 mm", box, Capsule(r, new Vec3(0, -5 - r + eps, 5), new Vec3(25, -5 - r + eps, 5)), true);
+            var sliver = Synthetic((CollisionClass.Prop, new[] { new Vec3(0, 0, 0), new Vec3(0, 0, 0), new Vec3(0, 4, 0) }, new[] { 0, 1, 2 }));
+            Expect("collapsed triangle within r", sliver, Capsule(1.2, new Vec3(1, 2, 0.5), new Vec3(1, 3, 0.5)), true);
+            Expect("collapsed triangle beyond r", sliver, Capsule(1.1, new Vec3(1, 2, 0.5), new Vec3(1, 3, 0.5)), false);
+            var deck = Synthetic((CollisionClass.Bridge, new[] { new Vec3(0, 0, 0), new Vec3(100000, 0, 0), new Vec3(50000, -1, 0) }, new[] { 0, 1, 2 }));
+            Vec3 p0 = new Vec3(0, 0.0001, -0.001), p1 = new Vec3(100000, 0.0001, 0.001);
+            Expect("nearly parallel path 0.1 mm from an edge, r 0.15 mm", deck, Capsule(0.00015, p0, p1), true);
+            Expect("nearly parallel path 0.1 mm from an edge, r 0.05 mm", deck, Capsule(0.00005, p0, p1), false);
+            double dist = SegmentTriangleDistance(p0, p1, deck.GetTriangle(0));
+            if (!(Math.Abs(dist - 0.0001) <= 1e-9)) failed.Add($"nearly parallel distance {dist} m, expected 0.0001 m");
+            long budget = 3;
+            if (Hits(box, Capsule(1.0, new Vec3(0, 0, 5), new Vec3(25, 0, 5)), ref budget) != null) failed.Add("work budget of 3 was not exhausted");
+            return failed;
         }
     }
 

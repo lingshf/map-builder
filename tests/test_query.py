@@ -5,7 +5,16 @@ import unittest
 
 from map_builder.core.collision import ColObject, read_collision, write_collision
 from map_builder.core.errors import LimitError
-from map_builder.core.query import capsule_hits, ray_cast, segment_triangle_distance
+from map_builder.core.query import (capsule_hits, closest_point_segment, closest_point_triangle, ray_cast,
+                                    segment_segment_distance, segment_triangle_distance, triangle_is_degenerate)
+
+
+def _sub_(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def lerp(a, b, t):
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
 
 
 def box(x0, y0, z0, x1, y1, z1):
@@ -36,6 +45,52 @@ class SegmentTriangleTest(unittest.TestCase):
         self.assertEqual(d((0.5, 0.5, 0), (1, 1, 0), *self.TRI), 0.0)              # coplanar, inside
         line = ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (4.0, 0.0, 0.0))                 # degenerate: its edges
         self.assertAlmostEqual(d((1, 3, -1), (1, 3, 1), *line), 3.0)
+
+    def test_collapsed_and_collinear_triangles(self):
+        a, c = (0.0, 0.0, 0.0), (0.0, 4.0, 0.0)
+        p = (1.0, 2.0, 0.5)                                    # projects inside the "a == b" sliver's span
+        self.assertTrue(triangle_is_degenerate(a, a, c))
+        self.assertEqual(closest_point_triangle(p, a, a, c), (0.0, 2.0, 0.0))     # was ZeroDivisionError
+        self.assertEqual(closest_point_triangle(p, c, a, a), (0.0, 2.0, 0.0))
+        self.assertEqual(closest_point_triangle(p, a, a, a), a)                   # a point
+        self.assertAlmostEqual(segment_triangle_distance(p, (1.0, 3.0, 0.5), a, a, c), math.sqrt(1.25))
+        self.assertAlmostEqual(segment_triangle_distance((-1, 2, -1), (1, 2, 1), a, a, c), 0.0)   # crosses it
+        near = (0.0, 0.0, 0.0), (1e5, 0.0, 0.0), (5e4, 1e-6, 0.0)                # collinear within 1e-11
+        self.assertTrue(triangle_is_degenerate(*near))
+        self.assertAlmostEqual(segment_triangle_distance((5e4, 2.0, -1), (5e4, 2.0, 1), *near), 2.0, places=5)
+        self.assertFalse(triangle_is_degenerate(*self.TRI))
+        for tri in ((a, a, c), near):
+            self.assertTrue(all(math.isfinite(x) for x in closest_point_triangle((3.0, 1.0, 2.0), *tri)))
+
+    def test_nearly_parallel_segment_keeps_precision(self):
+        p, q = (0.0, 0.0001, -0.001), (100000.0, 0.0001, 0.001)
+        tri = ((0.0, 0.0, 0.0), (100000.0, 0.0, 0.0), (50000.0, -1.0, 0.0))
+        self.assertAlmostEqual(segment_triangle_distance(p, q, *tri), 0.0001, delta=1e-9)
+        self.assertAlmostEqual(segment_segment_distance(p, q, tri[0], tri[1]), 0.0001, delta=1e-9)
+        # the same configuration rotated about z and shifted (no axis alignment to help the arithmetic)
+        cs, sn, off = math.cos(0.7), math.sin(0.7), (1234.5, -987.25, 42.0)
+        rot = lambda v: (cs * v[0] - sn * v[1] + off[0], sn * v[0] + cs * v[1] + off[1], v[2] + off[2])
+        self.assertAlmostEqual(segment_triangle_distance(rot(p), rot(q), *map(rot, tri)), 0.0001, delta=1e-8)
+        col = read_collision(write_collision([ColObject("deck", "osm:way/7", "bridge", list(tri), [(0, 1, 2)])]))
+        self.assertEqual(capsule_hits(col, [p, q], 0.00015), [0])
+        self.assertEqual(capsule_hits(col, [p, q], 0.00005), [])
+
+    def test_segment_segment_matches_brute_force(self):
+        import random
+        rng = random.Random(7)
+        for _ in range(300):
+            pts = [tuple(rng.uniform(-10, 10) for _ in range(3)) for _ in range(4)]
+            if rng.random() < 0.3:                              # parallel or overlapping pairs
+                d = _sub_(pts[1], pts[0])
+                k = rng.uniform(-2, 2)
+                pts[3] = (pts[2][0] + d[0] * k, pts[2][1] + d[1] * k, pts[2][2] + d[2] * k)
+            got = segment_segment_distance(*pts)
+            n = 200
+            ref = min(math.dist(lerp(pts[0], pts[1], i / n), closest_point_segment(lerp(pts[0], pts[1], i / n),
+                                                                                    pts[2], pts[3]))
+                      for i in range(n + 1))
+            self.assertLessEqual(got, ref + 1e-9)
+            self.assertGreaterEqual(got, ref - 0.2)            # the sampled reference over-estimates a little
 
 
 class CapsuleTest(unittest.TestCase):
@@ -96,6 +151,24 @@ class RayCastTest(unittest.TestCase):
             ray_cast(self.col, (0, 0, 5), (1, 0, 0), 100.0, max_work=3)
         with self.assertRaises(ValueError):
             ray_cast(self.col, (0, 0, 5), (0, 0, 0), 100.0)
+
+    def test_extreme_direction_magnitudes(self):
+        want = ray_cast(self.col, (0, 0, 5), (0, 0, -1), 100.0)
+        for d in ((0, 0, -1e200), (0, 0, -1e-200), (0, 0, -5e-324), (1e-300, 0, -1e300)):
+            with self.subTest(d=d):
+                got = ray_cast(self.col, (0, 0, 5), d, 100.0)
+                self.assertIsNotNone(got)
+                self.assertEqual((got.object, got.triangle), (want.object, want.triangle))
+                self.assertAlmostEqual(got.t, want.t, places=9)
+        side = ray_cast(self.col, (0, 0, 5), (3e-200, 0, 0), 100.0)
+        self.assertEqual((side.object, round(side.t, 5)), (1, 10.0))
+
+    def test_degenerate_triangle_is_never_hit(self):
+        col = read_collision(write_collision([ColObject("sliver", "osm:way/3", "prop",
+                                                        [(0, 0, 0), (0, 0, 0), (0, 4, 0)], [(0, 1, 2)])]))
+        self.assertIsNone(ray_cast(col, (0, 2, 5), (0, 0, -1), 100.0))
+        self.assertEqual(capsule_hits(col, [(1, 2, 0.5), (1, 3, 0.5)], 1.2), [0])
+        self.assertEqual(capsule_hits(col, [(1, 2, 0.5), (1, 3, 0.5)], 1.1), [])
 
 
 if __name__ == "__main__":

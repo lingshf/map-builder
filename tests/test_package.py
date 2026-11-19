@@ -1733,11 +1733,18 @@ class ClassKindTest(unittest.TestCase):
         half = tube_mesh(0, 30, 0, 6, 0, 5)
         half.add_face((4, 7, 6, 5), "MB Wall", (0.7, 0.7, 0.7))         # inconsistent: top face twice, both ways
         self.assertIn("not a consistently oriented tube", orient_one("tunnel", half)[0])
-        # a closed inward box (a cavity with no portal) is a valid degenerate tube; an outward box is not
+        # a closed inward box (a cavity with no portal) is sealed: a tube must be open; an outward box is wrong too
         inner = box_mesh(0, 0, 4, 4, 0, 4)
         flipped = merged_mesh([(inner, True)])
-        self.assertEqual(orient_one("tunnel", flipped), [])
+        probs = orient_one("tunnel", flipped)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("tunnel object #0: shell 0 of 1 is sealed (it has no portal loop)", probs[0])
         self.assertTrue(orient_one("tunnel", inner))
+        # an open tube plus a separate sealed inward box in the same object: only the sealed shell is reported
+        both = merged_mesh([(tube_mesh(0, 30, 0, 6, 0, 5), False), (box_mesh(50, 0, 54, 4, 0, 4), True)])
+        probs = orient_one("tunnel", both)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("shell 1 of 2 is sealed", probs[0])
 
     def test_bridge_and_structure_are_solids(self):
         box = box_mesh(0, 0, 10, 4, 5, 6)
@@ -1862,9 +1869,46 @@ class PassageProbeTest(TempDirCase):
     def test_filter_drops_probes_of_missing_features(self):
         from map_builder.core.pipeline import filter_passage_probes
         a, b = self.probe(id="a"), self.probe(id="b", feature="osm:way/gone")
-        kept, dropped = filter_passage_probes([a, b, "junk"], ["osm:way/2"])
-        self.assertEqual((kept, dropped), ([a, "junk"], ["b"]))
+        kept, dropped = filter_passage_probes([a, b], ["osm:way/2"], ["osm:way/2", "osm:way/gone"])
+        self.assertEqual((kept, dropped), ([a], ["b"]))
         self.assertEqual(filter_passage_probes(None, []), ([], []))
+
+    def test_filter_rejects_malformed_and_unknown_probes(self):
+        from map_builder.core.pipeline import filter_passage_probes
+        plan = ["osm:way/2", "osm:way/gone"]
+        cases = {
+            "not an object": (["junk"], "passage_probes[0] must be an object"),
+            "unhashable feature": ([self.probe(feature=["osm:way/2"])], "passage_probes[0].feature"),
+            "dict feature": ([self.probe(feature={"x": 1})], "passage_probes[0].feature"),
+            "bad radius": ([self.probe(radius_m=-1)], "passage_probes[0].radius_m"),
+            "not a list": ({"a": 1}, "passage_probes must be an array"),
+            "never in the plan": ([self.probe(), self.probe(id="p1", feature="osm:way/404")],
+                                  "passage_probes[1].feature names neither an exported object nor a feature of the "
+                                  "generation plan"),
+        }
+        for what, (probes, fragment) in cases.items():
+            with self.subTest(what):
+                with self.assertRaises(PackageError) as cm:
+                    filter_passage_probes(probes, ["osm:way/2"], plan)
+                self.assertIn(fragment, str(cm.exception))
+        with self.assertRaises(PackageError):                       # no plan ids: nothing may be dropped
+            filter_passage_probes([self.probe(feature="osm:way/gone")], ["osm:way/2"])
+
+    def test_degenerate_collision_triangle_near_a_probe(self):
+        """The validator's capsule check measures collapsed triangles through their edges (it used to divide
+        by zero) and still finds the hit."""
+        sliver = MeshData("sliver")
+        for v in [(0, -56, self.HIGH + 0.5), (0, -56, self.HIGH + 0.5), (0, -58, self.HIGH + 0.5),
+                  (5, -40, 0), (6, -40, 0), (5, -39, 0)]:
+            sliver.add_vertex(*v)
+        sliver.add_face((0, 1, 2), "MB Wall", (0.7, 0.7, 0.7))
+        sliver.add_face((3, 4, 5), "MB Wall", (0.7, 0.7, 0.7))
+        objs = self.objs + [obj("sliver", "osm:node/5", "prop", sliver)]
+        members, manifest, _ = scene_members(objs, passage_probes=[self.probe()])
+        raw_write(self.p("sliver.mbmap"), members, manifest)
+        r = validate_package(self.p("sliver.mbmap"))
+        self.assertTrue(r.ok, r.summary())
+        self.assertIn("passage probe 0 is blocked by collision object #3", r.warnings)
 
     def test_old_schema_is_rejected(self):
         _, members, manifest = self.write("old.mbmap", [])

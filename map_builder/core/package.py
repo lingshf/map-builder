@@ -760,7 +760,8 @@ def _tube_problems(k, cls, tris):
     portals: every boundary vertex has exactly one outgoing and one incoming boundary edge). Each loop is
     capped with a triangle fan around its centroid, wound like the adjacent faces (a cap face uses each
     boundary edge reversed), which closes the surface; every resulting shell must then have a negative
-    signed volume (faces point inward, toward the free space). Linear in the triangle count."""
+    signed volume (faces point inward, toward the free space). Every shell must be open: a shell with no
+    portal loop (a sealed inward box) is an error. Linear in the triangle count."""
     tag = f"collision: {cls} object #{k}"
     ids = _weld_ids(tris)
     pos = {}
@@ -824,7 +825,12 @@ def _tube_problems(k, cls, tris):
     problems = []
     n = len(parts)
     vols = []
+    first_cap = len(ids)
     for s, ts in enumerate(parts):
+        if not any(t >= first_cap for t in ts):
+            problems.append(f"{tag}: shell {s} of {n} is sealed (it has no portal loop); every tube shell must be "
+                            "open at one or more portals")
+            continue
         st = [capped[t] for t in ts]
         vol = _signed_volume(st)
         vols.append(vol)
@@ -832,7 +838,7 @@ def _tube_problems(k, cls, tris):
             continue
         problems.append(f"{tag}: shell {s} of {n} (portal loops capped) has signed volume {vol:.6g} m^3; every "
                         "tube shell must have negative volume (faces CCW seen from the free space inside)")
-    if not any(v < 0.0 for v in vols):
+    if len(vols) == n and not any(v < 0.0 for v in vols):      # (sealed shells are reported above)
         problems.append(f"{tag} has no shell with negative volume once its portals are capped (collapsed or "
                         "flattened); a tube collision object must enclose free space")
     return problems

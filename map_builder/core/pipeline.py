@@ -18,7 +18,7 @@ from .generate import MATERIALS, PlanOptions, build_plan
 from .glb import node_scale, write_glb
 from .http import HttpClient, redact
 from .osm import DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_LICENSE, classify, fetch_overpass, load_osm_file
-from .package import assemble, write_package
+from .package import assemble, passage_probe_problems, write_package
 
 ELEVATION_SOURCES = ("copernicus", "file")
 OSM_SOURCES = ("overpass", "file")
@@ -210,26 +210,39 @@ def heightfield_from_objects(col_objects, area, spacing):
     return heightfield_from_collision(read_collision(write_collision(col_objects)), area, spacing)
 
 
-def filter_passage_probes(probes, mb_ids):
-    """Split passage probes into (kept, dropped_ids): a probe whose ``feature`` mb_id is not among ``mb_ids``
-    (the exported objects; e.g. the feature was deleted in Blender) is dropped and reported by its id.
-    Entries that are not objects are kept, so the package validator reports them."""
-    mb_ids = set(mb_ids)
+def filter_passage_probes(probes, mb_ids, plan_ids=()):
+    """Split passage probes into (kept, dropped_ids).
+
+    ``mb_ids`` are the exported objects; ``plan_ids`` are the mb_ids of the original generation plan (the
+    ``generated_ids`` recorded when the plan was built or loaded into Blender). A probe whose ``feature`` is
+    in ``plan_ids`` but no longer among ``mb_ids`` (the feature was deleted in Blender) is dropped and
+    reported by its id. Every other probe must be well formed (:func:`package.passage_probe_problems`) and
+    reference an exported object; otherwise PackageError is raised, since a probe that never referenced a
+    plan feature is a bug, not an edit. The messages never echo probe strings."""
+    probes = [] if probes is None else probes
+    bad = passage_probe_problems(probes)
+    if bad:
+        raise PackageError("invalid passage probes: " + "; ".join(bad))
+    mb_ids, plan_ids = set(mb_ids), set(plan_ids or ())
     kept, dropped = [], []
-    for p in probes or []:
-        if isinstance(p, dict) and p.get("feature") not in mb_ids:
-            dropped.append(p.get("id"))
-        else:
+    for i, p in enumerate(probes):
+        feature = p["feature"]
+        if feature in mb_ids:
             kept.append(copy.deepcopy(p))
+        elif feature in plan_ids:
+            dropped.append(p["id"])
+        else:
+            raise PackageError(f"passage_probes[{i}].feature names neither an exported object nor a feature of "
+                               "the generation plan")
     return kept, dropped
 
 
 def export_package(path, name, area, sources, glb_bytes, col_objects, report, edits=None, blender_version=None,
-                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=None):
+                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=None, plan_ids=()):
     """Write a validated package atomically. ``col_objects`` must come from the same final meshes and world
     transforms as ``glb_bytes``; ``object_info[name]['provenance']`` is copied to the manifest.
-    ``passage_probes`` (plan probes) are filtered by :func:`filter_passage_probes`; the ids of dropped probes
-    go to report.json ``passage_probes_dropped``."""
+    ``passage_probes`` (plan probes) are filtered by :func:`filter_passage_probes` against ``plan_ids`` (the
+    original plan's mb_ids); the ids of dropped probes go to report.json ``passage_probes_dropped``."""
     collision_bytes = write_collision(col_objects)
     col = read_collision(collision_bytes)
     hf = heightfield_from_collision(col, area, heightfield_spacing) if heightfield_spacing else None
@@ -245,7 +258,7 @@ def export_package(path, name, area, sources, glb_bytes, col_objects, report, ed
                                                     if is_degenerate(*col.triangle(t))),
                         "heightfield_nan_cells": hf[1]["nan_cells"] if hf else None}
     probes_kept, report["passage_probes_dropped"] = filter_passage_probes(passage_probes,
-                                                                          (o.mb_id for o in col_objects))
+                                                                          (o.mb_id for o in col_objects), plan_ids)
     members, manifest, probes = assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=hf,
                                          report=report, edits=edits, blender_version=blender_version,
                                          created_utc=created_utc, passage_probes=probes_kept)
@@ -274,7 +287,7 @@ def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generat
     glb_bytes = write_glb(nodes, MATERIALS, generator="map-builder headless")
     return export_package(path, name, plan.area, sources, glb_bytes, col_objects, plan.report, edits=edits,
                           heightfield_spacing=heightfield_spacing, object_info=info, created_utc=created_utc,
-                          passage_probes=getattr(plan, "passage_probes", []))
+                          passage_probes=getattr(plan, "passage_probes", []), plan_ids=generated_ids)
 
 
 def generate_plan(area, settings, client=None, progress=None):
