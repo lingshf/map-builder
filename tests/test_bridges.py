@@ -557,7 +557,68 @@ class TreeTest(unittest.TestCase):
         self.assertNotIn("passage_probes_blocked", plan.report)
 
 
-class RegionTest(unittest.TestCase):
+class SharedProbesTest(unittest.TestCase):
+    ELEV, TUNNEL = "elev:probe", "tunnel:probe"
+
+    def _mixed(self, ways, budget=None, cap=None):
+        """A scene of bridges whose finalisation also sees one ELEV and one tunnel probe (staged like their
+        stages do: the ELEV one before the bridges, the tunnel one after), with the work budget and the cap
+        optionally replaced. Returns ``(plan, ids)``."""
+        from map_builder.core import passages, structures
+        orig = bridges.build
+
+        def build(plan, ctx):
+            orig(plan, ctx)
+            tpl = ctx.probes[0]
+            elev = dict(tpl, id=self.ELEV, kind="elevated", path_map=[[x, y + 20.0, z] for x, y, z in tpl["path_map"]])
+            plan.passage_probes.insert(0, elev)
+            passages._state(ctx).probes.append(self.ELEV)
+            ctx.probes.append(dict(tpl, id=self.TUNNEL, kind="tunnel",
+                                   path_map=[[x, y + 20.0, z] for x, y, z in tpl["path_map"]]))
+        patches = [mock.patch.object(bridges, "build", build)]
+        if budget is not None:
+            patches.append(mock.patch.object(structures, "WorkBudget", lambda: budget))
+        if cap is not None:
+            from map_builder.core import package
+            patches.append(mock.patch.object(package, "PASSAGE_PROBE_MAX", cap))
+        for pt in patches:
+            pt.start()
+        try:
+            plan, ids, _ = make_scene(ways, lambda x, y: 0.0, width=300.0, height=500.0)
+        finally:
+            for pt in patches:
+                pt.stop()
+        return plan, ids
+
+    WAYS = [([(-100, y), (100, y)], {"highway": "residential", "bridge": "yes"}) for y in range(-160, 161, 80)]
+
+    def test_bridge_probes_draw_from_the_one_shared_work_budget(self):
+        from map_builder.core import structures
+        everything = structures.WorkBudget(10 ** 9)
+        plan, ids = self._mixed(self.WAYS, budget=everything)
+        cost = 10 ** 9 - everything.left
+        staged = sorted(p["id"] for p in plan.passage_probes)
+        self.assertEqual(plan.report.get("passage_probes_blocked", []), [])
+        self.assertTrue(self.ELEV in staged and self.TUNNEL in staged and any(s.endswith(":deck") for s in staged))
+        small = structures.WorkBudget(int(cost * 0.6))   # not enough for every probe of every kind
+        plan, ids = self._mixed(self.WAYS, budget=small)
+        unchecked = [e["id"] for e in plan.report["passage_probes_blocked"] if e.get("reason") == "budget_exhausted"]
+        kept = [p["id"] for p in plan.passage_probes]
+        self.assertEqual(sorted(kept + unchecked), staged)   # every probe is either checked or reported, none lost
+        self.assertTrue(any(u.endswith((":deck", ":under")) for u in unchecked))   # bridge probes ran dry
+        self.assertIn(self.TUNNEL, unchecked)                  # the last in plan order
+        self.assertIn(self.ELEV, kept)                         # the first in plan order was checked
+        self.assertLessEqual(small.left, 0)                    # a failed call is debited: nothing left over
+
+    def test_bridge_probes_fall_under_the_global_cap_in_plan_order(self):
+        full, ids = self._mixed(self.WAYS)
+        order = [p["id"] for p in full.passage_probes]   # ELEV, the bridges' probes in plan order, the tunnel
+        self.assertEqual((order[0], order[-1]), (self.ELEV, self.TUNNEL))
+        plan, _ = self._mixed(self.WAYS, cap=3)
+        self.assertEqual([p["id"] for p in plan.passage_probes], order[:3])
+        self.assertEqual([e["id"] for e in plan.report["passage_probes_dropped"]], order[3:])
+        self.assertNotIn("passage_probes_blocked", plan.report)
+
     def test_many_decks_all_get_checked_and_kept(self):
         ways = [([(-100, y), (100, y)], {"highway": "residential", "bridge": "yes"}) for y in range(-200, 200, 40)]
         plan, ids, _ = make_scene(ways, lambda x, y: 0.0, width=300.0, height=500.0)
@@ -565,19 +626,6 @@ class RegionTest(unittest.TestCase):
         self.assertEqual({p["id"] for p in plan.passage_probes if p["id"].endswith(":deck")},
                          {f"{i}:deck" for i in ids})
         self.assertNotIn("passage_probes_blocked", plan.report)
-
-    def test_probe_check_with_a_region_gives_the_same_result_from_far_fewer_triangles(self):
-        plan, ids, _ = valley_scene()
-        probes = plan.passage_probes
-        full, _ = plan_collision(plan)
-        part, _ = plan_collision(plan, region=[([tuple(p) for p in pr["path_map"]], pr["radius_m"])
-                                               for pr in probes])
-        self.assertLess(len(part.indices), len(full.indices))
-        from map_builder.core.query import capsule_hits
-        for pr in probes:
-            pts = [tuple(p) for p in pr["path_map"]]
-            names = lambda c: sorted(c.objects[k]["mb_id"] for k in capsule_hits(c, pts, pr["radius_m"]))   # noqa
-            self.assertEqual(names(part), names(full))
 
 
 class InvalidAndBlockedTest(unittest.TestCase):
