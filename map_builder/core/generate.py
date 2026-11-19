@@ -1639,7 +1639,11 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
 
     ``dsm_correction``: None (auto: on for surface-model sources such as Copernicus GLO-30, off for local
     files), True or False. When applied, the corrected grid (see :mod:`dsm`) is used for the terrain mesh
-    and everything placed on it; ``report['terrain_correction']`` always records the outcome."""
+    and everything placed on it; ``report['terrain_correction']`` always records the outcome. The classified
+    content and its selection do not depend on the correction, but terrain-dependent eligibility does: a
+    building whose roof a DSM spike pierces (terrain above the roof underside, rejected as invalid on the
+    uncorrected grid) is generated when the correction lowers that spike. That is intended: recovering
+    buildings wrongly rejected because of their own DSM surface is part of what the correction is for."""
     opts = options or PlanOptions()
     # Landcover ring topology is validated first: only valid polygons colour the terrain, drive scatter
     # and (forests) feed the DSM mask, so an invalid ring set never lowers terrain outside its feature.

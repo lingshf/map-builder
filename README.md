@@ -74,14 +74,16 @@ the surrounding ground before the terrain, roads and buildings are built.
   same query with a wider bbox: the grid's overshoot of the area (below one spacing) plus 45 m, the
   farthest a mask can reach (a bridge centreline: at most 30 m half deck width plus its 15 m
   buffer), rounded up to a whole metre. The normal request is byte-identical to the one made with
-  the correction off (it shares its cache entry), and it is classified exactly as then, so
-  buildings, `building:part` ownership, multipolygon outer suppression, landcover, roads, trees,
-  counts, `invalid_features` and `unsupported_features` come from it alone. The wider request is
+  the correction off (it shares its cache entry), and it is classified exactly as then, so the
+  selected buildings, `building:part` ownership, multipolygon outer suppression, landcover, roads,
+  trees, and the classification's counts, `invalid_features` and `unsupported_features` come from
+  it alone. The wider request is
   recorded in the features source as `dsm_mask_query`. Its elements (ways, relations, tree nodes)
   that the normal response lacks, including relations that merely reference content ways, only
   add mask candidates — surface building
-  footprints, forest/wood polygons, bridge ways and trees: they never colour the terrain, drive
-  scatter, or appear in counts, `invalid_features` or `unsupported_features`, and their ring
+  footprints, forest/wood polygons, bridge ways and trees, wherever they lie (inside the area too,
+  e.g. a tree added to OSM between the two requests): they are never generated, never colour the
+  terrain, drive scatter, or appear in counts, `invalid_features` or `unsupported_features`, and their ring
   topology is checked only by the budgeted, deduplicated mask validation below. A content way that
   is the outer of a multipolygon known only to the wider response (same area family, or an
   untagged one with inner rings) is still generated as in the normal response, but its solid
@@ -89,9 +91,15 @@ the surrounding ground before the terrain, roads and buildings are built.
   The two requests may see slightly different OSM data (minutes apart, or a cached normal
   response); that only affects the mask. If the wider request fails (HTTP error, rate limit, size
   limit, a server-side error remark), the content stands and the correction is skipped with a
-  warning (`reason: mask candidates unavailable`, the uncorrected surface model). So the generated
-  scene (objects, colours, materials, report) is the same with the correction on or off; only
-  terrain heights and the correction's report fields differ.
+  warning (`reason: mask candidates unavailable`, the uncorrected surface model). If only its
+  cache write fails (full disk, unwritable cache), its response is still used, uncached, with a
+  warning and `dsm_mask_query.cache_write_error`; a failed cache write of the normal request still
+  fails acquisition, as with the correction off. So the input OSM content and its selection are
+  the same with the correction on or off. What depends on the terrain uses the corrected terrain:
+  heights and placement, and terrain-dependent eligibility. A building whose roof a DSM spike
+  pierces (the terrain under the footprint rises above the roof underside) is rejected as invalid
+  with the correction off but generated with it on, once the spike is lowered; recovering
+  buildings that their own DSM surface wrongly rejects is part of the correction's purpose.
 * Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The
   equation is solved coarse to fine (multigrid: a nested-iteration guess from coarsened grids, with
   semi-coarsening along the long axis of elongated grids, then V- or W-cycles of red-black

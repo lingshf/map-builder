@@ -117,7 +117,9 @@ def acquire(area, settings, client=None, progress=None):
         osm = load_osm_file(settings.osm_file)
     else:
         # The content is always the normal query (area + OSM_FETCH_MARGIN_M): the same query text and cache
-        # key with the correction on or off, so the generated scene is the same either way. When the DSM
+        # key with the correction on or off, so the input OSM content and its selection are the same either
+        # way (terrain-dependent eligibility, e.g. a building's roof clearance, and placement use the
+        # corrected terrain, see generate.build_plan). When the DSM
         # correction is enabled, a second request (the same query with a wider bbox) fetches every DSM mask
         # candidate the grid can use (selected against the grid extent, osm.classify mask_extent): the grid
         # may overshoot the area on the +x/+y sides by up to one spacing, plus the widest mask reach, a bridge
@@ -134,8 +136,11 @@ def acquire(area, settings, client=None, progress=None):
             margin = max(OSM_FETCH_MARGIN_M, float(math.ceil(overshoot + dsm.BRIDGE_CANDIDATE_MARGIN_M)))
             mask_query = {"purpose": "DSM terrain correction mask candidates only (nothing generated from it)",
                           "margin_m": margin}
+            # Its cache write is best effort (a full disk or unwritable cache only loses the cache entry,
+            # recorded with a warning); the normal request's cache write still raises, as without the mask.
+            mask_cache = _BestEffortCache(cache)
             try:
-                mask_data = fetch_overpass(area, client, settings.overpass_url, cache, margin_m=margin, **fetch)
+                mask_data = fetch_overpass(area, client, settings.overpass_url, mask_cache, margin_m=margin, **fetch)
             except (NetworkError, CoverageError, FormatError, LimitError) as exc:
                 mask_query["error"] = str(exc)
             else:
@@ -145,6 +150,8 @@ def acquire(area, settings, client=None, progress=None):
                 if "from_cache" in src:
                     mask_query["from_cache"] = src["from_cache"]
                 mask_query["osm_base_timestamp"] = mask_data.timestamp
+            if mask_cache.write_error:
+                mask_query["cache_write_error"] = mask_cache.write_error
     s = grid.spacing
     classified = classify(osm, area, mask_extent=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * s,
                                                   grid.y0 + (grid.ny - 1) * s), mask_data=mask_data,
@@ -155,7 +162,37 @@ def acquire(area, settings, client=None, progress=None):
         if "error" in mask_query:
             classified.mask_unavailable = (f"the DSM mask request (OSM area + {mask_query['margin_m']:g} m) failed: "
                                            f"{mask_query['error']}")
+        if "cache_write_error" in mask_query:
+            classified.warnings.append(f"DSM mask request (OSM area + {mask_query['margin_m']:g} m): its response "
+                                       f"was used but could not be cached ({mask_query['cache_write_error']})")
     return grid, classified, [dict(grid.provenance), osm_entry]
+
+
+class _BestEffortCache:
+    """Wraps a cache for the optional DSM mask request: reads pass through, and an ``OSError`` from a write
+    (full disk, unwritable cache directory) is recorded in ``write_error`` instead of raised. Only the
+    exception type and its OS message are kept (no path: the cache directory may name the user)."""
+
+    def __init__(self, cache):
+        self._cache, self.write_error = cache, None
+
+    def __bool__(self):
+        return bool(self._cache)
+
+    def get(self, namespace, key):
+        return self._cache.get(namespace, key)
+
+    def put(self, namespace, key, body, meta=None):
+        try:
+            self._cache.put(namespace, key, body, meta)
+        except OSError as exc:
+            self.write_error = f"{type(exc).__name__}: {exc.strerror or 'write failed'}"
+
+    def delete(self, namespace, key):
+        try:
+            self._cache.delete(namespace, key)
+        except OSError:
+            pass
 
 
 def osm_source_entry(osm, declared_license=None):

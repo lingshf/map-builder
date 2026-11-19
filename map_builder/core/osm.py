@@ -435,8 +435,10 @@ class Classified:
         # the predicate generation applies in the area) whose centroid lies outside the area (counted in
         # ``outside``) with a bbox within the extent + the building buffer, and
         # natural=tree nodes outside the area within the extent + the tree radius (``mask_trees``).
-        # ``mask_areas``: forest/wood polygons that are only in the wider DSM mask response (classify
-        # ``mask_data``); never used for terrain colouring, scatter or any generated content.
+        # Elements only in the wider DSM mask response (classify ``mask_data``) are mask candidates wherever
+        # they lie, inside the area included, and never generated: footprints go to ``outside_buildings``
+        # (not counted in ``outside``), trees to ``mask_trees``, forest/wood polygons to ``mask_areas``
+        # (never used for terrain colouring, scatter or any generated content).
         # Margin-only candidates (``mask_areas`` and margin-only ``outside_buildings``) are not topology
         # checked here; generate.dsm_obstacles validates them under the mask validation work budget.
         self.bridges = []
@@ -503,13 +505,13 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     (``bridges``, ``outside_buildings``, ``mask_trees``, ``mask_areas``); generated features are always
     selected against the area. Every kept feature, mask candidates included, counts toward ``max_features``.
 
-    ``data`` is the whole content: everything that affects the generated scene or the report (buildings,
+    ``data`` is the whole content: everything selected for the scene or reported by classification (buildings,
     building:part ownership, multipolygon outer suppression, areas, roads, trees, ``outside``, ``invalid``,
     ``unsupported``, warnings) comes from it alone, so it is the same whether or not ``mask_data`` is given.
     ``mask_data`` (optional) is a second, wider response fetched only for the DSM correction (the same query
     with a wider bbox): its elements whose ids are not in ``data`` (ways, relations, tree nodes) add DSM mask
-    candidates only (:func:`_add_margin_mask_candidates`). None (a local file, or the correction off): the
-    candidates come from ``data`` alone.
+    candidates only (:func:`_add_margin_mask_candidates`), wherever they lie. None (a local file, or the
+    correction off): the candidates come from ``data`` alone.
 
     Assembling the margin-only candidates is charged to ``max_mask_work`` geometric tests (default
     :data:`dsm.MASK_VALIDATION_WORK_BUDGET`), the budget that :func:`generate.dsm_obstacles` then continues
@@ -643,8 +645,10 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
     """Adds to ``out`` the DSM mask candidates among the elements of ``data`` (the wider DSM mask response)
     whose ids are not in ``content`` (the normal response): surface building footprints (``outside_buildings``)
     and forest/wood polygons
-    (``mask_areas``) from closed ways and multipolygon relations, bridge ways (``bridges``) and trees outside
-    the area (``mask_trees``), selected against ``mask_extent`` like the content candidates. Nothing else is
+    (``mask_areas``) from closed ways and multipolygon relations, bridge ways (``bridges``) and trees
+    (``mask_trees``), selected against ``mask_extent`` (expanded by each mask buffer) wherever they lie, inside
+    the area included: the normal response may lack an element in the area (e.g. one added to OSM between the
+    two requests), and such an element is a mask candidate only. Nothing else is
     touched: these elements never generate, colour, scatter, count or report anything. A way that is an outer
     of a margin-only multipolygon of the same area family (or of an untagged one with inner rings) is not
     used on its own in the mask, so a solid copy never covers the relation's holes: a margin-only way is not
@@ -734,7 +738,8 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
     for nid, (lat, lon, tags) in data.nodes.items():
         if nid not in content.nodes and tags.get("natural") == "tree":
             x, y = frame.to_local(lat, lon)
-            if not area.contains(x, y) and tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]:
+            # wherever it lies, inside the area included: a margin-only tree is a mask candidate, never generated
+            if tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]:
                 out.mask_trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
 
 

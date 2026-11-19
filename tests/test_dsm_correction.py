@@ -830,7 +830,10 @@ class ReviewRound2Test(unittest.TestCase):
             b.node(110.0, -20.0, {"natural": "tree"})
         return parse_osm_xml(b.xml().encode())
 
-    def test_generated_scene_is_identical_with_the_correction_on_or_off(self):
+    def test_content_selection_is_identical_with_the_correction_on_or_off(self):
+        # Parity covers the input OSM content and its selection. Here no building's eligibility depends on the
+        # terrain (all roofs clear it either way), so the whole scene matches; terrain-dependent eligibility
+        # (roof clearance) uses the corrected terrain, see ReviewRound6Test.test_correction_recovers_...
         from map_builder.core.dem import grid_layout
         from map_builder.core.generate import LANDCOVER_COLORS
         geo = (47.0, 8.0, 101.0, 100.0)
@@ -1542,6 +1545,106 @@ class ReviewRound5Test(unittest.TestCase):
             random.Random(seed).shuffle(segs)
             segs = [s[::-1] if random.Random(seed + k).random() < 0.5 else s for k, s in enumerate(segs)]
             self.assertEqual(_assemble_rings(segs), _assemble_rings_round4(segs))
+
+
+class ReviewRound6Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-6 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+
+    # --- finding 1: roof clearance uses the corrected terrain (intended) -------------------------------------
+
+    def test_correction_recovers_a_building_a_dsm_spike_rejects(self):
+        b = OsmBuilder()
+        b.way(square(0, 0, 12), {"building": "yes", "height": "4"}, closed=True)   # flat 24 x 24 m footprint
+        data = parse_osm_xml(b.xml().encode())
+        g = make_grid(lambda x, y: 130.0 if (x, y) == (0.0, 0.0) else 100.0, n=11, spacing=10.0)
+        self.assertEqual(g.heights[5][5], 130.0)                    # the 30 m spike at the footprint centre
+        plans = {}
+        for on in (False, True):
+            area = Area(*self.AREA)
+            cl = classify(data, area, mask_extent=(-50.0, -50.0, 50.0, 50.0))
+            plans[on] = build_plan(area, g, cl, PlanOptions(trees=False), dsm_correction=on)
+        fid = "osm:way/" + str(b.ways[0][0])
+        off, on = plans[False], plans[True]
+        self.assertFalse(any(o.mb_class == "building" for o in off.objects))
+        reason = next(e["reason"] for e in off.report["invalid_features"] if e["id"] == fid)
+        self.assertIn("terrain inside footprint reaches eave/roof", reason)
+        self.assertTrue(on.report["terrain_correction"]["applied"])
+        self.assertEqual([o.mb_id for o in on.objects if o.mb_class == "building"], [fid])
+        self.assertFalse(any(e["id"] == fid for e in on.report["invalid_features"]))
+        self.assertEqual(on.report["counts"].get("buildings"), 1)
+
+    # --- finding 2: a cache write failure of the mask request is best effort ---------------------------------
+
+    def _acquire_with_failing_write(self, fail_on):
+        from map_builder.core import pipeline
+        from map_builder.core.cache import DiskCache
+        normal, wide = ReviewRound5Test._fixture(self)
+        writes = []
+
+        class FailingCache(DiskCache):
+            def put(self, namespace, key, body, meta=None):
+                writes.append(namespace)
+                if len(writes) == fail_on:
+                    raise OSError(28, "No space left on device", os.path.join(self.root, "SYNTHETIC"))
+                return super().put(namespace, key, body, meta)
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        orig = pipeline.DiskCache
+        pipeline.DiskCache = FailingCache
+        try:
+            return ReviewRound5Test._acquire(self, [(200, normal), (200, wide)], True, cache.name), writes, cache.name
+        finally:
+            pipeline.DiskCache = orig
+
+    def test_a_failed_mask_cache_write_keeps_the_response_and_warns(self):
+        (grid, cl, sources, queries), writes, root = self._acquire_with_failing_write(fail_on=2)
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(writes, ["osm", "osm"])                   # the second (mask) write raised
+        mq = sources[1]["dsm_mask_query"]
+        self.assertNotIn("error", mq)
+        self.assertEqual(mq["cache_write_error"], "OSError: No space left on device")
+        self.assertNotIn(root, json.dumps(sources))                 # no cache path in the provenance
+        self.assertIsNone(cl.mask_unavailable)
+        self.assertEqual(len(cl.buildings), 1)                      # content kept
+        self.assertEqual(len(cl.outside_buildings), 1)              # and the mask candidates too
+        self.assertEqual(len(cl.mask_trees), 1)
+        self.assertTrue(any(w.startswith("DSM mask request") and "could not be cached" in w for w in cl.warnings))
+
+    def test_a_failed_normal_cache_write_still_fails_acquisition(self):
+        # unchanged from main: the normal (content) request's cache write error propagates
+        with self.assertRaises(OSError):
+            self._acquire_with_failing_write(fail_on=1)
+
+    # --- finding 3: wide-only elements inside the area are mask candidates only ------------------------------
+
+    def test_wide_only_elements_inside_the_area_are_mask_candidates(self):
+        normal = parse_osm_xml(OsmBuilder().xml().encode())        # an empty normal response
+        b = OsmBuilder()
+        tree = b.node(0.0, 0.0, {"natural": "tree"})
+        bld = b.way(square(30, 30, 4), {"building": "yes"}, closed=True)
+        forest = b.way(square(-30, -30, 8), {"landuse": "forest"}, closed=True)
+        wide = parse_osm_xml(b.xml().encode())
+        area = Area(*self.AREA)
+        cl = classify(normal, area, mask_extent=(-50.0, -50.0, 50.0, 50.0), mask_data=wide)
+        self.assertEqual((cl.trees, cl.buildings, cl.areas, cl.outside), ([], [], [], 0))
+        self.assertEqual([f.id for f in cl.mask_trees], [f"osm:node/{tree}"])
+        self.assertEqual([f.id for f in cl.outside_buildings], [f"osm:way/{bld}"])
+        self.assertEqual([f.id for f in cl.mask_areas], [f"osm:way/{forest}"])
+        g = make_grid(lambda x, y: 115.0 if (x, y) == (0.0, 0.0) else 100.0, n=11, spacing=10.0)
+        plan = build_plan(area, g, cl, PlanOptions(seed=1), dsm_correction=True)
+        tc = plan.report["terrain_correction"]
+        self.assertTrue(tc["applied"])
+        self.assertEqual(tc["mask"]["features"]["trees"], 1)
+        self.assertEqual([o.mb_class for o in plan.objects], ["terrain"])   # nothing generated from them
+        self.assertEqual(plan.report["invalid_features"], [])
+        terrain = plan.objects[0]
+        z = plan.report["z_offset_m"]
+        centre = next(k for k, (i, j, x, y) in enumerate(points(g)) if (x, y) == (0.0, 0.0))
+        self.assertAlmostEqual(terrain.mesh.vertices[centre][2] + z, 100.0, places=2)   # lowered from 115 m
+        from map_builder.core.generate import LANDCOVER_COLORS
+        self.assertTrue(all(c == tuple(LANDCOVER_COLORS[None]) for c in terrain.mesh.face_colors))
 
 
 if __name__ == "__main__":
