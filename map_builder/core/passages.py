@@ -249,12 +249,24 @@ def split(plan, ctx, feature):
     # The replacement is all-or-nothing: every part must be buildable (terrain humps can make a part fail), else
     # the original building stays and nothing of the passage is staged.
     opts = ctx.options
+    # Reserve before allocating, on a transaction-local copy of the scene budget (the real one is charged when
+    # build_plan commits each part); a refusal falls back to the original building without allocating the part.
+    real = ctx.budget
+    local = gen.SceneBudget(real.max_vertices, real.max_triangles)
+    local.vertices, local.triangles = real.vertices, real.triangles
+    if real._pending:
+        local.vertices -= real._pending[1]
+        local.triangles -= real._pending[2]
     built = {}
     for piece in lows + [upper]:
         try:
             built[piece.id] = gen.build_building(piece, terrain, ctx.z_offset, opts.seed,
                                                  max_ring_vertices=opts.max_ring_vertices,
-                                                 max_work=opts.max_triangulation_work)
+                                                 max_work=opts.max_triangulation_work,
+                                                 reserve=lambda v, t, fid=piece.id: local.reserve(fid, v, t))
+            local.commit(built[piece.id][0])
+        except gen.LimitError as e:
+            return refuse(f"the replacement part {piece.id} would exceed the scene budget ({e})")
         except (gen.TriangulationError, gen.InvalidFeature) as e:
             return refuse(f"the replacement part {piece.id} cannot be generated ({e})")
     st.prebuilt.update(built)   # build_plan reuses these results instead of building the parts a second time
@@ -415,14 +427,27 @@ def _local_plan(plan, probes, grid=None):
                 and len(md.vertices) == grid.nx * grid.ny and len(md.faces) == 2 * (grid.nx - 1) * (grid.ny - 1):
             # the terrain mesh is the grid (build_terrain: vertex j * nx + i, two faces per cell): pick the cells under
             # the probe boxes by index instead of scanning every vertex, so the cost does not grow with the scene
-            cells = set()
-            for b in boxes:
-                i0 = max(0, int(math.floor((b[0] - grid.x0) / grid.spacing)))
-                i1 = min(grid.nx - 2, int(math.floor((b[3] - grid.x0) / grid.spacing)))
-                j0 = max(0, int(math.floor((b[1] - grid.y0) / grid.spacing)))
-                j1 = min(grid.ny - 2, int(math.floor((b[4] - grid.y0) / grid.spacing)))
-                cells.update((j, i) for j in range(j0, j1 + 1) for i in range(i0, i1 + 1))
-            keep = [md.faces[2 * (j * (grid.nx - 1) + i) + k] for j, i in sorted(cells) for k in (0, 1)]
+            # the same Cohen-Sutherland test as the generic path (plan view and height) on the faces of those
+            # cells, so both paths hand the same candidates to the work-budgeted check
+            verts = md.vertices
+            keep = []
+            for bi, (lx, ly, lz, hx, hy, hz) in enumerate(boxes):
+                i0 = max(0, int(math.floor((lx - grid.x0) / grid.spacing)))
+                i1 = min(grid.nx - 2, int(math.floor((hx - grid.x0) / grid.spacing)))
+                j0 = max(0, int(math.floor((ly - grid.y0) / grid.spacing)))
+                j1 = min(grid.ny - 2, int(math.floor((hy - grid.y0) / grid.spacing)))
+                for j in range(j0, j1 + 1):
+                    for i in range(i0, i1 + 1):
+                        for k in (0, 1):
+                            fi = 2 * (j * (grid.nx - 1) + i) + k
+                            acc = 63
+                            for v in md.faces[fi]:
+                                x, y, z = verts[v]
+                                acc &= ((x < lx) | ((x > hx) << 1) | ((y < ly) << 2) | ((y > hy) << 3)
+                                        | ((z < lz) << 4) | ((z > hz) << 5))
+                            if not acc:
+                                keep.append(fi)
+            keep = [md.faces[fi] for fi in sorted(set(keep))]
             if keep:
                 objs.append(_sub_object(gen, spec, md, keep))
             continue

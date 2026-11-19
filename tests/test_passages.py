@@ -206,6 +206,54 @@ class ReviewRound1Test(unittest.TestCase):
         self.assertLess(seen[0], total)      # the 10 x 10 cell terrain is pruned to the probe's surroundings
 
 
+class ReviewRound2Test(unittest.TestCase):
+    def test_grid_fast_path_matches_generic_verdict(self):
+        from map_builder.core import passages as P
+        n = 201
+        h = [[0.0] * n for _ in range(n)]
+        h[10][190] = h[190][10] = 10.0
+        grid = make_grid(h, spacing=5.0, x0=-500.0, y0=-500.0)
+        plan = plan_for([], grid=grid)
+        probe = {"id": "p", "kind": "elevated", "feature": "f", "radius_m": 1.0,
+                 "path_map": [[i, i, 5.0] for i in range(-499, 500, 17)]}
+
+        def run(g):
+            local = P._local_plan(plan, [probe], g)
+            terrain = [o for o in local.objects if o.mb_class == "terrain"][0]
+            return len(terrain.mesh.faces), check_probes(local, [probe])
+
+        generic = run(None)
+        fast = run(grid)
+        self.assertEqual(fast[0], generic[0])
+        self.assertLess(generic[0], 100)         # the height rejection keeps only the faces near the probe
+        self.assertEqual(fast[1], generic[1])
+        self.assertEqual(generic[1][1], [])      # kept: nothing blocks it, no work-budget exhaustion
+
+    def test_replacement_parts_reserve_before_allocation(self):
+        from map_builder.core import generate
+        whole = plan_for([building(BLD, height="9")])
+        used = sum(len(o.mesh.vertices) for o in whole.objects if o.mesh)
+        # room for the whole building but not for its three replacement parts
+        opts = PlanOptions(trees=False, max_vertices=used + 3)
+        cl = Classified()
+        cl.buildings = [building(BLD, height="9")]
+        cl.passages = [passage()]
+        built = []
+        real = generate.build_building
+
+        def spy(feature, *a, **k):
+            r = real(feature, *a, **k)
+            built.append(feature.id)
+            return r
+
+        with mock.patch.object(generate, "build_building", spy):
+            plan = build_plan(tiny_area(), flat_grid(), cl, opts)
+        self.assertEqual(list(parts(plan, "osm:way/1")), ["osm:way/1"])
+        self.assertNotIn("osm:way/1#3", built)       # the refused parts were never allocated
+        self.assertIn("scene budget", plan.report["unsupported_features"][0]["reason"])
+        self.assertEqual(plan.passage_probes, [])
+
+
 class ElevatedProbeTest(unittest.TestCase):
     def test_probe_under_an_elevated_part(self):
         plan = plan_for([building(BLD, height="12", min_height="6")])
