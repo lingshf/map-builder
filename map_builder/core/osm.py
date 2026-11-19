@@ -364,6 +364,12 @@ class Classified:
         self.invalid = []       # dicts {id, reason}
         self.outside = 0
         self.replaced_outlines = []  # building outlines superseded by their building:part features
+        # The superseded outlines are kept (not discarded) so generation can fall back to them
+        # when their parts are rejected: outline id -> Feature, outline id -> [part ids] and
+        # part id -> [outline ids] (a part can lie inside nested outlines).
+        self.outline_features = {}
+        self.outline_parts = {}
+        self.outline_for = {}
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -618,22 +624,27 @@ def classify(data, area, max_features=50_000):
 
 
 def _resolve_building_parts(out):
-    """Simple 3D Buildings: an outline that contains parts is replaced by its parts."""
+    """Simple 3D Buildings: an outline that contains parts is replaced by its parts.
+
+    The outline leaves ``out.buildings`` but is kept in ``out.outline_features`` with the
+    ids of the parts that replace it (``out.outline_parts`` / ``out.outline_for``), so the
+    generator can fall back to it if none of those parts can be generated."""
     parts = [b for b in out.buildings if b.kind == "building_part"]
     if not parts:
         return
+    centroids = [(p, p.geometry.centroid()) for p in parts]
     keep = []
     for b in out.buildings:
         if b.kind == "building":
             x0, y0, x1, y1 = b.geometry.bbox()
-            has_part = False
-            for p in parts:
-                cx, cy = p.geometry.centroid()
-                if x0 <= cx <= x1 and y0 <= cy <= y1 and b.geometry.contains(cx, cy):
-                    has_part = True
-                    break
-            if has_part:
+            inside = [p.id for p, (cx, cy) in centroids
+                      if x0 <= cx <= x1 and y0 <= cy <= y1 and b.geometry.contains(cx, cy)]
+            if inside:
                 out.replaced_outlines.append(b.id)
+                out.outline_features[b.id] = b
+                out.outline_parts[b.id] = inside
+                for pid in inside:
+                    out.outline_for.setdefault(pid, []).append(b.id)
                 continue
         keep.append(b)
     out.buildings = keep

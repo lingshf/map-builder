@@ -13,8 +13,9 @@ the emitted terrain mesh.
 
 Resource bounds (see :class:`PlanOptions`): cumulative scene vertex/triangle
 budgets are checked *before* each object is allocated, from an upper-bound
-estimate (buildings) or the exact final count (roads). Exceeding them is a hard
-:class:`LimitError` naming the feature, so a
+estimate (buildings) or the exact final count (roads; the count itself streams
+terrain triangles and stops as soon as it exceeds the remaining budget). Exceeding
+them is a hard :class:`LimitError` naming the feature, so a
 plan is never silently incomplete. Per-feature limits (ring vertices,
 triangulation work) instead reject just that feature and report it in
 ``invalid_features``.
@@ -27,7 +28,8 @@ import re
 
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
-from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate
+from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
+from .triangulate import _Work as _TopologyWork
 
 LEVEL_HEIGHT_M = 3.0
 FOUNDATION_SINK_M = 0.3
@@ -206,6 +208,11 @@ class SceneBudget:
         fid = self._pending[0] if self._pending else mesh.name
         self.release()
         self.charge(fid, len(mesh.vertices), mesh_triangle_count(mesh))
+
+    def remaining(self):
+        """(vertices, triangles) still available, excluding any pending reservation."""
+        self.release()
+        return self.max_vertices - self.vertices, self.max_triangles - self.triangles
 
     def to_dict(self):
         return {"vertices": self.vertices, "triangles": self.triangles, "max_vertices": self.max_vertices,
@@ -725,6 +732,31 @@ class _Buckets:
 LANDCOVER_PRIORITY = {"water": 4, "forest": 3, "sand": 2, "grass": 1}
 
 
+def landcover_ring_problem(feature, max_work=DEFAULT_MAX_WORK):
+    """None if the landcover polygon's rings form a valid polygon with holes, else the reason.
+
+    Uses the same topology rules as building footprints (:func:`validate_rings`): simple
+    rings, CCW outer, CW holes strictly inside it, no contacts between rings. The check is
+    bounded by ``max_work`` geometric tests; a polygon that cannot be validated within it is
+    reported too (never used unchecked)."""
+    poly = feature.geometry
+    rings = [dedupe_ring(poly.outer)] + [dedupe_ring(h) for h in poly.holes]
+    pts = [p for r in rings for p in r]
+    offsets = []
+    o = 0
+    for r in rings:
+        offsets.append(range(o, o + len(r)))
+        o += len(r)
+    work = _TopologyWork(max_work)
+    try:
+        validate_rings(pts, offsets[0], offsets[1:], _work=work)
+    except TriangulationError as e:
+        if work.n > work.limit:
+            return f"ring topology could not be validated within the work budget ({work.limit} geometric tests)"
+        return f"invalid ring topology: {e}"
+    return None
+
+
 def build_terrain(grid, z_offset, areas, coverage=None):
     """Terrain mesh; each cell is split along its (i, j)-(i+1, j+1) diagonal (see terrain_height).
 
@@ -1001,22 +1033,35 @@ def _union_convex(polys, eps=1e-9):
     return out
 
 
-def _piece_cells(grid, piece):
-    """Terrain cells (i, j) whose square meets convex ``piece`` (row strips, not the bbox)."""
-    s = grid.spacing
+def _piece_rows(grid, piece):
+    """Row range (j0, j1) of terrain cells the convex ``piece``'s bbox spans (empty if j0 > j1)."""
     x0, x1, y0, y1 = _bbox(piece)
     _, _, j0, j1 = _cell_range(grid, x0, x1, y0, y1)
+    return j0, j1
+
+
+def _piece_row_cells(grid, piece, j):
+    """Column range (i0, i1) of the cells in row ``j`` whose square meets convex ``piece``, or None."""
+    s = grid.spacing
+    ya, yb = grid.y0 + j * s, grid.y0 + (j + 1) * s
+    strip = _clip_halfplane(piece, (0.0, ya), (1.0, ya))
+    if len(strip) >= 3:
+        strip = _clip_halfplane(strip, (1.0, yb), (0.0, yb))
+    if len(strip) < 3:
+        return None
+    xs = [p[0] for p in strip]
+    i0, i1, _, _ = _cell_range(grid, min(xs), max(xs), ya, ya)
+    return (i0, i1) if i0 <= i1 else None
+
+
+def _piece_cells(grid, piece):
+    """Terrain cells (i, j) whose square meets convex ``piece`` (row strips, not the bbox)."""
+    j0, j1 = _piece_rows(grid, piece)
     for j in range(j0, j1 + 1):
-        ya, yb = grid.y0 + j * s, grid.y0 + (j + 1) * s
-        strip = _clip_halfplane(piece, (0.0, ya), (1.0, ya))
-        if len(strip) >= 3:
-            strip = _clip_halfplane(strip, (1.0, yb), (0.0, yb))
-        if len(strip) < 3:
-            continue
-        xs = [p[0] for p in strip]
-        i0, i1, _, _ = _cell_range(grid, min(xs), max(xs), ya, ya)
-        for i in range(i0, i1 + 1):
-            yield i, j
+        rng = _piece_row_cells(grid, piece, j)
+        if rng:
+            for i in range(rng[0], rng[1] + 1):
+                yield i, j
 
 
 def _convex_difference(a, b):
@@ -1102,25 +1147,48 @@ class RoadOwnership:
             cell.append((_bbox(q), q, fid))
 
 
-def _ribbon_triangles(faces, tol_digits=6):
-    """The final road triangles, shared by the budget count and the mesh emitter.
+class RoadBudgetExceeded(LimitError):
+    """The road's running welded-vertex or triangle count passed the remaining scene budget."""
 
-    ``faces`` is a list of (i, j, upper, polygons). Polygons are fanned; a triangle is
-    kept only if it has area both before and after welding (vertices whose coordinates
-    agree to ``tol_digits`` decimals are merged, keeping the first position). Returns
-    (vertices, triangles): vertices are (x, y, i, j, upper) - the terrain triangle that
-    first produced them, whose plane gives the height (heights agree on shared edges) -
-    and triangles are index triples, so the counts are exactly the emitted mesh."""
-    index = {}
-    verts = []
-    tris = []
-    for i, j, upper, polys in faces:
+
+class _RibbonWelder:
+    """Incremental form of the final road triangles, shared by the budget count and the mesh emitter.
+
+    ``add(i, j, upper, polygons)`` takes the polygons of one terrain triangle. Polygons are
+    fanned; a triangle is kept only if it has area both before and after welding (vertices
+    whose coordinates agree to ``tol_digits`` decimals are merged, keeping the first
+    position). ``verts`` are (x, y, i, j, upper) - the terrain triangle that first produced
+    them, whose plane gives the height (heights agree on shared edges) - and ``tris`` are
+    index triples, so the counts are exactly the emitted mesh.
+
+    With ``max_vertices``/``max_triangles``, :class:`RoadBudgetExceeded` is raised as soon as
+    a running count exceeds them (counts only grow, so the final mesh would exceed them
+    too; a final count exactly equal to the limit is accepted)."""
+
+    def __init__(self, tol_digits=6, max_vertices=None, max_triangles=None, fid=None):
+        self.tol_digits = tol_digits
+        self.max_vertices = max_vertices
+        self.max_triangles = max_triangles
+        self.fid = fid
+        self.index = {}
+        self.verts = []
+        self.tris = []
+
+    def _exceeded(self):
+        raise RoadBudgetExceeded(
+            f"{self.fid}: road ribbon needs more than the remaining scene budget ({self.max_vertices} vertices / "
+            f"{self.max_triangles} triangles left; counting stopped at {len(self.verts)} vertices / "
+            f"{len(self.tris)} triangles); choose a smaller area, coarser terrain or raise the limit")
+
+    def add(self, i, j, upper, polys):
+        index, verts, tris, td = self.index, self.verts, self.tris, self.tol_digits
+        mv = self.max_vertices
         for q in polys:
             for k in range(1, len(q) - 1):
                 tri = (q[0], q[k], q[k + 1])
                 if _area2(tri) <= _MIN_AREA2:  # sliver from clipping; zero area, nothing visible is lost
                     continue
-                keys = [(round(p[0], tol_digits), round(p[1], tol_digits)) for p in tri]
+                keys = [(round(p[0], td), round(p[1], td)) for p in tri]
                 if len(set(keys)) < 3:
                     continue
                 pos = [verts[index[key]][:2] if key in index else p for key, p in zip(keys, tri)]
@@ -1130,55 +1198,88 @@ def _ribbon_triangles(faces, tol_digits=6):
                 for key, p in zip(keys, pos):
                     v = index.get(key)
                     if v is None:
+                        if mv is not None and len(verts) >= mv:
+                            self._exceeded()
                         v = index[key] = len(verts)
                         verts.append((p[0], p[1], i, j, upper))
                     ids.append(v)
+                if self.max_triangles is not None and len(tris) >= self.max_triangles:
+                    self._exceeded()
                 tris.append(tuple(ids))
-    return verts, tris
+
+
+def _ribbon_triangles(faces, tol_digits=6):
+    """(vertices, triangles) of :class:`_RibbonWelder` for a list of (i, j, upper, polygons)."""
+    w = _RibbonWelder(tol_digits)
+    for i, j, upper, polys in faces:
+        w.add(i, j, upper, polys)
+    return w.verts, w.tris
 
 
 def _ribbon_faces(grid, pieces, groups, work):
-    """Yield (i, j, upper, X0, Y0, polygons) per terrain triangle the ribbon touches.
+    """Yield (i, j, upper, X0, Y0, polygons) per terrain triangle the ribbon touches, in
+    (row, column, lower/upper) order.
 
     ``polygons`` are interior-disjoint convex CCW polygons inside that terrain triangle
     whose union is the ribbon there: pieces that overlap (``groups`` are the components
-    of the piece-overlap graph, refined per terrain triangle) are replaced by their union."""
+    of the piece-overlap graph, refined per terrain triangle) are replaced by their union.
+
+    Cells are found one terrain row at a time, so only one row of cell lists is held and a
+    consumer that stops early (e.g. on a budget overrun) has not paid for the rest."""
     s = grid.spacing
-    cells = {}
-    for pi, piece in enumerate(pieces):
-        for i, j in _piece_cells(grid, piece):
-            work.add()
-            cells.setdefault((j, i), []).append(pi)
-    for j, i in sorted(cells):
-        X0, Y0 = grid.x0 + i * s, grid.y0 + j * s
-        c00, c10, c11, c01 = (X0, Y0), (X0 + s, Y0), (X0 + s, Y0 + s), (X0, Y0 + s)
-        for upper, tri in ((False, (c00, c10, c11)), (True, (c00, c11, c01))):
-            by_group = {}
-            for pi in cells[(j, i)]:
+    rows = [_piece_rows(grid, p) for p in pieces]
+    order = sorted((pi for pi in range(len(pieces)) if rows[pi][0] <= rows[pi][1]), key=lambda pi: rows[pi][0])
+    if not order:
+        return
+    j_end = max(rows[pi][1] for pi in order)
+    active = []
+    nxt = 0
+    for j in range(rows[order[0]][0], j_end + 1):
+        while nxt < len(order) and rows[order[nxt]][0] <= j:
+            active.append(order[nxt])
+            nxt += 1
+        active = [pi for pi in active if rows[pi][1] >= j]
+        if not active:
+            continue
+        cells = {}
+        for pi in sorted(active):
+            rng = _piece_row_cells(grid, pieces[pi], j)
+            if rng is None:
+                continue
+            for i in range(rng[0], rng[1] + 1):
                 work.add()
-                q = _clip_convex(pieces[pi], tri)
-                if len(q) >= 3 and _area2(q) > 1e-12:
-                    by_group.setdefault(groups[pi], []).append(q)
-            out = []
-            for qs in by_group.values():
-                if len(qs) == 1:
-                    out.extend(qs)
-                    continue
-                local = _overlap_groups(qs, work=work)
-                comps = {}
-                for k, g in local.items():
-                    comps.setdefault(g, []).append(qs[k])
-                for comp in comps.values():
-                    if len(comp) == 1:
-                        out.extend(comp)
-                    else:
-                        work.add(50 * len(comp) ** 3)
-                        out.extend(_union_convex(comp))
-            if out:
-                yield i, j, upper, X0, Y0, out
+                cells.setdefault(i, []).append(pi)
+        Y0 = grid.y0 + j * s
+        for i in sorted(cells):
+            X0 = grid.x0 + i * s
+            c00, c10, c11, c01 = (X0, Y0), (X0 + s, Y0), (X0 + s, Y0 + s), (X0, Y0 + s)
+            for upper, tri in ((False, (c00, c10, c11)), (True, (c00, c11, c01))):
+                by_group = {}
+                for pi in cells[i]:
+                    work.add()
+                    q = _clip_convex(pieces[pi], tri)
+                    if len(q) >= 3 and _area2(q) > 1e-12:
+                        by_group.setdefault(groups[pi], []).append(q)
+                out = []
+                for qs in by_group.values():
+                    if len(qs) == 1:
+                        out.extend(qs)
+                        continue
+                    local = _overlap_groups(qs, work=work)
+                    comps = {}
+                    for k, g in local.items():
+                        comps.setdefault(g, []).append(qs[k])
+                    for comp in comps.values():
+                        if len(comp) == 1:
+                            out.extend(comp)
+                        else:
+                            work.add(50 * len(comp) ** 3)
+                            out.extend(_union_convex(comp))
+                if out:
+                    yield i, j, upper, X0, Y0, out
 
 
-def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WORK, ownership=None):
+def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WORK, ownership=None, limit=None):
     """Returns (mesh, location, provenance), or (None, None, {"reason": ...}) if no valid ribbon exists.
 
     The footprint is the union of one rectangle per segment and a bevel triangle at
@@ -1193,7 +1294,11 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
 
     The final triangle list and welded vertices are computed first (no mesh allocated);
     ``reserve(vertices, triangles)`` is then called with exactly the counts the mesh
-    will have. Raises InvalidFeature if the clip/union work exceeds ``max_work``."""
+    will have. With ``limit`` = (vertices, triangles) remaining in the scene budget, the
+    counting itself is bounded: it streams terrain triangles and raises
+    :class:`RoadBudgetExceeded` (a LimitError) as soon as the running welded-vertex or
+    triangle count exceeds the limit (a mesh exactly at the limit is accepted). Raises
+    InvalidFeature if the clip/union work exceeds ``max_work``."""
     width, wprov = road_width(feature.tags)
     pts = _dedupe_polyline(list(feature.geometry))
     if len(pts) < 2:
@@ -1205,14 +1310,20 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
     groups = _overlap_groups(pieces, work=work)
     faces = []
     removed = {}
+    lim_v, lim_t = limit if limit is not None else (None, None)
+    welder = _RibbonWelder(max_vertices=lim_v, max_triangles=lim_t, fid=feature.id)
+    # Streamed: each terrain triangle's polygons are welded and counted as soon as they are
+    # produced, so a ribbon over the remaining budget stops at the first face that exceeds it.
     for i, j, upper, _X0, _Y0, polys in _ribbon_faces(terrain, pieces, groups, work):
         if ownership is not None:
             polys, rem = ownership.subtract((j, i, upper), polys, work)
             for fid, a in rem.items():
                 removed[fid] = removed.get(fid, 0.0) + a
         if polys:
-            faces.append((i, j, upper, polys))
-    verts, tris = _ribbon_triangles(faces)
+            welder.add(i, j, upper, polys)
+            if ownership is not None:
+                faces.append((i, j, upper, polys))
+    verts, tris = welder.verts, welder.tris
     if not tris:
         if removed:
             owners = sorted(removed)
@@ -1356,8 +1467,6 @@ def build_plan(area, terrain, classified, options=None):
     plan.report["unsupported_features"] = list(classified.unsupported)
     plan.report["invalid_features"] = list(classified.invalid)
     plan.count("buildings_outside_area", classified.outside)
-    if classified.replaced_outlines:
-        plan.report["building_outlines_replaced_by_parts"] = list(classified.replaced_outlines)
     budget = SceneBudget(opts.max_vertices, opts.max_triangles)
     invalid = plan.report["invalid_features"]
 
@@ -1367,13 +1476,21 @@ def build_plan(area, terrain, classified, options=None):
         plan.objects.append(spec)
 
     budget.reserve("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
+    areas = []
+    for a in classified.areas:
+        problem = landcover_ring_problem(a, opts.max_triangulation_work)
+        if problem:
+            invalid.append({"id": a.id, "reason": f"{a.tags.get('_class')} area: {problem}; not used for "
+                                                  "terrain colouring or scatter"})
+        else:
+            areas.append(a)
     coverage = {}
-    tmesh = build_terrain(terrain, z_offset, classified.areas, coverage)
+    tmesh = build_terrain(terrain, z_offset, areas, coverage)
     budget.commit(tmesh)
     add(ObjectSpec("terrain", "terrain:grid", "terrain", "Terrain", mesh=tmesh,
                    provenance={"elevation": terrain.provenance.get("provider"), "spacing_m": terrain.spacing,
                                "surface": "piecewise planar, cells split along the (i,j)-(i+1,j+1) diagonal"}))
-    for a in classified.areas:
+    for a in areas:
         if not coverage.get(a.id):
             plan.report["unsupported_features"].append(
                 {"id": a.id, "reason": f"{a.tags['_class']} area contains no terrain cell centre at "
@@ -1388,20 +1505,23 @@ def build_plan(area, terrain, classified, options=None):
 
     footprints = []
     if opts.buildings:
-        for f in classified.buildings:
+        def build_one(f, extra_prov=None, reason_prefix=""):
+            """Build one footprint; returns True if generated, else reports it in invalid_features."""
             try:
                 mesh, origin, prov = build_building(
                     f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
                     max_work=opts.max_triangulation_work, reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
             except TriangulationError as e:
                 budget.release()
-                invalid.append({"id": f.id, "reason": f"triangulation failed: {e}"})
-                continue
+                invalid.append({"id": f.id, "reason": f"{reason_prefix}triangulation failed: {e}"})
+                return False
             except InvalidFeature as e:
                 budget.release()
-                invalid.append({"id": f.id, "reason": str(e)})
-                continue
+                invalid.append({"id": f.id, "reason": f"{reason_prefix}{e}"})
+                return False
             budget.commit(mesh)
+            if extra_prov:
+                prov.update(extra_prov)
             for k, v in prov.items():
                 if isinstance(v, str) and v.startswith(("inferred", "fallback")) and not k.endswith("_source"):
                     plan.inferred(f"building.{k}")
@@ -1419,6 +1539,53 @@ def build_plan(area, terrain, classified, options=None):
             if f.geometry.holes:
                 plan.count("buildings_with_courtyards")
             plan.count("buildings")
+            return True
+
+        built = set()
+        for f in classified.buildings:
+            if build_one(f):
+                built.add(f.id)
+        # Outlines replaced by building:part features (Simple 3D Buildings). The parts were built
+        # first; an outline none of whose parts survived is generated itself (otherwise the
+        # building would vanish). If only some parts survived, the outline is NOT generated (it
+        # would overlap the surviving parts): it is partially represented, which is reported.
+        outline_parts = getattr(classified, "outline_parts", {})
+        outline_features = getattr(classified, "outline_features", {})
+        replaced, restored, partial = [], [], []
+        for oid in classified.replaced_outlines:
+            pids = outline_parts.get(oid)
+            if not pids or oid not in outline_features:
+                replaced.append(oid)  # no fallback information (hand-built Classified): as before
+                continue
+            ok = [p for p in pids if p in built]
+            rejected = [p for p in pids if p not in built]
+            if ok and not rejected:
+                replaced.append(oid)
+            elif ok:
+                replaced.append(oid)
+                partial.append({"id": oid, "built_parts": ok, "rejected_parts": rejected})
+                plan.report["warnings"].append(
+                    f"{oid}: building outline only partially represented: building:part feature(s) "
+                    f"{_id_list(rejected)} could not be generated (see invalid_features); the surviving part(s) "
+                    f"{_id_list(ok)} are kept and the outline is not generated, to avoid overlapping solids")
+            else:
+                note = (f"fallback:outline generated because all of its building:part features "
+                        f"({_id_list(pids)}) were rejected (see invalid_features)")
+                if build_one(outline_features[oid], {"building_parts": note},
+                             reason_prefix="building outline (fallback after all of its building:part features "
+                                           f"{_id_list(pids)} were rejected): "):
+                    restored.append({"id": oid, "rejected_parts": pids})
+                    plan.report["warnings"].append(
+                        f"{oid}: all building:part feature(s) {_id_list(pids)} were rejected (see "
+                        "invalid_features); the building outline is generated instead")
+        if replaced:
+            plan.report["building_outlines_replaced_by_parts"] = replaced
+        if restored:
+            plan.report["building_outlines_restored"] = restored
+        if partial:
+            plan.report["building_outlines_partially_represented"] = partial
+    elif classified.replaced_outlines:
+        plan.report["building_outlines_replaced_by_parts"] = list(classified.replaced_outlines)
     road_segments = []
     if opts.roads:
         # All roads are at grade (bridges/tunnels are reported unsupported by classify). They
@@ -1431,7 +1598,8 @@ def build_plan(area, terrain, classified, options=None):
             try:
                 mesh, origin, prov = build_road(f, terrain, z_offset,
                                                 reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
-                                                max_work=opts.max_triangulation_work, ownership=ownership)
+                                                max_work=opts.max_triangulation_work, ownership=ownership,
+                                                limit=budget.remaining())
             except InvalidFeature as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": str(e)})
@@ -1508,7 +1676,7 @@ def build_plan(area, terrain, classified, options=None):
             n_trees += 1
         if opts.scatter:
             capped = False
-            for f in sorted(classified.areas, key=lambda a: a.id):
+            for f in sorted(areas, key=lambda a: a.id):
                 cls = f.tags["_class"]
                 dens = SCATTER_DENSITY.get(cls)
                 if dens is None or (cls == "grass" and f.tags.get("leisure") != "park"):

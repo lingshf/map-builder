@@ -1270,3 +1270,192 @@ class ExactRoadCountTest(unittest.TestCase):
             with self.assertRaises(LimitError) as cm:
                 build_plan(tiny_area(), self.GRID, cl, PlanOptions(trees=False, **opts))
             self.assertIn("osm:way/401", str(cm.exception))
+
+
+# --- Round 4 -------------------------------------------------------------------
+
+def peak_grid(peak=10.0):
+    """11 x 11 nodes, 10 m spacing from -50; node (0, 0) raised to ``peak`` m."""
+    heights = [[0.0] * 11 for _ in range(11)]
+    heights[5][5] = peak
+    return make_grid(heights, x0=-50, y0=-50)
+
+
+class BuildingPartFallbackTest(unittest.TestCase):
+    """Round 4, finding 1: a replaced outline is generated if none of its parts survives."""
+
+    def classified(self, parts):
+        b = OsmBuilder()
+        oid = b.way(rect_ccw(-10, -10, 10, 10), {"building": "yes", "height": "15"}, closed=True)
+        pids = [b.way(r, dict({"building:part": "yes"}, **t), closed=True) for r, t in parts]
+        cl = classify(parse_osm_xml(b.xml().encode()), tiny_area())
+        return cl, f"osm:way/{oid}", [f"osm:way/{p}" for p in pids]
+
+    # 3 m part over the 10 m peak: terrain reaches its eave
+    OVER_PEAK = (rect_ccw(-2, -2, 2, 2), {"height": "3"})
+    # part near the corner (about 1.5 m of relief), 6 m high: generated
+    CORNER = (rect_ccw(-9.5, -9.5, -8, -8), {"height": "6"})
+
+    def test_classification_keeps_replaced_outline(self):
+        cl, oid, (p1, p2) = self.classified([self.OVER_PEAK, self.CORNER])
+        self.assertEqual(cl.replaced_outlines, [oid])
+        self.assertEqual([f.id for f in cl.buildings], [p1, p2])
+        self.assertEqual(cl.outline_features[oid].id, oid)
+        self.assertEqual(cl.outline_parts, {oid: [p1, p2]})
+        self.assertEqual(cl.outline_for, {p1: [oid], p2: [oid]})
+
+    def test_reviewer_rejected_part_restores_outline(self):
+        cl, oid, (pid,) = self.classified([self.OVER_PEAK])
+        alone = Classified()
+        alone.buildings = [building(rect_ccw(-10, -10, 10, 10), fid=oid, height="15")]
+        self.assertIn(oid, {o.mb_id for o in build_plan(tiny_area(), peak_grid(), alone).objects})
+        plan = build_plan(tiny_area(), peak_grid(), cl)
+        built = {o.mb_id: o for o in plan.objects if o.mb_class == "building"}
+        self.assertEqual(set(built), {oid})  # old code: no building at all
+        self.assertIn("reaches eave/roof", {e["id"]: e["reason"] for e in plan.report["invalid_features"]}[pid])
+        self.assertTrue(built[oid].provenance["building_parts"].startswith("fallback:outline generated"))
+        self.assertIn(pid, built[oid].provenance["building_parts"])
+        self.assertEqual(plan.report["building_outlines_restored"], [{"id": oid, "rejected_parts": [pid]}])
+        self.assertNotIn("building_outlines_replaced_by_parts", plan.report)  # it was not replaced
+        self.assertTrue(any(w.startswith(oid) and "generated instead" in w for w in plan.report["warnings"]))
+        self.assertEqual(plan.report["counts"]["buildings"], 1)
+        assert_closed_manifold(self, built[oid].mesh)
+
+    def test_partial_survival_keeps_parts_and_reports_outline(self):
+        cl, oid, (p1, p2) = self.classified([self.OVER_PEAK, self.CORNER])
+        plan = build_plan(tiny_area(), peak_grid(), cl)
+        self.assertEqual({o.mb_id for o in plan.objects if o.mb_class == "building"}, {p2})
+        self.assertIn(p1, {e["id"] for e in plan.report["invalid_features"]})
+        self.assertEqual(plan.report["building_outlines_partially_represented"],
+                         [{"id": oid, "built_parts": [p2], "rejected_parts": [p1]}])
+        self.assertEqual(plan.report["building_outlines_replaced_by_parts"], [oid])
+        self.assertNotIn("building_outlines_restored", plan.report)
+        self.assertTrue(any(w.startswith(oid) and "partially represented" in w for w in plan.report["warnings"]))
+
+    def test_all_parts_survive(self):
+        cl, oid, (pid,) = self.classified([self.CORNER])
+        plan = build_plan(tiny_area(), peak_grid(), cl)
+        self.assertEqual({o.mb_id for o in plan.objects if o.mb_class == "building"}, {pid})
+        self.assertEqual(plan.report["building_outlines_replaced_by_parts"], [oid])
+        self.assertNotIn("building_outlines_restored", plan.report)
+        self.assertNotIn("building_outlines_partially_represented", plan.report)
+
+    def test_failing_fallback_outline_is_reported(self):
+        cl, oid, (pid,) = self.classified([self.OVER_PEAK])
+        plan = build_plan(tiny_area(), peak_grid(30.0), cl)  # the outline's 15 m eave is also reached
+        self.assertEqual([o for o in plan.objects if o.mb_class == "building"], [])
+        reasons = {e["id"]: e["reason"] for e in plan.report["invalid_features"]}
+        self.assertIn(pid, reasons)
+        self.assertIn("fallback after all of its building:part features", reasons[oid])
+        self.assertIn("reaches eave/roof", reasons[oid])
+        self.assertNotIn("building_outlines_restored", plan.report)
+        self.assertNotIn("building_outlines_replaced_by_parts", plan.report)
+
+
+class LandcoverTopologyTest(unittest.TestCase):
+    """Round 4, finding 2: landcover rings are validated before colouring or scatter."""
+
+    def test_reviewer_water_hole_crossing_outer(self):
+        b = OsmBuilder()
+        rid = b.multipolygon(rect_ccw(-30, -30, 30, 30), [rect_ccw(20, -10, 40, 10)], {"natural": "water"})
+        fid = b.multipolygon(rect_ccw(-40, -40, 0, 0), [rect_ccw(-20, -20, 5, -10)], {"landuse": "forest"})
+        ok = b.way(rect_ccw(10, -45, 40, -35), {"natural": "water"}, closed=True)
+        cl = classify(parse_osm_xml(b.xml().encode()), tiny_area())
+        self.assertEqual({a.id for a in cl.areas}, {f"osm:relation/{rid}", f"osm:relation/{fid}", f"osm:way/{ok}"})
+        plan = build_plan(tiny_area(), flat_grid(n=21, spacing=5.0), cl)
+        reasons = {e["id"]: e["reason"] for e in plan.report["invalid_features"]}
+        for bad in (f"osm:relation/{rid}", f"osm:relation/{fid}"):
+            self.assertIn("touches or crosses the outer ring", reasons[bad])
+            self.assertIn("not used for terrain colouring or scatter", reasons[bad])
+        self.assertNotIn(f"osm:way/{ok}", reasons)
+        terrain = next(o for o in plan.objects if o.mb_id == "terrain:grid").mesh
+        water = gen.LANDCOVER_COLORS["water"]
+        cols = {terrain.face_colors[k] for k, f in enumerate(terrain.faces)
+                if all(-30 < terrain.vertices[i][0] < 30 and -30 < terrain.vertices[i][1] < 30 for i in f)}
+        self.assertNotIn(water, cols)  # old code coloured the invalid lake
+        self.assertNotIn(gen.LANDCOVER_COLORS["forest"], cols)
+        self.assertIn(water, set(terrain.face_colors))  # the valid lake is still used
+        self.assertFalse(any(o.mb_id.startswith(f"scatter:osm:relation/{fid}") for o in plan.objects))
+
+    def test_validation_is_work_bounded(self):
+        a = Feature("osm:way/7", "area", {"_class": "water", "natural": "water"},
+                    Polygon([(math.cos(2 * math.pi * k / 400) * 30, math.sin(2 * math.pi * k / 400) * 30)
+                             for k in range(400)]))
+        self.assertIsNone(gen.landcover_ring_problem(a))
+        self.assertIn("work budget", gen.landcover_ring_problem(a, max_work=50))
+
+
+class StreamingRoadBudgetTest(unittest.TestCase):
+    """Round 4, finding 3: road counting stops as soon as the remaining budget is exceeded."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.grid = make_grid([[0.0] * 501 for _ in range(501)], spacing=2.0, x0=-500, y0=-500)
+        cls.road = road([(-450, -450), (450, 450)], fid="osm:way/81", width="60")
+        cls.n_v, cls.n_t = cls.grid.nx * cls.grid.ny, 2 * (cls.grid.nx - 1) * (cls.grid.ny - 1)
+
+    def run_plan(self, extra_v, extra_t):
+        """build_plan with ``extra`` vertices/triangles left after the terrain; returns
+        (exception, faces produced, bytes allocated by the road)."""
+        import tracemalloc
+        faces = [0]
+        staged = [0]
+        real_faces, real_build = gen._ribbon_faces, gen.build_road
+
+        def counting_faces(*a, **k):
+            for f in real_faces(*a, **k):
+                faces[0] += 1
+                yield f
+
+        def traced_build(*a, **k):
+            tracemalloc.start()
+            try:
+                return real_build(*a, **k)
+            finally:
+                staged[0] = tracemalloc.get_traced_memory()[1]
+                tracemalloc.stop()
+
+        cl = Classified()
+        cl.roads = [self.road]
+        opts = PlanOptions(trees=False, max_vertices=self.n_v + extra_v, max_triangles=self.n_t + extra_t)
+        with mock.patch.object(gen, "_ribbon_faces", counting_faces), mock.patch.object(gen, "build_road",
+                                                                                        traced_build):
+            try:
+                build_plan(Area(47.0, 8.0, 1000.0, 1000.0), self.grid, cl, opts)
+                err = None
+            except LimitError as e:
+                err = e
+        return err, faces[0], staged[0]
+
+    def test_reviewer_zero_budget_rejects_early(self):
+        err, faces, staged = self.run_plan(0, 0)
+        self.assertIsNotNone(err)
+        self.assertIn("osm:way/81", str(err))
+        self.assertLessEqual(faces, 2)          # old code: every face (~40k triangles) first
+        self.assertLess(staged, 1 << 20)        # old code: ~29 MiB
+
+    def test_small_budget_rejects_early(self):
+        for extra_v, extra_t in ((100, 10 ** 9), (10 ** 9, 100)):
+            with self.subTest(v=extra_v, t=extra_t):
+                err, faces, staged = self.run_plan(extra_v, extra_t)
+                self.assertIsInstance(err, LimitError)
+                self.assertIn("osm:way/81", str(err))
+                self.assertLessEqual(faces, 2 * 100 + 10)  # every face adds at least one new triangle
+                self.assertLess(staged, 1 << 20)
+
+    def test_exact_fit_still_passes(self):
+        grid = flat_grid(n=41, spacing=1.0, x0=-20, y0=-20)
+        rng = random.Random(4)
+        for k in range(15):
+            pts = [(rng.uniform(-15, 15), rng.uniform(-15, 15)) for _ in range(rng.randint(2, 4))]
+            f = road(pts, fid=f"osm:way/{500 + k}", width=str(rng.choice([1.0, 3.3, 7.0])))
+            mesh, _, _ = build_road(f, grid, 0.0)
+            v, t = len(mesh.vertices), sum(1 for _ in mesh.triangles())
+            with self.subTest(k=k):
+                calls = []
+                mesh2, _, _ = build_road(f, grid, 0.0, reserve=lambda a, b: calls.append((a, b)), limit=(v, t))
+                self.assertEqual(calls, [(v, t)])
+                self.assertEqual(mesh2.vertices, mesh.vertices)
+                for lim in ((v - 1, t), (v, t - 1)):
+                    with self.assertRaises(gen.RoadBudgetExceeded):
+                        build_road(f, grid, 0.0, limit=lim)

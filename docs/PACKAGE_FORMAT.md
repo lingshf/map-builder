@@ -196,11 +196,31 @@ counted in `edits.removed` and listed in `report.json`.
   it (1 mm tolerance) are listed in `invalid_features`. Procedural scatter is placed only on
   terrain. Landcover only colours terrain cells. If the terrain does not cover the scene area,
   `warnings` says so.
+* Landcover (water, forest, grass, sand) polygons are checked with the same ring-topology rules
+  as building footprints (simple rings, holes strictly inside the outer ring, no contacts).
+  A polygon that fails, or cannot be checked within the work budget, is listed in
+  `invalid_features` and is used neither for terrain colouring nor for scatter.
+* Building parts (Simple 3D Buildings): an outline that contains `building:part` features is
+  replaced by them. The parts are built first.
+  * All parts generated: the outline is listed in `building_outlines_replaced_by_parts`.
+  * No part generated: the outline is generated instead. It is listed in
+    `building_outlines_restored` (`{id, rejected_parts}`), has the provenance
+    `building_parts = fallback:outline generated because all of its building:part features
+    (…) were rejected`, and gets a `warnings` entry. The rejected parts are in
+    `invalid_features`. If the outline fails too, its `invalid_features` reason starts with
+    `building outline (fallback after all of its building:part features … were rejected)`.
+  * Some parts generated: the surviving parts are kept and the outline is **not** generated,
+    so solids never overlap. The outline is listed in `building_outlines_replaced_by_parts`
+    and in `building_outlines_partially_represented` (`{id, built_parts, rejected_parts}`),
+    with a `warnings` entry; the rejected parts are in `invalid_features`.
+* Scene budget: a road's exact vertex/triangle count is computed one terrain triangle at a
+  time and stops as soon as it exceeds what remains of the budget (`LimitError` naming the
+  road). A road that exactly fits is accepted.
 * `report.json` lists:
   * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, elevated parts
   * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
-    buildings where the terrain reaches the roof underside, and footprints or trees outside
-    the terrain extent
+    buildings where the terrain reaches the roof underside, footprints or trees outside
+    the terrain extent, landcover with invalid ring topology, and rejected building parts
   * counts and warnings
 
 ## `collision/map.mbcol` v1 (little-endian)
