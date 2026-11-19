@@ -1,5 +1,6 @@
 """Shared structure helpers (map_builder/core/structures.py): sweep, polyline_z_profile, check_probes."""
 
+import math
 import types
 import unittest
 
@@ -71,6 +72,19 @@ class SweepTest(unittest.TestCase):
             sweep(wide, bend, True)
         long_enough = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (17.0, 7.0, 0.0)]
         self.assertEqual(problems(sweep(wide, long_enough, True), "bridge"), [])
+
+
+    def test_unequal_grades_do_not_fold_the_inner_corner(self):
+        wide = [(-2.0, 0.0), (2.0, 0.0), (2.0, 2.0), (-2.0, 2.0)]
+        path = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0 + 0.7071, 0.7071, 4.0)]   # flat, then 1 m in plan, +4 m up
+        mesh = sweep(wide, path, True)
+        n = len(wide)
+        for k, (a, b) in enumerate(zip(path, path[1:])):
+            h = math.hypot(b[0] - a[0], b[1] - a[1])
+            d = ((b[0] - a[0]) / h, (b[1] - a[1]) / h)
+            for j in range(n):
+                v0, v1 = mesh.vertices[k * n + j], mesh.vertices[(k + 1) * n + j]
+                self.assertGreater((v1[0] - v0[0]) * d[0] + (v1[1] - v0[1]) * d[1], 0.0)
 
 
 class ZProfileTest(unittest.TestCase):

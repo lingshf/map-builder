@@ -110,7 +110,8 @@ def _frames(path, half_width=0.0):
             cosang = max(-1.0, min(1.0, (d0[0] * d1[0] + d0[1] * d1[1]) / (h0 * h1)))
             if math.degrees(math.acos(cosang)) > MAX_TURN_DEG:
                 raise _invalid(f"structure path turns by more than {MAX_TURN_DEG:g} degrees at point {i}")
-            t, _ = _norm((d0[0] + d1[0], d0[1] + d1[1], d0[2] + d1[2]))
+            # bisect the turn in plan: averaging 3D tangents skews the side vector when the grades differ
+            t, _ = _norm((d0[0] / h0 + d1[0] / h1, d0[1] / h0 + d1[1] / h1, d0[2] / h0 + d1[2] / h1))
             half = math.acos(cosang) / 2
             miter = 1.0 / max(math.cos(half), 0.5)
             shift[i] = half_width * math.tan(half)
