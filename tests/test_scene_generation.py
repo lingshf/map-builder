@@ -52,9 +52,16 @@ class OsmTest(unittest.TestCase):
             parse_osm_xml(evil)
 
     def test_unsupported_features_reported_not_flattened(self):
-        unsup = {u["id"]: u["reason"] for u in self.cl.unsupported}
+        from map_builder.core.generate import build_plan
+        plan = build_plan(self.area, self.grid, self.cl)
+        unsup = {u["id"]: u["reason"] for u in plan.report["unsupported_features"]}
         self.assertIn("bridge", unsup[f"osm:way/{self.ids['bridge']}"])
         self.assertIn("tunnel", unsup[f"osm:way/{self.ids['tunnel']}"])
+        # routed to their own lists, reported by the stage stubs, and never roads
+        self.assertEqual([f.id for f in self.cl.structure_bridges], [f"osm:way/{self.ids['bridge']}"])
+        self.assertEqual([f.id for f in self.cl.tunnels], [f"osm:way/{self.ids['tunnel']}"])
+        self.assertEqual(self.cl.passages, [])
+        self.assertNotIn(f"osm:way/{self.ids['bridge']}", {u["id"] for u in self.cl.unsupported})
         road_ids = {r.id for r in self.cl.roads}
         self.assertNotIn(f"osm:way/{self.ids['bridge']}", road_ids)
         self.assertNotIn(f"osm:way/{self.ids['tunnel']}", road_ids)

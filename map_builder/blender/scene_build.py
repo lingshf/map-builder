@@ -21,6 +21,14 @@ COLOR_ATTR = "mb_color"
 META_KEY = "mb_map"
 META_VERSION = 1
 
+# Structure classes (bridge/tunnel/structure) go to their own sub-collections whatever the generator names;
+# their materials are added to the generator's table here, so a structure feature needs no change elsewhere.
+CLASS_COLLECTIONS = {"bridge": "Bridges", "tunnel": "Tunnels", "structure": "Structures"}
+STRUCTURE_MATERIALS = {
+    "MB Concrete": ((0.8, 0.8, 0.8), 0.9, 0.0),   # deck sides, piers, headwalls
+    "MB Tunnel": ((0.8, 0.8, 0.8), 0.95, 0.0),    # tube walls
+}
+
 
 def ensure_material(name, created=None):
     """The generated material ``name``; reuses an existing generated one (tagged ``mb_material``), never
@@ -31,7 +39,7 @@ def ensure_material(name, created=None):
     mat = next((m for m in bpy.data.materials if m.get("mb_material") == name and m.library is None), None)
     if mat is not None:
         return mat
-    base, rough, metal = MATERIALS.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
+    base, rough, metal = STRUCTURE_MATERIALS.get(name) or MATERIALS.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
     mat = bpy.data.materials.new(name)
     if created is not None:
         created.append(mat)
@@ -115,12 +123,13 @@ def build_scene(context, plan, sources, map_name):
         subs = {}
         shared = {}
         for spec in plan.objects:
-            coll = subs.get(spec.collection)
+            coll_name = CLASS_COLLECTIONS.get(spec.mb_class, spec.collection)
+            coll = subs.get(coll_name)
             if coll is None:
-                coll = bpy.data.collections.new(f"{root.name} {spec.collection}")
+                coll = bpy.data.collections.new(f"{root.name} {coll_name}")
                 created_colls.append(coll)
                 root.children.link(coll)
-                subs[spec.collection] = coll
+                subs[coll_name] = coll
             if spec.mesh is not None:
                 me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)

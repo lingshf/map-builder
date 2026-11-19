@@ -487,6 +487,15 @@ class Classified:
         # Margin-only candidates (``mask_areas`` and margin-only ``outside_buildings``) are not topology
         # checked here; generate.dsm_obstacles validates them under the mask validation work budget.
         self.bridges = []
+        # Structure features inside the area (D18), routed here instead of ``unsupported``; the stage modules
+        # (core/bridges.py, tunnels.py, passages.py) own them and report them as unsupported until they are
+        # generated. ``structure_bridges`` holds the in-area highway bridge ways (the ``bridges`` list above
+        # is the extent-clipped DSM mask candidate list: it also holds railways and exists only when the
+        # mask is available). Features carry the whole way's polyline clipped to the area.
+        self.structure_bridges = []
+        self.tunnels = []
+        self.passages = []
+        self.route_seq = 0
         self.outside_buildings = []
         self.mask_trees = []
         self.mask_areas = []
@@ -532,6 +541,23 @@ def _unsupported_reason(tags):
         pass   # a non-integer layer (e.g. "1;2", "-1.5") is not treated as below ground
     if tags.get("location") in ("underground", "underwater"):
         return f"location={tags['location']} (not supported in v1; omitted)"
+    return None
+
+
+def structure_kind(tags):
+    """Routing class of a highway way that :func:`_unsupported_reason` rejects: ``"bridge"``, ``"tunnel"``,
+    ``"passage"`` (``tunnel=building_passage`` or ``covered=yes``) or None (still unsupported: culverts,
+    ``layer<0``, ``location=underground`` ...). ``man_made`` and ``building=bridge`` never route (D25)."""
+    b = tags.get("bridge")
+    if b and b != "no":
+        return "bridge"
+    t = tags.get("tunnel")
+    if t == "building_passage":
+        return "passage"
+    if t and t != "no":
+        return None if t == "culvert" else "tunnel"
+    if tags.get("covered") == "yes":
+        return "passage"
     return None
 
 
@@ -1082,7 +1108,17 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             # e.g. highway=corridor + tunnel=building_passage is never silently dropped.
             reason = _unsupported_reason(tags)
             if reason:
-                out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
+                kind = structure_kind(tags)
+                if kind is None:
+                    out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
+                else:
+                    target = {"bridge": out.structure_bridges, "tunnel": out.tunnels, "passage": out.passages}[kind]
+                    for k, part in enumerate(parts):
+                        feat = Feature(fid if len(parts) == 1 else f"{fid}#{k}", kind, tags, part)
+                        # where the entry sat in ``unsupported`` before routing: the stages report in place
+                        feat.report_pos = (len(out.unsupported), out.route_seq)
+                        out.route_seq += 1
+                        target.append(feat)
                 continue
             if tags["highway"] in ROAD_EXCLUDE:
                 continue

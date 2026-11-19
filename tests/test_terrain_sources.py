@@ -571,7 +571,7 @@ class OsmClassifyTest(unittest.TestCase):
         culvert = b.way(rect(-60, -60, 30, 30), {"natural": "water", "tunnel": "culvert"}, closed=True)
         cl = self.classify(b)
         unsup = {u["id"]: u["reason"] for u in cl.unsupported}
-        self.assertIn("building_passage", unsup[f"osm:way/{corridor}"])
+        self.assertEqual([f.id for f in cl.passages], [f"osm:way/{corridor}"])   # routed to the passage stage
         self.assertIn("bridge", unsup[f"osm:way/{park}"])
         self.assertIn("tunnel", unsup[f"osm:way/{culvert}"])
         self.assertEqual(cl.roads, [])

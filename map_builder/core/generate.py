@@ -26,9 +26,10 @@ import math
 import random
 import re
 
-from . import dsm, roofs
+from . import bridges, dsm, passages, roofs, tunnels
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
+from .structures import StageContext
 from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
 from .triangulate import _Work as _TopologyWork
 
@@ -1596,6 +1597,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             "landcover only colours terrain cells)")
 
     footprints = []
+    road_segments = []
+    ctx = StageContext(area, terrain, z_offset, budget, opts, add, classified, road_segments)
     if opts.buildings:
         def build_one(f, extra_prov=None, reason_prefix=""):
             """Build one footprint; returns True if generated, else reports it in invalid_features."""
@@ -1638,8 +1641,9 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         built_specs = {}
         built = set()
         for f in classified.buildings:
-            if build_one(f):
-                built.add(f.id)
+            for piece in passages.split(plan, ctx, f):
+                if build_one(piece):
+                    built.add(piece.id)
         # Outlines replaced by building:part features (Simple 3D Buildings). The parts were built
         # first; an outline none of whose parts survived is generated itself (otherwise the
         # building would vanish). If only some parts survived, the outline is NOT generated (it
@@ -1684,9 +1688,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         _check_building_overlaps(plan, getattr(classified, "overlap_candidates", ()), built_specs)
     elif classified.replaced_outlines:
         plan.report["building_outlines_replaced_by_parts"] = list(classified.replaced_outlines)
-    road_segments = []
     if opts.roads:
-        # All roads are at grade (bridges/tunnels are reported unsupported by classify). They
+        # All roads are at grade; bridges and tunnels are routed to their own stages below.
         # are built in ownership order so overlapping ground belongs to exactly one road; the
         # objects are listed in the original feature order.
         ownership = RoadOwnership()
@@ -1728,6 +1731,10 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             plan.count("roads")
         for k in sorted(road_specs):
             add(road_specs[k])
+    bridges.build(plan, ctx)
+    tunnels.build(plan, ctx)
+    passages.build(plan, ctx)
+    ctx.flush_unsupported(plan)
     if opts.trees:
         tmpl = plan.shared_meshes["tree_generic"] = tree_mesh()
         tree_cost = (len(tmpl.vertices), mesh_triangle_count(tmpl))
