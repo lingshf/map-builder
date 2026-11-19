@@ -371,7 +371,7 @@ def elevated_probe(plan, ctx, feature):
     _emit(plan, ctx, _probe(ctx, f"{feature.id}:under", feature.id, pts, clearance, lambda x, y: zmax))
 
 
-def _local_plan(plan, probes):
+def _local_plan(plan, probes, grid=None):
     """A view of ``plan`` holding only what a probe capsule can touch: objects whose bounding box meets a probe's
     padded box, and for the terrain and road surfaces only the faces whose plan-view box meets a probe's box.
     A capsule cannot hit anything else, so the result of the check is the same as on the
@@ -411,6 +411,21 @@ def _local_plan(plan, probes):
             objs.append(spec)
             continue
         x0, y0, z0 = spec.location
+        if grid is not None and spec.mb_class == "terrain" and (x0, y0, z0) == (0.0, 0.0, 0.0) \
+                and len(md.vertices) == grid.nx * grid.ny and len(md.faces) == 2 * (grid.nx - 1) * (grid.ny - 1):
+            # the terrain mesh is the grid (build_terrain: vertex j * nx + i, two faces per cell): pick the cells under
+            # the probe boxes by index instead of scanning every vertex, so the cost does not grow with the scene
+            cells = set()
+            for b in boxes:
+                i0 = max(0, int(math.floor((b[0] - grid.x0) / grid.spacing)))
+                i1 = min(grid.nx - 2, int(math.floor((b[3] - grid.x0) / grid.spacing)))
+                j0 = max(0, int(math.floor((b[1] - grid.y0) / grid.spacing)))
+                j1 = min(grid.ny - 2, int(math.floor((b[4] - grid.y0) / grid.spacing)))
+                cells.update((j, i) for j in range(j0, j1 + 1) for i in range(i0, i1 + 1))
+            keep = [md.faces[2 * (j * (grid.nx - 1) + i) + k] for j, i in sorted(cells) for k in (0, 1)]
+            if keep:
+                objs.append(_sub_object(gen, spec, md, keep))
+            continue
         vx, vy, vz = zip(*md.vertices)
         if not hit((min(vx) + x0, min(vy) + y0, min(vz) + z0), (max(vx) + x0, max(vy) + y0, max(vz) + z0)):
             continue
@@ -445,17 +460,21 @@ def _local_plan(plan, probes):
         if len(keep) == len(md.faces):
             objs.append(spec)
         elif keep:
-            used = sorted({i for f in keep for i in f})
-            remap = {v: k for k, v in enumerate(used)}
-            sub = gen.MeshData(md.name)
-            sub.vertices = [md.vertices[i] for i in used]
-            sub.faces = [tuple(remap[i] for i in f) for f in keep]
-            sub.face_materials = [0] * len(keep)
-            sub.face_colors = [(0.5, 0.5, 0.5)] * len(keep)
-            sub.materials = ["MB Probe Check"]
-            objs.append(gen.ObjectSpec(spec.name, spec.mb_id, spec.mb_class, spec.collection, mesh=sub,
-                                       location=spec.location))
+            objs.append(_sub_object(gen, spec, md, keep))
     return SimpleNamespace(objects=objs, shared_meshes=plan.shared_meshes)
+
+
+def _sub_object(gen, spec, md, keep):
+    """``spec`` reduced to the faces ``keep`` (vertex indices compacted) for the probe check."""
+    used = sorted({i for f in keep for i in f})
+    remap = {v: k for k, v in enumerate(used)}
+    sub = gen.MeshData(md.name)
+    sub.vertices = [md.vertices[i] for i in used]
+    sub.faces = [tuple(remap[i] for i in f) for f in keep]
+    sub.face_materials = [0] * len(keep)
+    sub.face_colors = [(0.5, 0.5, 0.5)] * len(keep)
+    sub.materials = ["MB Probe Check"]
+    return gen.ObjectSpec(spec.name, spec.mb_id, spec.mb_class, spec.collection, mesh=sub, location=spec.location)
 
 
 def finish(plan, ctx):
@@ -470,7 +489,7 @@ def finish(plan, ctx):
     if mine:
         others = len(plan.passage_probes) - len(mine)
         room = max(0, PASSAGE_PROBE_MAX - others)
-        _, blocked = check_probes(_local_plan(plan, mine[:PASSAGE_PROBE_MAX]),
+        _, blocked = check_probes(_local_plan(plan, mine[:PASSAGE_PROBE_MAX], ctx.terrain),
                                   mine[:PASSAGE_PROBE_MAX])
         gone = {b["id"] for b in blocked}
         survivors = [p for p in mine[:PASSAGE_PROBE_MAX] if p["id"] not in gone]
