@@ -49,6 +49,7 @@ COURTYARD_CENTRE = (-100.0, -60.0)
 L_BUILDING = "bld_way_1007"         # L shape at x 50..90, y 20..80 (north-east)
 GABLED = "bld_way_1023"
 HIPPED = "bld_way_1028"
+DOME = "bld_way_1043"
 
 
 def fixture_settings(**kw):
@@ -245,7 +246,7 @@ class FixturePackageTest(unittest.TestCase):
         self.assertEqual(set(self.nodes), set(self.entries))     # one-to-one binding by name
 
     def test_non_flat_roofs_match_collision(self):
-        for name, shape in ((GABLED, "gabled"), (HIPPED, "hipped")):
+        for name, shape in ((GABLED, "gabled"), (HIPPED, "hipped"), (DOME, "dome")):
             prov = self.objects[name]["provenance"]
             self.assertEqual(prov["roof_shape_built"], shape)
             self.assertTrue(prov["roof_shape"].startswith("measured:"), prov["roof_shape"])

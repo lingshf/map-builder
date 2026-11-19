@@ -483,14 +483,15 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
         height += roof_h  # building:levels gave the eave; the total includes the roof built on top
     prov["roof_height_m"] = round(roof_h, 2)
 
-    across = roofs.resolve_orientation(roof_shape, tags, prov)
+    roof_dir = parse_number(tags.get("roof:direction"))
+    across = roofs.resolve_orientation(roof_shape, tags, prov, outer, roof_dir)
 
     top = height  # relative to the base datum
     wall_top_flat = top - roof_h
     elevated = min_h > 0
     base_z = min_h if elevated else -FOUNDATION_SINK_M
 
-    skillion_z = roofs.skillion_surface(roof_shape, rings, parse_number(tags.get("roof:direction")), top, roof_h, prov)
+    skillion_z = roofs.skillion_surface(roof_shape, rings, roof_dir, top, roof_h, prov)
 
     samples = footprint_terrain_samples(terrain, rings)
     g_min = min(p[2] for p in samples)
@@ -527,7 +528,8 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
                                    f"the underside of the elevated volume at {min_h:.2f} m")
 
     if reserve is not None:
-        reserve(2 * n_ring + 2, 2 * n_ring + 2 * len(tris) + 4)
+        extra_v, extra_t = roofs.roof_budget(roof_shape, n_ring)
+        reserve(2 * n_ring + 2 + extra_v, 2 * n_ring + 2 * len(tris) + 4 + extra_t)
 
     facade = parse_colour(tags.get("building:colour"))
     if facade:
@@ -569,7 +571,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     local_rings = [[(p[0] - cx, p[1] - cy) for p in r] for r in rings]
     roofs.build_roof(mesh, local_rings[0], local_rings[1:], wall_top_flat, roof_h, roof_shape, tags, prov,
                      top_idx=ring_idx_top, tris=tris, add_face=add_face, roof_col=roof_col, facade=facade,
-                     across=across)
+                     across=across, direction=roof_dir)
     if any(split):
         prov["roof_faces"] = (f"{sum(split)} non-planar face(s) (footprint not an exact rectangle) split into "
                               "triangles along the shorter diagonal")

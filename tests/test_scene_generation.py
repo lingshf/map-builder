@@ -152,8 +152,9 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(self.obj("pyramid").provenance["roof_shape_built"], "pyramidal")
         self.assertEqual(self.obj("skillion").provenance["roof_shape_built"], "skillion")
         dome = self.obj("dome").provenance
-        self.assertEqual(dome["roof_shape_built"], "flat")
-        self.assertTrue(dome["roof_shape"].startswith("fallback"))
+        self.assertEqual(dome["roof_shape_built"], "dome")
+        self.assertEqual(dome["roof_shape"], "measured:osm roof:shape")
+        self.assertAlmostEqual(max(v[2] for v in self.obj("dome").mesh.vertices), 10.0)
 
     def test_elevated_volume_is_flagged(self):
         o = self.obj("elevated")
