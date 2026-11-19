@@ -1,9 +1,10 @@
 # v0.1.0 demo: editable map baseline
 
-**Preview candidate; not a published release.** All images below show an
-invented **SYNTHETIC** 400 x 300 m area. The map images are actual Blender
-Cycles CPU renders; the sidebar image is a real Blender window captured
-with Mesa software OpenGL. None is a real-city reconstruction or a mock UI.
+**Preview candidate; not a published release.** Examples 1-3 and the sidebar
+show an invented **SYNTHETIC** 400 x 300 m area. The separate Pittsburgh section
+uses actual online OSM / Copernicus data. Map images are actual Blender Cycles
+CPU renders; the sidebar is a real Blender window captured with Mesa software
+OpenGL. No UI is mocked.
 
 ## Real Blender interface
 
@@ -138,3 +139,157 @@ images do not demonstrate DSM lowering or flyable passages. Follow the
 [DSM user guide](../../user/generate.md#dsm-terrain-correction-inferred-ground-preview)
 for settings, comparison steps, reports and approximation limits.
 Release review and coordinator authorization remain required before tagging.
+
+## Real-data example: Pittsburgh DSM Off / On (interim, roads disabled)
+
+**Not release acceptance yet.** The default-content Pittsburgh export exposed
+a road winding error: `road object #1012 has 1 non-degenerate triangle(s) whose
+normal does not point up (z <= 0)`. The coordinator requires BUG-ROAD-NORMALS to
+merge, followed by a default-content rerun with roads enabled, before this
+release is reviewed again. These interim images use the supported **Roads off**
+content setting, not a validator bypass or a product-code modification.
+
+Area D26 is centred at **40.437 N, 80.016 W**, **1200 x 1000 m**, covering
+Fort Pitt Bridge and the north Fort Pitt Tunnel portals. The southern tunnel
+ends lie beyond this small area's southwest edge; this is not a reconstruction
+of the entire tunnel. [Saved cameras](pittsburgh-cameras.json) use map-frame
+ENU metres and are fixed for the DSM pair and subsequent v0.2.0 comparison.
+
+| Same camera | DSM Off | DSM On |
+|---|---|---|
+| Real-area overview | ![Pittsburgh overview DSM Off, roads disabled](pittsburgh-overview-off.png) | ![Pittsburgh overview DSM On, roads disabled](pittsburgh-overview-on.png) |
+| Hillside ground detail | ![Pittsburgh ground DSM Off, roads disabled](pittsburgh-dsm-off.png) | ![Pittsburgh ground DSM On, roads disabled](pittsburgh-dsm-on.png) |
+
+| v0.2.0 baseline camera | v0.1.0: unsupported structure omitted |
+|---|---|
+| Fort Pitt Bridge approach | ![Bridge baseline, no generated deck, roads disabled](pittsburgh-bridge-baseline.png) |
+| North tunnel portals | ![Tunnel baseline, no generated tube, roads disabled](pittsburgh-tunnel-baseline.png) |
+
+The bridge/tunnel views are **absence baselines**, not fly-through evidence:
+no bridge deck, tube, portals or passage probes are generated in v0.1.0. Their
+OSM features are listed under `unsupported_features`, even though bridge ways
+participate in the DSM mask.
+
+### Recorded real-data evidence
+
+Acquired online on **2026-11-19** through the normal pipeline: public Copernicus
+AWS tiles and public Overpass. Two initial optional mask requests failed;
+attempt 3 succeeded. The normal response was reused from the fresh run's cache,
+then the same acquired elevation grid and classified OSM snapshot were
+deep-copied for Off and On, eliminating differences between network responses
+from the comparison. No existing user's data/cache or demo server was used.
+
+| Evidence | Off | On |
+|---|---|---|
+| Validation | VALID, 0 errors, 0 warnings | VALID, 0 errors, 0 warnings |
+| Objects (roads disabled) | 3011 | 2988 |
+| Build + package validation, excluding acquisition | 15.046 s | 17.563 s |
+| Vertical offset, EGM2008 | 213 m | 213 m |
+| Terrain samples | 12221 | 12221 |
+| Masked / lowered samples | 0 / 0 | 8532 / 5201 |
+| Maximum / mean lowering over mask | 0 / 0 m | 33.255 / 3.670 m |
+| Unsupported / invalid source-feature reports | 89 / 29 | 89 / 52 |
+
+On converged in 8 cycles, residual 0.0002 m; it was **applied**, not skipped.
+The object counts differ because terrain-dependent building eligibility changes;
+the On report has 23 additional invalid features. This is not a promise that
+every building improves or that hidden relief is accurately recovered.
+
+Off package identity:
+`sha256:f29f8ea79107b22232c0efe8f182048bfd5690641b37ffda2efc963fba7248c5`.
+On package identity:
+`sha256:12f94aff221a91cff5364e38ddbae378d2370fe3732159ae3fcac8dec5ea43d7`.
+Normal OSM base timestamp: `2026-11-19T15:38:06Z`;
+mask response: `2026-11-19T15:40:08Z`.
+Copernicus tile: `Copernicus_DSM_COG_10_N40_00_W081_00_DEM`,
+source spacing approximately 23.54 x 30.71 m, bilinearly resampled to 10 m.
+
+The largest measured lowering is around map `(90, -70)` m, from z 145.144 m
+to 111.889 m in the shared frame. Lowering measures the algorithm's change,
+**not ground-truth accuracy**. Copernicus remains a surface model; large masked
+areas can lose real relief.
+
+### Exact acquisition, package, viewer and summary commands
+
+Run from the v0.1.0 source root with Python 3.12. This **interim** command
+explicitly disables roads; replace that setting with the default after the
+road fix is merged and regenerate final evidence. No network credentials are
+needed. Blender online UI permission is not involved in this Python process;
+inside Blender enable **Preferences > System > Network > Allow Online Access**.
+
+```powershell
+$env:MB_DEMO_ROOT = Join-Path $env:TEMP ("map-builder-pittsburgh-" + [guid]::NewGuid().ToString("N"))
+@'
+import copy, json, os, pickle, time
+from pathlib import Path
+from map_builder.core.errors import MapBuilderError
+from map_builder.core.generate import PlanOptions, build_plan
+from map_builder.core.geodesy import Area
+from map_builder.core.pipeline import Settings, acquire, elevation_correction_note, plan_to_package
+
+root = Path(os.environ["MB_DEMO_ROOT"])
+root.mkdir(parents=True, exist_ok=False)
+settings = Settings(cache_dir=str(root / "cache"), terrain_spacing=10.0, dsm_correction=True)
+for attempt in range(1, 4):
+    try:
+        grid, classified, sources = acquire(Area(40.437, -80.016, 1200, 1000), settings)
+        if getattr(classified, "mask_unavailable", None):
+            raise RuntimeError(classified.mask_unavailable)
+        break
+    except (MapBuilderError, OSError, RuntimeError) as error:
+        print(f"Attempt {attempt}: {type(error).__name__}: {error}", flush=True)
+        if attempt == 3:
+            raise
+        time.sleep(15 * attempt)
+with (root / "acquired.pickle").open("wb") as stream:
+    pickle.dump((grid, classified, sources), stream)
+for mode, enabled in (("off", False), ("on", True)):
+    plan = build_plan(Area(40.437, -80.016, 1200, 1000), copy.deepcopy(grid),
+                      copy.deepcopy(classified), PlanOptions(seed=1, roads=False),
+                      dsm_correction=enabled)
+    if enabled and not plan.report["terrain_correction"]["applied"]:
+        raise RuntimeError(json.dumps(plan.report["terrain_correction"]))
+    mode_sources = copy.deepcopy(sources)
+    note = elevation_correction_note(plan.report["terrain_correction"])
+    if note:
+        for source in mode_sources:
+            if source.get("kind") == "elevation":
+                source["processing"] = note
+    manifest, result = plan_to_package(
+        plan, str(root / f"pittsburgh-{mode}.mbmap"), "pittsburgh", mode_sources,
+        heightfield_spacing=2.0, created_utc="2026-11-19T15:40:00Z")
+    if not result.ok:
+        raise RuntimeError(result.summary())
+    print(mode, result.summary(), json.dumps(plan.report["terrain_correction"]))
+'@ | py -3.12 -
+if ($LASTEXITCODE -ne 0) { throw "Pittsburgh acquisition/build failed; do not render substitute data" }
+$blender = "C:\path\to\blender.exe"
+& $blender --background --factory-startup --python-exit-code 1 `
+    --python tools\demo\run_demo.py -- --preset docs\demo\v0.1.0\pittsburgh-cameras.json `
+    --before "$env:MB_DEMO_ROOT\pittsburgh-off.mbmap" `
+    --after "$env:MB_DEMO_ROOT\pittsburgh-on.mbmap" --out "$env:MB_DEMO_ROOT\demo"
+if ($LASTEXITCODE -ne 0) { throw "Pittsburgh demo failed" }
+```
+
+The shared kit generates **eight 1280 x 720 Cycles CPU renders**, 64 samples,
+using identical Off/On cameras, plus `demo\summary.md`, `demo\viewer.zip` and
+`demo\viewer\` with `map.glb`, `probes.json`, bundled three.js and NOTICES.
+Only selected PNGs, this README and the camera preset are committed; packages,
+download cache, acquisition snapshot, viewer bundle and summary remain
+throwaway outputs. Live providers change over time, so later acquisitions need
+not reproduce these exact package identities.
+
+To try the generated viewer separately (never port 8765):
+
+```powershell
+py -3.12 -m http.server 8792 --bind 127.0.0.1 --directory "$env:MB_DEMO_ROOT\demo\viewer"
+```
+
+Open `http://127.0.0.1:8792/`. It displays the DSM On GLB and no passage probes,
+not simulator physics. Read `demo\summary.md` for identities and output listing.
+
+**Real-data credits:** (c) OpenStreetMap contributors, ODbL 1.0.
+Copernicus DEM GLO-30 / WorldDEM-30: (c) DLR e.V. 2010-2014 and
+(c) Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS
+by the European Union and ESA; all rights reserved. The generated viewer's
+`NOTICES.txt` includes attribution and the On package's processing note.
