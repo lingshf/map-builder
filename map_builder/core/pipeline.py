@@ -210,10 +210,26 @@ def heightfield_from_objects(col_objects, area, spacing):
     return heightfield_from_collision(read_collision(write_collision(col_objects)), area, spacing)
 
 
+def filter_passage_probes(probes, mb_ids):
+    """Split passage probes into (kept, dropped_ids): a probe whose ``feature`` mb_id is not among ``mb_ids``
+    (the exported objects; e.g. the feature was deleted in Blender) is dropped and reported by its id.
+    Entries that are not objects are kept, so the package validator reports them."""
+    mb_ids = set(mb_ids)
+    kept, dropped = [], []
+    for p in probes or []:
+        if isinstance(p, dict) and p.get("feature") not in mb_ids:
+            dropped.append(p.get("id"))
+        else:
+            kept.append(copy.deepcopy(p))
+    return kept, dropped
+
+
 def export_package(path, name, area, sources, glb_bytes, col_objects, report, edits=None, blender_version=None,
-                   heightfield_spacing=None, object_info=None, created_utc=None):
+                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=None):
     """Write a validated package atomically. ``col_objects`` must come from the same final meshes and world
-    transforms as ``glb_bytes``; ``object_info[name]['provenance']`` is copied to the manifest."""
+    transforms as ``glb_bytes``; ``object_info[name]['provenance']`` is copied to the manifest.
+    ``passage_probes`` (plan probes) are filtered by :func:`filter_passage_probes`; the ids of dropped probes
+    go to report.json ``passage_probes_dropped``."""
     collision_bytes = write_collision(col_objects)
     col = read_collision(collision_bytes)
     hf = heightfield_from_collision(col, area, heightfield_spacing) if heightfield_spacing else None
@@ -228,9 +244,11 @@ def export_package(path, name, area, sources, glb_bytes, col_objects, report, ed
                         "degenerate_triangles": sum(1 for t in range(col.triangle_count)
                                                     if is_degenerate(*col.triangle(t))),
                         "heightfield_nan_cells": hf[1]["nan_cells"] if hf else None}
+    probes_kept, report["passage_probes_dropped"] = filter_passage_probes(passage_probes,
+                                                                          (o.mb_id for o in col_objects))
     members, manifest, probes = assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=hf,
                                          report=report, edits=edits, blender_version=blender_version,
-                                         created_utc=created_utc)
+                                         created_utc=created_utc, passage_probes=probes_kept)
     result = write_package(path, members, manifest)
     return manifest, result
 
@@ -255,7 +273,8 @@ def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generat
         raise PackageError("plan z_offset_m differs from the area frame; regenerate the plan")
     glb_bytes = write_glb(nodes, MATERIALS, generator="map-builder headless")
     return export_package(path, name, plan.area, sources, glb_bytes, col_objects, plan.report, edits=edits,
-                          heightfield_spacing=heightfield_spacing, object_info=info, created_utc=created_utc)
+                          heightfield_spacing=heightfield_spacing, object_info=info, created_utc=created_utc,
+                          passage_probes=getattr(plan, "passage_probes", []))
 
 
 def generate_plan(area, settings, client=None, progress=None):

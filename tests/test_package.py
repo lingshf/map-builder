@@ -123,7 +123,7 @@ def world_node(o, **kw):
             "scale": 1.0, "extras": {"mb_id": o["mb_id"]}}
 
 
-def scene_members(objs, visual_nodes=None, heightfield_spacing=None, report=None, sources=None):
+def scene_members(objs, visual_nodes=None, heightfield_spacing=None, report=None, sources=None, passage_probes=None):
     col_bytes = write_collision([col_of(o) for o in objs])
     glb = write_glb(visual_nodes if visual_nodes is not None else [node_of(o) for o in objs], MATERIALS)
     hf = heightfield_from_collision(read_collision(col_bytes), AREA, heightfield_spacing) if heightfield_spacing \
@@ -131,7 +131,7 @@ def scene_members(objs, visual_nodes=None, heightfield_spacing=None, report=None
     objects = [{"name": o["name"], "mb_id": o["mb_id"], "class": o["cls"], "collision": True, "provenance": {}}
                for o in objs]
     return assemble("test", AREA, sources or synthetic_sources(), glb, col_bytes, objects, heightfield=hf,
-                    report=report or {}, created_utc=UTC)
+                    report=report or {}, created_utc=UTC, passage_probes=passage_probes)
 
 
 def raw_write(path, members, manifest, manifest_raw=None):
@@ -212,7 +212,7 @@ class CollisionFormatTest(unittest.TestCase):
         data = write_collision(two_objects())
         self.assertEqual(COL_HEADER.size, 64)
         magic, ver, flags, nv, nt, no, tlen, *rest = COL_HEADER.unpack_from(data, 0)
-        self.assertEqual((magic, ver, flags, nv, nt, no), (b"MBCOL\0\0\0", 1, 1, 7, 3, 2))  # unused vertex dropped
+        self.assertEqual((magic, ver, flags, nv, nt, no), (b"MBCOL\0\0\0", 2, 1, 7, 3, 2))  # unused vertex dropped
         self.assertEqual(tuple(rest[:6]), (0, 0, 0, 6, 7, 2))
         self.assertEqual(tuple(rest[6:]), (0, 0))
         self.assertEqual(tlen % 4, 0)
@@ -242,7 +242,7 @@ class CollisionFormatTest(unittest.TestCase):
 
     def test_class_mapping_is_contract(self):
         self.assertEqual(CLASSES, {"user": 0, "terrain": 1, "building": 2, "road": 3, "vegetation": 4, "water": 5,
-                                   "prop": 6})
+                                   "prop": 6, "bridge": 7, "tunnel": 8, "structure": 9})
 
     def test_reader_rejects_corruption(self):
         good = write_collision(two_objects())
@@ -257,7 +257,8 @@ class CollisionFormatTest(unittest.TestCase):
             return bytes(b)
         cases = {
             "magic": patched("<8s", 0, b"MBCOX\0\0\0"),
-            "version": patched("<I", 8, 2),
+            "version 1": patched("<I", 8, 1),
+            "version 3": patched("<I", 8, 3),
             "flag bit0 unset": patched("<I", 12, 0),
             "unknown flag": patched("<I", 12, 3),
             "reserved": patched("<I", 56, 1),
@@ -267,7 +268,7 @@ class CollisionFormatTest(unittest.TestCase):
             "vertex index": patched("<I", o_idx, nv),
             "object index": patched("<I", o_obj, 5),
             "class mismatch": patched("<B", o_cls, 3),
-            "unknown class": patched("<B", o_cls, 9),
+            "unknown class": patched("<B", o_cls, 10),
             "class padding": patched("<B", o_cls + 3, 1),
             "non-contiguous": patched("<3I", o_obj, 1, 0, 1),
             "table length not /4": patched("<I", 28, tlen - 1),
@@ -303,7 +304,7 @@ class CollisionFormatTest(unittest.TestCase):
                                                                                          [(0, 1, 2)])],
             "empty name": [ColObject("", "i", "user", tri, [(0, 1, 2)])],
             "no mb_id": [ColObject("a", "", "user", tri, [(0, 1, 2)])],
-            "unknown class": [ColObject("a", "i", "bridge", tri, [(0, 1, 2)])],
+            "unknown class": [ColObject("a", "i", "bridge2", tri, [(0, 1, 2)])],
             "no triangles": [ColObject("a", "i", "user", tri, [])],
             "bad index": [ColObject("a", "i", "user", tri, [(0, 1, 3)])],
             "nan": [ColObject("a", "i", "user", [(math.nan, 0, 0)] + tri, [(0, 1, 2)])],
@@ -964,11 +965,12 @@ class ValidatorTest(TempDirCase):
         self.assertInvalid(with_raw("nan.mbmap", raw.replace("{", '{"x": NaN, ', 1)), "strict")
         self.assertInvalid(with_raw("dupkey.mbmap", raw.replace("{", '{"name": "a", ', 1)), "duplicate key")
         self.assertInvalid(with_raw("array.mbmap", "[]"), "JSON object")
-        self.assertInvalid(self.variant("v2.mbmap", change_manifest=lambda m: m.update(schema_version="2.0.0")),
-                           "unsupported schema major version")
+        for old in ("1.0.0", "1.9.0", "3.0.0"):
+            self.assertInvalid(self.variant(f"v{old}.mbmap", change_manifest=lambda m: m.update(schema_version=old)),
+                               "unsupported schema major version")
         self.assertInvalid(self.variant("schema.mbmap", change_manifest=lambda m: m.update(schema="other")),
                            "schema")
-        path = self.variant("v11.mbmap", change_manifest=lambda m: m.update(schema_version="1.1.0",
+        path = self.variant("v21.mbmap", change_manifest=lambda m: m.update(schema_version="2.1.0",
                                                                              future_field={"a": 1}))
         r = validate_package(path)
         self.assertTrue(r.ok, r.summary())
@@ -982,7 +984,7 @@ class ValidatorTest(TempDirCase):
     def test_payload_tamper_with_fixed_hashes(self):
         def col_version(members):
             b = bytearray(members["collision/map.mbcol"])
-            struct.pack_into("<I", b, 8, 2)
+            struct.pack_into("<I", b, 8, 1)
             members["collision/map.mbcol"] = bytes(b)
         self.assertInvalid(self.variant("cv.mbmap", col_version), "unsupported version")
 
@@ -1685,6 +1687,191 @@ class SplitPartIdentityTest(TempDirCase):
     def test_malformed_part_ids_still_warn(self):
         r = self.check(["osm:way/1#", "osm:way/2#-1"])
         self.assertEqual(sum("unrecognised mb_id form" in w for w in r.warnings), 2, r.warnings)
+
+
+# --- format 2.0.0: class kinds, tube rule, passage probes -----------------------------------------------------
+
+def tube_mesh(x0, x1, y0, y1, z0, z1, inward=True, name="tube"):
+    """A box tube along +X, open at x0 and x1 (the portals); faces inward unless ``inward`` is false."""
+    src = box_mesh(x0, y0, x1, y1, z0, z1)
+    m = MeshData(name)
+    for v in src.vertices:
+        m.add_vertex(*v)
+    for f in [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (2, 3, 7, 6)]:      # box faces minus the two x ends
+        m.add_face(tuple(reversed(f)) if inward else f, "MB Wall", (0.7, 0.7, 0.7))
+    return m
+
+
+def orient_one(cls, mesh):
+    col = read_collision(write_collision([ColObject("o", "osm:way/9", cls, list(mesh.vertices),
+                                                    [tuple(t) for t in mesh.triangles()])]))
+    return pkg.collision_orientation_problems(col)
+
+
+class ClassKindTest(unittest.TestCase):
+    def test_kinds_defined_once_for_every_class(self):
+        from map_builder.core.collision import CLASS_KINDS
+        self.assertEqual(set(CLASS_KINDS), set(CLASSES))
+        self.assertEqual({c for c, k in CLASS_KINDS.items() if k == "solid"}, {"building", "bridge", "structure"})
+        self.assertEqual({c for c, k in CLASS_KINDS.items() if k == "surface"}, {"terrain", "road", "water"})
+        self.assertEqual({c for c, k in CLASS_KINDS.items() if k == "tube"}, {"tunnel"})
+        self.assertEqual({c for c, k in CLASS_KINDS.items() if k is None}, {"user", "vegetation", "prop"})
+
+    def test_tube_rule(self):
+        self.assertEqual(orient_one("tunnel", tube_mesh(0, 30, 0, 6, 0, 5)), [])
+        probs = orient_one("tunnel", tube_mesh(0, 30, 0, 6, 0, 5, inward=False))
+        self.assertEqual(len(probs), 2, probs)
+        self.assertIn("tunnel object #0: shell 0 of 1", probs[0])
+        self.assertIn("must have negative volume", probs[0])
+        stray = tube_mesh(0, 30, 0, 6, 0, 5)
+        a = stray.add_vertex(-5, -5, 0)
+        b = stray.add_vertex(-5, -8, 0)
+        stray.add_face((0, a, b), "MB Wall", (0.7, 0.7, 0.7))            # a fin touching one portal corner
+        probs = orient_one("tunnel", stray)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("boundary edges do not form simple closed loops", probs[0])
+        half = tube_mesh(0, 30, 0, 6, 0, 5)
+        half.add_face((4, 7, 6, 5), "MB Wall", (0.7, 0.7, 0.7))         # inconsistent: top face twice, both ways
+        self.assertIn("not a consistently oriented tube", orient_one("tunnel", half)[0])
+        # a closed inward box (a cavity with no portal) is a valid degenerate tube; an outward box is not
+        inner = box_mesh(0, 0, 4, 4, 0, 4)
+        flipped = merged_mesh([(inner, True)])
+        self.assertEqual(orient_one("tunnel", flipped), [])
+        self.assertTrue(orient_one("tunnel", inner))
+
+    def test_bridge_and_structure_are_solids(self):
+        box = box_mesh(0, 0, 10, 4, 5, 6)
+        for cls in ("bridge", "structure"):
+            with self.subTest(cls):
+                self.assertEqual(orient_one(cls, box), [])
+                probs = orient_one(cls, merged_mesh([(box, True)]))
+                self.assertTrue(probs, probs)
+                self.assertIn(f"{cls} object #0: shell 0 of 1", probs[0])
+                self.assertIn("every shell must have positive volume", probs[0])
+
+    def test_water_surface_must_face_up(self):
+        m = MeshData("water")
+        for x, y in ((0, 0), (10, 0), (10, 10), (0, 10)):
+            m.add_vertex(x, y, 1.0)
+        m.add_face((0, 1, 2, 3), "MB Water", (0.2, 0.4, 0.8))
+        self.assertEqual(orient_one("water", m), [])
+        down = MeshData("water")
+        for v in m.vertices:
+            down.add_vertex(*v)
+        down.add_face((3, 2, 1, 0), "MB Water", (0.2, 0.4, 0.8))
+        probs = orient_one("water", down)
+        self.assertEqual(len(probs), 1)
+        self.assertIn("water object #0 has 2 non-degenerate triangle(s) whose normal does not point up", probs[0])
+        for cls in ("vegetation", "prop", "user"):                           # no rule
+            self.assertEqual(orient_one(cls, down), [])
+
+
+class PassageProbeTest(TempDirCase):
+    HIGH = 900.0     # far above every object in scene()
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.objs = scene()
+
+    def probe(self, **kw):
+        p = {"id": "p0", "kind": "bridge", "feature": "osm:way/2", "radius_m": 1.0,
+             "path_map": [[-100.0, -57.0, self.HIGH], [100.0, -57.0, self.HIGH]]}
+        p.update(kw)
+        return p
+
+    def write(self, name, probes):
+        members, manifest, _ = scene_members(self.objs, passage_probes=probes)
+        raw_write(self.p(name), members, manifest)
+        return self.p(name), members, manifest
+
+    def test_default_is_an_empty_list_always_written(self):
+        _, _, manifest = self.write("none.mbmap", None)
+        self.assertEqual(manifest["passage_probes"], [])
+        members, manifest = load(self.p("none.mbmap"))
+        manifest.pop("passage_probes")
+        raw_write(self.p("missing.mbmap"), members, manifest)
+        self.assertInvalid(self.p("missing.mbmap"), "passage_probes must be an array")
+
+    def test_clear_probe_passes(self):
+        path, _, manifest = self.write("clear.mbmap", [self.probe(), self.probe(id="p1", kind="tunnel"),
+                                                        self.probe(id="p2", kind="elevated", extra={"x": 1})])
+        r = validate_package(path)
+        self.assertTrue(r.ok, r.summary())
+        self.assertEqual(r.warnings, [])
+        self.assertEqual(len(manifest["passage_probes"]), 3)
+
+    def test_blocked_probe_is_a_warning(self):
+        through_box = [[-60.0, -57.0, 7.0], [-40.0, -57.0, 7.0]]       # box spans x -55..-45, y -65..-50, z 2..12
+        path, _, _ = self.write("blocked.mbmap", [self.probe(), self.probe(id="p1", path_map=through_box)])
+        r = validate_package(path)
+        self.assertTrue(r.ok, r.summary())
+        self.assertEqual([w for w in r.warnings if "passage" in w], ["passage probe 1 is blocked by collision object #2"])
+
+    def test_budget_exhaustion_is_a_warning(self):
+        path, _, _ = self.write("budget.mbmap", [self.probe(), self.probe(id="p1")])
+        with mock.patch.object(pkg, "PASSAGE_QUERY_BUDGET", 5):      # probe 0 costs 3 object visits, probe 1 more
+            r = validate_package(path)
+        self.assertTrue(r.ok, r.summary())
+        self.assertTrue(any("query budget of 5 unit(s) exhausted; probes 1..1 were not checked" in w
+                            for w in r.warnings), r.warnings)
+
+    def test_malformed_probe_is_an_error(self):
+        _, members, manifest = self.write("ok.mbmap", [self.probe()])
+        cases = {
+            "not an object": (["x"], "passage_probes[0] must be an object"),
+            "empty id": ([self.probe(id="")], "passage_probes[0].id"),
+            "duplicate id": ([self.probe(), self.probe()], "passage_probes[1].id repeats"),
+            "kind": ([self.probe(kind="ramp")], "passage_probes[0].kind"),
+            "feature type": ([self.probe(feature=3)], "passage_probes[0].feature"),
+            "one point": ([self.probe(path_map=[[0, 0, 0]])], "passage_probes[0].path_map"),
+            "65 points": ([self.probe(path_map=[[i, 0, 0] for i in range(65)])], "passage_probes[0].path_map"),
+            "2d point": ([self.probe(path_map=[[0, 0], [1, 1]])], "passage_probes[0].path_map"),
+            "far": ([self.probe(path_map=[[0, 0, 0], [2e6, 0, 0]])], "passage_probes[0].path_map"),
+            "bool coord": ([self.probe(path_map=[[0, 0, True], [1, 0, 0]])], "passage_probes[0].path_map"),
+            "radius 0": ([self.probe(radius_m=0)], "passage_probes[0].radius_m"),
+            "radius 11": ([self.probe(radius_m=11)], "passage_probes[0].radius_m"),
+            "radius bool": ([self.probe(radius_m=True)], "passage_probes[0].radius_m"),
+            "too many": ([self.probe(id=f"p{i}") for i in range(257)], "at most 256"),
+            "not a list": ({"a": 1}, "passage_probes must be an array"),
+        }
+        for what, (probes, fragment) in cases.items():
+            with self.subTest(what):
+                m = copy.deepcopy(manifest)
+                m["passage_probes"] = probes
+                raw_write(self.p("bad.mbmap"), members, m)
+                self.assertInvalid(self.p("bad.mbmap"), fragment)
+        with self.assertRaises(PackageError):
+            scene_members(self.objs, passage_probes=[self.probe(radius_m=-1)])
+
+    def test_unknown_feature_is_an_error(self):
+        path, _, _ = self.write("feature.mbmap", [self.probe(feature="osm:way/404")])
+        self.assertInvalid(path, "passage_probes[0].feature does not match any manifest object mb_id")
+
+    def test_credentials_in_probes_are_refused_and_never_echoed(self):
+        secret = "https://user:hunter2@example.invalid/x"
+        _, members, manifest = self.write("ok2.mbmap", [self.probe()])
+        manifest["passage_probes"][0]["id"] = secret
+        raw_write(self.p("secret.mbmap"), members, manifest)
+        r = self.assertInvalid(self.p("secret.mbmap"), "credential-like value")
+        self.assertFalse(any("hunter2" in e for e in r.errors + r.warnings))
+        with self.assertRaises(PackageError) as cm:
+            scene_members(self.objs, passage_probes=[self.probe(id=secret)])
+        self.assertNotIn("hunter2", str(cm.exception))
+
+    def test_filter_drops_probes_of_missing_features(self):
+        from map_builder.core.pipeline import filter_passage_probes
+        a, b = self.probe(id="a"), self.probe(id="b", feature="osm:way/gone")
+        kept, dropped = filter_passage_probes([a, b, "junk"], ["osm:way/2"])
+        self.assertEqual((kept, dropped), ([a, "junk"], ["b"]))
+        self.assertEqual(filter_passage_probes(None, []), ([], []))
+
+    def test_old_schema_is_rejected(self):
+        _, members, manifest = self.write("old.mbmap", [])
+        manifest["schema_version"] = "1.0.0"
+        manifest.pop("passage_probes")
+        raw_write(self.p("old.mbmap"), members, manifest)
+        self.assertInvalid(self.p("old.mbmap"), "unsupported schema major version 1 (expected 2)")
 
 
 if __name__ == "__main__":

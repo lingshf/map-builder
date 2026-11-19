@@ -63,6 +63,10 @@ The sample regeneration command is in `examples/README.md`.
   shading with no UVs or textures in v1.
 * **v1 buildings are closed, outward-facing, positive-volume shell sets** with no cavities.
   Under-bridge, tunnel and elevated flying are unsupported, and are reported in `report.json`.
+* **Package format 2.0.0** adds the `bridge`/`tunnel`/`structure` classes with per-kind
+  winding rules (solid, surface, inward tube), two-sided triangles for queries, `.mbcol` v2 and
+  validator-checked `passage_probes`. 1.x packages are rejected. Generators do not emit the new
+  classes yet.
 * **Credential policy:**
   * there is no free-text endpoint;
   * a private Overpass URL comes only from `MAP_BUILDER_OVERPASS_URL` at Generate time;

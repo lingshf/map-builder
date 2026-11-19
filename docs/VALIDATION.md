@@ -75,6 +75,9 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
 | 2026-11-18 | Headless Blender 4.2.23 LTS (Windows x64) | 74 PASS, `OK: 0 failure(s)`; 77 objects, 5131 collision triangles |
 | PR #7 | Unit + acceptance (Python 3.12, Windows) | 295 tests OK (adds `test_examples.py`) |
 | PR #7 | C# reader (.NET 8, Windows) on `examples/synthetic_sample.mbmap` | `OK`: 5 members hash-verified, 3 probes PASS with both negative controls rejected, heightfield vs terrain max \|dz\| 1e-6 m; tampered copy → `INVALID: collision/map.mbcol: SHA-256 mismatch`, exit 1 |
+| format 2.0.0 | Unit + acceptance (Python 3.12, Windows) | 322 tests OK (adds `test_query.py`, class-kind, tube-rule and passage-probe tests) |
+| format 2.0.0 | CLI validate of the regenerated sample | `VALID: 0 error(s), 1 warning(s)` (2 degenerate collision triangles); 74 objects, 4945 triangles, no passage probes |
+| format 2.0.0 | C# reader (.NET 8, Windows) on `examples/synthetic_sample.mbmap` | `OK`: schema 2.0.0, mbcol v2, 3 orientation probes PASS, `passage none`, capsule controls BLOCKED/PASS as expected; tampered copy → `INVALID: collision/map.mbcol: SHA-256 mismatch`, exit 1 |
 
 ## Not validated
 

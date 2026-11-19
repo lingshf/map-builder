@@ -1,4 +1,4 @@
-// Reference reader for .mbmap packages (map-builder.package 1.x). The contract is docs/PACKAGE_FORMAT.md;
+// Reference reader for .mbmap packages (map-builder.package 2.x). The contract is docs/PACKAGE_FORMAT.md;
 // struct layouts and checks mirror map_builder/core/collision.py, glb.py and package.py.
 //
 // It illustrates the consumer side of the contract and is NOT a production loader:
@@ -50,6 +50,9 @@ namespace MapBuilder.Reference
         public const int ProbeMax = 3;
         public const double ProbeMatchM = 0.05, ProbeMinDot = 0.99, ProbeUnitTol = 1e-4, ProbeVertexTolM = 1e-6;
         public const double ProbeMinNormalXZ = 0.05, ProbeMinAbsXYM = 1.0, ProbeMirrorClearanceM = 0.5;
+        // passage probes (package.py)
+        public const int PassageProbeMax = 256, PassagePathMin = 2, PassagePathMax = 64;
+        public const double PassageRadiusMaxM = 10.0, MaxAbsCoordM = 1.0e6;
     }
 
     public struct Vec3
@@ -107,7 +110,7 @@ namespace MapBuilder.Reference
         }
     }
 
-    public enum CollisionClass : byte { User = 0, Terrain = 1, Building = 2, Road = 3, Vegetation = 4, Water = 5, Prop = 6 }
+    public enum CollisionClass : byte { User = 0, Terrain = 1, Building = 2, Road = 3, Vegetation = 4, Water = 5, Prop = 6, Bridge = 7, Tunnel = 8, Structure = 9 }
 
     public sealed class CollisionObject
     {
@@ -117,13 +120,17 @@ namespace MapBuilder.Reference
         public double[] Aabb; // min xyz, max xyz (map frame)
     }
 
-    /// <summary>collision/map.mbcol v1: authoritative static collision in the map frame.</summary>
+    /// <summary>collision/map.mbcol v2: authoritative static collision in the map frame. Triangles are two-sided
+    /// for intersection; the CCW winding gives the contact normal (outward for solids, up for surfaces, inward
+    /// into the free space for tubes).</summary>
     public sealed class CollisionMesh
     {
         public const string Magic = "MBCOL\0\0\0";
         public const int HeaderSize = 64;
         public const uint FlagCcwOutward = 1;
-        public static readonly string[] ClassNames = { "user", "terrain", "building", "road", "vegetation", "water", "prop" };
+        public static readonly string[] ClassNames = { "user", "terrain", "building", "road", "vegetation", "water", "prop", "bridge", "tunnel", "structure" };
+        /// <summary>Collision kind per class id (collision.py CLASS_KINDS): "solid", "surface", "tube" or null (no rule).</summary>
+        public static readonly string[] ClassKinds = { null, "surface", "solid", "surface", null, "surface", null, "solid", "tube", "solid" };
 
         public uint Version, Flags;
         public float[] BoundsMin = new float[3], BoundsMax = new float[3];
@@ -173,7 +180,7 @@ namespace MapBuilder.Reference
             uint nv = Bin.U32(d, 16), nt = Bin.U32(d, 20), no = Bin.U32(d, 24), tlen = Bin.U32(d, 28);
             for (int k = 0; k < 3; k++) { c.BoundsMin[k] = Bin.F32(d, 32 + 4 * k); c.BoundsMax[k] = Bin.F32(d, 44 + 4 * k); }
             uint r0 = Bin.U32(d, 56), r1 = Bin.U32(d, 60);
-            if (c.Version != 1) throw new MbmapException($"collision: unsupported version {c.Version}");
+            if (c.Version != 2) throw new MbmapException($"collision: unsupported version {c.Version}");
             if ((c.Flags & FlagCcwOutward) == 0) throw new MbmapException("collision: flags bit0 (CCW outward winding) is not set");
             if ((c.Flags & ~FlagCcwOutward) != 0) throw new MbmapException("collision: unknown flag bits");
             if (r0 != 0 || r1 != 0) throw new MbmapException("collision: reserved header fields must be 0");
@@ -692,6 +699,144 @@ namespace MapBuilder.Reference
         }
     }
 
+    /// <summary>A manifest passage probe: a capsule (polyline path_map, radius_m) that must stay free of collision.</summary>
+    public sealed class PassageProbe
+    {
+        public static readonly string[] Kinds = { "bridge", "tunnel", "elevated" };
+        public string Id, Kind, Feature;
+        public List<Vec3> PathMap = new List<Vec3>();
+        public double RadiusM;
+    }
+
+    /// <summary>Capsule-vs-collision check for passage probes. Brute force with a per-object and per-triangle
+    /// AABB prefilter; triangles are two-sided. Mirrors map_builder/core/query.py capsule_hits.</summary>
+    public static class CapsuleCheck
+    {
+        static Vec3 Add(Vec3 a, Vec3 d, double t) => new Vec3(a.X + d.X * t, a.Y + d.Y * t, a.Z + d.Z * t);
+        static double Clamp01(double x) => x < 0 ? 0 : x > 1 ? 1 : x;
+
+        static Vec3 ClosestOnSegment(Vec3 p, Vec3 a, Vec3 b)
+        {
+            var ab = b - a;
+            double den = Vec3.Dot(ab, ab);
+            return den == 0 ? a : Add(a, ab, Clamp01(Vec3.Dot(p - a, ab) / den));
+        }
+
+        /// <summary>Closest point on triangle abc (Ericson, Real-Time Collision Detection 5.1.5).</summary>
+        static Vec3 ClosestOnTriangle(Vec3 p, Vec3 a, Vec3 b, Vec3 c)
+        {
+            Vec3 ab = b - a, ac = c - a, ap = p - a;
+            double d1 = Vec3.Dot(ab, ap), d2 = Vec3.Dot(ac, ap);
+            if (d1 <= 0 && d2 <= 0) return a;
+            var bp = p - b;
+            double d3 = Vec3.Dot(ab, bp), d4 = Vec3.Dot(ac, bp);
+            if (d3 >= 0 && d4 <= d3) return b;
+            double vc = d1 * d4 - d3 * d2;
+            if (vc <= 0 && d1 >= 0 && d3 <= 0) return Add(a, ab, d1 / (d1 - d3));
+            var cp = p - c;
+            double d5 = Vec3.Dot(ab, cp), d6 = Vec3.Dot(ac, cp);
+            if (d6 >= 0 && d5 <= d6) return c;
+            double vb = d5 * d2 - d1 * d6;
+            if (vb <= 0 && d2 >= 0 && d6 <= 0) return Add(a, ac, d2 / (d2 - d6));
+            double va = d3 * d6 - d5 * d4;
+            if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return Add(b, c - b, (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+            double den = va + vb + vc;
+            if (den == 0)
+            {
+                Vec3 best = ClosestOnSegment(p, a, b);
+                foreach (var q in new[] { ClosestOnSegment(p, b, c), ClosestOnSegment(p, c, a) })
+                    if (Vec3.Distance(p, q) < Vec3.Distance(p, best)) best = q;
+                return best;
+            }
+            double v = vb / den, w = vc / den;
+            return new Vec3(a.X + ab.X * v + ac.X * w, a.Y + ab.Y * v + ac.Y * w, a.Z + ab.Z * v + ac.Z * w);
+        }
+
+        /// <summary>Closest distance between segments p1q1 and p2q2 (Ericson 5.1.9).</summary>
+        static double SegmentSegment(Vec3 p1, Vec3 q1, Vec3 p2, Vec3 q2)
+        {
+            Vec3 d1 = q1 - p1, d2 = q2 - p2, r = p1 - p2;
+            double a = Vec3.Dot(d1, d1), e = Vec3.Dot(d2, d2), f = Vec3.Dot(d2, r), s, t;
+            if (a == 0 && e == 0) return r.Length;
+            if (a == 0) { s = 0; t = Clamp01(f / e); }
+            else
+            {
+                double c = Vec3.Dot(d1, r);
+                if (e == 0) { t = 0; s = Clamp01(-c / a); }
+                else
+                {
+                    double b = Vec3.Dot(d1, d2), den = a * e - b * b;
+                    s = den != 0 ? Clamp01((b * f - c * e) / den) : 0;
+                    t = (b * s + f) / e;
+                    if (t < 0) { t = 0; s = Clamp01(-c / a); }
+                    else if (t > 1) { t = 1; s = Clamp01((b - c) / a); }
+                }
+            }
+            return Vec3.Distance(Add(p1, d1, s), Add(p2, d2, t));
+        }
+
+        /// <summary>Two-sided segment/triangle intersection parameter along p + t (q - p), or NaN.</summary>
+        static double SegmentHit(Vec3 o, Vec3 d, Vec3 a, Vec3 b, Vec3 c)
+        {
+            Vec3 e1 = b - a, e2 = c - a, pv = Vec3.Cross(d, e2);
+            double det = Vec3.Dot(e1, pv);
+            if (det == 0) return double.NaN;
+            double inv = 1 / det;
+            var tv = o - a;
+            double u = Vec3.Dot(tv, pv) * inv;
+            if (u < 0 || u > 1) return double.NaN;
+            var qv = Vec3.Cross(tv, e1);
+            double v = Vec3.Dot(d, qv) * inv;
+            if (v < 0 || u + v > 1) return double.NaN;
+            return Vec3.Dot(e2, qv) * inv;
+        }
+
+        public static double SegmentTriangleDistance(Vec3 p, Vec3 q, Triangle tri)
+        {
+            double t = SegmentHit(p, q - p, tri.A, tri.B, tri.C);
+            if (t >= 0 && t <= 1) return 0;
+            double best = Math.Min(Vec3.Distance(p, ClosestOnTriangle(p, tri.A, tri.B, tri.C)), Vec3.Distance(q, ClosestOnTriangle(q, tri.A, tri.B, tri.C)));
+            best = Math.Min(best, SegmentSegment(p, q, tri.A, tri.B));
+            best = Math.Min(best, SegmentSegment(p, q, tri.B, tri.C));
+            return Math.Min(best, SegmentSegment(p, q, tri.C, tri.A));
+        }
+
+        static bool Overlap(double[] lo, double[] hi, double[] box, double pad)
+        {
+            for (int a = 0; a < 3; a++)
+                if (box[a] - pad > hi[a] || lo[a] > box[a + 3] + pad) return false;
+            return true;
+        }
+
+        /// <summary>Indices of the collision objects with a triangle within radius_m of the probe path (empty = clear).</summary>
+        public static List<int> Hits(CollisionMesh col, PassageProbe probe)
+        {
+            var hits = new List<int>();
+            double r = probe.RadiusM, pad = r + Limits.AabbTableTolM;
+            foreach (var obj in col.Objects)
+            {
+                bool hit = false;
+                for (int s = 0; s + 1 < probe.PathMap.Count && !hit; s++)
+                {
+                    Vec3 p = probe.PathMap[s], q = probe.PathMap[s + 1];
+                    var lo = new[] { Math.Min(p.X, q.X), Math.Min(p.Y, q.Y), Math.Min(p.Z, q.Z) };
+                    var hi = new[] { Math.Max(p.X, q.X), Math.Max(p.Y, q.Y), Math.Max(p.Z, q.Z) };
+                    if (!Overlap(lo, hi, obj.Aabb, pad)) continue;
+                    for (int t = obj.TriStart; t < obj.TriStart + obj.TriCount && !hit; t++)
+                    {
+                        var tri = col.GetTriangle(t);
+                        var tb = new[] { Math.Min(tri.A.X, Math.Min(tri.B.X, tri.C.X)), Math.Min(tri.A.Y, Math.Min(tri.B.Y, tri.C.Y)), Math.Min(tri.A.Z, Math.Min(tri.B.Z, tri.C.Z)),
+                                         Math.Max(tri.A.X, Math.Max(tri.B.X, tri.C.X)), Math.Max(tri.A.Y, Math.Max(tri.B.Y, tri.C.Y)), Math.Max(tri.A.Z, Math.Max(tri.B.Z, tri.C.Z)) };
+                        if (!Overlap(lo, hi, tb, r)) continue;
+                        hit = SegmentTriangleDistance(p, q, tri) <= r;
+                    }
+                }
+                if (hit) hits.Add(obj.Index);
+            }
+            return hits;
+        }
+    }
+
     public sealed class FileEntry
     {
         public string Path, Role, MediaType, Sha256;
@@ -764,7 +909,7 @@ namespace MapBuilder.Reference
     public sealed class MbmapPackage : IDisposable
     {
         public const string Schema = "map-builder.package";
-        public const int SupportedMajor = 1;
+        public const int SupportedMajor = 2;
         public const string VisualPath = "visual/map.glb", CollisionPath = "collision/map.mbcol", NoticesPath = "NOTICES.txt",
                             ReportPath = "report.json", HeightfieldPath = "collision/terrain.mbhf";
         public const string HorizontalDatum = "WGS84 (EPSG:4326)", HeightFormula = "H = z + z_offset_m";
@@ -799,6 +944,7 @@ namespace MapBuilder.Reference
         public CollisionMesh Collision;
         public HeightField Heightfield;   // null if the package has none
         public List<OrientationProbe> Probes = new List<OrientationProbe>();
+        public List<PassageProbe> PassageProbes = new List<PassageProbe>();
         public ManifestSummary Info;      // typed, validated manifest fields a consumer displays
 
         public void Dispose() => ManifestDocument?.Dispose();
@@ -899,9 +1045,9 @@ namespace MapBuilder.Reference
                 var colInfo = Json.Obj(m, "collision", "manifest");
                 if (Json.Str(colInfo, "path", "manifest.collision") != CollisionPath)
                     throw new MbmapException($"manifest: collision.path must be '{CollisionPath}'");
-                if (Json.Str(colInfo, "format", "manifest.collision") != "mbcol" || Json.Long(colInfo, "version", "manifest.collision") != 1
+                if (Json.Str(colInfo, "format", "manifest.collision") != "mbcol" || Json.Long(colInfo, "version", "manifest.collision") != 2
                     || Json.Str(colInfo, "frame", "manifest.collision") != "map" || Json.Str(colInfo, "winding", "manifest.collision") != "ccw_outward")
-                    throw new MbmapException("manifest: collision must be {format: 'mbcol', version: 1, frame: 'map', winding: 'ccw_outward'}");
+                    throw new MbmapException("manifest: collision must be {format: 'mbcol', version: 2, frame: 'map', winding: 'ccw_outward'}");
                 bool hasHf = m.TryGetProperty("heightfield", out var hfInfo) && hfInfo.ValueKind != JsonValueKind.Null;
                 if (hasHf)
                 {
@@ -953,6 +1099,43 @@ namespace MapBuilder.Reference
                     string why = ProbeCheck.Intrinsic(probe);
                     if (why != null) throw new MbmapException($"{tag}: {why}");
                     pkg.Probes.Add(probe);
+                }
+
+                // Passage probes (docs/PACKAGE_FORMAT.md "Passage probes"): required array, each capsule's
+                // feature must name a manifest object. Whether a capsule is clear is reported by the caller
+                // (a blocked probe is a warning in the reference validator, not an invalid package).
+                var mbIds = new HashSet<string>(StringComparer.Ordinal);
+                int oi = 0;
+                foreach (var o in Json.Array(m, "objects", "manifest"))
+                    mbIds.Add(Json.Str(o, "mb_id", $"manifest: objects[{oi++}]"));
+                var passage = Json.Array(m, "passage_probes", "manifest");
+                if (passage.Count > Limits.PassageProbeMax) throw new MbmapException($"manifest: passage_probes must be an array of at most {Limits.PassageProbeMax}");
+                var passageIds = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < passage.Count; i++)
+                {
+                    var p = passage[i];
+                    string tag = $"manifest: passage_probes[{i}]";
+                    if (p.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag} must be an object");
+                    var pp = new PassageProbe
+                    {
+                        Id = Json.NonEmptyStr(p, "id", tag), Kind = Json.Str(p, "kind", tag),
+                        Feature = Json.NonEmptyStr(p, "feature", tag), RadiusM = Json.Num(p, "radius_m", tag),
+                    };
+                    if (!passageIds.Add(pp.Id)) throw new MbmapException($"{tag}.id repeats an earlier probe id");
+                    if (Array.IndexOf(PassageProbe.Kinds, pp.Kind) < 0) throw new MbmapException($"{tag}.kind must be one of bridge, tunnel, elevated");
+                    if (!mbIds.Contains(pp.Feature)) throw new MbmapException($"{tag}.feature does not match any manifest object mb_id");
+                    if (!(pp.RadiusM > 0 && pp.RadiusM <= Limits.PassageRadiusMaxM)) throw new MbmapException($"{tag}.radius_m must be in (0, {Limits.PassageRadiusMaxM}]");
+                    var path = Json.Array(p, "path_map", tag);
+                    if (path.Count < Limits.PassagePathMin || path.Count > Limits.PassagePathMax)
+                        throw new MbmapException($"{tag}.path_map must have {Limits.PassagePathMin}..{Limits.PassagePathMax} points");
+                    foreach (var q in path)
+                    {
+                        var v = Json.AsV3(q, $"{tag}.path_map");
+                        if (Math.Abs(v.X) > Limits.MaxAbsCoordM || Math.Abs(v.Y) > Limits.MaxAbsCoordM || Math.Abs(v.Z) > Limits.MaxAbsCoordM)
+                            throw new MbmapException($"{tag}.path_map coordinates must be within {Limits.MaxAbsCoordM} m");
+                        pp.PathMap.Add(v);
+                    }
+                    pkg.PassageProbes.Add(pp);
                 }
 
                 // 5. Only now does package_id bind the verified payload.

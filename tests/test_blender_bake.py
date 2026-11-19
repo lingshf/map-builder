@@ -3,10 +3,12 @@
 integration test tests/blender/run_integration.py, which needs Blender and is not run here."""
 
 import hashlib
+import json
 import math
 import shutil
 import tempfile
 import unittest
+import zipfile
 
 from map_builder.blender.bake import (DEFAULT_MATERIAL, ExportError, bake_object, det3, export_baked, package_parts,
                                       transform_problem)
@@ -172,6 +174,20 @@ class BakeExportTest(unittest.TestCase):
         err = max(abs(p - q) for tg, tw in zip(got, want) for pg, pw in zip(tg, tw) for p, q in zip(pg, pw))
         self.assertLess(err, 1e-4)
         self.assertTrue(next(x for x in baked if x.name == mirrored.name).mirrored)
+
+    def test_probe_of_deleted_feature_is_dropped_and_reported(self):
+        baked, moved, deleted, *_ = self.edited_scene()
+        path = f"{self.tmp}/probes.mbmap"
+        hi = 400.0                                    # far above the synthetic scene: never blocked
+        keep = {"id": "p-keep", "kind": "bridge", "feature": moved.mb_id, "path_map": [[0, 0, hi], [10, 0, hi]],
+                "radius_m": 1.0}
+        gone = dict(keep, id="p-gone", feature=deleted.mb_id)
+        manifest, result, _ = export_baked(path, "probes", self.area, self.sources, baked, self.generated, MATERIALS,
+                                           {}, created_utc=UTC, passage_probes=[keep, gone])
+        self.assertTrue(result.ok, result.summary())
+        self.assertEqual(manifest["passage_probes"], [keep])
+        with zipfile.ZipFile(path) as z:
+            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"], ["p-gone"])
 
     def test_failed_export_keeps_previous_package(self):
         baked, *_ = self.edited_scene()

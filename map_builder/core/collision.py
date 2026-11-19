@@ -1,8 +1,9 @@
 """Platform-neutral static collision formats (see docs/PACKAGE_FORMAT.md).
 
-``.mbcol`` (authoritative): triangles in the map frame (metres, +X east, +Y north,
-+Z up, right-handed), world space, front faces CCW seen from outside
-(normal = (b - a) x (c - a)). Triangles are grouped per object; each object entry
+``.mbcol`` v2 (authoritative): triangles in the map frame (metres, +X east, +Y north,
++Z up, right-handed), world space, front faces CCW (normal = (b - a) x (c - a)) pointing
+to the free space: outward for solids, up for surfaces, inward for tubes. Triangles are
+two-sided for intersection tests. Triangles are grouped per object; each object entry
 carries the glTF node name it was exported from, so visuals and collision stay bound.
 
 ``.mbhf`` (derived convenience): regular terrain height grid rasterised from the
@@ -29,8 +30,19 @@ HF_HEADER = struct.Struct("<8sIIIIddd")
 FLAG_CCW_OUTWARD = 1
 KNOWN_FLAGS = FLAG_CCW_OUTWARD
 
-CLASSES = {"user": 0, "terrain": 1, "building": 2, "road": 3, "vegetation": 4, "water": 5, "prop": 6}
+CLASSES = {"user": 0, "terrain": 1, "building": 2, "road": 3, "vegetation": 4, "water": 5, "prop": 6,
+           "bridge": 7, "tunnel": 8, "structure": 9}
 CLASS_NAMES = {v: k for k, v in CLASSES.items()}
+# Collision kind per class (docs/PACKAGE_FORMAT.md "Classes and kinds"); the one place it is defined.
+#   solid:   closed, CCW outward, every shell with positive signed volume
+#   surface: open, every non-degenerate triangle faces up (normal z > 0)
+#   tube:    open at its portals, faces inward (every portal-capped shell has negative signed volume)
+#   None:    no orientation rule
+KIND_SOLID, KIND_SURFACE, KIND_TUBE = "solid", "surface", "tube"
+CLASS_KINDS = {"user": None, "terrain": KIND_SURFACE, "building": KIND_SOLID, "road": KIND_SURFACE,
+               "vegetation": None, "water": KIND_SURFACE, "prop": None, "bridge": KIND_SOLID, "tunnel": KIND_TUBE,
+               "structure": KIND_SOLID}
+assert set(CLASS_KINDS) == set(CLASSES)
 TABLE_KEYS = ("index", "name", "mb_id", "class", "tri_start", "tri_count", "aabb")
 
 MAX_TRIANGLES = 8_000_000

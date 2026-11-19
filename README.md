@@ -107,11 +107,13 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
 CI runs the unit tests on Python 3.11 and 3.12, plus a CLI build and validate of the synthetic
 fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALIDATION.md).
 
-## Limits (v1)
+## Limits
 
-* **Flight under bridges, through tunnels or beneath elevated building parts is not supported.**
-  Bridges and tunnels are omitted, and elevated volumes are generated as closed solids. All of
-  these are listed under `unsupported_features` in `report.json`.
+* **Flight under bridges, through tunnels or beneath elevated building parts is not generated
+  yet; the format is ready.** Package format 2.0.0 has `bridge`, `tunnel` and `structure`
+  collision classes and `passage_probes`, but the generator still omits bridges and tunnels and
+  builds elevated volumes as closed solids. All of these are listed under
+  `unsupported_features` in `report.json`.
 * Each building is a set of closed, outward-facing, positive-volume shells with no interior
   cavities: no rooms, passages or flyable interiors.
 * The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or
