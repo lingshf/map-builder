@@ -21,6 +21,7 @@ import zipfile
 from unittest import mock
 
 from map_builder.blender.bake import bake_object, export_baked
+from map_builder.core import dem as dem_mod
 from map_builder.core import pipeline
 from map_builder.core.collision import heightfield_layout, read_collision, read_heightfield
 from map_builder.core.dem import fetch_copernicus
@@ -653,6 +654,15 @@ class ResourceBoundsTest(unittest.TestCase):
                               "too_big")
         self.assertEqual(calls, [])
         self.assertFalse(os.path.exists(self.out()))
+
+    def test_direct_local_loader_checks_grid_before_opening(self):
+        big = Area(47.0, 8.0, 2000.0, 2000.0)          # 1001 x 1001 terrain points at 2 m
+        fail = AssertionError("file reader called for an over-limit request")
+        with mock.patch.object(dem_mod, "load_ascii_grid", side_effect=fail), \
+                mock.patch.object(dem_mod, "load_local_geotiff", side_effect=fail):
+            for path in ("x.asc", "x.tif"):
+                with self.assertRaises(LimitError):
+                    dem_mod.load_local_elevation(big, path, spacing=2.0)
 
     def test_absurdly_fine_heightfield_spacing_is_a_limit_error(self):
         big = Area(47.0, 8.0, 400.0, 300.0)

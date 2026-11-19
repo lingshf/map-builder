@@ -441,6 +441,7 @@ def load_ascii_grid(area, path, crs_text, spacing=10.0, vertical_datum="user-dec
 
 def load_local_elevation(area, path, spacing=10.0, crs_text="EPSG:4326", vertical_datum="user-declared (unknown)",
                          license_note="", progress=None):
+    grid_layout(area, spacing)  # resource bounds are enforced before the file is opened
     lower = path.lower()
     if lower.endswith((".tif", ".tiff")):
         return load_local_geotiff(area, path, spacing, vertical_datum, license_note, progress)
