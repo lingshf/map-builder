@@ -51,5 +51,5 @@ an id containing markup) from the synthetic sample, for viewer smoke tests.
 
 Coordinates are the map frame (metres, +X east, +Y north, +Z up). 1 to 6 cameras with unique
 `[a-z0-9-]` names; identical cameras for before and after make comparable pairs. Add a camera per
-feature to show (`bridge-under`, `tunnel-portal`, ...). Presets: `synthetic`, `sf-fidi` (demo area;
+feature to show (`bridge-under`, `tunnel-portal`, ...). Presets: `synthetic`, `pittsburgh` (Fort Pitt Bridge/Tunnel, 1200 x 1000 m), `sf-fidi` (demo area;
 cameras are starting points).
