@@ -1552,12 +1552,19 @@ class ReviewRound2Test(TempDirCase):
                 visits[0] += len(arg)
                 return orig(arg, *a, **k)
             return wrapper
-        names = ("_weld_ids", "_directed_edges", "_shells", "_signed_volume")
+
+        def counting_ids(orig):
+            # the welded ids are a counted sequence too, so _directed_edges and _shells are charged for the
+            # iteration they actually do, not once per call
+            def wrapper(arg, *a, **k):
+                return CountingList(orig(arg, *a, **k))
+            return wrapper
+        names = ("_weld_ids", "_signed_volume")
         saved = {n: getattr(pkg, n) for n in names}
         get = col.object_triangles
         col.object_triangles = lambda e: CountingList(get(e))
-        for n in names:
-            setattr(pkg, n, counting(saved[n]))
+        setattr(pkg, "_weld_ids", counting_ids(saved["_weld_ids"]))
+        setattr(pkg, "_signed_volume", counting(saved["_signed_volume"]))
         try:
             probs = pkg.collision_orientation_problems(col)
         finally:
