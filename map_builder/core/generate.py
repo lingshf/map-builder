@@ -26,7 +26,7 @@ import math
 import random
 import re
 
-from . import dsm
+from . import dsm, roofs
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
@@ -409,59 +409,6 @@ def _building_height(tags):
     return h, min_h, roof_h, prov, eave_based
 
 
-def _rect_check(ring):
-    """Return True if ring is a near-rectangle (4 vertices, ~90 deg corners)."""
-    if len(ring) != 4:
-        return False
-    for k in range(4):
-        a, b, c = ring[k - 1], ring[k], ring[(k + 1) % 4]
-        v1 = (a[0] - b[0], a[1] - b[1])
-        v2 = (c[0] - b[0], c[1] - b[1])
-        n1, n2 = math.hypot(*v1), math.hypot(*v2)
-        if n1 < 0.5 or n2 < 0.5:
-            return False
-        if abs((v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2)) > math.sin(math.radians(15)):
-            return False
-    return True
-
-
-PLANAR_TOL_M = 1e-6
-
-
-def _add_planar_face(mesh, idx, mat, col, tol=PLANAR_TOL_M):
-    """Add face ``idx``; a polygon with > 3 vertices that is not planar within ``tol`` metres
-    is added as explicit triangles instead (a quad along its shorter diagonal, otherwise a
-    fan), keeping the winding. Returns True if the face was split."""
-    if len(idx) > 3:
-        V = [mesh.vertices[i] for i in idx]
-        n = len(V)
-        nx_ = sum((V[k][1] - V[(k + 1) % n][1]) * (V[k][2] + V[(k + 1) % n][2]) for k in range(n))
-        ny_ = sum((V[k][2] - V[(k + 1) % n][2]) * (V[k][0] + V[(k + 1) % n][0]) for k in range(n))
-        nz_ = sum((V[k][0] - V[(k + 1) % n][0]) * (V[k][1] + V[(k + 1) % n][1]) for k in range(n))
-        ln = math.sqrt(nx_ * nx_ + ny_ * ny_ + nz_ * nz_)
-        c = [sum(v[d] for v in V) / n for d in range(3)]
-        if ln <= 1e-12 or max(abs((v[0] - c[0]) * nx_ + (v[1] - c[1]) * ny_ + (v[2] - c[2]) * nz_) / ln
-                              for v in V) > tol:
-            if n == 4 and math.dist(V[1], V[3]) < math.dist(V[0], V[2]):
-                tris = [(idx[1], idx[2], idx[3]), (idx[1], idx[3], idx[0])]
-            else:
-                tris = [(idx[0], idx[k], idx[k + 1]) for k in range(1, n - 1)]
-            for t in tris:
-                mesh.add_face(t, mat, col)
-            return True
-    mesh.add_face(idx, mat, col)
-    return False
-
-
-def _is_convex(ring):
-    n = len(ring)
-    for k in range(n):
-        a, b, c = ring[k - 1], ring[k], ring[(k + 1) % n]
-        if (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) < -1e-9:
-            return False
-    return True
-
-
 def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RING_VERTICES,
                    max_work=DEFAULT_MAX_WORK, reserve=None):
     """Returns (MeshData in object-local coords, location, provenance).
@@ -494,26 +441,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     height, min_h, roof_src, prov, eave_based = _building_height(tags)
     roof_src_label = prov.get("roof_height")
     roof_shape_tag = tags.get("roof:shape")
-    roof_shape = roof_shape_tag or "flat"
-    prov["roof_shape"] = "measured:osm roof:shape" if roof_shape_tag else "inferred:flat"
-
-    supported = {"flat", "skillion", "pyramidal", "gabled", "hipped"}
-    if roof_shape not in supported:
-        prov["roof_shape"] = f"fallback:flat (roof:shape={roof_shape} not modelled in v1)"
-        roof_shape = "flat"
-    if poly.holes and roof_shape not in ("flat", "skillion"):
-        prov["roof_shape"] = f"fallback:flat (roof:shape={roof_shape} with courtyard)"
-        roof_shape = "flat"
-    if roof_shape in ("gabled", "hipped") and not _rect_check(outer):
-        if _is_convex(outer):
-            prov["roof_shape"] = f"fallback:pyramidal (roof:shape={roof_shape} on non-rectangular footprint)"
-            roof_shape = "pyramidal"
-        else:
-            prov["roof_shape"] = f"fallback:flat (roof:shape={roof_shape} on non-rectangular footprint)"
-            roof_shape = "flat"
-    if roof_shape == "pyramidal" and not _is_convex(outer):
-        prov["roof_shape"] = "fallback:flat (pyramidal roof on concave footprint)"
-        roof_shape = "flat"
+    roof_shape = roofs.resolve_shape(roof_shape_tag, outer, poly.holes, prov)
 
     # Roof height actually built; a source value that cannot be used is kept separately.
     xs, ys = [p[0] for p in outer], [p[1] for p in outer]
@@ -555,39 +483,14 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
         height += roof_h  # building:levels gave the eave; the total includes the roof built on top
     prov["roof_height_m"] = round(roof_h, 2)
 
-    across = False
-    orient_tag = tags.get("roof:orientation")
-    if roof_shape in ("gabled", "hipped"):
-        if orient_tag in ("along", "across"):
-            prov["roof_orientation"] = f"measured:osm roof:orientation={orient_tag}"
-            across = orient_tag == "across"
-        elif orient_tag is None:
-            prov["roof_orientation"] = "inferred:along (ridge parallel to the longer side)"
-        else:
-            prov["roof_orientation"] = f"fallback:along (roof:orientation={orient_tag} not recognised)"
-    elif orient_tag is not None:
-        prov["roof_orientation"] = f"ignored:roof:orientation={orient_tag} (roof built {roof_shape})"
+    across = roofs.resolve_orientation(roof_shape, tags, prov)
 
     top = height  # relative to the base datum
     wall_top_flat = top - roof_h
     elevated = min_h > 0
     base_z = min_h if elevated else -FOUNDATION_SINK_M
 
-    skillion_z = None
-    if roof_shape == "skillion":
-        direction = parse_number(tags.get("roof:direction"))
-        if direction is None:
-            prov["roof_direction"] = "inferred:0 (north-facing slope)"
-            direction = 0.0
-        direction %= 360.0
-        d = (math.sin(math.radians(direction)), math.cos(math.radians(direction)))
-        proj = [p[0] * d[0] + p[1] * d[1] for r in rings for p in r]
-        smin, smax = min(proj), max(proj)
-        span = max(smax - smin, 1e-6)
-
-        def skillion_z(p):
-            s = p[0] * d[0] + p[1] * d[1]
-            return top - roof_h * (s - smin) / span
+    skillion_z = roofs.skillion_surface(roof_shape, rings, parse_number(tags.get("roof:direction")), top, roof_h, prov)
 
     samples = footprint_terrain_samples(terrain, rings)
     g_min = min(p[2] for p in samples)
@@ -643,7 +546,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     split = []
 
     def add_face(idx, mat, col):
-        split.append(_add_planar_face(mesh, idx, mat, col))
+        split.append(roofs.add_planar_face(mesh, idx, mat, col))
     ring_idx_bottom, ring_idx_top = [], []
     for r in rings:
         rb, rt = [], []
@@ -660,42 +563,13 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
             j = (k + 1) % n
             add_face((rb[k], rb[j], rt[j], rt[k]), "MB Facade", facade)
 
-    flat_top = [i for rt in ring_idx_top for i in rt]
     flat_bot = [i for rb in ring_idx_bottom for i in rb]
     for (a, b, c) in tris:
         add_face((flat_bot[a], flat_bot[c], flat_bot[b]), "MB Facade", facade)  # downward
-    if roof_shape in ("flat", "skillion"):
-        for (a, b, c) in tris:
-            add_face((flat_top[a], flat_top[b], flat_top[c]), "MB Roof", roof_col)
-    elif roof_shape == "pyramidal":
-        apex = mesh.add_vertex(0.0, 0.0, top)
-        rt = ring_idx_top[0]
-        for k in range(len(rt)):
-            add_face((rt[k], rt[(k + 1) % len(rt)], apex), "MB Roof", roof_col)
-    else:  # gabled / hipped on rectangle a,b,c,d (CCW); ridge runs parallel to a-b
-        rt = ring_idx_top[0]
-        V = mesh.vertices
-        a, b, c, d = rt
-        # along: a-b is a long side (ridge along the long axis); across: a-b is a short side.
-        if (math.dist(V[a][:2], V[b][:2]) < math.dist(V[b][:2], V[c][:2])) != across:
-            a, b, c, d = b, c, d, a
-        m1 = tuple((V[b][i] + V[c][i]) / 2 for i in range(2))
-        m2 = tuple((V[d][i] + V[a][i]) / 2 for i in range(2))
-        if roof_shape == "hipped":
-            end = math.dist(V[b][:2], V[c][:2])
-            ridge_span = math.dist(m1, m2)
-            t = min(0.5 * end / max(ridge_span, 1e-6), 0.49)
-            r1 = (m1[0] + (m2[0] - m1[0]) * t, m1[1] + (m2[1] - m1[1]) * t)
-            r2 = (m2[0] + (m1[0] - m2[0]) * t, m2[1] + (m1[1] - m2[1]) * t)
-        else:
-            r1, r2 = m1, m2
-        R1 = mesh.add_vertex(r1[0], r1[1], top)
-        R2 = mesh.add_vertex(r2[0], r2[1], top)
-        add_face((a, b, R1, R2), "MB Roof", roof_col)
-        add_face((c, d, R2, R1), "MB Roof", roof_col)
-        end_mat, end_col = ("MB Roof", roof_col) if roof_shape == "hipped" else ("MB Facade", facade)
-        add_face((b, c, R1), end_mat, end_col)
-        add_face((d, a, R2), end_mat, end_col)
+    local_rings = [[(p[0] - cx, p[1] - cy) for p in r] for r in rings]
+    roofs.build_roof(mesh, local_rings[0], local_rings[1:], wall_top_flat, roof_h, roof_shape, tags, prov,
+                     top_idx=ring_idx_top, tris=tris, add_face=add_face, roof_col=roof_col, facade=facade,
+                     across=across)
     if any(split):
         prov["roof_faces"] = (f"{sum(split)} non-planar face(s) (footprint not an exact rectangle) split into "
                               "triangles along the shorter diagonal")
