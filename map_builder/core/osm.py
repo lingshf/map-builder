@@ -838,7 +838,9 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
         elif (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"):
             pts = way_points(nids)
             if pts is not None:
-                bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent))
+                bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent), max_parts=allowance.left)
+                if bparts is None:
+                    raise _MaskFeatureLimit()
                 allowance.take(len(bparts))
                 for k, part in enumerate(bparts):
                     out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
@@ -1042,7 +1044,11 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                 continue
             if (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"
                     and not out.mask_unavailable):
-                bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent))
+                bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent),
+                                        max_parts=max_features - _mask_count(out))
+                if bparts is None:
+                    bparts = ()
+                    _drop_mask_candidates(out, max_features)
                 keep_mask(out.bridges, (Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part)
                                         for k, part in enumerate(bparts)))
             if "highway" not in tags:
@@ -1520,8 +1526,9 @@ def _subset(tags):
     return {k: v for k, v in tags.items() if k in _KEEP_TAGS}
 
 
-def _clip_polyline(pts, area, rect=None):
-    """Clip a polyline to the area rectangle (or ``rect`` = (x0, y0, x1, y1)); returns list of parts (>=2 pts)."""
+def _clip_polyline(pts, area, rect=None, max_parts=None):
+    """Clip a polyline to the area rectangle (or ``rect`` = (x0, y0, x1, y1)); returns list of parts (>=2 pts),
+    or None as soon as it would hold more than ``max_parts`` parts (bounding the allocation, not only the result)."""
     if rect is None:
         hx, hy = area.half
         rect = (-hx, -hy, hx, hy)
@@ -1532,6 +1539,8 @@ def _clip_polyline(pts, area, rect=None):
         if seg is None:
             if len(cur) >= 2:
                 parts.append(cur)
+                if max_parts is not None and len(parts) > max_parts:
+                    return None
             cur = []
             continue
         p, q = seg
@@ -1540,9 +1549,13 @@ def _clip_polyline(pts, area, rect=None):
         else:
             if len(cur) >= 2:
                 parts.append(cur)
+                if max_parts is not None and len(parts) > max_parts:
+                    return None
             cur = [p, q]
     if len(cur) >= 2:
         parts.append(cur)
+    if max_parts is not None and len(parts) > max_parts:
+        return None
     return parts
 
 
