@@ -329,7 +329,7 @@ def ray_cast(col, origin, direction, max_dist, max_work=DEFAULT_MAX_WORK):
             if triangle_is_degenerate(a, b, c):
                 continue
             hit = _ray_triangle(o, d, a, b, c)
-            if hit is None or hit < 0.0:
+            if hit is None or hit < 0.0 or hit > max_dist:     # (either test's hit counts; see RAY_EDGE_TOL)
                 hit = _ray_triangle_tolerant(o, d, a, b, c, RAY_EDGE_TOL)
             if hit is None or hit < 0.0 or hit > max_dist:
                 continue

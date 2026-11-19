@@ -213,6 +213,14 @@ class RayCastTest(unittest.TestCase):
         n = math.sqrt(sum(x * x for x in dr))
         self.assertAlmostEqual(hit.t, n, delta=1e-6)
 
+    def test_hit_exactly_at_max_dist_is_inclusive(self):
+        """Review round 6: the watertight test rounded t = 3 to 3.0000000000000004 > max_dist."""
+        q = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        col = read_collision(write_collision([ColObject("g", "terrain:grid", "terrain", q, [(0, 1, 2), (0, 2, 3)])]))
+        hit = ray_cast(col, (0.5, 0.2, 3), (0, 0, -1), 3.0)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.t, 3.0)
+
     def test_capsule_prefilter_honours_the_contact_tolerance(self):
         """Review round 5: the triangle AABB prefilter used the bare radius."""
         col = read_collision(write_collision([ColObject("g", "terrain:grid", "terrain",
