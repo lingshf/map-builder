@@ -321,9 +321,59 @@ class TunnelVariantsTest(unittest.TestCase):
         probes = [dict(pr, id=f"p{k}") for k in range(PASSAGE_PROBE_MAX + 2)]
         finalize_probes(plan, SimpleNamespace(probes=probes))
         self.assertEqual(len(plan.passage_probes), PASSAGE_PROBE_MAX)
-        over = plan.report["passage_probes_blocked"]
+        over = plan.report["passage_probes_dropped"]
         self.assertEqual([e["id"] for e in over], ["p256", "p257"])
-        self.assertTrue(all(e["blocker"] is None and "cap" in e["reason"] for e in over))
+        self.assertTrue(all("at most" in e["reason"] for e in over))
+        self.assertEqual([p["id"] for p in plan.passage_probes], [f"p{k}" for k in range(PASSAGE_PROBE_MAX)])
+
+    def test_blocked_elevated_probes_do_not_take_the_bore_slot(self):
+        """Review round 2: 1 clear bore + 256 staged elevated probes that collide with terrain."""
+        from types import SimpleNamespace
+        from map_builder.core import passages
+        from map_builder.core.package import PASSAGE_PROBE_MAX
+        from map_builder.core.structures import finalize_probes
+        grid = hill_grid()
+        plan, _ = plan_for(grid)
+        bore = plan.passage_probes.pop()
+        z = plan.objects[0].mesh.vertices[0][2]
+        elev = [dict(bore, id=f"e{i}", kind="elevated", path_map=[[42, 30, z], [43, 30, z]])
+                for i in range(PASSAGE_PROBE_MAX)]
+        ctx = SimpleNamespace(probes=[bore], terrain=grid)
+        passages._state(ctx).probes = [p["id"] for p in elev]
+        plan.passage_probes.extend(elev)
+        finalize_probes(plan, ctx)
+        self.assertEqual([p["id"] for p in plan.passage_probes], [bore["id"]])
+        self.assertEqual(len(plan.report["passage_probes_blocked"]), PASSAGE_PROBE_MAX)
+        self.assertNotIn("passage_probes_dropped", plan.report)
+
+    def test_global_cap_applies_after_validation_in_plan_order(self):
+        from types import SimpleNamespace
+        from map_builder.core import passages
+        from map_builder.core.package import PASSAGE_PROBE_MAX
+        from map_builder.core.structures import finalize_probes
+        grid = hill_grid()
+        plan, _ = plan_for(grid)
+        bore = plan.passage_probes.pop()
+        z = max(v[2] for v in plan.objects[0].mesh.vertices) + 20.0     # high above everything: all clear
+        mk = lambda name, kind: dict(bore, id=name, kind=kind, path_map=[[-40 + int(name[1:]) * 0.1, 40, z],   # noqa: E731
+                                                                          [-39 + int(name[1:]) * 0.1, 40, z]])
+        elev = [mk(f"e{i}", "elevated") for i in range(200)]
+        tun = [mk(f"t{i}", "tunnel") for i in range(100)]
+        results = []
+        for _ in range(2):
+            plan, _ = plan_for(grid)
+            plan.passage_probes.clear()
+            plan.passage_probes.extend(dict(p) for p in elev)
+            ctx = SimpleNamespace(probes=[dict(p) for p in tun], terrain=grid)
+            passages._state(ctx).probes = [p["id"] for p in elev]
+            finalize_probes(plan, ctx)
+            results.append(([p["id"] for p in plan.passage_probes],
+                            [e["id"] for e in plan.report["passage_probes_dropped"]]))
+        self.assertEqual(results[0], results[1])
+        kept, dropped = results[0]
+        self.assertEqual(len(kept), PASSAGE_PROBE_MAX)
+        self.assertEqual(kept, [f"e{i}" for i in range(200)] + [f"t{i}" for i in range(PASSAGE_PROBE_MAX - 200)])
+        self.assertEqual(dropped, [f"t{i}" for i in range(PASSAGE_PROBE_MAX - 200, 100)])
 
     def test_chunked_probe_check_matches_the_whole_scene_query(self):
         from map_builder.core.generate import ObjectSpec

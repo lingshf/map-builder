@@ -351,18 +351,23 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK):
 
 
 def finalize_probes(plan, ctx):
-    """Check the probes the stages queued on ``ctx.probes`` against the finished scene (after the vegetation)
-    and publish them: kept ones go to ``plan.passage_probes`` (at most ``PASSAGE_PROBE_MAX``), blocked,
-    over-cap and unchecked ones to ``report["passage_probes_blocked"]`` with the blocker's ``mb_id`` or a
-    ``reason``."""
+    """The single place where passage probes are finished (after the vegetation). Every staged probe is first
+    checked on the finished scene by its own kind's check: the elevated / building-passage ones through
+    ``passages.finish`` and the ones queued on ``ctx.probes`` (tunnels, later bridges) through ``check_probes``.
+    Blocked and unchecked ones go to ``report["passage_probes_blocked"]`` with the blocker's ``mb_id`` or a
+    ``reason``. Only then is the one global ``PASSAGE_PROBE_MAX`` cap applied, in plan order, to the survivors:
+    the surplus is not exported and is listed in ``report["passage_probes_dropped"]``."""
+    from . import passages
     from .package import PASSAGE_PROBE_MAX
-    if not ctx.probes:
-        return
-    kept, blocked = check_probes(plan, ctx.probes)
-    room = max(0, PASSAGE_PROBE_MAX - len(plan.passage_probes))
-    for pr in kept[room:]:
-        blocked.append({"id": pr["id"], "blocker": None, "reason": f"passage probe cap {PASSAGE_PROBE_MAX} reached"})
-    plan.passage_probes.extend(kept[:room])
+    passages.finish(plan, ctx)
+    kept, blocked = check_probes(plan, ctx.probes) if ctx.probes else ([], [])
+    ctx.probes = []
+    plan.passage_probes.extend(kept)
     if blocked:
         plan.report.setdefault("passage_probes_blocked", []).extend(blocked)
-    ctx.probes = []
+    surplus = plan.passage_probes[PASSAGE_PROBE_MAX:]
+    if surplus:
+        del plan.passage_probes[PASSAGE_PROBE_MAX:]
+        plan.report.setdefault("passage_probes_dropped", []).extend(
+            {"id": p["id"], "reason": f"the manifest holds at most {PASSAGE_PROBE_MAX} passage probes"}
+            for p in surplus)

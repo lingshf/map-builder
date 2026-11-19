@@ -1885,7 +1885,6 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                 plan.report["warnings"].append(f"tree limit {opts.max_trees} reached; scatter truncated")
         plan.count("trees", n_trees)
     finalize_probes(plan, ctx)
-    passages.finish(plan, ctx)
     plan.report["counts"]["objects"] = len(plan.objects)
     plan.report["z_offset_m"] = z_offset
     plan.report["budget"] = budget.to_dict()
