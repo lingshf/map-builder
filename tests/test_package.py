@@ -1477,28 +1477,33 @@ class ReviewRound2Test(TempDirCase):
         island = box_mesh(3, 3, 6, 6, 3, 6)
         probs = self.orient([(outer, False), (apart, True)])
         self.assertEqual(len(probs), 1, probs)
-        self.assertIn("is not inside an outward shell", probs[0])
+        self.assertIn("every shell must have positive volume", probs[0])
         self.assertIn("building object #0: shell 1 of 2", probs[0])
         self.assertTrue(self.orient([(apart, True), (outer, False)]))                # order does not matter
         self.assertTrue(self.orient([(outer, True)]))                                # a lone inverted solid
-        self.assertEqual(self.orient([(outer, False), (cavity, True)]), [])          # legitimate cavity
-        self.assertEqual(self.orient([(outer, False), (big_cavity, True), (island, False)]), [])
+        self.assertTrue(self.orient([(outer, False), (cavity, True)]))               # cavities: not in v1
+        self.assertTrue(self.orient([(outer, False), (big_cavity, True), (island, False)]))
+        self.assertTrue(self.orient([(outer, False), (big_cavity, True), (cavity, True)]))  # review round 3
+        crossing = box_mesh(8, 8, 14, 14, 2, 7)                                       # crosses the boundary
+        self.assertTrue(self.orient([(outer, False), (crossing, True)]))
         self.assertEqual(self.orient([(outer, False), (apart, False)]), [])          # two outward shells
-        probs = self.orient([(outer, False), (cavity, True)], max_work=1)
-        self.assertTrue(probs and "work budget" in probs[0], probs)
         # package level: visual and collision agree, so only the independent orientation check catches it
         bad = obj("twin", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
                                                                 (box_mesh(80, 60, 85, 65, 0, 5), True)]))
         members, manifest, _ = scene_members(scene() + [bad])
         raw_write(self.p("shells.mbmap"), members, manifest)
-        r = self.assertInvalid(self.p("shells.mbmap"), "is not inside an outward shell")
+        r = self.assertInvalid(self.p("shells.mbmap"), "every shell must have positive volume")
         self.assertFalse(any("winding mismatch" in e for e in r.errors), r.errors)
         with self.assertRaises(PackageError):
             pkg.write_package(self.p("shells_w.mbmap"), members, manifest)
-        ok = obj("hollow", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
-                                                                 (box_mesh(62, 62, 67, 67, 2, 7), True)]))
-        members, manifest, _ = scene_members(scene() + [ok])
-        self.assertTrue(pkg.write_package(self.p("hollow.mbmap"), members, manifest).ok)
+
+    def test_orientation_check_is_linear_in_shells(self):
+        import time
+        boxes = [(box_mesh(x * 3, y * 3, x * 3 + 1, y * 3 + 1, 0, 1), True) for x in range(60) for y in range(50)]
+        t0 = time.perf_counter()
+        probs = self.orient(boxes)
+        self.assertEqual(len(probs), 3000)
+        self.assertLess(time.perf_counter() - t0, 10.0)
 
     # 2: the one-to-one matcher is a maximum matching, independent of order
     def test_one_to_one_matching_is_order_independent(self):

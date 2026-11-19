@@ -128,9 +128,9 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
     warning.
   * the collision winding rules above, checked on the collision alone: building solids must be
     closed (each directed edge matched by its reverse), and each connected shell must have a
-    positive signed volume unless it is a cavity nested inside an outward shell. Non-degenerate
-    terrain and road triangles must have normal Z > 0. A violation, or exhausting the bounded
-    work budget for this check, is an error. Degenerate triangles are only a warning.
+    positive signed volume. Enclosed cavities (inward-facing inner shells) are not supported in
+    v1. Non-degenerate terrain and road triangles must have normal Z > 0. A violation is an
+    error. Degenerate triangles are only a warning.
   * the credential policy (no URL user-info, credential query keys, Authorization or Bearer
     values, or credential-named keys), applied recursively to the manifest, `report.json`,
     the collision object table and the glTF JSON. Diagnostics name entries by index or fixed

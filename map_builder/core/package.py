@@ -569,20 +569,6 @@ def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, m
 # --- independent collision orientation ------------------------------------------------------
 
 WELD_TOL_M = 1e-4                 # building shell vertices closer than this are one vertex (float32 noise)
-# Work budget for shell nesting (ray/triangle tests), over the whole collision: per building triangle plus a
-# constant. Generated buildings have no inverted shells and need no ray tests at all; a legitimate cavity
-# costs a few passes over its container.
-ORIENT_WORK_PER_TRIANGLE = 64
-ORIENT_WORK_SLACK = 1 << 16
-NEST_TEST_POINTS = 4              # face centroids of a shell tried as the point-in-solid sample
-_RAY_DIRS = tuple(_unit(d) for d in ((0.5383, 0.3101, 0.7837), (-0.4231, 0.6687, 0.6115),
-                                     (0.2719, -0.8129, 0.5150)))   # generic: no axis or diagonal alignment
-_RAY_EPS_BARY = 1e-9
-_RAY_EPS_T = 1e-7
-
-
-class _OrientBudget(Exception):
-    pass
 
 
 def _weld_ids(tris, tol=WELD_TOL_M):
@@ -670,53 +656,7 @@ def _signed_volume(tris):
     return vol / 6.0
 
 
-def _ray_parity(p, d, tris):
-    """Number of crossings of the ray p + t*d (t > 0) with ``tris`` mod 2, or None when the ray grazes an
-    edge or vertex or starts on a triangle (undecidable from this ray)."""
-    odd = False
-    for a, b, c in tris:
-        e1 = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
-        e2 = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
-        pv = (d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0])
-        det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2]
-        if det == 0.0:
-            continue                            # parallel to the ray (or degenerate): no transversal crossing
-        s = (p[0] - a[0], p[1] - a[1], p[2] - a[2])
-        u = (s[0] * pv[0] + s[1] * pv[1] + s[2] * pv[2]) / det
-        if u < -_RAY_EPS_BARY or u > 1.0 + _RAY_EPS_BARY:
-            continue
-        qv = (s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0])
-        v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) / det
-        if v < -_RAY_EPS_BARY or u + v > 1.0 + _RAY_EPS_BARY:
-            continue
-        t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det
-        if t < -_RAY_EPS_T:
-            continue
-        if t <= _RAY_EPS_T or u <= _RAY_EPS_BARY or v <= _RAY_EPS_BARY or u + v >= 1.0 - _RAY_EPS_BARY:
-            return None
-        odd = not odd
-    return odd
-
-
-def _inside(points, tris, work):
-    """Whether the closed surface ``tris`` contains the sample points (the first point and direction that
-    give a clean ray decide), or None if none does. ``work`` = [used, budget] ray/triangle tests."""
-    for p in points:
-        for d in _RAY_DIRS:
-            work[0] += len(tris)
-            if work[0] > work[1]:
-                raise _OrientBudget
-            res = _ray_parity(p, d, tris)
-            if res is not None:
-                return res
-    return None
-
-
-def _contains_aabb(outer, inner, eps=1e-6):
-    return all(outer[i] <= inner[i] + eps for i in range(3)) and all(outer[i] >= inner[i] - eps for i in range(3, 6))
-
-
-def _building_problems(k, tris, work):
+def _building_problems(k, tris):
     """Orientation problems of one building collision object (index ``k`` in the object table)."""
     tag = f"collision: building object #{k}"
     ids = _weld_ids(tris)
@@ -733,37 +673,19 @@ def _building_problems(k, tris, work):
     shells = []
     for ts in _shells(ids):
         st = [tris[t] for t in ts]
-        shells.append((st, _signed_volume(st), _aabb([p for t in st for p in t])))
+        shells.append((st, _signed_volume(st)))
     problems = []
     n = len(shells)
-    for s, (st, vol, box) in enumerate(shells):
-        if vol > 0.0:
-            continue
-        # An inverted shell is legitimate only as a cavity: inside a shell that faces outward.
-        nd = [t for t in st if not is_degenerate(*t)]
-        if not nd:
-            continue                            # only zero-area faces: no orientation to check
-        points = [_centroid(nd[(i * len(nd)) // NEST_TEST_POINTS]) for i in range(min(NEST_TEST_POINTS, len(nd)))]
-        verdict = False
-        for o, (ot, ovol, obox) in enumerate(shells):
-            if o == s or not ovol > 0.0 or not _contains_aabb(obox, box):
-                continue
-            res = _inside(points, ot, work)
-            if res:
-                verdict = True
-                break
-            if res is None:
-                verdict = None
-        if verdict is None:
-            problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3 and whether it is a cavity "
-                            "inside an outward shell could not be decided (every sample ray grazed an edge)")
-        elif not verdict:
-            problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3 and is not inside an outward "
-                            "shell; every top-level shell must have positive volume (faces CCW seen from outside)")
+    for s, (st, vol) in enumerate(shells):
+        if vol > 0.0 or all(is_degenerate(*t) for t in st):
+            continue                            # outward, or only zero-area faces: nothing to orient
+        problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3; every shell must have "
+                        "positive volume (faces CCW seen from outside). Inverted shells and enclosed "
+                        "cavities are not supported in v1")
     return problems
 
 
-def collision_orientation_problems(col, max_work=None):
+def collision_orientation_problems(col):
     """Checks the final collision on its own, per docs/PACKAGE_FORMAT.md "Winding" (agreement with the
     visuals does not prove orientation: both could be inverted). Returns a list of error strings, which
     name objects by table index only (never by their names from the file).
@@ -772,37 +694,20 @@ def collision_orientation_problems(col, max_work=None):
       positions within ``WELD_TOL_M``, is matched by its reverse equally often; zero-length edges of
       degenerate triangles are ignored, degenerate triangles are otherwise kept so slivers still close the
       surface). Each connected shell (see :func:`_shells`) is checked on its own, so an outward shell
-      cannot hide a separate inverted one: a shell must have positive signed volume unless it is a cavity,
-      i.e. inside a shell of positive volume (ray parity from sample face centroids). Courtyards are holes
-      of their own shell, not cavities. Generated buildings, all roof shapes, courtyards and raised parts,
-      are closed by construction.
+      cannot hide a separate inverted one: every shell must have positive signed volume. Enclosed
+      cavities (inward-facing inner shells) are not supported in v1 and are errors; courtyards are
+      holes of their own shell, not cavities. Generated buildings, all roof shapes, courtyards and raised
+      parts, are closed outward shells by construction. The work is linear in the triangle count.
     * ``terrain`` and ``road``: every non-degenerate triangle faces up (normal z > 0).
-    Other classes (vegetation, water, props, user) carry no orientation requirement in the contract.
-
-    Nesting tests are bounded by ``max_work`` ray/triangle tests over the whole collision (default
-    ``ORIENT_WORK_PER_TRIANGLE`` per building triangle + ``ORIENT_WORK_SLACK``); running out is reported as
-    an error, not passed."""
+    Other classes (vegetation, water, props, user) carry no orientation requirement in the contract."""
     problems = []
-    if max_work is None:
-        nb = sum(e["tri_count"] for e in col.objects if e["class"] == "building")
-        max_work = ORIENT_WORK_PER_TRIANGLE * nb + ORIENT_WORK_SLACK
-    work = [0, max_work]
-    exhausted = False
     for k, e in enumerate(col.objects):
         cls = e["class"]
         if cls not in ("building", "terrain", "road"):
             continue
         tris = col.object_triangles(e)
         if cls == "building":
-            if exhausted:
-                continue
-            try:
-                problems += _building_problems(k, tris, work)
-            except _OrientBudget:
-                exhausted = True
-                problems.append(f"collision: building object #{k}: shell nesting could not be verified within the "
-                                f"work budget of {max_work} ray/triangle tests; building orientation is unverified "
-                                "from here on")
+            problems += _building_problems(k, tris)
         else:
             down = sum(1 for t in tris if not is_degenerate(*t) and _cross(*t)[2] <= 0.0)
             if down:
