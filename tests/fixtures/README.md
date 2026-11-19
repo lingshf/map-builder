@@ -12,4 +12,6 @@ and are not real geographic data.
   datum reported as `SYNTHETIC`).
 
 These files contain no OpenStreetMap or Copernicus data and need no licence.
-`examples/synthetic_sample.mbmap` is built from them.
+`examples/synthetic_sample.mbmap` is built from them with a fixed `--created-utc`, so the build is
+byte-reproducible. The exact command is in [examples/README.md](../../examples/README.md), and
+`tests/test_examples.py` fails if the committed sample goes stale. The build passes `--osm-license` so the sample is not credited as OpenStreetMap/ODbL.

@@ -46,6 +46,9 @@ class Settings:
         "elevation_cache_dataset_id": None,
         "osm_cache_dataset_id": None,
         "heightfield_spacing": None,
+        # licence/attribution the user declares for a local OSM-format file that is NOT OpenStreetMap data
+        # (e.g. a hand-written synthetic fixture); None = the file is OpenStreetMap data under ODbL
+        "osm_license": None,
         "plan_options": None,
     }
 
@@ -63,6 +66,12 @@ class Settings:
             raise ValueError("elevation_source 'file' needs elevation_file")
         if self.osm_source == "file" and not self.osm_file:
             raise ValueError("osm_source 'file' needs osm_file")
+        if self.osm_license is not None:
+            if self.osm_source != "file":
+                raise ValueError("osm_license applies only to a local OSM-format file; Overpass data is "
+                                 "OpenStreetMap (ODbL)")
+            if not (isinstance(self.osm_license, str) and self.osm_license.strip()):
+                raise ValueError("osm_license must be a non-empty licence/attribution statement")
         self.terrain_spacing = float(self.terrain_spacing)
         if not (math.isfinite(self.terrain_spacing) and self.terrain_spacing > 0):
             raise ValueError("terrain_spacing must be a positive finite number")
@@ -100,12 +109,20 @@ def acquire(area, settings, client=None, progress=None):
                              allow_cache_override=settings.allow_cache_override,
                              cache_dataset_id=settings.osm_cache_dataset_id)
     classified = classify(osm, area)
-    return grid, classified, [dict(grid.provenance), osm_source_entry(osm)]
+    return grid, classified, [dict(grid.provenance), osm_source_entry(osm, settings.osm_license)]
 
 
-def osm_source_entry(osm):
-    src = {"kind": "features", "provider": osm.source.get("provider"), "product": "OpenStreetMap",
-           "license": OSM_LICENSE, "attribution": OSM_ATTRIBUTION, "osm_base_timestamp": osm.timestamp}
+def osm_source_entry(osm, declared_license=None):
+    """Source entry for the features. ``declared_license``: the user's statement for a local OSM-format
+    file that is not OpenStreetMap data (then no OpenStreetMap/ODbL attribution is claimed)."""
+    if declared_license is None:
+        src = {"kind": "features", "provider": osm.source.get("provider"), "product": "OpenStreetMap",
+               "license": OSM_LICENSE, "attribution": OSM_ATTRIBUTION, "osm_base_timestamp": osm.timestamp}
+    else:
+        src = {"kind": "features", "provider": osm.source.get("provider"),
+               "product": "user-declared OSM-format data (not OpenStreetMap)",
+               "license": {"id": "user-declared", "name": declared_license}, "attribution": declared_license,
+               "osm_base_timestamp": osm.timestamp}
     for k, v in osm.source.items():
         if k == "query":
             src["query_sha256"] = hashlib.sha256(v.encode("utf-8")).hexdigest()

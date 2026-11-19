@@ -10,6 +10,7 @@ user-edited Blender scene. Use the add-on for edited maps.
 
 import argparse
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,6 +20,8 @@ from map_builder.core.geodesy import Area  # noqa: E402
 from map_builder.core.generate import PlanOptions  # noqa: E402
 from map_builder.core.package import validate_package  # noqa: E402
 from map_builder.core.pipeline import Settings, build_package  # noqa: E402
+
+_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
 def main(argv=None):
@@ -32,6 +35,9 @@ def main(argv=None):
     b.add_argument("--dem-crs", default="EPSG:4326", help="CRS of an .asc grid (GeoTIFFs carry their own)")
     b.add_argument("--datum", required=True, help="vertical datum of the elevation values, e.g. EGM2008")
     b.add_argument("--dem-license", required=True, help="licence/attribution of the elevation data")
+    b.add_argument("--osm-license", default=None,
+                   help="only if the --osm file is NOT OpenStreetMap data (e.g. a synthetic fixture): its "
+                        "licence/attribution statement; by default the file is credited as OpenStreetMap (ODbL)")
     b.add_argument("--lat", type=float, required=True)
     b.add_argument("--lon", type=float, required=True)
     b.add_argument("--width", type=float, default=1000)
@@ -40,8 +46,13 @@ def main(argv=None):
     b.add_argument("--heightfield", type=float, default=2.0, help="heightfield spacing (0 = none)")
     b.add_argument("--seed", type=int, default=1)
     b.add_argument("--name", default="map")
+    b.add_argument("--created-utc", default=None, metavar="YYYY-MM-DDTHH:MM:SSZ",
+                   help="fixed manifest created_utc (default: now); with the same inputs the package is "
+                        "byte-identical, including package_id")
     b.add_argument("--out", required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "build" and a.created_utc is not None and not _UTC.fullmatch(a.created_utc):
+        ap.error("--created-utc must be an ISO-8601 UTC timestamp like 2026-01-01T00:00:00Z")
     try:
         if a.cmd == "validate":
             r = validate_package(a.package)
@@ -49,10 +60,12 @@ def main(argv=None):
             area = Area(a.lat, a.lon, a.width, a.height)
             s = Settings(elevation_source="file", elevation_file=a.dem, elevation_crs=a.dem_crs,
                          elevation_vertical_datum=a.datum, elevation_license=a.dem_license, osm_source="file",
-                         osm_file=a.osm, terrain_spacing=a.spacing, heightfield_spacing=a.heightfield or None,
+                         osm_file=a.osm, osm_license=a.osm_license, terrain_spacing=a.spacing,
+                         heightfield_spacing=a.heightfield or None,
                          plan_options=PlanOptions(seed=a.seed))
             m, r = build_package(area, s, a.out, a.name,
-                                 progress=lambda frac: print(f"terrain {frac:.0%}", file=sys.stderr, end="\r"))
+                                 progress=lambda frac: print(f"terrain {frac:.0%}", file=sys.stderr, end="\r"),
+                                 created_utc=a.created_utc)
             print(f"wrote {a.out}  package_id={r.package_id}  objects={len(m['objects'])}  "
                   f"probes={len(m['orientation_probes'])}")
     except (MapBuilderError, OSError, ValueError) as e:
