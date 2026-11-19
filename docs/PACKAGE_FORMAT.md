@@ -356,6 +356,22 @@ counted in `edits.removed` and listed in `report.json`.
   * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
     buildings where the terrain reaches the roof underside, footprints or trees outside
     the terrain extent, landcover with invalid ring topology, and rejected building parts
+  * `terrain_correction`: the DSM correction outcome (`applied`, `setting`, `reason`,
+    `masked_points`, `lowered_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, and
+    once the fill ran `fill_cycles`, `fill_residual_m`, `fill_converged`; mask parameters, feature
+    counts, `excluded_invalid`, `validation_work` and `rasterisation_work`). A fill that did not converge is not
+    applied (`reason: fill did not converge`); nor is a mask whose polygon validation used up its
+    work budget (`reason: mask validation work budget exceeded`), nor one whose DSM mask request
+    failed (`reason: mask candidates unavailable`).
+    Informative only; when applied, the elevation entry in `sources` also has an optional
+    `processing` string (sources are an open object, so this is not a format change). With the
+    correction enabled online, the `features` entry also has an optional `dsm_mask_query` object
+    describing the second, wider Overpass request of the same OpenStreetMap data (same licence and
+    attribution) used only for DSM mask candidates: `purpose`, `margin_m`, and `query_sha256`,
+    `from_cache`, `osm_base_timestamp` on success, or `error_class`, `error` (a fixed summary) and
+    for an HTTP error `error_status` if it failed. An `osm_base` value that is not an ISO-8601 UTC
+    timestamp is omitted, here and in the `features` entry itself, with an `osm_base_timestamp_note`. The entry's own
+    `query_sha256` is always the normal (area + 30 m) query, the same as with the correction off
   * counts and warnings
 
 ## `collision/map.mbcol` v2 (little-endian)

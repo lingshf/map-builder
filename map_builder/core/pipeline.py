@@ -1,7 +1,9 @@
 """End-to-end pipeline glue shared by the Blender add-on and headless tools.
 
 Nothing here substitutes data on failure: every acquisition, generation or export error is
-raised to the caller (no flat terrain, no empty feature set, no partial package).
+raised to the caller (no flat terrain, no empty feature set, no partial package). The one exception is
+the optional second Overpass request that only widens the DSM correction mask: if it fails, the content
+(fetched by the normal request) stands and the correction is skipped with a warning.
 """
 
 import copy
@@ -9,16 +11,18 @@ import hashlib
 import json
 import math
 
+from . import dsm
 from .cache import DiskCache, NullCache
 from .collision import (CLASSES, ColObject, heightfield_layout, is_degenerate, rasterize_heightfield,
                         read_collision, write_collision, write_heightfield)
 from .dem import COPERNICUS_BASE_URL, fetch_copernicus, grid_layout, load_local_elevation
-from .errors import PackageError
+from .errors import CoverageError, FormatError, LimitError, NetworkError, PackageError
 from .generate import MATERIALS, PlanOptions, build_plan
 from .glb import node_scale, write_glb
 from .http import HttpClient, redact
-from .osm import DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_LICENSE, classify, fetch_overpass, load_osm_file
-from .package import assemble, passage_probe_problems, write_package
+from .osm import (DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_FETCH_MARGIN_M, OSM_LICENSE, classify, fetch_overpass,
+                  load_osm_file)
+from .package import assemble, find_secrets, is_utc_timestamp, passage_probe_problems, write_package
 
 ELEVATION_SOURCES = ("copernicus", "file")
 OSM_SOURCES = ("overpass", "file")
@@ -49,6 +53,9 @@ class Settings:
         # licence/attribution the user declares for a local OSM-format file that is NOT OpenStreetMap data
         # (e.g. a hand-written synthetic fixture); None = the file is OpenStreetMap data under ODbL
         "osm_license": None,
+        # DSM terrain correction (core/dsm.py): None = auto (on for the Copernicus surface model, off for a
+        # local elevation file), True = on, False = off
+        "dsm_correction": None,
         "plan_options": None,
     }
 
@@ -79,6 +86,8 @@ class Settings:
             self.heightfield_spacing = float(self.heightfield_spacing)
             if not (math.isfinite(self.heightfield_spacing) and self.heightfield_spacing > 0):
                 raise ValueError("heightfield_spacing must be a positive finite number")
+        if self.dsm_correction is not None and not isinstance(self.dsm_correction, bool):
+            raise ValueError("dsm_correction must be None (auto), True or False")
         self.plan_options = self.plan_options or PlanOptions()
 
     def __repr__(self):
@@ -89,10 +98,11 @@ class Settings:
 
 
 def acquire(area, settings, client=None, progress=None):
-    """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data.
+    """Returns (ElevationGrid, Classified, sources list). Raises on any failure (except the DSM mask request,
+    see below); never substitutes data.
     The terrain grid limit is checked first, before any file or network access. The heightfield limit
     belongs to package export (see :func:`build_package`); acquisition and plans produce no heightfield."""
-    grid_layout(area, settings.terrain_spacing)
+    x0, y0, nx, ny = grid_layout(area, settings.terrain_spacing)
     client = client or HttpClient()
     cache = DiskCache(settings.cache_dir) if settings.cache_dir else NullCache()
     if settings.elevation_source == "file":
@@ -102,14 +112,123 @@ def acquire(area, settings, client=None, progress=None):
         grid = fetch_copernicus(area, client, settings.terrain_spacing, cache, settings.copernicus_url, progress,
                                 allow_cache_override=settings.allow_cache_override,
                                 cache_dataset_id=settings.elevation_cache_dataset_id)
+    mask_data = mask_query = None
     if settings.osm_source == "file":
         osm = load_osm_file(settings.osm_file)
     else:
-        osm = fetch_overpass(area, client, settings.overpass_url, cache,
-                             allow_cache_override=settings.allow_cache_override,
-                             cache_dataset_id=settings.osm_cache_dataset_id)
-    classified = classify(osm, area)
-    return grid, classified, [dict(grid.provenance), osm_source_entry(osm, settings.osm_license)]
+        # The content is always the normal query (area + OSM_FETCH_MARGIN_M): the same query text and cache
+        # key with the correction on or off, so the input OSM content and its selection are the same either
+        # way (terrain-dependent eligibility, e.g. a building's roof clearance, and placement use the
+        # corrected terrain, see generate.build_plan). When the DSM
+        # correction is enabled, a second request (the same query with a wider bbox) fetches every DSM mask
+        # candidate the grid can use (selected against the grid extent, osm.classify mask_extent): the grid
+        # may overshoot the area on the +x/+y sides by up to one spacing, plus the widest mask reach, a bridge
+        # centreline up to dsm.BRIDGE_CANDIDATE_MARGIN_M away. Its elements that the normal response lacks are
+        # mask candidates only (classify mask_data). If that request fails, the content stands and the
+        # correction is skipped with a warning (Classified.mask_unavailable).
+        fetch = dict(allow_cache_override=settings.allow_cache_override,
+                     cache_dataset_id=settings.osm_cache_dataset_id)
+        osm = fetch_overpass(area, client, settings.overpass_url, cache, margin_m=OSM_FETCH_MARGIN_M, **fetch)
+        enabled, _ = dsm.resolve(settings.dsm_correction, grid.provenance)
+        if enabled:
+            overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
+                            y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
+            margin = max(OSM_FETCH_MARGIN_M, float(math.ceil(overshoot + dsm.BRIDGE_CANDIDATE_MARGIN_M)))
+            mask_query = {"purpose": "DSM terrain correction mask candidates only (nothing generated from it)",
+                          "margin_m": margin}
+            # Its cache write is best effort (a full disk or unwritable cache only loses the cache entry,
+            # recorded with a warning); the normal request's cache write still raises, as without the mask.
+            mask_cache = _BestEffortCache(cache)
+            try:
+                # also the forests enclosing the area centre: no member of theirs need fall in the bbox
+                mask_data = fetch_overpass(area, client, settings.overpass_url, mask_cache, margin_m=margin,
+                                           enclosing_forests=True, **fetch)
+            except (NetworkError, CoverageError, FormatError, LimitError) as exc:
+                # a structured summary only: the class and a fixed message (the exception text may quote the
+                # response, e.g. a parser diagnostic; it is never persisted)
+                mask_query["error_class"] = type(exc).__name__
+                mask_query["error"] = _mask_error_message(exc)
+                if isinstance(exc, NetworkError) and isinstance(exc.status, int):
+                    mask_query["error_status"] = exc.status
+            else:
+                src = mask_data.source
+                if "query" in src:
+                    mask_query["query_sha256"] = hashlib.sha256(src["query"].encode("utf-8")).hexdigest()
+                if "from_cache" in src:
+                    mask_query["from_cache"] = src["from_cache"]
+                _set_osm_base(mask_query, mask_data.timestamp)
+            if mask_cache.write_error:
+                mask_query["cache_write_error"] = mask_cache.write_error
+    s = grid.spacing
+    classified = classify(osm, area, mask_extent=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * s,
+                                                  grid.y0 + (grid.ny - 1) * s), mask_data=mask_data,
+                          max_mask_work=settings.plan_options.max_mask_validation_work)
+    osm_entry = osm_source_entry(osm, settings.osm_license)
+    if mask_query is not None:
+        osm_entry["dsm_mask_query"] = mask_query
+        if "error" in mask_query:
+            classified.mask_unavailable = (f"the DSM mask request (OSM area + {mask_query['margin_m']:g} m) failed: "
+                                           f"{mask_query['error_class']}: {mask_query['error']}")
+        if "cache_write_error" in mask_query:
+            classified.warnings.append(f"DSM mask request (OSM area + {mask_query['margin_m']:g} m): its response "
+                                       f"was used but could not be cached ({mask_query['cache_write_error']})")
+    return grid, classified, [dict(grid.provenance), osm_entry]
+
+
+class _BestEffortCache:
+    """Wraps a cache for the optional DSM mask request: reads pass through, and an ``OSError`` from a write
+    (full disk, unwritable cache directory) is recorded in ``write_error`` instead of raised. Only the
+    exception type and its OS message are kept (no path: the cache directory may name the user)."""
+
+    def __init__(self, cache):
+        self._cache, self.write_error = cache, None
+
+    def __bool__(self):
+        return bool(self._cache)
+
+    def get(self, namespace, key):
+        return self._cache.get(namespace, key)
+
+    def put(self, namespace, key, body, meta=None):
+        try:
+            self._cache.put(namespace, key, body, meta)
+        except OSError as exc:
+            self.write_error = f"{type(exc).__name__}: {exc.strerror or 'write failed'}"
+
+    def delete(self, namespace, key):
+        try:
+            self._cache.delete(namespace, key)
+        except OSError:
+            pass
+
+
+def _mask_error_message(exc):
+    """Fixed, project-authored summary of a failed DSM mask request (never the exception text)."""
+    from .errors import AuthError
+    if isinstance(exc, AuthError):
+        return "the endpoint rejected the request (HTTP 401/403)"
+    if isinstance(exc, NetworkError):
+        return "the request failed (network error, timeout or HTTP error status)"
+    if isinstance(exc, LimitError):
+        return "the response exceeds a configured resource bound (bytes, elements or nesting)"
+    if isinstance(exc, CoverageError):
+        return "the response has no data for the requested area"
+    return ("the response is not usable OSM XML (malformed, an unsupported encoding or variant, or an incomplete "
+            "result with a server remark)")
+
+
+OSM_BASE_NOTE = ("the OSM data's <meta osm_base> value is not an ISO-8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ); "
+                 "not recorded")
+
+
+def _set_osm_base(entry, value):
+    """Records ``osm_base_timestamp``: the OSM data's ``<meta osm_base>`` only when it is a valid ISO-8601 UTC
+    timestamp (:func:`package.is_utc_timestamp`), None when the data has none; any other value (it is
+    unvalidated response or file text) is omitted with ``osm_base_timestamp_note``."""
+    if value is None or is_utc_timestamp(value):
+        entry["osm_base_timestamp"] = value
+    else:
+        entry["osm_base_timestamp_note"] = OSM_BASE_NOTE
 
 
 def osm_source_entry(osm, declared_license=None):
@@ -117,15 +236,19 @@ def osm_source_entry(osm, declared_license=None):
     file that is not OpenStreetMap data (then no OpenStreetMap/ODbL attribution is claimed)."""
     if declared_license is None:
         src = {"kind": "features", "provider": osm.source.get("provider"), "product": "OpenStreetMap",
-               "license": OSM_LICENSE, "attribution": OSM_ATTRIBUTION, "osm_base_timestamp": osm.timestamp}
+               "license": OSM_LICENSE, "attribution": OSM_ATTRIBUTION}
     else:
         src = {"kind": "features", "provider": osm.source.get("provider"),
                "product": "user-declared OSM-format data (not OpenStreetMap)",
-               "license": {"id": "user-declared", "name": declared_license}, "attribution": declared_license,
-               "osm_base_timestamp": osm.timestamp}
+               "license": {"id": "user-declared", "name": declared_license}, "attribution": declared_license}
+    _set_osm_base(src, osm.timestamp)
     for k, v in osm.source.items():
         if k == "query":
             src["query_sha256"] = hashlib.sha256(v.encode("utf-8")).hexdigest()
+        elif k == "file_generator" and isinstance(v, str) and find_secrets(v):
+            # the file's own <osm generator> text: a credential-like value is not recorded (it would make the
+            # persistence check and package export reject the build)
+            src["file_generator_note"] = "the file's <osm generator> value is credential-like; not recorded"
         elif k != "provider":
             src[k] = v
     return src
@@ -292,9 +415,32 @@ def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generat
                           passage_probes=getattr(plan, "passage_probes", []), plan_ids=generated_ids)
 
 
+def elevation_correction_note(correction):
+    """Text for the elevation source entry (``processing``) when the DSM correction was applied, else None."""
+    if not (correction or {}).get("applied"):
+        return None
+    masked, total = correction["masked_points"], correction["total_points"]
+    lowered = correction.get("lowered_points", 0)
+    if not lowered:
+        return (f"DSM terrain correction ran (map-builder, derived; raw source data unchanged) but lowered no "
+                f"points: {masked} of {total} terrain points lie under buildings, trees, forest or bridge decks "
+                "and none was above the interpolated surrounding ground; the terrain equals the source. See "
+                "report.json terrain_correction.")
+    return (f"DSM terrain correction applied by map-builder (derived; raw source data unchanged): {lowered} of "
+            f"{total} terrain points ({masked} masked under buildings, trees, forest and bridge decks) were "
+            f"lowered toward the surrounding ground (max {correction['max_lowering_m']:g} m, mean over the masked "
+            f"points {correction['mean_lowering_m']:g} m); an approximation, not a bare-earth DTM. See report.json "
+            "terrain_correction.")
+
+
 def generate_plan(area, settings, client=None, progress=None):
     grid, classified, sources = acquire(area, settings, client, progress)
-    plan = build_plan(area, grid, classified, settings.plan_options)
+    plan = build_plan(area, grid, classified, settings.plan_options, dsm_correction=settings.dsm_correction)
+    note = elevation_correction_note(plan.report.get("terrain_correction"))
+    if note:
+        for src in sources:
+            if src.get("kind") == "elevation":
+                src["processing"] = note
     return plan, sources
 
 

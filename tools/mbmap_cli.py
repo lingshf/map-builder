@@ -45,6 +45,10 @@ def main(argv=None):
     b.add_argument("--spacing", type=float, default=10.0, help="terrain grid spacing in metres")
     b.add_argument("--heightfield", type=float, default=2.0, help="heightfield spacing (0 = none)")
     b.add_argument("--seed", type=int, default=1)
+    b.add_argument("--dsm-correction", action=argparse.BooleanOptionalAction, default=None,
+                   help="DSM terrain correction: lower the terrain under buildings, trees, forest and bridge decks "
+                        "toward the surrounding ground (default: auto = off for a local elevation file, which "
+                        "--dsm-correction opts in; use it for surface models such as Copernicus GLO-30)")
     b.add_argument("--name", default="map")
     b.add_argument("--created-utc", default=None, metavar="YYYY-MM-DDTHH:MM:SSZ",
                    help="fixed manifest created_utc (default: now); with the same inputs the package is "
@@ -62,7 +66,7 @@ def main(argv=None):
             s = Settings(elevation_source="file", elevation_file=a.dem, elevation_crs=a.dem_crs,
                          elevation_vertical_datum=a.datum, elevation_license=a.dem_license, osm_source="file",
                          osm_file=a.osm, osm_license=a.osm_license, terrain_spacing=a.spacing,
-                         heightfield_spacing=a.heightfield or None,
+                         heightfield_spacing=a.heightfield or None, dsm_correction=a.dsm_correction,
                          plan_options=PlanOptions(seed=a.seed))
             m, r = build_package(area, s, a.out, a.name,
                                  progress=lambda frac: print(f"terrain {frac:.0%}", file=sys.stderr, end="\r"),

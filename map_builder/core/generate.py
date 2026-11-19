@@ -26,6 +26,7 @@ import math
 import random
 import re
 
+from . import dsm
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
@@ -741,15 +742,26 @@ def landcover_ring_problem(feature, max_work=DEFAULT_MAX_WORK):
     rings, CCW outer, CW holes strictly inside it, no contacts between rings. The check is
     bounded by ``max_work`` geometric tests; a polygon that cannot be validated within it is
     reported too (never used unchecked)."""
-    poly = feature.geometry
+    return ring_topology_problem(feature.geometry, max_work)
+
+
+def ring_topology_problem(poly, max_work=DEFAULT_MAX_WORK, max_ring_vertices=None, _work=None):
+    """None if ``poly``'s rings (outer plus holes) form a valid polygon with holes (:func:`validate_rings`,
+    the rules :func:`build_building` triangulates with), else the reason. ``max_ring_vertices`` optionally
+    bounds the total ring vertices first, as for building footprints. ``_work``: optional work counter
+    (limit ``max_work``) whose count the caller reads afterwards."""
     rings = [dedupe_ring(poly.outer)] + [dedupe_ring(h) for h in poly.holes]
+    if max_ring_vertices is not None:
+        n_ring = sum(len(r) for r in rings)
+        if n_ring > max_ring_vertices:
+            return f"{n_ring} ring vertices exceed the per-footprint limit of {max_ring_vertices}"
     pts = [p for r in rings for p in r]
     offsets = []
     o = 0
     for r in rings:
         offsets.append(range(o, o + len(r)))
         o += len(r)
-    work = _TopologyWork(max_work)
+    work = _work if _work is not None else _TopologyWork(max_work)
     try:
         validate_rings(pts, offsets[0], offsets[1:], _work=work)
     except TriangulationError as e:
@@ -1488,7 +1500,8 @@ class PlanOptions:
 
     def __init__(self, buildings=True, roads=True, trees=True, scatter=True, max_trees=2000, seed=0,
                  max_objects=20_000, max_vertices=MAX_SCENE_VERTICES, max_triangles=MAX_SCENE_TRIANGLES,
-                 max_ring_vertices=MAX_RING_VERTICES, max_triangulation_work=DEFAULT_MAX_WORK):
+                 max_ring_vertices=MAX_RING_VERTICES, max_triangulation_work=DEFAULT_MAX_WORK,
+                 max_mask_validation_work=None):
         self.buildings = buildings
         self.roads = roads
         self.trees = trees
@@ -1500,17 +1513,181 @@ class PlanOptions:
         self.max_triangles = max_triangles
         self.max_ring_vertices = max_ring_vertices
         self.max_triangulation_work = max_triangulation_work
+        # cumulative ring-topology tests for the DSM mask (None: dsm.MASK_VALIDATION_WORK_BUDGET)
+        self.max_mask_validation_work = max_mask_validation_work
 
 
-def build_plan(area, terrain, classified, options=None):
+TERRAIN_SURFACE = "piecewise planar, cells split along the (i,j)-(i+1,j+1) diagonal"
+DSM_CORRECTED_SURFACE = "inferred:DSM corrected (buildings/trees/forest/bridges masked); " + TERRAIN_SURFACE
+
+
+def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RING_VERTICES,
+                  max_work=DEFAULT_MAX_WORK, excluded=None, work_budget=None, stats=None):
+    """Mask inputs for :func:`dsm.apply_correction` from classified features, whether or not they are
+    generated: every building footprint (outlines replaced by building:part features and footprints whose
+    centroid lies outside the area included; holes kept), OSM trees (``mask_trees`` outside the area
+    included), forest/wood landcover (plus the margin-only ``mask_areas``, which are never generated), and
+    bridge ways with the road width the generator would use for them.
+
+    Only valid polygons are used, since an invalid ring set (e.g. a hole crossing its outer ring) would
+    mask points outside the feature: ``areas`` are the already validated landcover areas (default: the
+    classified areas checked with :func:`landcover_ring_problem`), and building footprints and
+    ``mask_areas`` must pass :func:`ring_topology_problem` (buildings with the generator's
+    ``max_ring_vertices``), each within ``max_work``. If ``extent`` (x0, y0, x1, y1, the terrain grid) is
+    given, features whose bbox lies farther from it than their mask buffer are dropped up front.
+    ``excluded`` (a dict) receives the per-kind counts of footprints/areas excluded for invalid geometry.
+
+    The validation done here for the mask is charged to one cumulative budget, ``work_budget`` geometric
+    tests (default :data:`dsm.MASK_VALIDATION_WORK_BUDGET`), checked as it goes: each candidate may use at
+    most what is left, and :class:`dsm.MaskWorkExceeded` is raised as soon as it is used up. Identical
+    geometries (e.g. relations sharing their rings) are validated and masked once. ``stats`` (a dict)
+    receives ``validation_work``, the geometric tests used, including those classify spent assembling the
+    margin-only candidates (``classified.mask_work``; ``mask_work_exceeded`` raises at once).
+
+    Footprints and forests listed in ``classified.mask_suppressed`` (ways whose footprint, with its holes,
+    a multipolygon using them as an outer supplies) are left out, so a solid copy never fills a courtyard."""
+    from .osm import _expand, _rect_overlaps
+    if excluded is None:
+        excluded = {}
+    if work_budget is None:
+        work_budget = dsm.MASK_VALIDATION_WORK_BUDGET
+    used = [getattr(classified, "mask_work", 0)]
+    suppressed = getattr(classified, "mask_suppressed", ())
+    if areas is None:
+        areas = [a for a in classified.areas if not landcover_ring_problem(a, max_work)]
+        bad = sum(1 for a in classified.areas if a.tags.get("_class") == "forest") - sum(
+            1 for a in areas if a.tags.get("_class") == "forest")
+        if bad:
+            excluded["forest_areas"] = bad
+    near = (lambda bbox, m: True) if extent is None else (lambda bbox, m: _rect_overlaps(bbox, _expand(extent, m)))
+
+    def geometry_key(poly):
+        return (tuple(map(tuple, poly.outer)),) + tuple(tuple(map(tuple, h)) for h in poly.holes)
+
+    def problem(poly, ring_vertices):
+        remaining = work_budget - used[0]
+        if remaining <= 0:
+            raise dsm.MaskWorkExceeded(f"DSM mask validation needs more than {work_budget} ring topology tests "
+                                       "(the mask validation work budget)")
+        limit = min(max_work, remaining)
+        work = _TopologyWork(limit)
+        p = ring_topology_problem(poly, limit, ring_vertices, _work=work)
+        used[0] += min(work.n, limit)
+        if p and work.n > limit and limit < max_work:
+            raise dsm.MaskWorkExceeded(f"DSM mask validation needs more than {work_budget} ring topology tests "
+                                       "(the mask validation work budget)")
+        return p
+
+    try:
+        exceeded = getattr(classified, "mask_work_exceeded", None)
+        if exceeded or used[0] > work_budget:
+            raise dsm.MaskWorkExceeded(exceeded or f"DSM mask validation needs more than {work_budget} ring "
+                                                   "topology tests (the mask validation work budget)")
+        buildings, seen, keys, bad = [], set(), {}, 0
+        for f in (list(classified.buildings) + list(getattr(classified, "outline_features", {}).values())
+                  + list(getattr(classified, "outside_buildings", ()))):
+            key = (f.id, id(f.geometry))
+            if key in seen:
+                continue
+            seen.add(key)
+            if f.id.split("#")[0] in suppressed or not near(f.geometry.bbox(), dsm.BUILDING_BUFFER_M):
+                continue
+            gk = geometry_key(f.geometry)
+            if gk not in keys:
+                keys[gk] = problem(f.geometry, max_ring_vertices)
+                if not keys[gk]:
+                    buildings.append([f.geometry.outer] + list(f.geometry.holes))
+            if keys[gk]:
+                bad += 1
+        if bad:
+            excluded["buildings"] = bad
+        trees = [tuple(f.geometry) for f in list(classified.trees) + list(getattr(classified, "mask_trees", ()))
+                 if near((f.geometry[0], f.geometry[1]) * 2, dsm.TREE_RADIUS_M)]
+        forests, keys, bad = [], {}, 0
+        for a in areas:   # validated by the caller (they also colour the terrain): not charged again
+            if (a.tags.get("_class") == "forest" and a.id.split("#")[0] not in suppressed
+                    and near(a.geometry.bbox(), 0.0)):
+                gk = geometry_key(a.geometry)
+                if gk not in keys:
+                    keys[gk] = None
+                    forests.append([a.geometry.outer] + list(a.geometry.holes))
+        for a in getattr(classified, "mask_areas", ()):
+            if a.tags.get("_class") == "forest" and near(a.geometry.bbox(), 0.0):
+                gk = geometry_key(a.geometry)
+                if gk not in keys:
+                    keys[gk] = problem(a.geometry, None)
+                    if not keys[gk]:
+                        forests.append([a.geometry.outer] + list(a.geometry.holes))
+                if keys[gk]:
+                    bad += 1
+        if bad:
+            excluded["forest_areas"] = excluded.get("forest_areas", 0) + bad
+    finally:
+        if stats is not None:
+            stats["validation_work"] = used[0]
+    bridges = []
+    widths = {}   # fragments of one way share its tags: its width is parsed once, not per fragment
+    for f in getattr(classified, "bridges", ()):
+        key = id(f.tags)
+        if key not in widths:
+            widths[key] = (f.tags, road_width(f.tags)[0])   # the tags kept alive so the id stays unique
+        pts, width = list(f.geometry), widths[key][1]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        if near((min(xs), min(ys), max(xs), max(ys)), width / 2.0 + dsm.BRIDGE_BUFFER_M):
+            bridges.append((pts, width))
+    return buildings, trees, forests, bridges
+
+
+def build_plan(area, terrain, classified, options=None, dsm_correction=None):
+    """Scene plan from the elevation grid ``terrain`` and the classified features.
+
+    ``dsm_correction``: None (auto: on for surface-model sources such as Copernicus GLO-30, off for local
+    files), True or False. When applied, the corrected grid (see :mod:`dsm`) is used for the terrain mesh
+    and everything placed on it; ``report['terrain_correction']`` always records the outcome. The classified
+    content and its selection do not depend on the correction, but terrain-dependent eligibility does: a
+    building whose roof a DSM spike pierces (terrain above the roof underside, rejected as invalid on the
+    uncorrected grid) is generated when the correction lowers that spike. That is intended: recovering
+    buildings wrongly rejected because of their own DSM surface is part of what the correction is for."""
     opts = options or PlanOptions()
+    # Landcover ring topology is validated first: only valid polygons colour the terrain, drive scatter
+    # and (forests) feed the DSM mask, so an invalid ring set never lowers terrain outside its feature.
+    areas, area_invalid = [], []
+    for a in classified.areas:
+        problem = landcover_ring_problem(a, opts.max_triangulation_work)
+        if problem:
+            area_invalid.append({"id": a.id, "reason": f"{a.tags.get('_class')} area: {problem}; not used for "
+                                                       "terrain colouring or scatter (nor the DSM mask)"})
+        else:
+            areas.append(a)
+    enabled, _ = dsm.resolve(dsm_correction, terrain.provenance)
+    excluded, mask_stats, skip = {}, {}, None
+    unavailable = getattr(classified, "mask_unavailable", None)
+    obstacles = ((), (), (), ())
+    if enabled:
+        bad_forests = sum(1 for e in area_invalid if e["reason"].startswith("forest area:"))
+        if bad_forests:
+            excluded["forest_areas"] = bad_forests
+        try:
+            if not unavailable:   # incomplete candidates (the DSM mask request failed): skipped below
+                obstacles = dsm_obstacles(classified, areas, terrain_extent(terrain), opts.max_ring_vertices,
+                                          opts.max_triangulation_work, excluded, opts.max_mask_validation_work,
+                                          mask_stats)
+        except dsm.MaskWorkExceeded as exc:
+            skip = str(exc)
+    terrain, correction, dsm_warning = dsm.apply_correction(terrain, dsm_correction, *obstacles,
+                                                            excluded_invalid=excluded,
+                                                            validation_work=mask_stats.get("validation_work"),
+                                                            validation_skipped=skip, mask_unavailable=unavailable)
     zmin, _ = terrain.min_max()
     z_offset = math.floor(zmin)
     area.frame.z_offset = z_offset
     plan = ScenePlan(area.frame, area)
     plan.report["unsupported_features"] = list(classified.unsupported)
-    plan.report["invalid_features"] = list(classified.invalid)
+    plan.report["invalid_features"] = list(classified.invalid) + area_invalid
     plan.report["warnings"].extend(getattr(classified, "warnings", ()))
+    plan.report["terrain_correction"] = correction
+    if dsm_warning:
+        plan.report["warnings"].append(dsm_warning)
     plan.count("buildings_outside_area", classified.outside)
     budget = SceneBudget(opts.max_vertices, opts.max_triangles)
     invalid = plan.report["invalid_features"]
@@ -1521,20 +1698,14 @@ def build_plan(area, terrain, classified, options=None):
         plan.objects.append(spec)
 
     budget.reserve("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
-    areas = []
-    for a in classified.areas:
-        problem = landcover_ring_problem(a, opts.max_triangulation_work)
-        if problem:
-            invalid.append({"id": a.id, "reason": f"{a.tags.get('_class')} area: {problem}; not used for "
-                                                  "terrain colouring or scatter"})
-        else:
-            areas.append(a)
     coverage = {}
     tmesh = build_terrain(terrain, z_offset, areas, coverage)
     budget.commit(tmesh)
+    if correction["applied"]:
+        plan.inferred("terrain.surface")
     add(ObjectSpec("terrain", "terrain:grid", "terrain", "Terrain", mesh=tmesh,
                    provenance={"elevation": terrain.provenance.get("provider"), "spacing_m": terrain.spacing,
-                               "surface": "piecewise planar, cells split along the (i,j)-(i+1,j+1) diagonal"}))
+                               "surface": DSM_CORRECTED_SURFACE if correction["applied"] else TERRAIN_SURFACE}))
     for a in areas:
         if not coverage.get(a.id):
             plan.report["unsupported_features"].append(

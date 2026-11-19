@@ -48,6 +48,96 @@ The panel is in **3D Viewport › Sidebar (N) › Map Builder**.
 6. **Validate Package:** this runs the full validator (structure, hashes, binding, geometry,
    probes and policy) and prints the errors and warnings.
 
+### DSM terrain correction
+
+Copernicus GLO-30 is a surface model (DSM): its heights include buildings, tree canopy and bridge
+decks. The **DSM correction** setting (*DSM correction* under the elevation source in the panel: Auto / On / Off; CLI
+`--dsm-correction` / `--no-dsm-correction`) pushes the terrain under those features back toward
+the surrounding ground before the terrain, roads and buildings are built.
+
+* **Auto** (the default) is ON for the Copernicus source and OFF for local elevation files.
+  On or Off overrides that for either source.
+* Masked DEM points are those within 15 m of a building footprint (all buildings, including
+  courtyards), within 6 m of a `natural=tree`, inside `landuse=forest`/`natural=wood`, or within
+  width/2 + 15 m of a `highway`/`railway` way with `bridge=*` (not `no`).
+* Only valid polygons are masked: building footprints and forest areas whose rings fail the same
+  topology check as generation (e.g. a hole crossing its outer ring), or exceed the footprint
+  vertex limit, are left out and counted in `mask.excluded_invalid`. Only surface features are
+  masked, inside or outside the area: footprints and forests that generation leaves out as below
+  ground or not supported (`location=underground`, `layer<0`, `tunnel=*`, `covered=yes`, bridges)
+  never lower the terrain. Identical geometries (e.g. relations sharing their rings) are validated
+  and masked once, so `mask.features` counts distinct polygons.
+* Mask candidates are selected against the terrain grid extent, not the area: buildings, trees and
+  bridge ways just outside the area still mask the edge samples within their buffer, but are not
+  generated. Online acquisition always fetches OSM for the area plus 30 m, and that response alone
+  is the content. Only when the correction is enabled does it make a second Overpass request, the
+  same query with a wider bbox: the grid's overshoot of the area (below one spacing) plus 45 m, the
+  farthest a mask can reach (a bridge centreline: at most 30 m half deck width plus its 15 m
+  buffer), rounded up to a whole metre, plus the forest areas enclosing the area centre (Overpass
+  `is_in`: a forest whose boundary lies wholly outside the bbox would otherwise be missing, and its
+  canopy taken for ground). The normal request is byte-identical to the one made with
+  the correction off (it shares its cache entry), and it is classified exactly as then, so the
+  selected buildings, `building:part` ownership, multipolygon outer suppression, landcover, roads,
+  trees, and the classification's counts, `invalid_features` and `unsupported_features` come from
+  it alone. The wider request is
+  recorded in the features source as `dsm_mask_query`. Its elements (ways, relations, tree nodes)
+  that the normal response lacks, including relations that merely reference content ways, only
+  add mask candidates — surface building
+  footprints, forest/wood polygons, bridge ways and trees, wherever they lie (inside the area too,
+  e.g. a tree added to OSM between the two requests): they are never generated, never colour the
+  terrain, drive scatter, or appear in counts, `invalid_features` or `unsupported_features`, and their ring
+  topology is checked only by the budgeted, deduplicated mask validation below. A content way that
+  is the outer of a multipolygon known only to the wider response (same area family, or an
+  untagged one with inner rings) is still generated as in the normal response, but its solid
+  footprint is left out of the mask, so it never fills that multipolygon's courtyard or clearing.
+  The two requests may see slightly different OSM data (minutes apart, or a cached normal
+  response); that only affects the mask. If the wider request fails (HTTP error, rate limit, size
+  limit, a server-side error remark, malformed XML or an unsupported encoding), the content stands
+  and the correction is skipped with a
+  warning (`reason: mask candidates unavailable`, the uncorrected surface model);
+  `dsm_mask_query` then records only `error_class`, a fixed `error` summary and, for an HTTP
+  error, `error_status` — never the parser or server text, which may quote the response. A
+  `<meta osm_base>` value (either response, or a local file) that is not an ISO-8601 UTC
+  timestamp is not recorded (`osm_base_timestamp_note` instead). The DSM mask candidates (from
+    either response) have their own feature allowance (50 000 by default), counted separately from
+    the scene content, which alone can fail the build with a feature-limit error; rather than failing
+    the build, mask candidates beyond the allowance (enforced as they are collected) are dropped and the correction is skipped with the
+    same warning (also with the correction off, mask-only features never fail a build), and a member way
+    listed more than once in a multipolygon is used once. Wide-only forest mask areas keep only a
+    minimal `_class` tag, not the relation's tags. If only its
+  cache write fails (full disk, unwritable cache), its response is still used, uncached, with a
+  warning and `dsm_mask_query.cache_write_error`; a failed cache write of the normal request still
+  fails acquisition, as with the correction off. So the input OSM content and its selection are
+  the same with the correction on or off. What depends on the terrain uses the corrected terrain:
+  heights and placement, and terrain-dependent eligibility. A building whose roof a DSM spike
+  pierces (the terrain under the footprint rises above the roof underside) is rejected as invalid
+  with the correction off but generated with it on, once the spike is lowered; recovering
+  buildings that their own DSM surface wrongly rejects is part of the correction's purpose.
+* Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The
+  equation is solved coarse to fine (multigrid: a nested-iteration guess from coarsened grids, with
+  semi-coarsening along the long axis of elongated grids, then V- or W-cycles of red-black
+  Gauss-Seidel until the largest update is below 5 mm). The work is linear in the grid size and
+  bounded. A plane, such as a uniform slope, is reproduced under a masked area that is enclosed by
+  unmasked ground; where the mask reaches the grid edge, the fill is levelled towards that edge.
+  The fill is smooth and never goes above or below the surrounding unmasked heights. The result is
+  `min(original, filled)`: terrain is never raised and unmasked points are not changed.
+* The correction is skipped with a warning, and the uncorrected surface model used, if fewer than
+  5 % of the points are unmasked, if assembling the margin-only mask candidates (ring joining and
+  hole-to-outer assignment) plus validating the mask polygons' ring topology would exceed their
+  shared cumulative work budget (5 000 000 geometric tests, checked as it goes;
+  `reason: mask validation work budget exceeded`), if the mask rasterisation would exceed its work budget
+  (20 000 000 edge and row-crossing units), or if the fill does not converge within its bounded
+  cycles (a fill that has not converged is never applied). These do not fail the build; the hard
+  input limits (feature count, grid size) still do.
+* `report.json` gets a `terrain_correction` entry (`applied`, `setting`, `reason`,
+  `masked_points`, `lowered_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`,
+  `fill_cycles`, `fill_residual_m`, `fill_converged`, mask parameters and feature counts,
+  `validation_work`, `rasterisation_work`).
+  `lowered_points` counts the masked points that actually went down; the `processing` note says
+  so, or that the correction ran but lowered no points. When applied, the terrain's `surface` provenance becomes
+  `inferred:DSM corrected (…)` and the elevation source carries a `processing` note, also shown in
+  `NOTICES.txt`. Source hashes and the raw elevation provenance are unchanged.
+
 ## Credentials and privacy
 
 * There is no free-text endpoint field. A private Overpass instance is read from the
@@ -118,6 +208,19 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
   cavities: no rooms, passages or flyable interiors.
 * The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or
   custom normals.
+* **DSM correction is an approximation, not a DTM.** It only knows the features mapped in OSM:
+  unmapped buildings, trees or hedges stay in the terrain. Inside masked areas the fill is the
+  smoothest surface through the surrounding ground. It follows uniform slopes, but it cannot
+  reveal ground that differs from the surrounding points, such as hills or hollows inside a big
+  forest, cuttings, or river banks under a bridge. Where a masked area touches the edge of the
+  area, the fill there is levelled towards the edge (zero slope across it). `man_made=bridge`
+  outlines are not masked (only the bridge ways are). Features outside the area mask the edge only
+  if they are in the OSM input: online, with the correction enabled, that covers every mask reach
+  around the grid (see above); a local OSM file is used in full (all of it is content), so it should
+  extend about 45 m beyond the area for full edge masking. Invalid and
+  below-ground footprints and forest polygons are not masked; `natural=tree` nodes are masked as
+  generation uses them (no surface check). A scene whose mask polygons are too costly to validate
+  within the budget is left uncorrected rather than partly corrected.
 * The target size is about 1 × 1 km. There is no streaming, no LOD generation and no
   frame-rate or performance guarantee.
 * The online paths (Copernicus download, Overpass, and online acquisition inside Blender) are

@@ -64,6 +64,13 @@ class MB_Settings(bpy.types.PropertyGroup):
     elevation_license: StringProperty(name="Licence", default="", update=_scrub("elevation_license"),
                                       description="Licence/attribution of the local elevation file (required)")
     terrain_spacing: FloatProperty(name="Terrain spacing (m)", default=10.0, min=1.0, max=100.0)
+    dsm_correction: EnumProperty(name="DSM correction", items=[
+        ("AUTO", "Auto", "On for Copernicus GLO-30 (a surface model that includes buildings, trees and bridge "
+                         "decks), off for a local elevation file"),
+        ("ON", "On", "Lower the terrain under buildings, trees, forest and bridge decks toward the surrounding "
+                     "ground (an approximation, not a bare-earth DTM)"),
+        ("OFF", "Off", "Use the elevation as provided"),
+    ], default="AUTO")
 
     osm_source: EnumProperty(name="Features", items=[
         ("overpass", "Overpass API (online)", "Download OpenStreetMap data (ODbL)"),

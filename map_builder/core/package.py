@@ -322,6 +322,8 @@ def notices_text(sources):
             lines.append(lic["text"])
         if s.get("notes"):
             lines.append(f"  Notes: {s['notes']}")
+        if s.get("processing"):
+            lines.append(f"  Processing: {s['processing']}")
     lines.append("")
     if any((s.get("license") or {}).get("id") == "ODbL-1.0" for s in sources):
         lines += [

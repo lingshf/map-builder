@@ -44,7 +44,7 @@ def ui_values(s):
             "elevation_license": s.elevation_license, "terrain_spacing": s.terrain_spacing,
             "osm_source": s.osm_source, "osm_file": _abspath(s.osm_file),
             "overpass_endpoint": s.overpass_endpoint, "cache_dir": _abspath(s.cache_dir),
-            "package_name": s.package_name}
+            "package_name": s.package_name, "dsm_correction": s.dsm_correction}
 
 
 def make_settings(s):
