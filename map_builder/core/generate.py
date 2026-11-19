@@ -2,7 +2,21 @@
 
 The plan is plain data (no bpy). The Blender layer instantiates it; tests use
 it directly. Every generated object records provenance: which values were
-*measured/provided* by a source and which were *inferred* defaults.
+*measured/provided* by a source and which were *inferred* defaults. When a
+source value cannot be used as given, provenance keeps the source value, the
+built value and the reason separately (``<key>_source``, ``<key>_m``,
+``<key>_reason``); the built value is then labelled ``fallback:``.
+
+Terrain heights everywhere (buildings, roads, vegetation) come from
+:func:`terrain_height`, which evaluates exactly the piecewise-planar surface of
+the emitted terrain mesh.
+
+Resource bounds (see :class:`PlanOptions`): cumulative scene vertex/triangle
+budgets are checked *before* each object is allocated, from an upper-bound
+estimate. Exceeding them is a hard :class:`LimitError` naming the feature, so a
+plan is never silently incomplete. Per-feature limits (ring vertices,
+triangulation work) instead reject just that feature and report it in
+``invalid_features``.
 """
 
 import hashlib
@@ -10,13 +24,19 @@ import math
 import random
 import re
 
+from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
-from .triangulate import TriangulationError, triangulate
+from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate
 
 LEVEL_HEIGHT_M = 3.0
 FOUNDATION_SINK_M = 0.3
 ROAD_LIFT_M = 0.12
 ROAD_SEGMENT_M = 4.0
+MIN_WALL_M = 0.5
+MAX_RING_VERTICES = 2000
+# ~1 km2 at the finest 1 m terrain spacing is ~1M vertices / 2M triangles of terrain alone.
+MAX_SCENE_VERTICES = 3_000_000
+MAX_SCENE_TRIANGLES = 4_000_000
 
 MATERIALS = {
     # name: (base colour linear rgb, roughness, metallic)
@@ -48,6 +68,10 @@ ROAD_WIDTHS = {"motorway": 12.0, "trunk": 10.0, "primary": 8.0, "secondary": 7.0
                "pedestrian": 4.0, "track": 3.0, "footway": 2.0, "path": 1.5, "cycleway": 2.0,
                "steps": 2.0, "bridleway": 2.0}
 FOOT = {"footway", "path", "cycleway", "steps", "bridleway", "pedestrian", "track"}
+
+
+class InvalidFeature(MapBuilderError):
+    """A feature that cannot be generated as given; reported in ``invalid_features``."""
 
 
 def stable_hash(text):
@@ -132,10 +156,136 @@ class ScenePlan:
         self.report["inferred"][key] = self.report["inferred"].get(key, 0) + 1
 
 
+def mesh_triangle_count(mesh):
+    return sum(len(f) - 2 for f in mesh.faces)
+
+
+class SceneBudget:
+    """Cumulative vertex/triangle budget. ``reserve`` an upper-bound estimate *before*
+    allocating an object, then ``commit`` the built mesh to replace the estimate."""
+
+    def __init__(self, max_vertices=MAX_SCENE_VERTICES, max_triangles=MAX_SCENE_TRIANGLES):
+        self.max_vertices = max_vertices
+        self.max_triangles = max_triangles
+        self.vertices = 0
+        self.triangles = 0
+        self._pending = None
+
+    def _check(self, fid, vertices, triangles, what):
+        if self.vertices + vertices > self.max_vertices or self.triangles + triangles > self.max_triangles:
+            raise LimitError(
+                f"{fid}: {what} {vertices} vertices / {triangles} triangles would exceed the scene budget "
+                f"({self.vertices}/{self.max_vertices} vertices, {self.triangles}/{self.max_triangles} "
+                "triangles used); choose a smaller area, coarser terrain or raise the limit")
+
+    def reserve(self, fid, vertices, triangles):
+        self.release()
+        self._check(fid, vertices, triangles, "needs up to")
+        self.vertices += vertices
+        self.triangles += triangles
+        self._pending = (fid, vertices, triangles)
+
+    def charge(self, fid, vertices, triangles):
+        """Reserve an exact amount that needs no later commit."""
+        self.release()
+        self._check(fid, vertices, triangles, "needs")
+        self.vertices += vertices
+        self.triangles += triangles
+
+    def release(self):
+        if self._pending:
+            _, v, t = self._pending
+            self.vertices -= v
+            self.triangles -= t
+            self._pending = None
+
+    def commit(self, mesh):
+        fid = self._pending[0] if self._pending else mesh.name
+        self.release()
+        self.charge(fid, len(mesh.vertices), mesh_triangle_count(mesh))
+
+    def to_dict(self):
+        return {"vertices": self.vertices, "triangles": self.triangles, "max_vertices": self.max_vertices,
+                "max_triangles": self.max_triangles}
+
+
+# --- Terrain surface ----------------------------------------------------------
+
+def _cell(grid, x, y):
+    fx = min(max((x - grid.x0) / grid.spacing, 0.0), grid.nx - 1.0)
+    fy = min(max((y - grid.y0) / grid.spacing, 0.0), grid.ny - 1.0)
+    i = max(0, min(int(fx), grid.nx - 2))
+    j = max(0, min(int(fy), grid.ny - 2))
+    return i, j, fx - i, fy - j
+
+
+def _plane_height(h, i, j, upper, tx, ty):
+    """Height in cell (i, j): ``upper`` False -> triangle (v00, v10, v11), True -> (v00, v11, v01)."""
+    h00 = h[j][i]
+    h11 = h[j + 1][i + 1]
+    if not upper:
+        return h00 + tx * (h[j][i + 1] - h00) + ty * (h11 - h[j][i + 1])
+    return h00 + ty * (h[j + 1][i] - h00) + tx * (h11 - h[j + 1][i])
+
+
+def terrain_height(grid, x, y):
+    """Exact height of the emitted terrain mesh at (x, y).
+
+    The terrain mesh splits each cell along the (i, j)-(i+1, j+1) diagonal (see
+    :func:`build_terrain`); this evaluates that triangle's plane. Positions
+    outside the grid are clamped to its edge."""
+    i, j, tx, ty = _cell(grid, x, y)
+    return _plane_height(grid.heights, i, j, ty > tx, tx, ty)
+
+
+def footprint_terrain_range(grid, rings):
+    """(min, max) of the terrain surface over a footprint (outer ring + holes, holes excluded).
+
+    The terrain is piecewise planar, so its extremes over the footprint lie at ring
+    vertices, grid nodes strictly inside the footprint, or where ring edges cross
+    grid lines and cell diagonals; all of those are evaluated."""
+    s, gx0, gy0 = grid.spacing, grid.x0, grid.y0
+    zs = [terrain_height(grid, p[0], p[1]) for r in rings for p in r]
+    umax, vmax = grid.nx - 1, grid.ny - 1
+    for r in rings:
+        n = len(r)
+        for k in range(n):
+            a, b = r[k], r[(k + 1) % n]
+            ua, va = (a[0] - gx0) / s, (a[1] - gy0) / s
+            ub, vb = (b[0] - gx0) / s, (b[1] - gy0) / s
+            for fa, fb, lo_lim, hi_lim in ((ua, ub, 0, umax), (va, vb, 0, vmax), (ua - va, ub - vb, -vmax, umax)):
+                if fa == fb:
+                    continue
+                lo, hi = sorted((fa, fb))
+                for m in range(max(math.ceil(lo), lo_lim), min(math.floor(hi), hi_lim) + 1):
+                    t = (m - fa) / (fb - fa)
+                    if 0.0 < t < 1.0:
+                        zs.append(terrain_height(grid, a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+    ys = [p[1] for p in rings[0]]
+    h = grid.heights
+    for j in range(max(0, math.ceil((min(ys) - gy0) / s)), min(vmax, math.floor((max(ys) - gy0) / s)) + 1):
+        y = gy0 + j * s
+        xs = []
+        for r in rings:
+            n = len(r)
+            for k in range(n):
+                a, b = r[k], r[(k + 1) % n]
+                if (a[1] > y) != (b[1] > y):
+                    xs.append(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]))
+        xs.sort()
+        for q in range(0, len(xs) - 1, 2):
+            for i in range(max(0, math.ceil((xs[q] - gx0) / s)), min(umax, math.floor((xs[q + 1] - gx0) / s)) + 1):
+                zs.append(h[j][i])
+    return min(zs), max(zs)
+
+
 # --- Buildings --------------------------------------------------------------
 
 def building_height(tags):
-    """Returns (height, min_height, roof_height_or_None, provenance dict)."""
+    """Returns (height, min_height, roof_height_or_None, provenance dict).
+
+    ``roof_height`` here is the *source* value (tag or roof:levels); the value
+    actually built is decided in :func:`build_building`."""
     prov = {}
     h = parse_length(tags.get("height"))
     levels = parse_number(tags.get("building:levels"))
@@ -196,48 +346,116 @@ def _is_convex(ring):
     return True
 
 
-def build_building(feature, terrain, z_offset, seed=0):
-    """Returns (MeshData in object-local coords, location, provenance) or raises TriangulationError."""
+def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RING_VERTICES,
+                   max_work=DEFAULT_MAX_WORK, reserve=None):
+    """Returns (MeshData in object-local coords, location, provenance).
+
+    Raises TriangulationError (invalid rings, work budget) or InvalidFeature (limits)
+    before any mesh is allocated. ``reserve(vertices, triangles)`` is called with an
+    upper-bound estimate before allocation and may raise LimitError."""
     poly = feature.geometry
     tags = feature.tags
-    height, min_h, roof_h, prov = building_height(tags)
-    rings = [poly.outer] + poly.holes
-    ground = [terrain.sample(x, y) for r in rings for (x, y) in r]
-    g_min, g_max = min(ground), max(ground)
+    rings = [dedupe_ring(poly.outer)] + [dedupe_ring(h) for h in poly.holes]
+    n_ring = sum(len(r) for r in rings)
+    if n_ring > max_ring_vertices:
+        raise InvalidFeature(f"footprint has {n_ring} ring vertices; the per-footprint limit is {max_ring_vertices}")
     cx, cy = poly.centroid()
-    origin = (cx, cy, g_min - z_offset)
-    top = height  # relative to g_min
-    roof_shape = tags.get("roof:shape", "flat")
-    prov["roof_shape"] = "measured:osm roof:shape" if "roof:shape" in tags else "inferred:flat"
-    prov["ground"] = "terrain minimum under footprint"
-    if g_max - g_min > 0:
-        prov["ground_slope_m"] = round(g_max - g_min, 2)
+    pts2 = [(p[0] - cx, p[1] - cy) for r in rings for p in r]
+    offsets = []
+    o = 0
+    for r in rings:
+        offsets.append(list(range(o, o + len(r))))
+        o += len(r)
+    tris = triangulate(pts2, offsets[0], offsets[1:], max_work=max_work)
+    outer = rings[0]
 
-    short_side = min(poly.bbox()[2] - poly.bbox()[0], poly.bbox()[3] - poly.bbox()[1])
-    if roof_shape != "flat" and roof_h is None:
-        roof_h = max(1.0, min(0.3 * short_side, 6.0))
-        prov["roof_height"] = "inferred:0.3 x footprint short side (1-6 m)"
-    if roof_shape == "flat":
-        roof_h = 0.0
-    roof_h = min(roof_h or 0.0, 0.6 * (height - min_h))
+    height, min_h, roof_src, prov = building_height(tags)
+    roof_src_label = prov.get("roof_height")
+    roof_shape_tag = tags.get("roof:shape")
+    roof_shape = roof_shape_tag or "flat"
+    prov["roof_shape"] = "measured:osm roof:shape" if roof_shape_tag else "inferred:flat"
 
     supported = {"flat", "skillion", "pyramidal", "gabled", "hipped"}
     if roof_shape not in supported:
         prov["roof_shape"] = f"fallback:flat (roof:shape={roof_shape} not modelled in v1)"
-        roof_shape, roof_h = "flat", 0.0
+        roof_shape = "flat"
     if poly.holes and roof_shape not in ("flat", "skillion"):
         prov["roof_shape"] = f"fallback:flat (roof:shape={roof_shape} with courtyard)"
-        roof_shape, roof_h = "flat", 0.0
-    if roof_shape in ("gabled", "hipped") and not _rect_check(poly.outer):
-        if _is_convex(poly.outer):
+        roof_shape = "flat"
+    if roof_shape in ("gabled", "hipped") and not _rect_check(outer):
+        if _is_convex(outer):
             prov["roof_shape"] = f"fallback:pyramidal (roof:shape={roof_shape} on non-rectangular footprint)"
             roof_shape = "pyramidal"
         else:
             prov["roof_shape"] = f"fallback:flat (roof:shape={roof_shape} on non-rectangular footprint)"
-            roof_shape, roof_h = "flat", 0.0
-    if roof_shape == "pyramidal" and not _is_convex(poly.outer):
+            roof_shape = "flat"
+    if roof_shape == "pyramidal" and not _is_convex(outer):
         prov["roof_shape"] = "fallback:flat (pyramidal roof on concave footprint)"
-        roof_shape, roof_h = "flat", 0.0
+        roof_shape = "flat"
+
+    # Roof height actually built; a source value that cannot be used is kept separately.
+    xs, ys = [p[0] for p in outer], [p[1] for p in outer]
+    short_side = min(max(xs) - min(xs), max(ys) - min(ys))
+    wall_span = height - min_h
+    reason = None
+    if roof_shape == "flat":
+        roof_h = 0.0
+        reason = f"roof built flat (roof:shape={roof_shape_tag or 'flat'})"
+    elif roof_src is None:
+        roof_h = min(max(1.0, min(0.3 * short_side, 6.0)), 0.6 * wall_span)
+        prov["roof_height"] = "inferred:0.3 x footprint short side (1-6 m, at most 60% of the building height)"
+    else:
+        roof_h = roof_src
+        limit = wall_span - MIN_WALL_M
+        if roof_h > limit:
+            roof_h = max(limit, 0.0)
+            reason = (f"roof:height must leave at least {MIN_WALL_M:g} m of wall below the eave "
+                      f"(building height {height:g} m, min_height {min_h:g} m)")
+        if roof_h <= 1e-6:
+            prov["roof_shape"] = f"fallback:flat (no room for a {roof_shape} roof)"
+            roof_shape, roof_h = "flat", 0.0
+    if roof_src is not None and abs(roof_h - roof_src) > 1e-9:
+        prov["roof_height_source"] = f"{roof_src_label} = {roof_src:g} m"
+        prov["roof_height"] = f"fallback:{roof_h:g} m built ({reason})"
+        prov["roof_height_reason"] = reason
+    prov["roof_height_m"] = round(roof_h, 2)
+
+    across = False
+    orient_tag = tags.get("roof:orientation")
+    if roof_shape in ("gabled", "hipped"):
+        if orient_tag in ("along", "across"):
+            prov["roof_orientation"] = f"measured:osm roof:orientation={orient_tag}"
+            across = orient_tag == "across"
+        elif orient_tag is None:
+            prov["roof_orientation"] = "inferred:along (ridge parallel to the longer side)"
+        else:
+            prov["roof_orientation"] = f"fallback:along (roof:orientation={orient_tag} not recognised)"
+    elif orient_tag is not None:
+        prov["roof_orientation"] = f"ignored:roof:orientation={orient_tag} (roof built {roof_shape})"
+
+    top = height  # relative to the base datum
+    wall_top_flat = top - roof_h
+    elevated = min_h > 0
+    base_z = min_h if elevated else -FOUNDATION_SINK_M
+
+    g_min, g_max = footprint_terrain_range(terrain, rings)
+    origin = (cx, cy, g_min - z_offset)
+    prov["ground"] = "terrain minimum under footprint"
+    prov["base_datum"] = ("minimum of the piecewise-planar terrain mesh over the footprint (ring vertices, interior "
+                          "grid nodes, ring crossings of grid lines and cell diagonals); heights are measured from "
+                          f"it and the foundation extends {FOUNDATION_SINK_M:g} m below it")
+    relief = g_max - g_min
+    if relief > 0:
+        prov["ground_slope_m"] = round(relief, 2)
+    if relief >= wall_top_flat:
+        prov["terrain_warning"] = (f"terrain inside the footprint rises {relief:.2f} m above the base datum, reaching "
+                                   f"the eave at {wall_top_flat:.2f} m: walls/roof are partly under terrain")
+    elif elevated and relief >= min_h:
+        prov["terrain_warning"] = (f"terrain inside the footprint rises {relief:.2f} m above the base datum, into "
+                                   f"the underside of the elevated volume at {min_h:.2f} m")
+
+    if reserve is not None:
+        reserve(2 * n_ring + 2, 2 * n_ring + 2 * len(tris) + 4)
 
     facade = parse_colour(tags.get("building:colour"))
     if facade:
@@ -251,13 +469,6 @@ def build_building(feature, terrain, z_offset, seed=0):
         roof_col = ROOF_PALETTE[stable_hash(feature.id + "r" + str(seed)) % len(ROOF_PALETTE)]
         if roof_shape == "flat":
             roof_col = (0.3, 0.3, 0.31)
-
-    elevated = min_h > 0
-    base_z = min_h if elevated else -FOUNDATION_SINK_M
-    wall_top_flat = top - roof_h
-
-    def local(p):
-        return (p[0] - cx, p[1] - cy)
 
     skillion_z = None
     if roof_shape == "skillion":
@@ -275,16 +486,14 @@ def build_building(feature, terrain, z_offset, seed=0):
             return top - roof_h * (s - smin) / span
 
     mesh = MeshData(f"bld_{short_name(feature.id)}")
-    pts2 = []
     ring_idx_bottom, ring_idx_top = [], []
     for r in rings:
         rb, rt = [], []
         for p in r:
-            lx, ly = local(p)
+            lx, ly = p[0] - cx, p[1] - cy
             zt = skillion_z(p) if skillion_z else wall_top_flat
             rb.append(mesh.add_vertex(lx, ly, base_z))
             rt.append(mesh.add_vertex(lx, ly, zt))
-            pts2.append((lx, ly))
         ring_idx_bottom.append(rb)
         ring_idx_top.append(rt)
     for rb, rt in zip(ring_idx_bottom, ring_idx_top):
@@ -293,13 +502,6 @@ def build_building(feature, terrain, z_offset, seed=0):
             j = (k + 1) % n
             mesh.add_face((rb[k], rb[j], rt[j], rt[k]), "MB Facade", facade)
 
-    # 2-D index mapping for triangulation: pts2 index == position in vertex order / 2
-    offsets = []
-    o = 0
-    for r in rings:
-        offsets.append(list(range(o, o + len(r))))
-        o += len(r)
-    tris = triangulate(pts2, offsets[0], offsets[1:])
     flat_top = [i for rt in ring_idx_top for i in rt]
     flat_bot = [i for rb in ring_idx_bottom for i in rb]
     for (a, b, c) in tris:
@@ -312,18 +514,19 @@ def build_building(feature, terrain, z_offset, seed=0):
         rt = ring_idx_top[0]
         for k in range(len(rt)):
             mesh.add_face((rt[k], rt[(k + 1) % len(rt)], apex), "MB Roof", roof_col)
-    else:  # gabled / hipped on rectangle a,b,c,d (CCW)
+    else:  # gabled / hipped on rectangle a,b,c,d (CCW); ridge runs parallel to a-b
         rt = ring_idx_top[0]
         V = mesh.vertices
         a, b, c, d = rt
-        if math.dist(V[a][:2], V[b][:2]) < math.dist(V[b][:2], V[c][:2]):
-            a, b, c, d = b, c, d, a  # make a-b a long side
+        # along: a-b is a long side (ridge along the long axis); across: a-b is a short side.
+        if (math.dist(V[a][:2], V[b][:2]) < math.dist(V[b][:2], V[c][:2])) != across:
+            a, b, c, d = b, c, d, a
         m1 = tuple((V[b][i] + V[c][i]) / 2 for i in range(2))
         m2 = tuple((V[d][i] + V[a][i]) / 2 for i in range(2))
         if roof_shape == "hipped":
-            short = math.dist(V[b][:2], V[c][:2])
-            long_ = math.dist(m1, m2)
-            t = min(0.5 * short / max(long_, 1e-6), 0.49)
+            end = math.dist(V[b][:2], V[c][:2])
+            ridge_span = math.dist(m1, m2)
+            t = min(0.5 * end / max(ridge_span, 1e-6), 0.49)
             r1 = (m1[0] + (m2[0] - m1[0]) * t, m1[1] + (m2[1] - m1[1]) * t)
             r2 = (m2[0] + (m1[0] - m2[0]) * t, m2[1] + (m1[1] - m2[1]) * t)
         else:
@@ -361,7 +564,11 @@ class _Buckets:
 LANDCOVER_PRIORITY = {"water": 4, "forest": 3, "sand": 2, "grass": 1}
 
 
-def build_terrain(grid, z_offset, areas):
+def build_terrain(grid, z_offset, areas, coverage=None):
+    """Terrain mesh; each cell is split along its (i, j)-(i+1, j+1) diagonal (see terrain_height).
+
+    If ``coverage`` is a dict it receives, per area id, the number of cells whose
+    centre lies inside that area."""
     mesh = MeshData("terrain")
     buckets = _Buckets([(a, a.geometry.bbox()) for a in areas])
     for j in range(grid.ny):
@@ -376,8 +583,12 @@ def build_terrain(grid, z_offset, areas):
             cy = grid.y0 + (j + 0.5) * grid.spacing
             cls = None
             for a in buckets.query(cx, cy):
+                if not a.geometry.contains(cx, cy):
+                    continue
+                if coverage is not None:
+                    coverage[a.id] = coverage.get(a.id, 0) + 1
                 c = a.tags["_class"]
-                if (cls is None or LANDCOVER_PRIORITY[c] > LANDCOVER_PRIORITY[cls]) and a.geometry.contains(cx, cy):
+                if cls is None or LANDCOVER_PRIORITY[c] > LANDCOVER_PRIORITY[cls]:
                     cls = c
             col = LANDCOVER_COLORS[cls]
             mesh.add_face((v00, v10, v11), "MB Terrain", col)
@@ -399,6 +610,8 @@ def road_width(tags):
 
 
 def _densify(pts, step):
+    if not pts:
+        return []
     out = [pts[0]]
     for a, b in zip(pts, pts[1:]):
         d = math.dist(a, b)
@@ -412,59 +625,156 @@ def _densify(pts, step):
     return dedup
 
 
-def build_road(feature, terrain, z_offset):
+def _area2(poly):
+    a = 0.0
+    n = len(poly)
+    for k in range(n):
+        a += poly[k][0] * poly[(k + 1) % n][1] - poly[(k + 1) % n][0] * poly[k][1]
+    return a
+
+
+def _road_pieces(pts, half):
+    """Convex CCW polygons covering a ribbon: one rectangle per segment + bevel triangles at joins.
+
+    Each piece is non-folded by construction; consecutive rectangles overlap on the
+    inside of a turn and the bevel fills the outside."""
+    pieces, normals = [], []
+    for a, b in zip(pts, pts[1:]):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        ln = math.hypot(dx, dy)
+        nx_, ny_ = -dy / ln * half, dx / ln * half
+        normals.append((nx_, ny_))
+        pieces.append([(a[0] - nx_, a[1] - ny_), (b[0] - nx_, b[1] - ny_), (b[0] + nx_, b[1] + ny_),
+                       (a[0] + nx_, a[1] + ny_)])
+    for k in range(1, len(pts) - 1):
+        p, n1, n2 = pts[k], normals[k - 1], normals[k]
+        turn = n1[0] * n2[1] - n1[1] * n2[0]
+        if abs(turn) <= 1e-9 * half * half:
+            continue
+        s = -1.0 if turn > 0 else 1.0  # outer side of the turn
+        tri = [p, (p[0] + s * n1[0], p[1] + s * n1[1]), (p[0] + s * n2[0], p[1] + s * n2[1])]
+        if _area2(tri) < 0:
+            tri = [tri[0], tri[2], tri[1]]
+        if _area2(tri) > 1e-9:
+            pieces.append(tri)
+    return pieces
+
+
+def _clip_halfplane(poly, a, b):
+    """Keep the part of convex ``poly`` left of (or on) the directed line a->b."""
+    out = []
+    n = len(poly)
+    for k in range(n):
+        p, q = poly[k], poly[(k + 1) % n]
+        sp = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        sq = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        if sp >= 0:
+            out.append(p)
+        if (sp > 0 > sq) or (sp < 0 < sq):
+            t = sp / (sp - sq)
+            out.append((p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t))
+    return out
+
+
+def _cell_range(grid, x0, x1, y0, y1):
+    s = grid.spacing
+    i0 = max(0, int(math.floor((x0 - grid.x0) / s)))
+    i1 = min(grid.nx - 2, int(math.floor((x1 - grid.x0) / s)))
+    j0 = max(0, int(math.floor((y0 - grid.y0) / s)))
+    j1 = min(grid.ny - 2, int(math.floor((y1 - grid.y0) / s)))
+    return i0, i1, j0, j1
+
+
+def _bbox(poly):
+    xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def drape_polygon(grid, poly, emit):
+    """Split convex CCW ``poly`` along terrain cell edges and diagonals.
+
+    Calls ``emit(piece, height_fn)`` for each non-empty convex piece lying in one
+    terrain triangle; ``height_fn(x, y)`` evaluates that triangle's plane."""
+    s = grid.spacing
+    i0, i1, j0, j1 = _cell_range(grid, *_bbox(poly))
+    for j in range(j0, j1 + 1):
+        for i in range(i0, i1 + 1):
+            X0, Y0 = grid.x0 + i * s, grid.y0 + j * s
+            c00, c10, c11, c01 = (X0, Y0), (X0 + s, Y0), (X0 + s, Y0 + s), (X0, Y0 + s)
+            for upper, tri in ((False, (c00, c10, c11)), (True, (c00, c11, c01))):
+                piece = poly
+                for k in range(3):
+                    piece = _clip_halfplane(piece, tri[k], tri[(k + 1) % 3])
+                    if len(piece) < 3:
+                        break
+                if len(piece) >= 3:
+                    emit(piece, lambda x, y, i=i, j=j, upper=upper, X0=X0, Y0=Y0:
+                         _plane_height(grid.heights, i, j, upper, (x - X0) / s, (y - Y0) / s))
+
+
+def build_road(feature, terrain, z_offset, reserve=None):
+    """Returns (mesh, location, provenance), or (None, None, {"reason": ...}) if no valid ribbon exists.
+
+    The ribbon is split at terrain grid lines and diagonals so each triangle lies
+    on one terrain plane, ``ROAD_LIFT_M`` above it, and faces up (+Z)."""
     width, wprov = road_width(feature.tags)
-    pts = _densify(feature.geometry, ROAD_SEGMENT_M)
+    pts = _densify(list(feature.geometry), ROAD_SEGMENT_M)
     if len(pts) < 2:
-        return None, None, None
+        return None, None, {"reason": "road collapses to fewer than 2 distinct points (1 mm tolerance); "
+                                      "no ribbon generated"}
     half = width / 2.0
+    pieces = _road_pieces(pts, half)
+    est_t = 0
+    for piece in pieces:
+        i0, i1, j0, j1 = _cell_range(terrain, *_bbox(piece))
+        est_t += max(0, i1 - i0 + 1) * max(0, j1 - j0 + 1) * 2 * (len(piece) + 1)
+    if reserve is not None:
+        reserve(3 * est_t, est_t)
+    gx1 = terrain.x0 + (terrain.nx - 1) * terrain.spacing
+    gy1 = terrain.y0 + (terrain.ny - 1) * terrain.spacing
+    clipped = any(b[0] < terrain.x0 or b[1] > gx1 or b[2] < terrain.y0 or b[3] > gy1
+                  for b in (_bbox(p) for p in pieces))
+
     cx = sum(p[0] for p in pts) / len(pts)
     cy = sum(p[1] for p in pts) / len(pts)
+    z0 = terrain_height(terrain, *pts[0]) - z_offset + ROAD_LIFT_M
     mesh = MeshData(f"road_{short_name(feature.id)}")
     color = (0.12, 0.12, 0.12) if feature.tags.get("highway") not in FOOT else (0.35, 0.32, 0.28)
-    z0 = None
-    left, right = [], []
-    for k, p in enumerate(pts):
-        if k == 0:
-            dx, dy = pts[1][0] - p[0], pts[1][1] - p[1]
-            nx_, ny_ = -dy, dx
-            scale = 1.0
-        elif k == len(pts) - 1:
-            dx, dy = p[0] - pts[k - 1][0], p[1] - pts[k - 1][1]
-            nx_, ny_ = -dy, dx
-            scale = 1.0
-        else:
-            d1 = (p[0] - pts[k - 1][0], p[1] - pts[k - 1][1])
-            d2 = (pts[k + 1][0] - p[0], pts[k + 1][1] - p[1])
-            l1, l2 = math.hypot(*d1), math.hypot(*d2)
-            n1 = (-d1[1] / l1, d1[0] / l1)
-            n2 = (-d2[1] / l2, d2[0] / l2)
-            nx_, ny_ = n1[0] + n2[0], n1[1] + n2[1]
-            ln = math.hypot(nx_, ny_)
-            if ln < 1e-6:
-                nx_, ny_ = n1
-                scale = 1.0
-            else:
-                nx_, ny_ = nx_ / ln, ny_ / ln
-                cosang = nx_ * n1[0] + ny_ * n1[1]
-                scale = min(1.0 / max(cosang, 1e-3), 2.0)
-        ln = math.hypot(nx_, ny_) or 1.0
-        nx_, ny_ = nx_ / ln * half * scale, ny_ / ln * half * scale
-        lp = (p[0] + nx_, p[1] + ny_)
-        rp = (p[0] - nx_, p[1] - ny_)
-        zl = terrain.sample(*lp) - z_offset + ROAD_LIFT_M
-        zr = terrain.sample(*rp) - z_offset + ROAD_LIFT_M
-        zc = terrain.sample(*p) - z_offset + ROAD_LIFT_M
-        zl, zr = max(zl, zc), max(zr, zc)
-        if z0 is None:
-            z0 = zc
-        left.append(mesh.add_vertex(lp[0] - cx, lp[1] - cy, zl - z0))
-        right.append(mesh.add_vertex(rp[0] - cx, rp[1] - cy, zr - z0))
-    for k in range(len(pts) - 1):
-        mesh.add_face((right[k], right[k + 1], left[k + 1]), "MB Road", color)
-        mesh.add_face((right[k], left[k + 1], left[k]), "MB Road", color)
-    return mesh, (cx, cy, z0), {"width": wprov, "width_m": round(width, 2),
-                               "vertical": "draped on terrain (+0.12 m)"}
+    index = {}
+
+    def vertex(p, hfn):
+        key = (round(p[0], 6), round(p[1], 6))
+        v = index.get(key)
+        if v is None:
+            v = index[key] = mesh.add_vertex(p[0] - cx, p[1] - cy, hfn(*p) - z_offset + ROAD_LIFT_M - z0)
+        return v
+
+    def emit(piece, hfn):
+        for k in range(1, len(piece) - 1):
+            tri = (piece[0], piece[k], piece[k + 1])
+            if _area2(tri) <= 1e-9:  # sliver from clipping; zero area, nothing visible is lost
+                continue
+            idx = tuple(vertex(p, hfn) for p in tri)
+            # re-check on the welded positions (welding moves points by <= 1e-6 m)
+            if _area2([mesh.vertices[v][:2] for v in idx]) <= 1e-9:
+                continue
+            mesh.add_face(idx, "MB Road", color)
+
+    for piece in pieces:
+        drape_polygon(terrain, piece, emit)
+    if not mesh.faces:
+        return None, None, {"reason": "road ribbon lies outside the terrain extent; no ribbon generated"}
+    # Guarantee: never emit folded (downward-facing) faces.
+    V = mesh.vertices
+    for a, b, c in mesh.triangles():
+        if (V[b][0] - V[a][0]) * (V[c][1] - V[a][1]) - (V[b][1] - V[a][1]) * (V[c][0] - V[a][0]) <= 0:
+            return None, None, {"reason": "road ribbon would contain folded faces; not generated"}
+    prov = {"width": wprov, "width_m": round(width, 2),
+            "vertical": f"draped on the terrain mesh (+{ROAD_LIFT_M:g} m), split at terrain cell edges and diagonals",
+            "joins": "bevel"}
+    if clipped:
+        prov["terrain_edge"] = "ribbon trimmed at the terrain edge"
+    return mesh, (cx, cy, z0), prov
 
 
 # --- Vegetation -------------------------------------------------------------
@@ -519,8 +829,17 @@ def scatter_points(feature, density, rng, limit):
 # --- Plan -------------------------------------------------------------------
 
 class PlanOptions:
+    """Generation switches and resource bounds.
+
+    ``max_vertices``/``max_triangles``: cumulative scene budget (tree instances count
+    individually), checked before each object is allocated; exceeding it raises
+    LimitError naming the feature. ``max_ring_vertices`` and
+    ``max_triangulation_work`` reject a single footprint (reported in
+    ``invalid_features``)."""
+
     def __init__(self, buildings=True, roads=True, trees=True, scatter=True, max_trees=2000, seed=0,
-                 max_objects=20_000):
+                 max_objects=20_000, max_vertices=MAX_SCENE_VERTICES, max_triangles=MAX_SCENE_TRIANGLES,
+                 max_ring_vertices=MAX_RING_VERTICES, max_triangulation_work=DEFAULT_MAX_WORK):
         self.buildings = buildings
         self.roads = roads
         self.trees = trees
@@ -528,6 +847,10 @@ class PlanOptions:
         self.max_trees = max_trees
         self.seed = seed
         self.max_objects = max_objects
+        self.max_vertices = max_vertices
+        self.max_triangles = max_triangles
+        self.max_ring_vertices = max_ring_vertices
+        self.max_triangulation_work = max_triangulation_work
 
 
 def build_plan(area, terrain, classified, options=None):
@@ -541,29 +864,54 @@ def build_plan(area, terrain, classified, options=None):
     plan.count("buildings_outside_area", classified.outside)
     if classified.replaced_outlines:
         plan.report["building_outlines_replaced_by_parts"] = list(classified.replaced_outlines)
+    budget = SceneBudget(opts.max_vertices, opts.max_triangles)
+    invalid = plan.report["invalid_features"]
 
-    plan.objects.append(ObjectSpec("terrain", "terrain:grid", "terrain", "Terrain",
-                                   mesh=build_terrain(terrain, z_offset, classified.areas),
-                                   provenance={"elevation": terrain.provenance.get("provider"),
-                                               "spacing_m": terrain.spacing}))
+    def add(spec):
+        if len(plan.objects) >= opts.max_objects:
+            raise LimitError(f"{spec.mb_id}: object limit {opts.max_objects} reached")
+        plan.objects.append(spec)
+
+    budget.reserve("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
+    coverage = {}
+    tmesh = build_terrain(terrain, z_offset, classified.areas, coverage)
+    budget.commit(tmesh)
+    add(ObjectSpec("terrain", "terrain:grid", "terrain", "Terrain", mesh=tmesh,
+                   provenance={"elevation": terrain.provenance.get("provider"), "spacing_m": terrain.spacing,
+                               "surface": "piecewise planar, cells split along the (i,j)-(i+1,j+1) diagonal"}))
+    for a in classified.areas:
+        if not coverage.get(a.id):
+            plan.report["unsupported_features"].append(
+                {"id": a.id, "reason": f"{a.tags['_class']} area contains no terrain cell centre at "
+                                       f"{terrain.spacing:g} m spacing; not represented in terrain colouring"})
+
     footprints = []
     if opts.buildings:
         for f in classified.buildings:
             try:
-                mesh, origin, prov = build_building(f, terrain, z_offset, opts.seed)
+                mesh, origin, prov = build_building(
+                    f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
+                    max_work=opts.max_triangulation_work, reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
             except TriangulationError as e:
-                plan.report["invalid_features"].append({"id": f.id, "reason": f"triangulation failed: {e}"})
+                budget.release()
+                invalid.append({"id": f.id, "reason": f"triangulation failed: {e}"})
                 continue
+            except InvalidFeature as e:
+                budget.release()
+                invalid.append({"id": f.id, "reason": str(e)})
+                continue
+            budget.commit(mesh)
             for k, v in prov.items():
-                if isinstance(v, str) and v.startswith(("inferred", "fallback")):
+                if isinstance(v, str) and v.startswith(("inferred", "fallback")) and not k.endswith("_source"):
                     plan.inferred(f"building.{k}")
             if "elevated" in prov:
                 plan.report["unsupported_features"].append(
                     {"id": f.id, "reason": "elevated volume (min_height/building:min_level): generated as a "
                                            "closed solid; flying beneath it is not supported in v1",
                      "tags": {k: v for k, v in f.tags.items() if k in ("min_height", "building:min_level")}})
-            plan.objects.append(ObjectSpec(mesh.name, f.id, "building", "Buildings", mesh=mesh, location=origin,
-                                           provenance=prov))
+            if "terrain_warning" in prov:
+                plan.report["warnings"].append(f"{f.id}: {prov['terrain_warning']}")
+            add(ObjectSpec(mesh.name, f.id, "building", "Buildings", mesh=mesh, location=origin, provenance=prov))
             footprints.append((f.geometry, f.geometry.bbox()))
             if f.geometry.holes:
                 plan.count("buildings_with_courtyards")
@@ -571,19 +919,23 @@ def build_plan(area, terrain, classified, options=None):
     road_segments = []
     if opts.roads:
         for f in classified.roads:
-            mesh, origin, prov = build_road(f, terrain, z_offset)
+            mesh, origin, prov = build_road(f, terrain, z_offset,
+                                            reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
             if mesh is None:
+                budget.release()
+                invalid.append({"id": f.id, "reason": prov["reason"]})
                 continue
+            budget.commit(mesh)
             if prov["width"].startswith("inferred"):
                 plan.inferred("road.width")
-            plan.objects.append(ObjectSpec(mesh.name, f.id, "road", "Roads", mesh=mesh, location=origin,
-                                           provenance=prov))
+            add(ObjectSpec(mesh.name, f.id, "road", "Roads", mesh=mesh, location=origin, provenance=prov))
             w = prov["width_m"]
             for a, b in zip(f.geometry, f.geometry[1:]):
                 road_segments.append((a, b, w / 2 + 1.0))
             plan.count("roads")
     if opts.trees:
-        plan.shared_meshes["tree_generic"] = tree_mesh()
+        tmpl = plan.shared_meshes["tree_generic"] = tree_mesh()
+        tree_cost = (len(tmpl.vertices), mesh_triangle_count(tmpl))
         fp_buckets = _Buckets(footprints)
         seg_buckets = _Buckets([((a, b, r), (min(a[0], b[0]) - r, min(a[1], b[1]) - r,
                                              max(a[0], b[0]) + r, max(a[1], b[1]) + r)) for a, b, r in road_segments],
@@ -602,9 +954,10 @@ def build_plan(area, terrain, classified, options=None):
             return False
 
         n_trees = 0
-        for f in classified.trees:
+        for k_tree, f in enumerate(classified.trees):
             if n_trees >= opts.max_trees:
-                plan.report["warnings"].append(f"tree limit {opts.max_trees} reached; remaining trees skipped")
+                plan.report["warnings"].append(f"tree limit {opts.max_trees} reached; "
+                                               f"{len(classified.trees) - k_tree} remaining OSM trees skipped")
                 break
             x, y = f.geometry
             h = parse_length(f.tags.get("height"))
@@ -615,11 +968,10 @@ def build_plan(area, terrain, classified, options=None):
                 h = TREE_UNIT_HEIGHT
                 prov["height"] = "inferred:default 8 m"
             rng = random.Random(stable_hash(f.id) ^ opts.seed)
-            plan.objects.append(ObjectSpec(f"tree_{short_name(f.id)}", f.id, "vegetation", "Vegetation",
-                                           mesh_key="tree_generic",
-                                           location=(x, y, terrain.sample(x, y) - z_offset),
-                                           rotation_z=rng.random() * 2 * math.pi, scale=h / TREE_UNIT_HEIGHT,
-                                           provenance=prov))
+            budget.charge(f.id, *tree_cost)
+            add(ObjectSpec(f"tree_{short_name(f.id)}", f.id, "vegetation", "Vegetation", mesh_key="tree_generic",
+                           location=(x, y, terrain_height(terrain, x, y) - z_offset),
+                           rotation_z=rng.random() * 2 * math.pi, scale=h / TREE_UNIT_HEIGHT, provenance=prov))
             n_trees += 1
         if opts.scatter:
             capped = False
@@ -637,22 +989,21 @@ def build_plan(area, terrain, classified, options=None):
                     if not area.contains(x, y) or blocked(x, y):
                         continue
                     s = 0.75 + rng.random() * 0.5
-                    plan.objects.append(ObjectSpec(f"tree_s{stable_hash(f.id) % 1000000:06d}_{k}",
-                                                   f"scatter:{f.id}#{k}", "vegetation", "Vegetation",
-                                                   mesh_key="tree_generic",
-                                                   location=(x, y, terrain.sample(x, y) - z_offset),
-                                                   rotation_z=rng.random() * 2 * math.pi, scale=s,
-                                                   provenance={"position": f"inferred:procedural scatter in {f.id} ({cls})",
-                                                               "height": "inferred:procedural"}))
+                    sid = f"scatter:{f.id}#{k}"
+                    budget.charge(sid, *tree_cost)
+                    add(ObjectSpec(f"tree_s{stable_hash(f.id) % 1000000:06d}_{k}", sid, "vegetation", "Vegetation",
+                                   mesh_key="tree_generic",
+                                   location=(x, y, terrain_height(terrain, x, y) - z_offset),
+                                   rotation_z=rng.random() * 2 * math.pi, scale=s,
+                                   provenance={"position": f"inferred:procedural scatter in {f.id} ({cls})",
+                                               "height": "inferred:procedural"}))
                     n_trees += 1
             if capped:
                 plan.report["warnings"].append(f"tree limit {opts.max_trees} reached; scatter truncated")
         plan.count("trees", n_trees)
-    if len(plan.objects) > opts.max_objects:
-        from .errors import LimitError
-        raise LimitError(f"{len(plan.objects)} objects exceed limit {opts.max_objects}")
     plan.report["counts"]["objects"] = len(plan.objects)
     plan.report["z_offset_m"] = z_offset
+    plan.report["budget"] = budget.to_dict()
     # Ensure unique object names (Blender truncates at 63 bytes; keep ours shorter).
     seen = {}
     for o in plan.objects:
