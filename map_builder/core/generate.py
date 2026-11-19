@@ -1549,6 +1549,8 @@ def build_plan(area, terrain, classified, options=None):
         # first; an outline none of whose parts survived is generated itself (otherwise the
         # building would vanish). If only some parts survived, the outline is NOT generated (it
         # would overlap the surviving parts): it is partially represented, which is reported.
+        # ``outline_parts`` may also list parts already rejected by classify (crossing another
+        # outline); they are absent from ``classified.buildings`` and so count as rejected here.
         outline_parts = getattr(classified, "outline_parts", {})
         outline_features = getattr(classified, "outline_features", {})
         replaced, restored, partial = [], [], []

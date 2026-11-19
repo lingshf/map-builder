@@ -366,7 +366,7 @@ class Classified:
         self.replaced_outlines = []  # building outlines superseded by their building:part features
         # The superseded outlines are kept (not discarded) so generation can fall back to them
         # when their parts are rejected: outline id -> Feature, outline id -> [part ids] and
-        # part id -> [outline ids] (a part can lie inside nested outlines).
+        # part id -> [outline id] (at most one: the smallest outline containing the part).
         self.outline_features = {}
         self.outline_parts = {}
         self.outline_for = {}
@@ -405,7 +405,11 @@ def _unsupported_reason(tags):
     return None
 
 
-def classify(data, area, max_features=50_000):
+def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None):
+    if max_part_pair_checks is None:
+        max_part_pair_checks = MAX_PART_PAIR_CHECKS
+    if max_association_work is None:
+        max_association_work = MAX_ASSOCIATION_WORK
     frame = area.frame
     proj_cache = {}
 
@@ -616,38 +620,270 @@ def classify(data, area, max_features=50_000):
             if area.contains(x, y):
                 out.trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
 
-    _resolve_building_parts(out)
+    # Enforced before building:part matching: replaced outlines are retained (outline_features)
+    # and so count, exactly like the parts and the other buildings still in ``out.buildings``.
     total = len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees)
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
+    _resolve_building_parts(out, max_pair_checks=max_part_pair_checks, max_work=max_association_work)
     return out
 
 
-def _resolve_building_parts(out):
+# --- building:part / outline association -------------------------------------
+
+PART_TOL_M = 0.05            # boundaries closer than this count as coincident/touching
+MAX_PART_PAIR_CHECKS = 200_000       # bbox-overlapping (part, outline) pairs examined geometrically
+MAX_ASSOCIATION_WORK = 10_000_000    # primitive geometric tests for the whole association
+_PART_GRID_M = 32.0
+_PART_GRID_MAX_CELLS = 256   # per axis
+
+
+class _AssocWork:
+    def __init__(self, limit):
+        self.limit = limit
+        self.n = 0
+
+    def add(self, k=1):
+        self.n += k
+        if self.n > self.limit:
+            raise LimitError(f"building:part/outline association exceeds its work budget of {self.limit} "
+                             "geometric tests; choose a smaller area")
+
+
+def _seg_dist2(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    l2 = dx * dx + dy * dy
+    t = 0.0 if l2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2))
+    ex, ey = a[0] + t * dx - p[0], a[1] + t * dy - p[1]
+    return ex * ex + ey * ey
+
+
+def _locate(pt, poly, tol, work):
+    """1 strictly inside ``poly`` (farther than ``tol`` from its boundary), 0 on its boundary, -1 outside."""
+    rings = [poly.outer] + poly.holes
+    work.add(2 * sum(len(r) for r in rings))
+    t2 = tol * tol
+    for r in rings:
+        for i in range(len(r)):
+            if _seg_dist2(pt, r[i - 1], r[i]) <= t2:
+                return 0
+    if not point_in_ring(pt[0], pt[1], poly.outer) or any(point_in_ring(pt[0], pt[1], h) for h in poly.holes):
+        return -1
+    return 1
+
+
+def _contact_params(a, b, edges, tol, work):
+    """Sorted parameters in [0, 1] splitting segment ab at every contact with ``edges`` (proper
+    crossings, and the projections of edge vertices lying within ``tol`` of ab)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    l2 = dx * dx + dy * dy
+    t2 = tol * tol
+    ts = {0.0, 1.0}
+    x0, x1 = min(a[0], b[0]) - tol, max(a[0], b[0]) + tol
+    y0, y1 = min(a[1], b[1]) - tol, max(a[1], b[1]) + tol
+    work.add(len(edges))
+    for c, d in edges:
+        if max(c[0], d[0]) < x0 or min(c[0], d[0]) > x1 or max(c[1], d[1]) < y0 or min(c[1], d[1]) > y1:
+            continue
+        for q in (c, d):
+            t = ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2
+            if 0.0 < t < 1.0:
+                ex, ey = a[0] + t * dx - q[0], a[1] + t * dy - q[1]
+                if ex * ex + ey * ey <= t2:
+                    ts.add(t)
+        ex, ey = d[0] - c[0], d[1] - c[1]
+        den = dx * ey - dy * ex
+        if den != 0:
+            t = ((c[0] - a[0]) * ey - (c[1] - a[1]) * ex) / den
+            u = ((c[0] - a[0]) * dy - (c[1] - a[1]) * dx) / den
+            if 0.0 < t < 1.0 and 0.0 <= u <= 1.0:
+                ts.add(t)
+    return sorted(ts)
+
+
+def _boundary_locations(rings, poly, tol, work):
+    """Yield the location (see :func:`_locate`) w.r.t. ``poly`` of every vertex of ``rings`` and of the
+    midpoint of every piece of their edges between consecutive contacts with ``poly``'s boundary.
+    Each such piece lies entirely inside, on or outside ``poly``, so this decides where the whole
+    boundary lies (a crossing or an exit through a vertex always yields a piece outside)."""
+    edges = [(r[i - 1], r[i]) for r in [poly.outer] + poly.holes for i in range(len(r))]
+    for ring in rings:
+        n = len(ring)
+        for i in range(n):
+            a, b = ring[i], ring[(i + 1) % n]
+            yield _locate(a, poly, tol, work)
+            ts = _contact_params(a, b, edges, tol, work)
+            for t0, t1 in zip(ts, ts[1:]):
+                tm = (t0 + t1) / 2.0
+                yield _locate((a[0] + tm * (b[0] - a[0]), a[1] + tm * (b[1] - a[1])), poly, tol, work)
+
+
+def interior_point(rings):
+    """A point strictly inside the region bounded by ``rings`` (even-odd rule; an outer ring and its
+    holes), or None if degenerate. Unlike the vertex centroid it never falls in a notch or a hole:
+    it is the middle of the widest interior span on the horizontal line halfway across the
+    largest gap between distinct vertex heights (that line passes through no vertex)."""
+    ys = sorted({p[1] for r in rings for p in r})
+    if len(ys) < 2:
+        return None
+    k = max(range(len(ys) - 1), key=lambda i: ys[i + 1] - ys[i])
+    y = (ys[k] + ys[k + 1]) / 2.0
+    xs = []
+    for r in rings:
+        for i in range(len(r)):
+            (ax, ay), (bx, by) = r[i - 1], r[i]
+            if (ay > y) != (by > y):
+                xs.append(ax + (y - ay) * (bx - ax) / (by - ay))
+    xs.sort()
+    spans = [(xs[i], xs[i + 1]) for i in range(0, len(xs) - 1, 2)]
+    if not spans:
+        return None
+    x0, x1 = max(spans, key=lambda s: s[1] - s[0])
+    return (x0 + x1) / 2.0, y
+
+
+def part_within_outline(part, outline, tol=PART_TOL_M, work=None):
+    """True if footprint ``part`` (a Polygon) lies within ``outline`` (a Polygon): its boundary
+    (outer ring and holes) lies inside or on the outline - within the outer ring, outside every
+    hole, coincident/touching boundaries allowed within ``tol`` - and no outline hole (courtyard)
+    lies inside the part."""
+    work = work or _AssocWork(MAX_ASSOCIATION_WORK)
+    px0, py0, px1, py1 = part.bbox()
+    ox0, oy0, ox1, oy1 = outline.bbox()
+    if px0 < ox0 - tol or py0 < oy0 - tol or px1 > ox1 + tol or py1 > oy1 + tol:
+        return False
+    if any(s < 0 for s in _boundary_locations([part.outer] + part.holes, outline, tol, work)):
+        return False
+    # The boundary is within the outline, so each courtyard is either entirely inside or entirely
+    # outside the part: one interior point of it decides.
+    for h in outline.holes:
+        q = interior_point([h])
+        work.add(len(h))
+        if q is not None and _locate(q, part, tol, work) > 0:
+            return False
+    return True
+
+
+def footprints_overlap(a, b, tol=PART_TOL_M, work=None):
+    """True if the interiors of Polygons ``a`` and ``b`` overlap by more than ``tol`` (touching or
+    shared edges do not count)."""
+    work = work or _AssocWork(MAX_ASSOCIATION_WORK)
+    if any(s > 0 for s in _boundary_locations([a.outer] + a.holes, b, tol, work)):
+        return True
+    if any(s > 0 for s in _boundary_locations([b.outer] + b.holes, a, tol, work)):
+        return True
+    # Neither boundary enters the other's interior: overlap only if one lies inside the other.
+    for x, y in ((a, b), (b, a)):
+        q = interior_point([x.outer] + x.holes)
+        work.add(len(x.outer))
+        if q is not None and _locate(q, y, tol, work) > 0:
+            return True
+    return False
+
+
+def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=MAX_ASSOCIATION_WORK):
     """Simple 3D Buildings: an outline that contains parts is replaced by its parts.
 
-    The outline leaves ``out.buildings`` but is kept in ``out.outline_features`` with the
-    ids of the parts that replace it (``out.outline_parts`` / ``out.outline_for``), so the
-    generator can fall back to it if none of those parts can be generated."""
+    Association is by footprint containment (:func:`part_within_outline`), never by centroid. Each
+    part belongs to its *smallest* containing outline only. A part that overlaps an outline without
+    being contained in it (crossing its boundary or one of its courtyards) is rejected as invalid
+    (``building:part crosses outline courtyard/boundary``) and never replaces that outline.
+
+    A replaced outline leaves ``out.buildings`` but is kept in ``out.outline_features`` with the
+    ids of its parts (``out.outline_parts`` / ``out.outline_for``, one outline per part), so the
+    generator can fall back to it if none of those parts can be generated. Rejected parts that
+    lie within an outline are listed there too (they count as rejected); an outline all of whose
+    contained parts were rejected here is simply kept.
+
+    Work is bounded: candidate pairs come from a bbox grid and are counted against
+    ``max_pair_checks`` before any geometry; all geometric tests count against ``max_work``.
+    Exceeding either raises :class:`LimitError`."""
     parts = [b for b in out.buildings if b.kind == "building_part"]
-    if not parts:
+    outlines = [b for b in out.buildings if b.kind == "building"]
+    if not parts or not outlines:
         return
-    centroids = [(p, p.geometry.centroid()) for p in parts]
-    keep = []
-    for b in out.buildings:
-        if b.kind == "building":
-            x0, y0, x1, y1 = b.geometry.bbox()
-            inside = [p.id for p, (cx, cy) in centroids
-                      if x0 <= cx <= x1 and y0 <= cy <= y1 and b.geometry.contains(cx, cy)]
-            if inside:
-                out.replaced_outlines.append(b.id)
-                out.outline_features[b.id] = b
-                out.outline_parts[b.id] = inside
-                for pid in inside:
-                    out.outline_for.setdefault(pid, []).append(b.id)
-                continue
-        keep.append(b)
-    out.buildings = keep
+    tol = PART_TOL_M
+    work = _AssocWork(max_work)
+    pboxes = [p.geometry.bbox() for p in parts]
+    oboxes = [o.geometry.bbox() for o in outlines]
+    gx0 = min(b[0] for b in pboxes) - tol
+    gy0 = min(b[1] for b in pboxes) - tol
+    gx1 = max(b[2] for b in pboxes) + tol
+    gy1 = max(b[3] for b in pboxes) + tol
+    cs = max(_PART_GRID_M, (gx1 - gx0) / _PART_GRID_MAX_CELLS, (gy1 - gy0) / _PART_GRID_MAX_CELLS)
+    nmax = _PART_GRID_MAX_CELLS - 1
+
+    def cell_range(bb):
+        # Both parts and outlines are clamped to the parts' extent, which preserves overlaps.
+        i0 = min(nmax, max(0, int((bb[0] - tol - gx0) // cs)))
+        i1 = min(nmax, max(0, int((bb[2] + tol - gx0) // cs)))
+        j0 = min(nmax, max(0, int((bb[1] - tol - gy0) // cs)))
+        j1 = min(nmax, max(0, int((bb[3] + tol - gy0) // cs)))
+        return i0, i1, j0, j1
+
+    def overlap(a, b):
+        return a[0] <= b[2] + tol and b[0] <= a[2] + tol and a[1] <= b[3] + tol and b[1] <= a[3] + tol
+
+    grid = {}
+    for oi, bb in enumerate(oboxes):
+        if bb[2] < gx0 or bb[0] > gx1 or bb[3] < gy0 or bb[1] > gy1:
+            continue  # cannot touch any part
+        i0, i1, j0, j1 = cell_range(bb)
+        work.add((i1 - i0 + 1) * (j1 - j0 + 1))
+        for i in range(i0, i1 + 1):
+            for j in range(j0, j1 + 1):
+                grid.setdefault((i, j), []).append(oi)
+    # Phase 1: candidate pairs (bbox overlap), capped before any geometric test.
+    candidates = []
+    n_pairs = 0
+    for pi, bb in enumerate(pboxes):
+        i0, i1, j0, j1 = cell_range(bb)
+        seen = set()
+        for i in range(i0, i1 + 1):
+            for j in range(j0, j1 + 1):
+                cell = grid.get((i, j), ())
+                work.add(len(cell) + 1)
+                seen.update(oi for oi in cell if overlap(bb, oboxes[oi]))
+        n_pairs += len(seen)
+        if n_pairs > max_pair_checks:
+            raise LimitError(f"more than {max_pair_checks} overlapping building:part/outline pairs to check; "
+                             "choose a smaller area")
+        candidates.append(sorted(seen))
+    # Phase 2: containment.
+    owner = {}       # part index -> smallest containing outline index
+    rejected = set()
+    for pi, part in enumerate(parts):
+        containing, crossing = [], []
+        for oi in candidates[pi]:
+            o = outlines[oi].geometry
+            if part_within_outline(part.geometry, o, tol, work):
+                containing.append(oi)
+            elif footprints_overlap(part.geometry, o, tol, work):
+                crossing.append(oi)
+        if containing:
+            owner[pi] = min(containing, key=lambda oi: (abs(outlines[oi].geometry.area()), oi))
+        if crossing:
+            rejected.add(pi)
+            ids = ", ".join(outlines[oi].id for oi in crossing)
+            out.invalid.append({"id": part.id, "reason": f"building:part crosses outline courtyard/boundary "
+                                                         f"({ids}): it overlaps the outline without lying "
+                                                         "within it; part not generated, outline kept"})
+    members = {}
+    for pi in sorted(owner):
+        members.setdefault(owner[pi], []).append(pi)
+    replaced = {oi for oi, pis in members.items() if any(pi not in rejected for pi in pis)}
+    rejected_ids = {parts[pi].id for pi in rejected}
+    replaced_ids = set()
+    for oi in sorted(replaced):
+        o = outlines[oi]
+        replaced_ids.add(id(o))
+        out.replaced_outlines.append(o.id)
+        out.outline_features[o.id] = o
+        out.outline_parts[o.id] = [parts[pi].id for pi in members[oi]]
+        for pi in members[oi]:
+            out.outline_for[parts[pi].id] = [o.id]
+    out.buildings = [b for b in out.buildings if id(b) not in replaced_ids
+                     and not (b.kind == "building_part" and b.id in rejected_ids)]
 
 
 def _area_family(tags):

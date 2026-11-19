@@ -1459,3 +1459,173 @@ class StreamingRoadBudgetTest(unittest.TestCase):
                 for lim in ((v - 1, t), (v, t - 1)):
                     with self.assertRaises(gen.RoadBudgetExceeded):
                         build_road(f, grid, 0.0, limit=lim)
+
+
+# --- Round 5 -------------------------------------------------------------------
+
+from map_builder.core import osm as osm_mod  # noqa: E402
+
+C_SHAPE = [(-10, -10), (10, -10), (10, -3), (0, -3), (0, 3), (10, 3), (10, 10), (-10, 10)]  # vertex mean in notch
+
+
+def classify_xml(b, **kw):
+    return classify(parse_osm_xml(b.xml().encode()), tiny_area(), **kw)
+
+
+class PartContainmentTest(unittest.TestCase):
+    """Round 5, finding 1: parts are matched to outlines by footprint containment."""
+
+    def test_reviewer_identical_c_shape_is_one_solid(self):
+        b = OsmBuilder()
+        oid = f"osm:way/{b.way(C_SHAPE, {'building': 'yes', 'height': '10'}, closed=True)}"
+        pid = f"osm:way/{b.way(C_SHAPE, {'building:part': 'yes', 'height': '10'}, closed=True)}"
+        cl = classify_xml(b)
+        self.assertEqual([f.id for f in cl.buildings], [pid])  # old code: both (centroid in the notch)
+        self.assertEqual(cl.replaced_outlines, [oid])
+        self.assertEqual(cl.outline_for, {pid: [oid]})
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertEqual([o.mb_id for o in plan.objects if o.mb_class == "building"], [pid])
+
+    def test_reviewer_part_crossing_courtyard_is_rejected(self):
+        b = OsmBuilder()
+        rid = f"osm:relation/{b.multipolygon(rect_ccw(-20, -20, 20, 20), [rect_ccw(-5, -5, 5, 5)], {'building': 'yes', 'height': '10'})}"
+        # centroid (-6, 0) is outside the courtyard, but the part spans it
+        pid = f"osm:way/{b.way(rect_ccw(-18, -2, 6, 2), {'building:part': 'yes', 'height': '12'}, closed=True)}"
+        cl = classify_xml(b)
+        self.assertEqual([f.id for f in cl.buildings], [rid])  # old code: outline replaced by the part
+        self.assertEqual((cl.replaced_outlines, cl.outline_for, cl.outline_parts), ([], {}, {}))
+        reasons = {e["id"]: e["reason"] for e in cl.invalid}
+        self.assertIn("building:part crosses outline courtyard/boundary", reasons[pid])
+        self.assertIn(rid, reasons[pid])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        built = {o.mb_id: o for o in plan.objects if o.mb_class == "building"}
+        self.assertEqual(set(built), {rid})
+        self.assertIn(pid, {e["id"] for e in plan.report["invalid_features"]})
+
+    def test_part_extending_outside_outline_is_rejected(self):
+        b = OsmBuilder()
+        oid = f"osm:way/{b.way(rect_ccw(-10, -10, 10, 10), {'building': 'yes'}, closed=True)}"
+        pid = f"osm:way/{b.way(rect_ccw(0, -5, 15, 5), {'building:part': 'yes'}, closed=True)}"
+        cl = classify_xml(b)
+        self.assertEqual([f.id for f in cl.buildings], [oid])  # old code: centroid inside -> replaced
+        self.assertIn("crosses outline courtyard/boundary", {e["id"]: e["reason"] for e in cl.invalid}[pid])
+
+    def test_touching_and_disjoint_parts_are_not_reported(self):
+        b = OsmBuilder()
+        oid = f"osm:way/{b.way(rect_ccw(-10, -10, 10, 10), {'building': 'yes'}, closed=True)}"
+        inner = f"osm:way/{b.way(rect_ccw(-10, -10, 0, 10), {'building:part': 'yes'}, closed=True)}"  # shares edges
+        beside = f"osm:way/{b.way(rect_ccw(10, -5, 20, 5), {'building:part': 'yes'}, closed=True)}"  # touches
+        cl = classify_xml(b)
+        self.assertEqual([f.id for f in cl.buildings], [inner, beside])
+        self.assertEqual(cl.outline_parts, {oid: [inner]})
+        self.assertEqual(cl.invalid, [])
+
+    def test_part_matching_courtyard_is_contained(self):
+        b = OsmBuilder()
+        rid = f"osm:relation/{b.multipolygon(rect_ccw(-20, -20, 20, 20), [rect_ccw(-5, -5, 5, 5)], {'building': 'yes'})}"
+        pid = f"osm:relation/{b.multipolygon(rect_ccw(-20, -20, 20, 20), [rect_ccw(-5, -5, 5, 5)], {'building:part': 'yes'})}"
+        cl = classify_xml(b)
+        self.assertEqual(cl.outline_for, {pid: [rid]})
+        self.assertEqual(cl.invalid, [])
+
+    def test_containment_geometry(self):
+        P = Polygon
+        c = P([(-10, -10), (10, -10), (10, -3), (4, -3), (4, 3), (10, 3), (10, 10), (-10, 10)])
+        self.assertTrue(osm_mod.part_within_outline(P(list(c.outer)), c))
+        # covers the notch although every vertex is on the outline (old centroid (0, 0): inside)
+        self.assertFalse(osm_mod.part_within_outline(P(rect_ccw(-10, -10, 10, 10)), c))
+        # leaves the outline through a vertex: no proper crossing and no outline vertex inside it
+        tri = P([(3, -4), (10, -9), (10, 3)])
+        self.assertFalse(osm_mod.part_within_outline(tri, c))
+        self.assertTrue(osm_mod.footprints_overlap(tri, c))
+        # courtyard whose vertices all lie on the part boundary
+        yard = P(rect_ccw(-20, -20, 20, 20), [[(0, -10), (-10, 0), (0, 10), (10, 0)]])
+        sq = P(rect_ccw(-10, -10, 10, 10))
+        self.assertFalse(osm_mod.part_within_outline(sq, yard))
+        self.assertTrue(osm_mod.footprints_overlap(sq, yard))
+        # near-coincident boundary within tolerance
+        self.assertTrue(osm_mod.part_within_outline(P(rect_ccw(-10.01, -10, 0, 10)), P(rect_ccw(-10, -10, 10, 10))))
+        self.assertFalse(osm_mod.part_within_outline(P(rect_ccw(-10.2, -10, 0, 10)), P(rect_ccw(-10, -10, 10, 10))))
+        c2 = P(list(C_SHAPE))
+        self.assertTrue(c2.contains(*osm_mod.interior_point([c2.outer])))
+        self.assertFalse(c2.contains(*c2.centroid()))  # the vertex mean of this C is in the notch
+
+
+class PartAssociationBoundsTest(unittest.TestCase):
+    """Round 5, finding 2: feature cap first, one (smallest) outline per part, bounded matching."""
+
+    def test_reviewer_max_features_counts_retained_outline(self):
+        b = OsmBuilder()
+        b.way(rect_ccw(-10, -10, 10, 10), {"building": "yes"}, closed=True)
+        b.way(rect_ccw(-5, -5, 5, 5), {"building:part": "yes"}, closed=True)
+        with self.assertRaises(LimitError):
+            classify_xml(b, max_features=1)  # old code kept both
+        self.assertEqual(len(classify_xml(b, max_features=2).buildings), 1)
+
+    def test_smallest_containing_outline_only(self):
+        b = OsmBuilder()
+        big = f"osm:way/{b.way(rect_ccw(-30, -30, 30, 30), {'building': 'yes', 'height': '40'}, closed=True)}"
+        small = f"osm:way/{b.way(rect_ccw(-10, -10, 10, 10), {'building': 'yes', 'height': '15'}, closed=True)}"
+        pid = f"osm:way/{b.way(rect_ccw(-2, -2, 2, 2), {'building:part': 'yes', 'height': '3'}, closed=True)}"
+        cl = classify_xml(b)
+        self.assertEqual(cl.outline_for, {pid: [small]})  # old code: [big, small]
+        self.assertEqual(cl.outline_parts, {small: [pid]})
+        self.assertEqual(cl.replaced_outlines, [small])
+        self.assertEqual([f.id for f in cl.buildings], [big, pid])
+        plan = build_plan(tiny_area(), peak_grid(), cl)  # the part is rejected over the peak
+        self.assertEqual(plan.report["building_outlines_restored"], [{"id": small, "rejected_parts": [pid]}])
+
+    def test_rejected_contained_part_marks_outline_partial(self):
+        b = OsmBuilder()
+        a = f"osm:way/{b.way(rect_ccw(-30, -30, 30, 30), {'building': 'yes', 'height': '20'}, closed=True)}"
+        inner = f"osm:way/{b.way(rect_ccw(-10, -10, 5, 10), {'building': 'yes', 'height': '20'}, closed=True)}"
+        p1 = f"osm:way/{b.way(rect_ccw(-25, -25, -20, -20), {'building:part': 'yes', 'height': '20'}, closed=True)}"
+        p2 = f"osm:way/{b.way(rect_ccw(-2, -2, 8, 2), {'building:part': 'yes', 'height': '20'}, closed=True)}"
+        cl = classify_xml(b)
+        self.assertIn(inner, {e["id"]: e["reason"] for e in cl.invalid}[p2])
+        self.assertEqual(cl.outline_parts, {a: [p1, p2]})
+        self.assertEqual([f.id for f in cl.buildings], [inner, p1])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertEqual(plan.report["building_outlines_partially_represented"],
+                         [{"id": a, "built_parts": [p1], "rejected_parts": [p2]}])
+
+    @staticmethod
+    def dense(n):
+        out = Classified()
+        out.buildings = [building(rect_ccw(-20 + 1e-3 * k, -20, 20, 20), fid=f"osm:way/{k}") for k in range(n)]
+        out.buildings += [Feature(f"osm:way/{n + k}", "building_part", {"building:part": "yes"},
+                                  Polygon(rect_ccw(-5, -5, 5 + 1e-3 * k, 5))) for k in range(n)]
+        return out
+
+    def test_reviewer_dense_overlap_is_bounded(self):
+        import time
+        out = self.dense(1000)
+        t0 = time.perf_counter()
+        with self.assertRaises(LimitError) as cm:
+            osm_mod._resolve_building_parts(out)  # old code: 1M pairs, 2M association references
+        self.assertIn("pairs", str(cm.exception))
+        self.assertLess(time.perf_counter() - t0, 5.0)
+
+    def test_dense_within_limits_stores_one_outline_per_part(self):
+        out = self.dense(30)
+        osm_mod._resolve_building_parts(out, max_pair_checks=900)
+        self.assertEqual(sum(len(v) for v in out.outline_for.values()), 30)
+        self.assertEqual(set(out.replaced_outlines), {"osm:way/29"})  # the smallest outline
+        with self.assertRaises(LimitError):
+            osm_mod._resolve_building_parts(self.dense(30), max_pair_checks=899)
+        with self.assertRaises(LimitError) as cm:
+            osm_mod._resolve_building_parts(self.dense(30), max_work=1000)
+        self.assertIn("work budget", str(cm.exception))
+
+    def test_spatial_prefilter(self):
+        out = Classified()
+        for i in range(40):
+            for j in range(25):
+                k = i * 25 + j
+                x, y = -48 + 2.4 * i, -48 + 3.8 * j
+                out.buildings.append(building(rect_ccw(x, y, x + 2, y + 2), fid=f"osm:way/{k}"))
+                out.buildings.append(Feature(f"osm:way/{5000 + k}", "building_part", {"building:part": "yes"},
+                                             Polygon(rect_ccw(x + 0.5, y + 0.5, x + 1.5, y + 1.5))))
+        osm_mod._resolve_building_parts(out, max_pair_checks=1000)  # exactly one candidate per part
+        self.assertEqual(len(out.replaced_outlines), 1000)
+        self.assertEqual(out.outline_for["osm:way/5999"], ["osm:way/999"])

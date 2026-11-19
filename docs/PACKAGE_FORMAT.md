@@ -202,6 +202,20 @@ counted in `edits.removed` and listed in `report.json`.
   `invalid_features` and is used neither for terrain colouring nor for scatter.
 * Building parts (Simple 3D Buildings): an outline that contains `building:part` features is
   replaced by them. The parts are built first.
+  * Matching is by footprint containment, not centroid: the part's boundary (outer ring and
+    holes) must lie inside or on the outline's outer ring and outside all of its courtyards,
+    and no courtyard may lie inside the part. Coincident or touching boundaries are allowed
+    within 0.05 m. A part inside nested outlines belongs only to the smallest one.
+  * A part that overlaps an outline without lying within it (crossing its boundary or a
+    courtyard) is rejected: it is listed in `invalid_features` with the reason
+    `building:part crosses outline courtyard/boundary (<outline ids>)` and never replaces
+    that outline, which is kept. If the rejected part lies within another outline, it counts
+    among that outline's rejected parts below; an outline all of whose parts were rejected
+    this way is not replaced at all. Touching parts are not reported.
+  * Limits: retained (replaced) outlines count toward the feature limit, which is checked
+    before matching. Candidate pairs come from a bounding-box grid; more than 200,000
+    overlapping part/outline pairs, or more than 10,000,000 geometric tests, raise
+    `LimitError`.
   * All parts generated: the outline is listed in `building_outlines_replaced_by_parts`.
   * No part generated: the outline is generated instead. It is listed in
     `building_outlines_restored` (`{id, rejected_parts}`), has the provenance
