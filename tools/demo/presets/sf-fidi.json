@@ -1,0 +1,11 @@
+{
+  "name": "sf-fidi",
+  "description": "San Francisco Financial District, 800 x 800 m (demo area); cameras are starting points, tune per feature",
+  "area": {"lat": 37.7955, "lon": -122.3985, "width_m": 800, "height_m": 800},
+  "cameras": [
+    {"name": "overview", "eye": [-550, -650, 420], "target": [0, 0, 20], "lens_mm": 28},
+    {"name": "street", "eye": [-120, -250, 12], "target": [0, 0, 15], "lens_mm": 24},
+    {"name": "bridge-under", "eye": [-300, 100, 8], "target": [-100, 100, 20], "lens_mm": 24},
+    {"name": "tunnel-portal", "eye": [150, -300, 20], "target": [100, -200, 10], "lens_mm": 28}
+  ]
+}

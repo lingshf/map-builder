@@ -1,0 +1,10 @@
+{
+  "name": "synthetic",
+  "description": "The committed SYNTHETIC fixture area (400 x 300 m); not a real place",
+  "area": {"lat": 47.0, "lon": 8.0, "width_m": 400, "height_m": 300},
+  "cameras": [
+    {"name": "overview", "eye": [-260, -300, 190], "target": [0, 0, 8], "lens_mm": 28},
+    {"name": "street", "eye": [-150, -110, 35], "target": [0, 0, 8], "lens_mm": 24},
+    {"name": "top", "eye": [0, -40, 420], "target": [0, 0, 5], "lens_mm": 35}
+  ]
+}
