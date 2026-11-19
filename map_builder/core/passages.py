@@ -502,28 +502,18 @@ def _sub_object(gen, spec, md, keep):
     return gen.ObjectSpec(spec.name, spec.mb_id, spec.mb_class, spec.collection, mesh=sub, location=spec.location)
 
 
-def finish(plan, ctx):
+def finish(plan, ctx, budget=None):
     """D21: probes this module emitted are checked against the finished plan; a blocked one is not exported and
-    is listed in ``report['passage_probes_blocked']`` with the blocking object's ``mb_id``. The manifest holds at
-    most ``PASSAGE_PROBE_MAX`` probes: surplus probes of this module are not exported and are listed in
-    ``report['passage_probes_dropped']``."""
-    from .package import PASSAGE_PROBE_MAX
+    is listed in ``report['passage_probes_blocked']`` with the blocking object's ``mb_id``. The manifest cap is not
+    applied here: ``structures.finalize_probes`` applies one global cap to the probes of every kind that survive.
+    Probes whose passage road was not generated are listed in ``report['passage_probes_dropped']``."""
     st = _state(ctx)
     mine = [p for p in plan.passage_probes if p["id"] in st.probes]
     dropped = list(st.dropped)
+    st.probes, st.dropped = [], []
     if mine:
-        others = len(plan.passage_probes) - len(mine)
-        room = max(0, PASSAGE_PROBE_MAX - others)
-        _, blocked = check_probes(_local_plan(plan, mine[:PASSAGE_PROBE_MAX], ctx.terrain),
-                                  mine[:PASSAGE_PROBE_MAX])
+        _, blocked = check_probes(_local_plan(plan, mine, ctx.terrain), mine, budget=budget)
         gone = {b["id"] for b in blocked}
-        survivors = [p for p in mine[:PASSAGE_PROBE_MAX] if p["id"] not in gone]
-        for p in survivors[room:]:
-            dropped.append({"id": p["id"], "reason": f"the manifest holds at most {PASSAGE_PROBE_MAX} passage probes"})
-            gone.add(p["id"])
-        for p in mine[PASSAGE_PROBE_MAX:]:
-            dropped.append({"id": p["id"], "reason": f"the manifest holds at most {PASSAGE_PROBE_MAX} passage probes"})
-            gone.add(p["id"])
         if gone:
             plan.passage_probes[:] = [p for p in plan.passage_probes if p["id"] not in gone]
         if blocked:

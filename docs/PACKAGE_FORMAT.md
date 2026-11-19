@@ -97,8 +97,9 @@ All coordinates are in metres.
 | 8 | `tunnel` | tube | inward tube (below) |
 | 9 | `structure` | solid | closed, positive volume |
 
-The generator does not emit `bridge`, `tunnel` or `structure` yet (they are listed as
-unsupported features in `report.json`), but the format, the validator and the reference
+The generator emits `tunnel` (road tunnels: `highway=*` with `tunnel=yes`, see `report.json`) and the
+portal-headwall `structure` objects that belong to them. It does not emit `bridge` yet
+(listed as unsupported in `report.json`), but the format, the validator and the reference
 readers accept them. `manifest.collision.classes` maps names to ids and
 `manifest.collision.class_kinds` maps names to `"solid"`, `"surface"`, `"tube"` or `null`;
 both must equal the tables above.
@@ -352,8 +353,12 @@ counted in `edits.removed` and listed in `report.json`.
   time and stops as soon as it exceeds what remains of the budget (`LimitError` naming the
   road). A road that exactly fits is accepted.
 * `report.json` lists:
-  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), tunnels, and building passages that cannot be cut cleanly
-  * `passage_probes_blocked`: `[{id, blocker}]`, generated building/elevated passage probes that collision blocks (not exported)
+  * `unsupported_features`: bridges (including `man_made=bridge` and `building=bridge`), railway tunnels, `tunnel=culvert`, `man_made=tunnel`, and building passages that cannot be cut cleanly
+  * `counts.tunnels`, `counts.terrain_cut_cells` and `counts.tunnel_headwalls`: road tunnels generated, terrain
+    cells cut for them, and portal headwalls
+  * `passage_probes_blocked`: `[{id, blocker, reason?}]`, generated tunnel, building and elevated passage probes that
+    collision blocks (not exported), checked on the finished scene (trees included): `blocker` is the blocking
+    object's `mb_id`, or null with a `reason` (`budget_exhausted`: one collision-work allowance is shared by all probe kinds in plan order)
   * `passage_probes_dropped`: `[{id, reason}]`, passage probes not exported because the passage road was not generated or the manifest cap of 256 probes was reached
   * `invalid_features`: for example self-intersecting footprints, degenerate inner rings,
     buildings where the terrain reaches the roof underside, footprints or trees outside
@@ -421,7 +426,8 @@ Readers accept version 2 only.
 Each value is the maximum z of the *final* terrain-class collision triangles at that grid
 point. The grid is a derived convenience, for example for a Core height-grid path. **Triangles
 are authoritative.** The heightfield is **terrain-only**: it is NaN wherever terrain is absent
-or cut (for example a future tunnel portal or cutting), and it cannot represent bridges,
+or cut (every road tunnel removes the terrain below its roof inside its footprint, so the
+heightfield is NaN there; terrain above the roof remains), and it cannot represent bridges,
 tunnels, elevated volumes, overhangs or any other non-terrain object. A consumer that needs
 those must use the `.mbcol` triangles.
 

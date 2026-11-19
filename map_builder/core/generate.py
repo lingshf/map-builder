@@ -30,7 +30,7 @@ import struct
 from . import bridges, dsm, passages, roofs, tunnels
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
-from .structures import StageContext
+from .structures import StageContext, finalize_probes
 from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
 from .triangulate import _Work as _TopologyWork
 
@@ -1810,17 +1810,24 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                                              max(a[0], b[0]) + r, max(a[1], b[1]) + r)) for a, b, r in road_segments],
                                cell=25.0, bounds=scene)
 
-        def blocked(x, y):
-            for poly in fp_buckets.query(x, y):
-                if poly.contains(x, y):
-                    return True
-            for a, b, r in seg_buckets.query(x, y):
+        keep_buckets = _Buckets([((a, b, r), (min(a[0], b[0]) - r, min(a[1], b[1]) - r,
+                                              max(a[0], b[0]) + r, max(a[1], b[1]) + r)) for a, b, r in ctx.keepout],
+                                cell=25.0, bounds=scene)
+
+        def in_segment(buckets, x, y):
+            for a, b, r in buckets.query(x, y):
                 dx, dy = b[0] - a[0], b[1] - a[1]
                 L = dx * dx + dy * dy
                 t = 0.0 if L == 0 else max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy) / L))
                 if math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) < r:
                     return True
             return False
+
+        def blocked(x, y):
+            for poly in fp_buckets.query(x, y):
+                if poly.contains(x, y):
+                    return True
+            return in_segment(seg_buckets, x, y) or in_segment(keep_buckets, x, y)
 
         n_trees = 0
         for k_tree, f in enumerate(classified.trees):
@@ -1831,6 +1838,9 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             x, y = f.geometry
             if not inside_terrain(terrain, x, y):
                 invalid.append({"id": f.id, "reason": "tree lies outside the terrain extent; not generated"})
+                continue
+            if in_segment(keep_buckets, x, y):
+                invalid.append({"id": f.id, "reason": "tree stands in a tunnel portal or cut zone; not generated"})
                 continue
             h = parse_length(f.tags.get("height"))
             prov = {"position": "measured:osm natural=tree"}
@@ -1874,7 +1884,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             if capped:
                 plan.report["warnings"].append(f"tree limit {opts.max_trees} reached; scatter truncated")
         plan.count("trees", n_trees)
-    passages.finish(plan, ctx)
+    finalize_probes(plan, ctx)
     plan.report["counts"]["objects"] = len(plan.objects)
     plan.report["z_offset_m"] = z_offset
     plan.report["budget"] = budget.to_dict()
