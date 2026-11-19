@@ -1466,6 +1466,7 @@ def build_plan(area, terrain, classified, options=None):
     plan = ScenePlan(area.frame, area)
     plan.report["unsupported_features"] = list(classified.unsupported)
     plan.report["invalid_features"] = list(classified.invalid)
+    plan.report["warnings"].extend(getattr(classified, "warnings", ()))
     plan.count("buildings_outside_area", classified.outside)
     budget = SceneBudget(opts.max_vertices, opts.max_triangles)
     invalid = plan.report["invalid_features"]
@@ -1549,8 +1550,8 @@ def build_plan(area, terrain, classified, options=None):
         # first; an outline none of whose parts survived is generated itself (otherwise the
         # building would vanish). If only some parts survived, the outline is NOT generated (it
         # would overlap the surviving parts): it is partially represented, which is reported.
-        # ``outline_parts`` may also list parts already rejected by classify (crossing another
-        # outline); they are absent from ``classified.buildings`` and so count as rejected here.
+        # ``outline_parts`` may also list parts already rejected by classify (not within their
+        # declared outline); they are absent from ``classified.buildings`` and so count as rejected.
         outline_parts = getattr(classified, "outline_parts", {})
         outline_features = getattr(classified, "outline_features", {})
         replaced, restored, partial = [], [], []

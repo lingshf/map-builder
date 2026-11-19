@@ -1486,29 +1486,31 @@ class PartContainmentTest(unittest.TestCase):
         plan = build_plan(tiny_area(), flat_grid(), cl)
         self.assertEqual([o.mb_id for o in plan.objects if o.mb_class == "building"], [pid])
 
-    def test_reviewer_part_crossing_courtyard_is_rejected(self):
+    def test_reviewer_part_crossing_courtyard_never_replaces_outline(self):
         b = OsmBuilder()
         rid = f"osm:relation/{b.multipolygon(rect_ccw(-20, -20, 20, 20), [rect_ccw(-5, -5, 5, 5)], {'building': 'yes', 'height': '10'})}"
         # centroid (-6, 0) is outside the courtyard, but the part spans it
         pid = f"osm:way/{b.way(rect_ccw(-18, -2, 6, 2), {'building:part': 'yes', 'height': '12'}, closed=True)}"
         cl = classify_xml(b)
-        self.assertEqual([f.id for f in cl.buildings], [rid])  # old code: outline replaced by the part
+        # round 5: the outline is not replaced; round 6: the undeclared part is kept, with a warning
+        self.assertEqual([f.id for f in cl.buildings], [rid, pid])
         self.assertEqual((cl.replaced_outlines, cl.outline_for, cl.outline_parts), ([], {}, {}))
-        reasons = {e["id"]: e["reason"] for e in cl.invalid}
-        self.assertIn("building:part crosses outline courtyard/boundary", reasons[pid])
-        self.assertIn(rid, reasons[pid])
+        self.assertEqual(cl.invalid, [])
+        self.assertEqual(len(cl.warnings), 1)
+        self.assertTrue(cl.warnings[0].startswith(pid) and rid in cl.warnings[0])
         plan = build_plan(tiny_area(), flat_grid(), cl)
         built = {o.mb_id: o for o in plan.objects if o.mb_class == "building"}
-        self.assertEqual(set(built), {rid})
-        self.assertIn(pid, {e["id"] for e in plan.report["invalid_features"]})
+        self.assertEqual(set(built), {rid, pid})
+        self.assertIn(cl.warnings[0], plan.report["warnings"])
 
-    def test_part_extending_outside_outline_is_rejected(self):
+    def test_part_extending_outside_outline_is_kept_with_warning(self):
         b = OsmBuilder()
         oid = f"osm:way/{b.way(rect_ccw(-10, -10, 10, 10), {'building': 'yes'}, closed=True)}"
         pid = f"osm:way/{b.way(rect_ccw(0, -5, 15, 5), {'building:part': 'yes'}, closed=True)}"
         cl = classify_xml(b)
-        self.assertEqual([f.id for f in cl.buildings], [oid])  # old code: centroid inside -> replaced
-        self.assertIn("crosses outline courtyard/boundary", {e["id"]: e["reason"] for e in cl.invalid}[pid])
+        self.assertEqual([f.id for f in cl.buildings], [oid, pid])  # old centroid code: oid replaced
+        self.assertEqual((cl.replaced_outlines, cl.invalid), ([], []))
+        self.assertTrue(any(w.startswith(pid) and oid in w for w in cl.warnings))
 
     def test_touching_and_disjoint_parts_are_not_reported(self):
         b = OsmBuilder()
@@ -1575,16 +1577,29 @@ class PartAssociationBoundsTest(unittest.TestCase):
         plan = build_plan(tiny_area(), peak_grid(), cl)  # the part is rejected over the peak
         self.assertEqual(plan.report["building_outlines_restored"], [{"id": small, "rejected_parts": [pid]}])
 
-    def test_rejected_contained_part_marks_outline_partial(self):
+    def test_contained_part_crossing_inner_outline_is_kept(self):
         b = OsmBuilder()
         a = f"osm:way/{b.way(rect_ccw(-30, -30, 30, 30), {'building': 'yes', 'height': '20'}, closed=True)}"
         inner = f"osm:way/{b.way(rect_ccw(-10, -10, 5, 10), {'building': 'yes', 'height': '20'}, closed=True)}"
         p1 = f"osm:way/{b.way(rect_ccw(-25, -25, -20, -20), {'building:part': 'yes', 'height': '20'}, closed=True)}"
         p2 = f"osm:way/{b.way(rect_ccw(-2, -2, 8, 2), {'building:part': 'yes', 'height': '20'}, closed=True)}"
         cl = classify_xml(b)
-        self.assertIn(inner, {e["id"]: e["reason"] for e in cl.invalid}[p2])
+        self.assertEqual(cl.invalid, [])
+        self.assertTrue(any(w.startswith(p2) and inner in w for w in cl.warnings))
         self.assertEqual(cl.outline_parts, {a: [p1, p2]})
-        self.assertEqual([f.id for f in cl.buildings], [inner, p1])
+        self.assertEqual([f.id for f in cl.buildings], [inner, p1, p2])
+
+    def test_rejected_declared_part_marks_outline_partial(self):
+        b = OsmBuilder()
+        a = b.way(rect_ccw(-30, -30, 30, 30), {'building': 'yes', 'height': '20'}, closed=True)
+        p1 = b.way(rect_ccw(-25, -25, -20, -20), {'building:part': 'yes', 'height': '20'}, closed=True)
+        p2 = b.way(rect_ccw(25, -2, 35, 2), {'building:part': 'yes', 'height': '20'}, closed=True)  # crosses a
+        building_relation(b, [a], [p1, p2])
+        a, p1, p2 = (f"osm:way/{x}" for x in (a, p1, p2))
+        cl = classify_xml(b)
+        self.assertIn(a, {e["id"]: e["reason"] for e in cl.invalid}[p2])
+        self.assertEqual(cl.outline_parts, {a: [p1, p2]})
+        self.assertEqual([f.id for f in cl.buildings], [p1])
         plan = build_plan(tiny_area(), flat_grid(), cl)
         self.assertEqual(plan.report["building_outlines_partially_represented"],
                          [{"id": a, "built_parts": [p1], "rejected_parts": [p2]}])
@@ -1629,3 +1644,152 @@ class PartAssociationBoundsTest(unittest.TestCase):
         osm_mod._resolve_building_parts(out, max_pair_checks=1000)  # exactly one candidate per part
         self.assertEqual(len(out.replaced_outlines), 1000)
         self.assertEqual(out.outline_for["osm:way/5999"], ["osm:way/999"])
+
+
+# --- Round 6 -------------------------------------------------------------------
+
+def building_relation(b, outlines, parts, outline_type="way", part_type="way"):
+    """type=building relation (Simple 3D Buildings) with the given outline and part member ids."""
+    rid = b._next()
+    b.relations.append((rid, [(outline_type, o, "outline") for o in outlines] + [(part_type, p, "part") for p in parts],
+                        {"type": "building"}))
+    return f"osm:relation/{rid}"
+
+
+class DeclaredBuildingPartTest(unittest.TestCase):
+    """Round 6: type=building relations declare part ownership; spatial matching only for the rest."""
+
+    def elevated_scene(self, declare, other_height="4"):
+        b = OsmBuilder()
+        o = b.way(rect_ccw(-20, -10, 0, 10), {"building": "yes", "height": "10"}, closed=True)
+        p = b.way(rect_ccw(-12, -4, -2, 4), {"building:part": "yes", "min_height": "6", "height": "10"}, closed=True)
+        u = b.way(rect_ccw(-5, -2, 5, 2), {"building": "yes", "height": other_height}, closed=True)  # unrelated
+        rel = building_relation(b, [o], [p]) if declare else None
+        return classify_xml(b), rel, *(f"osm:way/{x}" for x in (o, p, u))
+
+    def test_reviewer_declared_elevated_part_over_unrelated_building(self):
+        cl, rel, o, p, u = self.elevated_scene(True)
+        self.assertEqual(cl.invalid, [])  # old code: p rejected for crossing u
+        self.assertEqual(cl.warnings, [])  # [6, 10] m and [0, 4] m do not overlap
+        self.assertEqual(cl.outline_for, {p: [o]})
+        self.assertEqual(cl.replaced_outlines, [o])
+        self.assertEqual([f.id for f in cl.buildings], [p, u])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertEqual({x.mb_id for x in plan.objects if x.mb_class == "building"}, {p, u})
+        self.assertEqual(plan.report["building_outlines_replaced_by_parts"], [o])
+
+    def test_declared_part_overlapping_unrelated_building_vertically_warns(self):
+        cl, rel, o, p, u = self.elevated_scene(True, other_height="8")
+        self.assertEqual(cl.invalid, [])
+        self.assertEqual(cl.outline_for, {p: [o]})
+        self.assertEqual(len(cl.warnings), 1)
+        self.assertTrue(cl.warnings[0].startswith(p) and u in cl.warnings[0] and o not in cl.warnings[0])
+
+    def test_undeclared_elevated_part_over_unrelated_building(self):
+        cl, _, o, p, u = self.elevated_scene(False)
+        self.assertEqual((cl.invalid, cl.warnings), ([], []))  # old code: rejected
+        self.assertEqual(cl.outline_for, {p: [o]})
+        cl, _, o, p, u = self.elevated_scene(False, other_height="8")
+        self.assertEqual(cl.invalid, [])
+        self.assertEqual(cl.outline_for, {p: [o]})  # contained in o: still replaces it
+        self.assertTrue(len(cl.warnings) == 1 and cl.warnings[0].startswith(p) and u in cl.warnings[0])
+
+    def courtyard_scene(self, declare):
+        b = OsmBuilder()
+        r = b.multipolygon(rect_ccw(-20, -20, 20, 20), [rect_ccw(-8, -8, 8, 8)], {"building": "yes", "height": "10"})
+        p = b.way(rect_ccw(-4, -4, 4, 4), {"building:part": "yes", "height": "3"}, closed=True)
+        rel = building_relation(b, [r], [p], outline_type="relation") if declare else None
+        return classify_xml(b), rel, f"osm:relation/{r}", f"osm:way/{p}"
+
+    def test_reviewer_declared_part_in_own_courtyard_is_invalid(self):
+        cl, rel, r, p = self.courtyard_scene(True)
+        reasons = {e["id"]: e["reason"] for e in cl.invalid}
+        self.assertIn(p, reasons)  # old code: emitted as a solid, no diagnostic
+        self.assertIn("does not lie within its declared outline", reasons[p])
+        self.assertIn(r, reasons[p])
+        self.assertIn(rel, reasons[p])
+        self.assertEqual([f.id for f in cl.buildings], [r])
+        self.assertEqual((cl.replaced_outlines, cl.outline_for), ([], {}))
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertEqual({x.mb_id for x in plan.objects if x.mb_class == "building"}, {r})
+        self.assertIn(p, {e["id"] for e in plan.report["invalid_features"]})
+
+    def test_undeclared_part_in_courtyard_is_standalone(self):
+        cl, _, r, p = self.courtyard_scene(False)
+        self.assertEqual((cl.invalid, cl.warnings, cl.replaced_outlines, cl.outline_for), ([], [], [], {}))
+        self.assertEqual([f.id for f in cl.buildings], [r, p])
+        plan = build_plan(tiny_area(), flat_grid(), cl)
+        self.assertEqual({x.mb_id for x in plan.objects if x.mb_class == "building"}, {r, p})
+
+    def test_declared_part_crossing_its_outline_is_invalid(self):
+        b = OsmBuilder()
+        o = b.way(rect_ccw(-10, -10, 10, 10), {"building": "yes"}, closed=True)
+        p = b.way(rect_ccw(0, -5, 15, 5), {"building:part": "yes"}, closed=True)
+        rel = building_relation(b, [o], [p])
+        o, p = f"osm:way/{o}", f"osm:way/{p}"
+        cl = classify_xml(b)
+        self.assertIn(o, {e["id"]: e["reason"] for e in cl.invalid}[p])
+        self.assertEqual([f.id for f in cl.buildings], [o])
+        self.assertEqual(cl.warnings, [])
+
+    def test_declared_outline_wins_over_smaller_spatial_container(self):
+        b = OsmBuilder()
+        big = b.way(rect_ccw(-30, -30, 30, 30), {"building": "yes", "height": "20"}, closed=True)
+        small = b.way(rect_ccw(-10, -10, 10, 10), {"building": "yes", "height": "20"}, closed=True)
+        p = b.way(rect_ccw(-2, -2, 2, 2), {"building:part": "yes", "height": "20"}, closed=True)
+        building_relation(b, [big], [p])
+        big, small, p = (f"osm:way/{x}" for x in (big, small, p))
+        cl = classify_xml(b)
+        self.assertEqual(cl.outline_for, {p: [big]})  # spatial matching would pick ``small``
+        self.assertEqual(cl.replaced_outlines, [big])
+        self.assertEqual([f.id for f in cl.buildings], [small, p])
+        self.assertEqual((cl.invalid, cl.warnings), ([], []))  # nested in ``small``: no conflict
+
+    def test_declared_outline_unavailable_means_standalone(self):
+        for case in ("missing", "outside", "no_outline"):
+            with self.subTest(case=case):
+                b = OsmBuilder()
+                o2 = f"osm:way/{b.way(rect_ccw(-10, -10, 10, 10), {'building': 'yes'}, closed=True)}"
+                p = b.way(rect_ccw(-2, -2, 2, 2), {"building:part": "yes"}, closed=True)
+                if case == "missing":
+                    outlines = [999999]
+                elif case == "outside":
+                    outlines = [b.way(rect_ccw(-5, 40, 5, 80), {"building": "yes"}, closed=True)]
+                else:
+                    outlines = []
+                rel = building_relation(b, outlines, [p])
+                p = f"osm:way/{p}"
+                cl = classify_xml(b)
+                # never matched spatially to o2, which the relation does not name
+                self.assertEqual((cl.replaced_outlines, cl.outline_for, cl.invalid), ([], {}, []))
+                self.assertEqual([f.id for f in cl.buildings], [o2, p])
+                self.assertEqual(len(cl.warnings), 1)
+                self.assertTrue(cl.warnings[0].startswith(p) and rel in cl.warnings[0])
+                self.assertIn("generated standalone", cl.warnings[0])
+                plan = build_plan(tiny_area(), flat_grid(), cl)
+                self.assertEqual({x.mb_id for x in plan.objects if x.mb_class == "building"}, {o2, p})
+                self.assertIn(cl.warnings[0], plan.report["warnings"])
+
+    def test_part_in_two_relations_belongs_to_containing_outline(self):
+        b = OsmBuilder()
+        o1 = b.way(rect_ccw(-10, -10, 10, 10), {"building": "yes"}, closed=True)
+        o2 = b.way(rect_ccw(20, -10, 40, 10), {"building": "yes"}, closed=True)
+        p = b.way(rect_ccw(-2, -2, 2, 2), {"building:part": "yes"}, closed=True)
+        building_relation(b, [o1], [p])
+        building_relation(b, [o2], [p])
+        o1, o2, p = (f"osm:way/{x}" for x in (o1, o2, p))
+        cl = classify_xml(b)
+        self.assertEqual(cl.outline_for, {p: [o1]})
+        self.assertEqual(cl.invalid, [])
+        self.assertTrue(len(cl.warnings) == 1 and o2 in cl.warnings[0])
+
+    def test_declared_pairs_are_bounded(self):
+        b = OsmBuilder()
+        outs = [b.way(rect_ccw(-10 + 0.1 * k, -10, 10, 10), {"building": "yes"}, closed=True) for k in range(2)]
+        prts = [b.way(rect_ccw(-2, -2, 2 + 0.1 * k, 2), {"building:part": "yes"}, closed=True) for k in range(2)]
+        rel = building_relation(b, outs, prts)
+        with self.assertRaises(LimitError) as cm:
+            classify_xml(b, max_part_pair_checks=3)  # 2 outlines x 2 parts
+        self.assertIn(rel, str(cm.exception))
+        cl = classify_xml(b, max_part_pair_checks=4)
+        self.assertEqual(len(cl.outline_for), 2)

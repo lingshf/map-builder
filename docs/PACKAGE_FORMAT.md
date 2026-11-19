@@ -200,22 +200,38 @@ counted in `edits.removed` and listed in `report.json`.
   as building footprints (simple rings, holes strictly inside the outer ring, no contacts).
   A polygon that fails, or cannot be checked within the work budget, is listed in
   `invalid_features` and is used neither for terrain colouring nor for scatter.
-* Building parts (Simple 3D Buildings): an outline that contains `building:part` features is
-  replaced by them. The parts are built first.
-  * Matching is by footprint containment, not centroid: the part's boundary (outer ring and
-    holes) must lie inside or on the outline's outer ring and outside all of its courtyards,
-    and no courtyard may lie inside the part. Coincident or touching boundaries are allowed
-    within 0.05 m. A part inside nested outlines belongs only to the smallest one.
-  * A part that overlaps an outline without lying within it (crossing its boundary or a
-    courtyard) is rejected: it is listed in `invalid_features` with the reason
-    `building:part crosses outline courtyard/boundary (<outline ids>)` and never replaces
-    that outline, which is kept. If the rejected part lies within another outline, it counts
-    among that outline's rejected parts below; an outline all of whose parts were rejected
-    this way is not replaced at all. Touching parts are not reported.
+* Building parts (Simple 3D Buildings): an outline is replaced by the `building:part` features
+  that belong to it. The parts are built first.
+  * Containment test: the part's boundary (outer ring and holes) must lie inside or on the
+    outline's outer ring and outside all of its courtyards, and no courtyard may lie inside the
+    part. Coincident or touching boundaries are allowed within 0.05 m. Centroids are never used.
+  * Declared parts: a `type=building` relation names its `outline` (a way, or a building
+    multipolygon relation) and its `part` members (ways or relations). A declared part is
+    checked against its declared outline only. If it lies within it, it belongs to that outline
+    (if several declared outlines contain it, the smallest; the others get a `warnings` entry).
+    If it does not (it crosses the outline boundary or lies in one of its courtyards), it is
+    listed in `invalid_features` with the reason `building:part does not lie within its declared
+    outline <outline ids> (building relation <relation ids>) ...`; the outline is kept, and the
+    rejected part counts among its rejected parts below.
+  * Declared outline unavailable: if no declared outline exists as a building outline (member
+    missing from the data, outside the area, invalid or unsupported, or the relation has no
+    `outline` member), the part is generated standalone with a `warnings` entry naming the
+    relation. It is never matched spatially to an outline the relation does not name.
+  * Undeclared parts are matched spatially: a part belongs to the smallest outline it lies
+    within. A part lying in an outline's courtyard does not overlap that outline: it is a
+    standalone part and is generated as such (the courtyard is empty space), with no diagnostic.
+  * Overlaps: a part (declared or not) whose footprint overlaps an outline it neither belongs
+    to nor lies within is kept, and so is the outline; the part never replaces it. If their
+    vertical extents `[min_height, height]` (as generated, above each one's own base) overlap,
+    a `warnings` entry names both, since their solids intersect; if the extents are disjoint
+    (for example a part from 6 m to 10 m over a 4 m building) this is not a conflict and nothing
+    is reported. Overlapping buildings are a property of the OSM data, so nothing is dropped.
+    Touching footprints never count as overlapping.
   * Limits: retained (replaced) outlines count toward the feature limit, which is checked
-    before matching. Candidate pairs come from a bounding-box grid; more than 200,000
-    overlapping part/outline pairs, or more than 10,000,000 geometric tests, raise
-    `LimitError`.
+    before matching. Candidate pairs come from a bounding-box grid plus the declared pairs;
+    more than 200,000 part/outline pairs (declared pairs across all `type=building` relations
+    are also counted while parsing, before they are stored), or more than 10,000,000 geometric
+    tests, raise `LimitError`.
   * All parts generated: the outline is listed in `building_outlines_replaced_by_parts`.
   * No part generated: the outline is generated instead. It is listed in
     `building_outlines_restored` (`{id, rejected_parts}`), has the provenance

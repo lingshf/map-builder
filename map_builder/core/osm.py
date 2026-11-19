@@ -362,11 +362,13 @@ class Classified:
         self.trees = []
         self.unsupported = []   # dicts {id, reason, tags subset}
         self.invalid = []       # dicts {id, reason}
+        self.warnings = []      # strings, copied into the report's ``warnings``
         self.outside = 0
         self.replaced_outlines = []  # building outlines superseded by their building:part features
         # The superseded outlines are kept (not discarded) so generation can fall back to them
         # when their parts are rejected: outline id -> Feature, outline id -> [part ids] and
-        # part id -> [outline id] (at most one: the smallest outline containing the part).
+        # part id -> [outline id] (at most one: the declared outline of a ``type=building``
+        # relation, else the smallest outline containing the part).
         self.outline_features = {}
         self.outline_parts = {}
         self.outline_for = {}
@@ -474,13 +476,30 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
                 return []
         return polys
 
+    # Declared ownership from type=building relations: part id -> {(relation id, outline id or None)}.
+    # Every stored (part, outline) pair is checked geometrically later, so the total counts against
+    # the same pair budget as spatial candidates (LimitError before anything is stored).
+    declared = {}
+    n_declared = 0
     # Relations (multipolygons)
     for rid, (members, tags) in data.relations.items():
         if tags.get("type") not in ("multipolygon", "building"):
             continue
         fid = f"osm:relation/{rid}"
         if tags.get("type") == "building":
-            continue  # building relations group parts; parts are handled as ways
+            # Simple 3D Buildings relation: groups an outline (way or building multipolygon)
+            # with its building:part ways/relations. Geometry comes from the members themselves.
+            outl = sorted({f"osm:{t}/{r}" for t, r, role in members
+                           if role == "outline" and t in ("way", "relation")})
+            prts = sorted({f"osm:{t}/{r}" for t, r, role in members
+                           if role == "part" and t in ("way", "relation")})
+            n_declared += max(1, len(outl)) * len(prts)
+            if n_declared > max_part_pair_checks:
+                raise LimitError(f"{fid}: type=building relations declare more than {max_part_pair_checks} "
+                                 "building:part/outline pairs; choose a smaller area")
+            for p in prts:
+                declared.setdefault(p, set()).update((fid, o) for o in (outl or [None]))
+            continue
         outer_ways, inner_ways, outer_ids = [], [], []
         missing_outer = missing_inner = False
         for typ, ref, role in members:
@@ -625,7 +644,8 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     total = len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees)
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
-    _resolve_building_parts(out, max_pair_checks=max_part_pair_checks, max_work=max_association_work)
+    _resolve_building_parts(out, max_pair_checks=max_part_pair_checks, max_work=max_association_work,
+                            declared=declared)
     return out
 
 
@@ -781,93 +801,183 @@ def footprints_overlap(a, b, tol=PART_TOL_M, work=None):
     return False
 
 
-def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=MAX_ASSOCIATION_WORK):
-    """Simple 3D Buildings: an outline that contains parts is replaced by its parts.
+def _base_id(fid):
+    """Feature id without the ``#k`` suffix given to the polygons of a multi-polygon feature."""
+    return fid.split("#", 1)[0]
 
-    Association is by footprint containment (:func:`part_within_outline`), never by centroid. Each
-    part belongs to its *smallest* containing outline only. A part that overlaps an outline without
-    being contained in it (crossing its boundary or one of its courtyards) is rejected as invalid
-    (``building:part crosses outline courtyard/boundary``) and never replaces that outline.
+
+def _ids(ids, limit=10):
+    ids = list(ids)
+    return ", ".join(ids[:limit]) + (f", ... ({len(ids) - limit} more)" if len(ids) > limit else "")
+
+
+def _vertical_range(f, cache):
+    """(min_height, height) above ground of ``f`` as the generator will build it."""
+    r = cache.get(id(f))
+    if r is None:
+        from .generate import building_height  # deferred: generation helpers, no import cycle
+        h, min_h, _, _ = building_height(f.tags)
+        r = cache[id(f)] = (min_h, h)
+    return r
+
+
+def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=MAX_ASSOCIATION_WORK,
+                            declared=None):
+    """Simple 3D Buildings: an outline is replaced by the building:part features that belong to it.
+
+    ``declared`` maps part ids to ``{(type=building relation id, outline id or None)}``.
+
+    * Declared parts are validated against their declared outline(s) only, by footprint
+      containment (:func:`part_within_outline`). A part within one of them belongs to it (the
+      smallest if several); a part within none of them (crossing the boundary or lying in a
+      courtyard) is rejected as invalid with a reason naming the declared outline(s), which are
+      kept. If no declared outline is available as a building outline (member missing, outside
+      the area, invalid or unsupported; or no outline member), the part is generated standalone
+      and a warning says so: it is never matched spatially to an outline the relation does not name.
+    * Undeclared parts are matched spatially: a part belongs to its *smallest* containing outline.
+      A part lying in an outline's courtyard does not overlap it and is a standalone part.
+    * A part (declared or not) whose footprint overlaps an outline it neither belongs to nor lies
+      within is kept, never replaces that outline, and the outline is kept too; a warning names
+      both, unless their vertical extents ``[min_height, height]`` are disjoint (no conflict).
 
     A replaced outline leaves ``out.buildings`` but is kept in ``out.outline_features`` with the
     ids of its parts (``out.outline_parts`` / ``out.outline_for``, one outline per part), so the
-    generator can fall back to it if none of those parts can be generated. Rejected parts that
-    lie within an outline are listed there too (they count as rejected); an outline all of whose
-    contained parts were rejected here is simply kept.
+    generator can fall back to it if none of those parts can be generated. Declared parts rejected
+    here are listed under their (smallest) declared outline too and count as rejected; an outline
+    all of whose parts were rejected here is simply kept.
 
-    Work is bounded: candidate pairs come from a bbox grid and are counted against
+    Work is bounded: candidate pairs (bbox grid plus declared pairs) are counted against
     ``max_pair_checks`` before any geometry; all geometric tests count against ``max_work``.
     Exceeding either raises :class:`LimitError`."""
     parts = [b for b in out.buildings if b.kind == "building_part"]
     outlines = [b for b in out.buildings if b.kind == "building"]
-    if not parts or not outlines:
+    if not parts:
         return
+    declared = declared or {}
     tol = PART_TOL_M
     work = _AssocWork(max_work)
-    pboxes = [p.geometry.bbox() for p in parts]
-    oboxes = [o.geometry.bbox() for o in outlines]
-    gx0 = min(b[0] for b in pboxes) - tol
-    gy0 = min(b[1] for b in pboxes) - tol
-    gx1 = max(b[2] for b in pboxes) + tol
-    gy1 = max(b[3] for b in pboxes) + tol
-    cs = max(_PART_GRID_M, (gx1 - gx0) / _PART_GRID_MAX_CELLS, (gy1 - gy0) / _PART_GRID_MAX_CELLS)
-    nmax = _PART_GRID_MAX_CELLS - 1
-
-    def cell_range(bb):
-        # Both parts and outlines are clamped to the parts' extent, which preserves overlaps.
-        i0 = min(nmax, max(0, int((bb[0] - tol - gx0) // cs)))
-        i1 = min(nmax, max(0, int((bb[2] + tol - gx0) // cs)))
-        j0 = min(nmax, max(0, int((bb[1] - tol - gy0) // cs)))
-        j1 = min(nmax, max(0, int((bb[3] + tol - gy0) // cs)))
-        return i0, i1, j0, j1
-
-    def overlap(a, b):
-        return a[0] <= b[2] + tol and b[0] <= a[2] + tol and a[1] <= b[3] + tol and b[1] <= a[3] + tol
-
-    grid = {}
-    for oi, bb in enumerate(oboxes):
-        if bb[2] < gx0 or bb[0] > gx1 or bb[3] < gy0 or bb[1] > gy1:
-            continue  # cannot touch any part
-        i0, i1, j0, j1 = cell_range(bb)
-        work.add((i1 - i0 + 1) * (j1 - j0 + 1))
-        for i in range(i0, i1 + 1):
-            for j in range(j0, j1 + 1):
-                grid.setdefault((i, j), []).append(oi)
-    # Phase 1: candidate pairs (bbox overlap), capped before any geometric test.
-    candidates = []
+    by_base = {}
+    for oi, o in enumerate(outlines):
+        by_base.setdefault(_base_id(o.id), []).append(oi)
+    decl_of = []  # per part: None (undeclared) or (declared outline indices, outline ids, relation ids)
+    for part in parts:
+        d = declared.get(_base_id(part.id))
+        if d is None:
+            decl_of.append(None)
+            continue
+        oids = sorted({o for _, o in d if o is not None})
+        decl_of.append((sorted({oi for o in oids for oi in by_base.get(o, ())}), oids, sorted({r for r, _ in d})))
+    candidates = [[] for _ in parts]
     n_pairs = 0
-    for pi, bb in enumerate(pboxes):
-        i0, i1, j0, j1 = cell_range(bb)
-        seen = set()
-        for i in range(i0, i1 + 1):
-            for j in range(j0, j1 + 1):
-                cell = grid.get((i, j), ())
-                work.add(len(cell) + 1)
-                seen.update(oi for oi in cell if overlap(bb, oboxes[oi]))
-        n_pairs += len(seen)
-        if n_pairs > max_pair_checks:
-            raise LimitError(f"more than {max_pair_checks} overlapping building:part/outline pairs to check; "
-                             "choose a smaller area")
-        candidates.append(sorted(seen))
-    # Phase 2: containment.
-    owner = {}       # part index -> smallest containing outline index
+    if outlines:
+        pboxes = [p.geometry.bbox() for p in parts]
+        oboxes = [o.geometry.bbox() for o in outlines]
+        gx0 = min(b[0] for b in pboxes) - tol
+        gy0 = min(b[1] for b in pboxes) - tol
+        gx1 = max(b[2] for b in pboxes) + tol
+        gy1 = max(b[3] for b in pboxes) + tol
+        cs = max(_PART_GRID_M, (gx1 - gx0) / _PART_GRID_MAX_CELLS, (gy1 - gy0) / _PART_GRID_MAX_CELLS)
+        nmax = _PART_GRID_MAX_CELLS - 1
+
+        def cell_range(bb):
+            # Both parts and outlines are clamped to the parts' extent, which preserves overlaps.
+            i0 = min(nmax, max(0, int((bb[0] - tol - gx0) // cs)))
+            i1 = min(nmax, max(0, int((bb[2] + tol - gx0) // cs)))
+            j0 = min(nmax, max(0, int((bb[1] - tol - gy0) // cs)))
+            j1 = min(nmax, max(0, int((bb[3] + tol - gy0) // cs)))
+            return i0, i1, j0, j1
+
+        def overlap(a, b):
+            return a[0] <= b[2] + tol and b[0] <= a[2] + tol and a[1] <= b[3] + tol and b[1] <= a[3] + tol
+
+        grid = {}
+        for oi, bb in enumerate(oboxes):
+            if bb[2] < gx0 or bb[0] > gx1 or bb[3] < gy0 or bb[1] > gy1:
+                continue  # cannot touch any part
+            i0, i1, j0, j1 = cell_range(bb)
+            work.add((i1 - i0 + 1) * (j1 - j0 + 1))
+            for i in range(i0, i1 + 1):
+                for j in range(j0, j1 + 1):
+                    grid.setdefault((i, j), []).append(oi)
+        # Phase 1: candidate pairs (bbox overlap, plus declared outlines), capped before any geometry.
+        for pi, bb in enumerate(pboxes):
+            i0, i1, j0, j1 = cell_range(bb)
+            seen = set(decl_of[pi][0]) if decl_of[pi] else set()
+            for i in range(i0, i1 + 1):
+                for j in range(j0, j1 + 1):
+                    cell = grid.get((i, j), ())
+                    work.add(len(cell) + 1)
+                    seen.update(oi for oi in cell if overlap(bb, oboxes[oi]))
+            n_pairs += len(seen)
+            if n_pairs > max_pair_checks:
+                raise LimitError(f"more than {max_pair_checks} overlapping building:part/outline pairs to check; "
+                                 "choose a smaller area")
+            candidates[pi] = sorted(seen)
+
+    def size(oi):
+        return abs(outlines[oi].geometry.area()), oi
+
+    # Phase 2: declared validation / containment, then conflicts with other outlines.
+    owner = {}       # part index -> outline index it belongs to (or is counted under, if rejected)
     rejected = set()
+    heights = {}
     for pi, part in enumerate(parts):
-        containing, crossing = [], []
+        g = part.geometry
+        dec = decl_of[pi]
+        within = set()
+        if dec is not None:
+            ois, oids, rels = dec
+            within = {oi for oi in ois if part_within_outline(g, outlines[oi].geometry, tol, work)}
+            if within:
+                owner[pi] = min(within, key=size)
+                bases = {_base_id(outlines[oi].id) for oi in within}
+                missed = [o for o in oids if o not in bases]
+                if missed:
+                    out.warnings.append(
+                        f"{part.id}: building:part is declared (building relation {_ids(rels)}) for outline(s) "
+                        f"{_ids(missed)} too but does not lie within them; it belongs to "
+                        f"{outlines[owner[pi]].id} only")
+            elif ois:
+                owner[pi] = min(ois, key=size)
+                rejected.add(pi)
+                out.invalid.append({"id": part.id, "reason": (
+                    f"building:part does not lie within its declared outline {_ids(oids)} (building relation "
+                    f"{_ids(rels)}): it crosses the outline boundary or lies in a courtyard; part not "
+                    "generated, outline kept")})
+            else:
+                what = f"outline {_ids(oids)} is" if oids else "relation has no outline member and"
+                out.warnings.append(
+                    f"{part.id}: building:part of building relation {_ids(rels)} whose declared {what} not "
+                    "available as a building outline (missing, outside the area, invalid or unsupported); "
+                    "the part is generated standalone and not matched to any other outline")
+            exempt = set(ois)
+        else:
+            within = {oi for oi in candidates[pi] if part_within_outline(g, outlines[oi].geometry, tol, work)}
+            if within:
+                owner[pi] = min(within, key=size)
+            exempt = within
+        if pi in rejected:
+            continue
+        crossing = []
+        lo, hi = None, None
         for oi in candidates[pi]:
-            o = outlines[oi].geometry
-            if part_within_outline(part.geometry, o, tol, work):
-                containing.append(oi)
-            elif footprints_overlap(part.geometry, o, tol, work):
-                crossing.append(oi)
-        if containing:
-            owner[pi] = min(containing, key=lambda oi: (abs(outlines[oi].geometry.area()), oi))
+            if oi in exempt:
+                continue
+            o = outlines[oi]
+            if dec is not None and part_within_outline(g, o.geometry, tol, work):
+                continue  # nested inside an unrelated outline: no conflict
+            if not footprints_overlap(g, o.geometry, tol, work):
+                continue
+            if lo is None:
+                lo, hi = _vertical_range(part, heights)
+            olo, ohi = _vertical_range(o, heights)
+            if olo < hi and lo < ohi:
+                crossing.append(o.id)
         if crossing:
-            rejected.add(pi)
-            ids = ", ".join(outlines[oi].id for oi in crossing)
-            out.invalid.append({"id": part.id, "reason": f"building:part crosses outline courtyard/boundary "
-                                                         f"({ids}): it overlaps the outline without lying "
-                                                         "within it; part not generated, outline kept"})
+            out.warnings.append(
+                f"{part.id}: building:part overlaps building outline(s) {_ids(crossing)} without lying within "
+                "them, at overlapping heights; both are kept as mapped (the part does not replace them), so "
+                "their solids intersect")
     members = {}
     for pi in sorted(owner):
         members.setdefault(owner[pi], []).append(pi)
