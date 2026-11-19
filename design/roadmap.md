@@ -37,50 +37,53 @@ tube rule and passage probes).
    documented in PACKAGE_FORMAT.md; they do not bump `schema_version`.
 6. **Keep it simple (SOLID without over-engineering).** Plain functions per structure kind
    with one shared helper module; no plugin registry, no class hierarchy for "structures".
-7. **Agile, but cheap demos (D17).** Two sprints, each ending in one user-checkable GitHub
-   pre-release. The demo is one reusable command (S1-DEMOKIT) built once; a sprint review only
-   runs it, reviews the design and tests, and tags the release. No release per task.
+7. **Agile, but cheap demos (D17, D28).** Two sprints, each ending in one user-checkable GitHub
+   pre-release. The demo is one reusable command (S1-DEMOKIT) built once. A sprint closes with
+   an RC PR by the release manager (CHANGELOG, user docs, flows, demo, notes), then the Design
+   milestone review + test audit, the coordinator retro and the tag. No release per task.
 
 ## Sprints and releases
 
 | Release | When | Content the user can try | Assets |
 |---|---|---|---|
-| `v0.1.0` baseline | after #11 merges (inside S1-RELEASE-WF) | v1 + format 2.0 + DSM correction | extension zip only (no renders) |
-| `v0.2.0` | end of **S1** (sprint-1-review) | **fly under bridges and through tunnels**: decks, piers, tunnel tubes, portals, probes | zip, real-data demo `.mbmap` + `.glb`, panel screenshot, before/after renders, three.js viewer, release notes with "How to try it" |
-| `v0.3.0` | end of **S2** (sprint-2-review, end of v2) | elevated parts / building passages, roof shapes, full real-data v2 demo | same as v0.2.0 + `docs/DEMO.md` with performance numbers |
+| `v0.1.0` (REL-v0.1.0) | after #11 merges | first full release: v1 + format 2.0 + DSM correction + release workflow (D29) | zip, sample `.mbmap` + `.glb`, renders, viewer, CHANGELOG, user docs, notes with "How to try it" |
+| `v0.2.0` | end of **S1** (REL-v0.2.0 + S1-REVIEW) | **fly under bridges and through tunnels**: decks, piers, tunnel tubes, portals, probes | zip, real-data demo `.mbmap` + `.glb`, panel screenshot, before/after renders, three.js viewer, release notes with "How to try it" |
+| `v0.3.0` | end of **S2** (REL-v0.3.0 + S2-REVIEW, end of v2) | elevated parts / building passages, roof shapes, full real-data v2 demo | same as v0.2.0 + `docs/DEMO.md` with performance numbers |
 
 | Sprint | Tasks | Exit criteria |
 |---|---|---|
-| S1 | RELEASE-WF, DEMOKIT, SEAMS, BRIDGE, TUNNEL, PIERS, sprint-1-review | fixture and demo-area bridges/tunnels generated, probes PASS (Python + C#), validator VALID, headless Blender PASS, review written, `v0.2.0` published |
-| S2 | ELEV, ROOF (may start in S1), sprint-2-review | elevated/passage probes PASS; new roof shapes closed and bound; real-data build ≤ 120 s; end-of-v2 review go/no-go; `v0.3.0` published |
+| S1 | RELEASE-WF (done, #13), REL-v0.1.0, DEMOKIT, SEAMS, BRIDGE, TUNNEL, PIERS, REL-v0.2.0, S1-REVIEW | fixture and demo-area bridges/tunnels generated, probes PASS (Python + C#), validator VALID, headless Blender PASS, review written, `v0.2.0` published |
+| S2 | ELEV, ROOF (may start in S1), REL-v0.3.0, S2-REVIEW | elevated/passage probes PASS; new roof shapes closed and bound; real-data build ≤ 120 s; end-of-v2 review go/no-go; `v0.3.0` published |
 
 ```mermaid
 flowchart LR
-  PR11[PR 11 DSM] --> V010[v0.1.0 tag]
-  RWF[S1-RELEASE-WF] --> V010
+  PR11[PR 11 DSM] --> V010[REL-v0.1.0]
+  RWF[S1-RELEASE-WF done] --> V010
   PR11 --> SEAMS[S1-SEAMS]
   PR11 --> ROOF[S2-ROOF]
   SEAMS --> BRIDGE[S1-BRIDGE]
   SEAMS --> TUNNEL[S1-TUNNEL]
   SEAMS --> ELEV[S2-ELEV]
   BRIDGE --> PIERS[S1-PIERS]
-  DEMO[S1-DEMOKIT] --> R1[sprint-1-review v0.2.0]
-  RWF --> R1
+  DEMO[S1-DEMOKIT] --> R1[REL-v0.2.0]
+  V010 --> R1
   PIERS --> R1
   TUNNEL --> R1
-  R1 --> R2[sprint-2-review v0.3.0]
+  R1 --> SR1[S1-REVIEW] --> T1[retro + tag v0.2.0]
+  T1 --> R2[REL-v0.3.0]
   ELEV --> R2
   ROOF --> R2
+  R2 --> SR2[S2-REVIEW] --> T2[retro + tag v0.3.0]
 ```
 
 ### Suggested waves (max 3 devs)
 
 | Wave | Tasks in parallel | Why disjoint |
 |---|---|---|
-| 1 | S1-RELEASE-WF, S1-DEMOKIT (now); then S1-SEAMS, S2-ROOF after #11 | new files only (workflow, `tools/demo/`); ROOF touches only the roof section of `build_building` (+ `core/roofs.py`), SEAMS routing, hooks and new modules |
+| 1 | S1-DEMOKIT (now); after #11: REL-v0.1.0 alone, then S1-SEAMS, S2-ROOF | DEMOKIT adds new files only (`tools/demo/`); ROOF touches only the roof section of `build_building` (+ `core/roofs.py`), SEAMS routing, hooks and new modules |
 | 2 | S1-BRIDGE, S1-TUNNEL, (S2-ROOF or S2-ELEV) | each lives in its own module and its own `build_plan` hook |
-| 3 | S1-PIERS, S2-ELEV → sprint-1-review | PIERS only extends `core/bridges.py` |
-| 4 | remaining S2 → sprint-2-review | review runs alone |
+| 3 | S1-PIERS, S2-ELEV → REL-v0.2.0 → S1-REVIEW → retro → tag | PIERS only extends `core/bridges.py`; REL runs alone |
+| 4 | remaining S2 → REL-v0.3.0 → S2-REVIEW → retro → tag | REL runs alone |
 
 **Soft conflicts** (shared but mechanically resolvable, D20): `examples/synthetic_sample.mbmap`
 (regenerate after rebase), `tests/fixtures/synthetic_area.osm` (append-only), the
@@ -125,7 +128,7 @@ Who: **U** = user, **C** = coordinator, **De** = design, **Dev** = earlier dev p
 | D14 | Package format 2.0 PR (#10) before bridges | C | done |
 | D15 | DSM correction before bridges; clearance measured from corrected ground | C | final |
 | D16 | PR #11 finished under the old process; the new team process starts from bridges | C | final |
-| D17 | Agile delivery with few releases (user: "按照敏捷流程开发…最好是有一个release" and "注意不要太频繁，以免影响进度"): two sprints, S1 = bridges + tunnels → `v0.2.0`, S2 = elevated parts/passages + roofs + real-data demo → `v0.3.0`; `v0.1.0` baseline after #11 as tag + extension zip only; no release per task; one reusable demo script built in S1; sprint review = demo + design review + test audit + release in one small task; release workflow tag-triggered only | U + C | final (user may change) |
+| D17 | Agile delivery with few releases (user: "按照敏捷流程开发…最好是有一个release" and "注意不要太频繁，以免影响进度"): two sprints, S1 = bridges + tunnels → `v0.2.0`, S2 = elevated parts/passages + roofs + real-data demo → `v0.3.0`; no release per task; one reusable demo script built in S1; sprint close kept small (see D28); release workflow tag-triggered only | U + C | final (user may change) |
 | D18 | Add one seam PR (S1-SEAMS) before the structure features so bridges, tunnels and passages can be built in parallel in their own modules | De | proposed |
 | D19 | Emitting `bridge`/`tunnel`/`structure` and probes is not a format change; stay on 2.0.0; new `report.json` keys are additive and documented, no bump. Generator/extension version follows the sprint releases (0.2.0, 0.3.0), bumped only in sprint-review tasks | De | proposed |
 | D20 | The binary sample `examples/synthetic_sample.mbmap` is a regenerated artefact: on rebase conflicts, regenerate with the documented command, never hand-merge. Feature tests use their own in-code synthetic terrain/OSM; the shared fixture is append-only | De | proposed |
@@ -133,18 +136,19 @@ Who: **U** = user, **C** = coordinator, **De** = design, **Dev** = earlier dev p
 | D22 | Bridge deck profile: linear between at-grade end heights, raised where needed to `layer` × 5.0 m clearance over corrected ground, ramps ≤ 8 % grade; deck 1.0 m thick (inferred) | De | proposed |
 | D23 | Tunnels cut the terrain mesh only where it intersects the tube interior (no trench); gaps between the cut and the tube are closed by portal headwalls/skirts (`structure`), verified by a ray "leak" test, never left open | De | proposed |
 | D24 | Building passages (`tunnel=building_passage`, `covered=yes` highways through a building) split the building into a lower part (footprint minus corridor) and an elevated upper part, reusing the existing elevated-volume code; ids use the `#k` part suffix | De | proposed |
-| D25 | Scope: highway bridges/tunnels only. Railway, waterway (`culvert`) and `building=bridge`/`man_made=bridge` outlines stay in `unsupported_features` | De | proposed, **user may extend** |
-| D26 | v2 demo area (used from `v0.2.0` on): Pittsburgh, Fort Pitt Bridge + Fort Pitt Tunnel (≈ 40.437 N, 80.016 W, 1200 × 1000 m) | De | proposed, **needs user before sprint-1-review** |
+| D25 | Scope: highway bridges/tunnels only in v2. Railway, waterway (`culvert`) and `building=bridge`/`man_made=bridge` outlines stay in `unsupported_features` | C (proposed by De) | final — decided by coordinator, user may change |
+| D26 | v2 sprint demo area: Pittsburgh, Fort Pitt Bridge + Fort Pitt Tunnel (≈ 40.437 N, 80.016 W, 1200 × 1000 m) | C (proposed by De) | final — decided by coordinator, user may change |
+| D27 | S1-RELEASE-WF (#13) AC1 "panel appears" is satisfied by a headless panel-registration assert after install-file + enable (`MB_PT_main` in `VIEW_3D`/`UI`, category *Map Builder*); the visual sidebar screenshot comes from S1-DEMOKIT `--panel`, checked at REL-v0.2.0 | C | final |
+| D28 | Team per agile-ai-team (user: "访问 lingshf/agents repo，安装最新skill。然后按照agile-ai-team 规划"): a release manager owns `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/<ver>/`, `docs/releases/<ver>.md` and proposes tag commits; Design owns `design/`. Sprint close order: RC PR → demo → Design milestone review + test audit → coordinator retro → tag/Release. Definition of Done in `design/tasks/README.md` | U + C | final (user may change) |
+| D29 | `v0.1.0` is a full first release of everything on main (v1, format 2.0, #11 DSM, #13 release workflow) with CHANGELOG, user docs, flows, demo and notes; supersedes the "tag + zip only" baseline in D17 | C | final (user may change) |
 
 ## Decisions that need the user
 
-1. **D26 demo area** (needed before sprint-1-review). Proposed: Pittsburgh (Fort Pitt Bridge,
-   Fort Pitt Tunnel, several river bridges, real relief). Alternative: stay in San Francisco
-   around the Stockton Tunnel and the Bay Bridge approach viaducts (weaker relief, larger box).
-2. **D25 scope.** Railway bridges/tunnels are out of scope for v2 by default (railways are not
-   generated at all yet). Say if they should be added as a task.
-3. **D13 licence.** Still deferred; nothing in v2 depends on it. Releases carry the provisional
+1. **D13 licence.** Still deferred; nothing in v2 depends on it. Releases carry the provisional
    GPL-3.0-or-later notice.
+
+D25 (scope) and D26 (demo area) were decided by the coordinator on the user's behalf; the user
+may change them at any time.
 
 ## Non-goals for v2
 

@@ -32,9 +32,10 @@ attached, so every sprint can be tried by installing from disk. PR CI is unchang
 3. Re-running on an existing tag replaces the zip asset instead of failing.
 4. PR CI (`ci.yml`) unchanged; its run time unchanged.
 5. No secrets beyond the default `GITHUB_TOKEN`.
-6. **v0.1.0 baseline:** once #11 is merged, write a short `docs/releases/v0.1.0.md` (what v1 +
-   format 2.0 + DSM can do, "How to try it") and push tag `v0.1.0` on that main commit; the
-   release carries the extension zip only (no renders, no sample package; D17).
+6. ~~v0.1.0 baseline~~ superseded by D29: the first release is the full task
+   [REL-v0.1.0](REL-v0.1.0.md) owned by the release manager.
+7. AC1's panel check is a headless panel-registration assert (D27); the visual screenshot comes
+   from S1-DEMOKIT `--panel`.
 
 ## Performance considerations
 
@@ -47,4 +48,4 @@ The dry run itself (link the run in the PR); no unit tests.
 
 ## Conflict domain
 
-Hard: `.github/workflows/release.yml` (new), `docs/releases/` (new). Soft: `docs/releases/v0.1.0.md`. Parallel with everything.
+Hard: `.github/workflows/release.yml` (new), `docs/releases/` (new). Parallel with everything.

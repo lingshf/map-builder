@@ -9,49 +9,64 @@ its **conflict domain**. Only run tasks in parallel whose hard conflict domains 
 `tests/fixtures/synthetic_area.osm`, the "Recorded results" table of `docs/VALIDATION.md`,
 each task's own bullet in README Limits / PACKAGE_FORMAT unsupported list) are resolved by
 rebasing and regenerating (D20), so they do not block parallel work; the coordinator merges one
-PR at a time. Releases happen only in the sprint-review tasks (D17).
+PR at a time. Releases happen only in the REL tasks (D17, D28).
 
-| id | sprint | dependencies | conflict domain (hard) | status | PR |
-|---|---|---|---|---|---|
-| [DSM](https://github.com/lingshf/map-builder/pull/11) | pre | — | `core/dsm.py`, `core/osm.py`, `core/generate.py`, `core/pipeline.py`, Blender props/ui/sources, CLI | in progress (old process) | #11 |
-| [S1-RELEASE-WF](S1-RELEASE-WF.md) | S1 | — (v0.1.0 tag after #11) | `.github/workflows/release.yml` (new), `docs/releases/` (new) | ready | |
-| [S1-DEMOKIT](S1-DEMOKIT.md) | S1 | — | `tools/demo/` (new), `tests/test_demo_bundle.py` | ready | |
-| [S1-SEAMS](S1-SEAMS.md) | S1 | #11 | `core/osm.py` (`_unsupported_reason`, `Classified`, routing), `core/generate.py` (`ScenePlan`, `build_plan` stage hooks), new `core/structures.py`, stub `core/bridges.py` / `core/tunnels.py` / `core/passages.py`, `blender/scene_build.py`, `tests/blender/*` (split into modules) | blocked | |
-| [S1-BRIDGE](S1-BRIDGE.md) | S1 | S1-SEAMS | `core/bridges.py`, `core/generate.py` (bridge hook only), `tests/test_bridges.py`, `tests/blender/checks_bridges.py` | blocked | |
-| [S1-TUNNEL](S1-TUNNEL.md) | S1 | S1-SEAMS | `core/tunnels.py`, `core/generate.py` (tunnel hook only), `tests/test_tunnels.py`, `tests/blender/checks_tunnels.py` | blocked | |
-| [S1-PIERS](S1-PIERS.md) | S1 | S1-BRIDGE | `core/bridges.py`, `tests/test_bridges.py` | blocked | |
-| [sprint-1-review](sprint-1-review.md) | S1 | RELEASE-WF, DEMOKIT, SEAMS, BRIDGE, PIERS, TUNNEL, D26 (user) | version files, `docs/releases/v0.2.0.md`, `design/reviews/` | blocked | |
-| [S2-ROOF](S2-ROOF.md) | S2 (may start in S1) | #11 | `core/generate.py` (roof section of `build_building` only), new `core/roofs.py`, `tests/test_roofs.py` | blocked | |
-| [S2-ELEV](S2-ELEV.md) | S2 | S1-SEAMS | `core/passages.py`, `core/generate.py` (building loop in `build_plan` only), `tests/test_passages.py`, `tests/blender/checks_passages.py` | blocked | |
-| [sprint-2-review](sprint-2-review.md) | S2 | ELEV, ROOF, sprint-1-review | version files, `docs/releases/v0.3.0.md`, `docs/DEMO.md` (new), `design/reviews/` | blocked | |
+| id | sprint | owner | dependencies | conflict domain (hard) | status | PR |
+|---|---|---|---|---|---|---|
+| [DSM](https://github.com/lingshf/map-builder/pull/11) | pre | dev (old process) | — | `core/dsm.py`, `core/osm.py`, `core/generate.py`, `core/pipeline.py`, Blender props/ui/sources, CLI | in progress | #11 |
+| [S1-RELEASE-WF](S1-RELEASE-WF.md) | S1 | dev | — | `.github/workflows/release.yml`, `docs/releases/README.md` | done | #13 |
+| [REL-v0.1.0](REL-v0.1.0.md) | S1 | release manager | #11, #13 | `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.1.0/`, `docs/releases/v0.1.0.md` | blocked | |
+| [S1-DEMOKIT](S1-DEMOKIT.md) | S1 | dev | — | `tools/demo/` (new), `tests/test_demo_bundle.py` | ready | |
+| [S1-SEAMS](S1-SEAMS.md) | S1 | dev | #11 | `core/osm.py` (`_unsupported_reason`, `Classified`, routing), `core/generate.py` (`ScenePlan`, `build_plan` stage hooks), new `core/structures.py`, stub `core/bridges.py` / `core/tunnels.py` / `core/passages.py`, `blender/scene_build.py`, `tests/blender/*` (split into modules) | blocked | |
+| [S1-BRIDGE](S1-BRIDGE.md) | S1 | dev | S1-SEAMS | `core/bridges.py`, `core/generate.py` (bridge hook only), `tests/test_bridges.py`, `tests/blender/checks_bridges.py` | blocked | |
+| [S1-TUNNEL](S1-TUNNEL.md) | S1 | dev | S1-SEAMS | `core/tunnels.py`, `core/generate.py` (tunnel hook only), `tests/test_tunnels.py`, `tests/blender/checks_tunnels.py` | blocked | |
+| [S1-PIERS](S1-PIERS.md) | S1 | dev | S1-BRIDGE | `core/bridges.py`, `tests/test_bridges.py` | blocked | |
+| [REL-v0.2.0](REL-v0.2.0.md) | S1 | release manager | DEMOKIT, SEAMS, BRIDGE, PIERS, TUNNEL, REL-v0.1.0 | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.2.0/`, `docs/releases/v0.2.0.md` | blocked | |
+| [S1-REVIEW](S1-REVIEW.md) | S1 | design | REL-v0.2.0 RC merged | `design/` only | blocked | |
+| [S2-ROOF](S2-ROOF.md) | S2 (may start in S1) | dev | #11 | `core/generate.py` (roof section of `build_building` only), new `core/roofs.py`, `tests/test_roofs.py` | blocked | |
+| [S2-ELEV](S2-ELEV.md) | S2 | dev | S1-SEAMS | `core/passages.py`, `core/generate.py` (building loop in `build_plan` only), `tests/test_passages.py`, `tests/blender/checks_passages.py` | blocked | |
+| [REL-v0.3.0](REL-v0.3.0.md) | S2 | release manager | ELEV, ROOF, v0.2.0 tagged | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.3.0/`, `docs/releases/v0.3.0.md`, `docs/DEMO.md` | blocked | |
+| [S2-REVIEW](S2-REVIEW.md) | S2 | design | REL-v0.3.0 RC merged | `design/` only | blocked | |
 
-Common sprint-review definition (demo + design review + test audit + release):
-[SPRINT_REVIEW.md](SPRINT_REVIEW.md).
+Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
+→ tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
 
 ## Dependency order and parallel waves (max 3 devs)
 
-1. Wave 1 (now): **S1-RELEASE-WF** ∥ **S1-DEMOKIT**; after #11 merges: v0.1.0 tag (in
-   RELEASE-WF), then **S1-SEAMS** ∥ **S2-ROOF** (early lane)
+1. Wave 1 (now): **S1-DEMOKIT**; after #11 merges: **REL-v0.1.0** (alone), then **S1-SEAMS** ∥
+   **S2-ROOF** (early lane) ∥ DEMOKIT if still open
 2. Wave 2: **S1-BRIDGE** ∥ **S1-TUNNEL** ∥ (ROOF if still open, else **S2-ELEV**)
-3. Wave 3: **S1-PIERS** ∥ **S2-ELEV** → **sprint-1-review** (v0.2.0; any S2 task already merged
-   is simply part of main and ships with it)
-4. Wave 4: remaining S2 work → **sprint-2-review** (v0.3.0, end of v2)
+3. Wave 3: **S1-PIERS** ∥ **S2-ELEV** → **REL-v0.2.0** → **S1-REVIEW** → retro → tag `v0.2.0`
+   (any S2 task already merged is simply part of main and ships with it)
+4. Wave 4: remaining S2 → **REL-v0.3.0** → **S2-REVIEW** → retro → tag `v0.3.0` (end of v2)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks
 (roof section, building loop, bridge hook, tunnel hook). The pairs listed as parallel above
 were checked for hunk overlap; anything else touching `generate.py` must be serialised.
 
-## Common definition of done (every code task)
+## Definition of Done (every code task, D28)
 
-* Unit tests: `py -3.12 -W error::ResourceWarning -m unittest discover -s tests -t .` green on
-  3.11 and 3.12 (CI).
-* CLI build + validate of the synthetic fixture is `VALID` (CI); new warnings explained in the PR.
+Each task doc keeps its own acceptance criteria and performance considerations; a task is done
+only when all of the following hold:
+
+1. **Acceptance criteria tested:** every criterion maps to an automated test or a recorded run
+   linked in the PR.
+2. **CI green** on the exact head (Python 3.11 + 3.12 unit tests, CLI build + validate of the
+   synthetic fixture `VALID`, C# reader on the committed sample).
+3. **No wall-clock or p95 gates in the PR suite**; performance is measured and quoted in the
+   PR, not asserted in CI.
+4. **New tests ≤ 5 s each** (no Blender, no network in PR CI).
+5. **PR body** contains: CI time, a **behavior-change table** (before / after / why, including
+   the sample and report changes) and a **"User-visible changes"** section (used by the
+   release manager for CHANGELOG and `docs/user/`; "none" if none).
+6. **Reviewer APPROVED on the exact head** (gpt-6.2-sol, D5); squash-merge, delete branch (D6).
+
+Also expected where relevant:
+
 * `examples/synthetic_sample.mbmap` regenerated with the command in `examples/README.md` if the
-  output changed; `tests/test_examples.py` and the C# reader CI step green.
+  output changed (D20); `tests/test_examples.py` green.
 * Headless Blender 4.2.23 run (`tests/blender/run_integration.py`) `OK: 0 failure(s)` when the
   task touches generation or Blender code; result appended to `docs/VALIDATION.md`.
-* Docs: PACKAGE_FORMAT.md (unsupported list, report keys), README Limits, UNITY_CORE_HANDOFF.md
-  and VALIDATION.md matrix updated for the behaviour the task changes.
-* PR quotes the fixture build time before/after and the unit-test time added.
-* No release, demo render or version bump per task (D17).
-* Review by gpt-6.2-sol (D5), summary comment on the PR, squash-merge, delete branch (D6).
+* PACKAGE_FORMAT.md, README Limits, UNITY_CORE_HANDOFF.md and VALIDATION.md updated for the
+  behaviour the task changes.
+* No release, demo render, CHANGELOG or version bump in feature PRs (release manager, D28).

@@ -22,7 +22,7 @@ requirement ("注意不要太频繁，以免影响进度").
 * **Fixed camera presets** committed as `tools/demo/presets/<name>.json` (area lat/lon/size and
   named cameras: `overview`, plus one per feature to show, e.g. `bridge-under`, `tunnel-portal`).
   Presets for `synthetic` and the demo area (D26). Identical cameras give before/after pairs.
-* **Panel screenshot:** without hardware OpenGL, try Mesa llvmpipe (`opengl32.dll`) in a
+* **Panel screenshot (`--panel`, D27):** without hardware OpenGL, try Mesa llvmpipe (`opengl32.dll`) in a
   **separate copy** of portable Blender (never modify `C:\tools\blender-4.2.23-windows-x64\`)
   with `bpy.ops.screen.screenshot`. If that fails within ~1 h of effort, ship without
   `panel.png`, record it as a known limit and tell the coordinator; do not fake the UI.
