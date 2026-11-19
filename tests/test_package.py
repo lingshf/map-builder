@@ -1491,6 +1491,16 @@ class ReviewRound2Test(TempDirCase):
         for flip in (True, False):                                                    # review round 4
             probs = self.orient([(outer, False), (touching, flip)])
             self.assertTrue(probs and "non-manifold" in probs[0], probs)
+        # triangles collapsed onto an existing edge (two welded vertices) do not split the shell (round 5)
+        m = merged_mesh([(outer, False)])
+        a, b, c = next(iter(m.triangles()))
+        pa = m.vertices[a]
+        for k in range(3):
+            near = m.add_vertex(pa[0] + 1e-5 * (k + 1), pa[1], pa[2])                # welds onto a
+            m.add_face((a, b, near), "MB Wall", (0.7, 0.7, 0.7))
+        col = read_collision(write_collision([ColObject("b", "osm:way/9", "building", list(m.vertices),
+                                                        [tuple(t) for t in m.triangles()])]))
+        self.assertEqual(pkg.collision_orientation_problems(col), [])
         # package level: visual and collision agree, so only the independent orientation check catches it
         bad = obj("twin", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
                                                                 (box_mesh(80, 60, 85, 65, 0, 5), True)]))

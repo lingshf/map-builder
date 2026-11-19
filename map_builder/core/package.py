@@ -621,9 +621,10 @@ def _shells(ids):
     triangle indices, in first-triangle order."""
     edges = {}                                  # undirected edge -> [(triangle, forward)]
     for t, (a, b, c) in enumerate(ids):
+        if a == b or b == c or c == a:
+            continue                            # collapsed to an edge or point: its edge uses cancel out
         for p, q in ((a, b), (b, c), (c, a)):
-            if p != q:
-                edges.setdefault((min(p, q), max(p, q)), []).append((t, p < q))
+            edges.setdefault((min(p, q), max(p, q)), []).append((t, p < q))
     parent = list(range(len(ids)))
     for uses in edges.values():
         if len(uses) == 2 and uses[0][1] != uses[1][1]:
@@ -638,7 +639,7 @@ def _shells(ids):
         return None
     groups = {}
     for t in range(len(ids)):
-        if len(set(ids[t])) > 1:
+        if len(set(ids[t])) == 3:
             groups.setdefault(_find(parent, t), []).append(t)
     return list(groups.values())
 
