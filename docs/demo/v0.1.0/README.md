@@ -110,8 +110,9 @@ Generate button supports that override; see the caveat in the generation guide.
 ## Recorded candidate checks
 
 Blender 4.2.23 LTS, Windows x64, Cycles **CPU**, 1200 x 800, 16 samples.
-All images and package evidence were refreshed after rebasing onto the merged
-DSM baseline (`23a102ebcf3a1029e1553c31a0e7f762fe9f2eb2`).
+All images and package evidence were refreshed after rebasing onto main
+`e5ed1fa4dc0554582b47f063adae0cb2a68304fe`, including the new roofs (#18),
+structure routing (#19) and real-terrain road-normal fix (#20).
 The [machine-readable evidence](evidence.json) records the exact package
 identities and geometry check. Timestamps change package identities on rerun.
 
@@ -130,24 +131,23 @@ identities and geometry check. Timestamps change package identities on rerun.
 but the shared kit's separate Mesa llvmpipe runtime successfully captured the
 real 1920 x 1129 Blender window above. The screenshot uses the committed sample,
 package identity
-`sha256:93446c4fda224f97e3915de51b393dede0b0b705376545f32fe67ba9a02abb43`.
+`sha256:ef66b4a5be150186ece546d983916f0c3595b1faf39cec040018b2773d44337b`.
 It verifies visible panel layout, not an online-acquisition or simulator test.
 
-**DSM scope:** this candidate includes merged correction (#11). The offline
+**Synthetic DSM scope:** this candidate includes merged correction (#11). The offline
 local-file demo keeps its default Auto setting, so correction is off; these
-images do not demonstrate DSM lowering or flyable passages. Follow the
+synthetic images do not demonstrate DSM lowering or flyable passages. Follow the
 [DSM user guide](../../user/generate.md#dsm-terrain-correction-inferred-ground-preview)
 for settings, comparison steps, reports and approximation limits.
 Release review and coordinator authorization remain required before tagging.
 
-## Real-data example: Pittsburgh DSM Off / On (interim, roads disabled)
+## Real-data example: Pittsburgh DSM Off / On (default content, roads enabled)
 
-**Not release acceptance yet.** The default-content Pittsburgh export exposed
-a road winding error: `road object #1012 has 1 non-degenerate triangle(s) whose
-normal does not point up (z <= 0)`. The coordinator requires BUG-ROAD-NORMALS to
-merge, followed by a default-content rerun with roads enabled, before this
-release is reviewed again. These interim images use the supported **Roads off**
-content setting, not a validator bypass or a product-code modification.
+Both packages were rebuilt and strictly validated after BUG-ROAD-NORMALS (#20)
+merged. **Roads are enabled**, along with the default buildings, trees and
+vegetation content. These renders replace the earlier interim roads-disabled
+images. No validator bypass, omitted road layer or product-code modification
+is used by the demo.
 
 Area D26 is centred at **40.437 N, 80.016 W**, **1200 x 1000 m**, covering
 Fort Pitt Bridge and the north Fort Pitt Tunnel portals. The southern tunnel
@@ -157,13 +157,13 @@ ENU metres and are fixed for the DSM pair and subsequent v0.2.0 comparison.
 
 | Same camera | DSM Off | DSM On |
 |---|---|---|
-| Real-area overview | ![Pittsburgh overview DSM Off, roads disabled](pittsburgh-overview-off.png) | ![Pittsburgh overview DSM On, roads disabled](pittsburgh-overview-on.png) |
-| Hillside ground detail | ![Pittsburgh ground DSM Off, roads disabled](pittsburgh-dsm-off.png) | ![Pittsburgh ground DSM On, roads disabled](pittsburgh-dsm-on.png) |
+| Real-area overview | ![Pittsburgh overview DSM Off, roads enabled](pittsburgh-overview-off.png) | ![Pittsburgh overview DSM On, roads enabled](pittsburgh-overview-on.png) |
+| Hillside ground detail | ![Pittsburgh ground DSM Off, roads enabled](pittsburgh-dsm-off.png) | ![Pittsburgh ground DSM On, roads enabled](pittsburgh-dsm-on.png) |
 
 | v0.2.0 baseline camera | v0.1.0: unsupported structure omitted |
 |---|---|
-| Fort Pitt Bridge approach | ![Bridge baseline, no generated deck, roads disabled](pittsburgh-bridge-baseline.png) |
-| North tunnel portals | ![Tunnel baseline, no generated tube, roads disabled](pittsburgh-tunnel-baseline.png) |
+| Fort Pitt Bridge approach | ![Bridge baseline, no generated deck, roads enabled](pittsburgh-bridge-baseline.png) |
+| North tunnel portals | ![Tunnel baseline, no generated tube, roads enabled](pittsburgh-tunnel-baseline.png) |
 
 The bridge/tunnel views are **absence baselines**, not fly-through evidence:
 no bridge deck, tube, portals or passage probes are generated in v0.1.0. Their
@@ -174,16 +174,21 @@ participate in the DSM mask.
 
 Acquired online on **2026-11-19** through the normal pipeline: public Copernicus
 AWS tiles and public Overpass. Two initial optional mask requests failed;
-attempt 3 succeeded. The normal response was reused from the fresh run's cache,
-then the same acquired elevation grid and classified OSM snapshot were
-deep-copied for Off and On, eliminating differences between network responses
-from the comparison. No existing user's data/cache or demo server was used.
+attempt 3 succeeded. The final rerun copies that throwaway acquisition's raw
+cache into a new output directory and **reclassifies with the current code**:
+the older pickled classification predates #19 and is not reused. Both normal
+and mask responses are cache hits with the original timestamps. The same
+newly acquired elevation grid and classified OSM snapshot are then deep-copied
+for Off and On, eliminating network-response differences from the comparison.
+No existing user's data/cache or demo server was used.
 
 | Evidence | Off | On |
 |---|---|---|
-| Validation | VALID, 0 errors, 0 warnings | VALID, 0 errors, 0 warnings |
-| Objects (roads disabled) | 3011 | 2988 |
-| Build + package validation, excluding acquisition | 15.046 s | 17.563 s |
+| Validation | VALID, 0 errors, 1 warning | VALID, 0 errors, 1 warning |
+| Zero-area collision triangles (reported, allowed) | 74 | 75 |
+| Objects / road objects | 3269 / 258 | 3246 / 258 |
+| Collision triangles | 133336 | 132312 |
+| Build + package validation, excluding acquisition | 32.890 s | 18.281 s |
 | Vertical offset, EGM2008 | 213 m | 213 m |
 | Terrain samples | 12221 | 12221 |
 | Masked / lowered samples | 0 / 0 | 8532 / 5201 |
@@ -195,10 +200,22 @@ The object counts differ because terrain-dependent building eligibility changes;
 the On report has 23 additional invalid features. This is not a promise that
 every building improves or that hidden relief is accurately recovered.
 
+Both complete Pittsburgh packages also passed the C# reference reader (`OK`).
+Build times above are single wall-clock observations on a shared machine,
+including planning, export and package validation; they are not a benchmark
+or a guarantee that On is faster than Off.
+
+The validator reports zero-area triangles as warnings; **non-degenerate
+downward-facing road triangles still fail**. Both modes also report two
+fully covered road ribbons represented by higher-priority roads and the
+2000-tree scatter limit. Road `osm:way/11826594` records `slivers_dropped`:
+one face, maximum width 0.000012 m and total area 0.000012 m2. The #20 fix
+drops that unrepresentable face instead of relaxing the validator.
+
 Off package identity:
-`sha256:f29f8ea79107b22232c0efe8f182048bfd5690641b37ffda2efc963fba7248c5`.
+`sha256:2a8aa7e1b41e7ae76f84a75e69adb7631d5455acfa82da9f3718ad7a890dd076`.
 On package identity:
-`sha256:12f94aff221a91cff5364e38ddbae378d2370fe3732159ae3fcac8dec5ea43d7`.
+`sha256:5abdabef613b43bbf62cb4eb6a2528e6d0857e55c708b26795638705f26fedba`.
 Normal OSM base timestamp: `2026-11-19T15:38:06Z`;
 mask response: `2026-11-19T15:40:08Z`.
 Copernicus tile: `Copernicus_DSM_COG_10_N40_00_W081_00_DEM`,
@@ -211,10 +228,10 @@ areas can lose real relief.
 
 ### Exact acquisition, package, viewer and summary commands
 
-Run from the v0.1.0 source root with Python 3.12. This **interim** command
-explicitly disables roads; replace that setting with the default after the
-road fix is merged and regenerate final evidence. No network credentials are
-needed. Blender online UI permission is not involved in this Python process;
+Run from the v0.1.0 source root with Python 3.12. This command uses default
+content, **including roads** (`PlanOptions(seed=1)`); seed 1 is fixed to match
+the recorded comparison. No network credentials are needed.
+Blender online UI permission is not involved in this Python process;
 inside Blender enable **Preferences > System > Network > Allow Online Access**.
 
 ```powershell
@@ -245,7 +262,7 @@ with (root / "acquired.pickle").open("wb") as stream:
     pickle.dump((grid, classified, sources), stream)
 for mode, enabled in (("off", False), ("on", True)):
     plan = build_plan(Area(40.437, -80.016, 1200, 1000), copy.deepcopy(grid),
-                      copy.deepcopy(classified), PlanOptions(seed=1, roads=False),
+                      copy.deepcopy(classified), PlanOptions(seed=1),
                       dsm_correction=enabled)
     if enabled and not plan.report["terrain_correction"]["applied"]:
         raise RuntimeError(json.dumps(plan.report["terrain_correction"]))

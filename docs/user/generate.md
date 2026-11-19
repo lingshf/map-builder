@@ -104,3 +104,19 @@ remains **2.0.0**.
 and hollows inside large masks are smoothed, fills touching an area edge level
 off, and buildings or trees missing from OSM remain uncorrected. Masking a
 bridge deck does not generate a flyable bridge or tunnel.
+
+## Roof shapes and road-export diagnostics
+
+OSM `roof:shape` supports flat, gabled, hipped, pyramidal and skillion, plus
+half-hipped, gambrel, mansard, round and saltbox on rectangles and dome/onion
+on convex footprints. Roof orientation and direction tags influence supported
+shapes. Unsupported or ill-fitting shapes fall back with `fallback:` provenance;
+inspect the report rather than assuming every tagged roof is reproduced.
+The synthetic sample's way/1043 demonstrates a dome.
+
+On steep real terrain, a road face thinner than float32 can represent may be
+omitted if storing it would make it non-upward-facing. `slivers_dropped` in the
+road's provenance records the count, maximum width and total area. This is
+not general road simplification: wider folded faces remain invalid and package
+validation is not relaxed. Bridges and tunnels are still omitted even though
+internal structure routing is in place.

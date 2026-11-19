@@ -18,6 +18,10 @@ release review and coordinator authorization.
 - Editable terrain, buildings with basic roof shapes and courtyards, draped roads,
   water and procedural vegetation; reports distinguish inferred and unsupported
   content (#3, #5).
+- Additional OSM roofs: half-hipped, gambrel, mansard, round and saltbox on
+  rectangular footprints; dome and onion on convex footprints.
+  `roof:orientation` and `roof:direction` are honored, with reported
+  inferred/fallback provenance for unsupported or ill-fitting shapes (#18).
 - Export final evaluated Blender meshes, including modifiers, transforms, mirrors,
   duplicates and user geometry, into GLB visuals and authoritative collision in an
   atomic `.mbmap` package. Include optional terrain heightfield, georeference,
@@ -33,7 +37,8 @@ release review and coordinator authorization.
 - Reusable demo kit with Cycles CPU renders, a bundled three.js viewer, probe
   results and real Blender-sidebar capture using a separate Mesa runtime (#14).
 - End-user installation, generation, export and simulator-handoff guides, UI flow
-  diagrams and an offline synthetic demo with reproducible renders (REL-v0.1.0).
+  diagrams, synthetic editing demo and real Pittsburgh DSM Off/On comparison
+  with reproducible renders and reusable cameras (REL-v0.1.0).
 
 ### Changed
 
@@ -52,19 +57,31 @@ release review and coordinator authorization.
   samples remain unmasked, or the fill does not converge, generation warns and
   uses the original surface model. Required source-data failures still stop
   generation; no flat or fabricated terrain is substituted (#11).
+- The committed synthetic sample's way/1043 now has a dome rather than a flat
+  fallback; its identity changed and collision count increased to 4987
+  triangles (#18).
+- Internal structure routing and stage hooks prepare later feature work without
+  changing generated output or reports. **Bridges and tunnels remain unsupported
+  and omitted**; this is not a new flyable-structure feature (#19).
 
 ### Fixed
 
 - Reject oversized terrain/heightfield requests before network or file access (#6).
 - Reject impossible calendar dates in `created_utc` in both reference readers (#8).
 - Recognize split OSM part identities such as `osm:way/123#1` during validation (#9).
+- Real-terrain road exports no longer fail upward-normal validation because of
+  slivers below float32 storage resolution. Only unrepresentable, failing faces
+  are omitted and reported as `slivers_dropped` provenance; wider folded faces
+  still reject the road. Pittsburgh drops one 0.000012 m-wide face per DSM
+  mode; validator rules and the synthetic sample are unchanged (#20).
 
 ### Known limitations
 
 - Bridges and tunnels are reported unsupported; elevated buildings are closed
   solids, not flyable passages. No interiors, streaming or LOD.
 - Visuals are procedural, flat-shaded and untextured; no performance guarantee.
-- Online acquisition is not exercised by CI or the offline release demo.
+- Online acquisition is not exercised by CI. The Pittsburgh demo uses a recorded
+  online acquisition; provider availability and live-data changes still apply.
 - DSM correction is an approximation, not a bare-earth DTM: hidden relief is
   smoothed, edge-touching fills level off, and unmapped buildings/trees are not
   corrected.

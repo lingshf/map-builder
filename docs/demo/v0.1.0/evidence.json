@@ -1,10 +1,10 @@
 {
   "data": "SYNTHETIC, not a real place",
   "before": {
-    "package_id": "sha256:b0d23cc51b4b0fda364d7212cdf161753f2460fa5da09df943aeef5927c5485a",
+    "package_id": "sha256:da8f97ea54353e9f6c4455c446bfccf499a41fdf43163bafac6963d6036d65ac",
     "schema_version": "2.0.0",
     "objects": 76,
-    "validation": "VALID: 0 error(s), 1 warning(s)\npackage_id sha256:b0d23cc51b4b0fda364d7212cdf161753f2460fa5da09df943aeef5927c5485a\nwarning: collision has 2 degenerate (zero-area) triangles",
+    "validation": "VALID: 0 error(s), 1 warning(s)\npackage_id sha256:da8f97ea54353e9f6c4455c446bfccf499a41fdf43163bafac6963d6036d65ac\nwarning: collision has 2 degenerate (zero-area) triangles",
     "warnings": [
       "collision has 2 degenerate (zero-area) triangles"
     ]
@@ -27,10 +27,10 @@
     ]
   },
   "after": {
-    "package_id": "sha256:3440a4c8bb199eb8d4fce900fd265a4b26594a812c7fe432ce93a1f9a38c107e",
+    "package_id": "sha256:b0741526f86e3d3292769dfe4342c5c37de6d4ac520e20ed0aa16bd20af41c2e",
     "schema_version": "2.0.0",
     "objects": 76,
-    "validation": "VALID: 0 error(s), 1 warning(s)\npackage_id sha256:3440a4c8bb199eb8d4fce900fd265a4b26594a812c7fe432ce93a1f9a38c107e\nwarning: collision has 2 degenerate (zero-area) triangles",
+    "validation": "VALID: 0 error(s), 1 warning(s)\npackage_id sha256:b0741526f86e3d3292769dfe4342c5c37de6d4ac520e20ed0aa16bd20af41c2e\nwarning: collision has 2 degenerate (zero-area) triangles",
     "warnings": [
       "collision has 2 degenerate (zero-area) triangles"
     ]
