@@ -1,7 +1,8 @@
 # Generate: source and failure flow
 
 The report is Blender's **MapBuilder Report** text block. Online failures never
-silently become synthetic or flat maps.
+silently become synthetic or flat maps. Optional DSM mask/correction failure
+warns and keeps the original surface model; required source failures stop.
 
 ```mermaid
 flowchart TD
@@ -14,7 +15,8 @@ flowchart TD
   F --> H{Inputs valid?}
   G --> H
   H -->|No| E
-  H -->|Yes| I[Generate scene plan]
+  H -->|Yes| N[Optional inferred DSM correction]
+  N --> I[Generate scene plan]
   I --> J{Build succeeds?}
   J -->|No| K[Roll back new data]
   K --> E

@@ -6,16 +6,10 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
-### Planned
-
-- DSM terrain correction is awaiting merge of [#11](https://github.com/lingshf/map-builder/pull/11).
-  It is **not included in this release candidate**. Move its verified changes into
-  0.1.0 before approving the baseline release.
-
 ## [0.1.0] - 2026-11-19
 
 Baseline **preview candidate**, not a published release. Final tagging requires
-DSM correction (#11), release review and coordinator authorization.
+release review and coordinator authorization.
 
 ### Added
 
@@ -41,6 +35,24 @@ DSM correction (#11), release review and coordinator authorization.
 - End-user installation, generation, export and simulator-handoff guides, UI flow
   diagrams and an offline synthetic demo with reproducible renders (REL-v0.1.0).
 
+### Changed
+
+- Copernicus maps now enable inferred DSM terrain correction by default: lower
+  ground under OSM-mapped buildings, trees, forests and bridge decks toward
+  surrounding ground, never raise it. Buildings and vegetation are placed on
+  the corrected terrain, reducing rooftop/canopy-height "plinths" (#11).
+- Blender's **DSM correction** control offers Auto / On / Off; CLI flags are
+  `--dsm-correction` / `--no-dsm-correction`. Auto leaves local elevation files
+  unchanged. Online Overpass acquisition with correction enabled adds a
+  mask-only request, increasing cold-cache generation time (#11).
+- Generation reports record whether correction ran, lowered sample counts,
+  lowering amounts and skip reasons. Applied processing is attributed in
+  package NOTICES; source hashes and package schema 2.0.0 stay unchanged (#11).
+- If mask acquisition fails, correction budgets are exceeded, fewer than 5% of
+  samples remain unmasked, or the fill does not converge, generation warns and
+  uses the original surface model. Required source-data failures still stop
+  generation; no flat or fabricated terrain is substituted (#11).
+
 ### Fixed
 
 - Reject oversized terrain/heightfield requests before network or file access (#6).
@@ -53,6 +65,9 @@ DSM correction (#11), release review and coordinator authorization.
   solids, not flyable passages. No interiors, streaming or LOD.
 - Visuals are procedural, flat-shaded and untextured; no performance guarantee.
 - Online acquisition is not exercised by CI or the offline release demo.
+- DSM correction is an approximation, not a bare-earth DTM: hidden relief is
+  smoothed, edge-touching fills level off, and unmapped buildings/trees are not
+  corrected.
 - Code licence is provisionally GPL-3.0-or-later; owner confirmation and a root
   licence file are still outstanding. Source-data licences apply separately.
 

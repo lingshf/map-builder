@@ -11,7 +11,7 @@ with Mesa software OpenGL. None is a real-city reconstruction or a mock UI.
 
 Captured by the merged demo kit from #14 using a separate, read-only Blender
 4.2.23 + Mesa llvmpipe runtime. The sidebar shows the real Area, Sources,
-Content and Export controls. The viewport contains the committed CLI sample's
+Content and Export controls, including **DSM correction**. The viewport contains the committed CLI sample's
 imported GLB (74 objects), not the separate 76-object edited Blender demo below.
 The source controls show their defaults, including the disabled-online-access
 warning; no online download was performed. An imported GLB does not restore
@@ -109,6 +109,8 @@ Generate button supports that override; see the caveat in the generation guide.
 ## Recorded candidate checks
 
 Blender 4.2.23 LTS, Windows x64, Cycles **CPU**, 1200 x 800, 16 samples.
+All images and package evidence were refreshed after rebasing onto the merged
+DSM baseline (`23a102ebcf3a1029e1553c31a0e7f762fe9f2eb2`).
 The [machine-readable evidence](evidence.json) records the exact package
 identities and geometry check. Timestamps change package identities on rerun.
 
@@ -120,15 +122,19 @@ identities and geometry check. Timestamps change package identities on rerun.
 - C# reference reader accepted the edited output and the committed sample.
 - Extension validation/build and Install-from-Disk CLI operation succeeded using
   a separate temporary Blender resource directory; the installed extension
-  enabled and registered the real Map Builder sidebar panel.
+  enabled, registered the real Map Builder sidebar panel and exposed DSM
+  correction with its default Auto value.
 
 **Sidebar capture:** native graphical startup lacked the required WGL context,
 but the shared kit's separate Mesa llvmpipe runtime successfully captured the
 real 1920 x 1129 Blender window above. The screenshot uses the committed sample,
 package identity
-`sha256:3bcc75e25368d71ec5c866233969e67fba03a0302594d61ca4767ca22165b0a2`.
+`sha256:93446c4fda224f97e3915de51b393dede0b0b705376545f32fe67ba9a02abb43`.
 It verifies visible panel layout, not an online-acquisition or simulator test.
 
-**Release gate:** DSM correction (#11) remains unmerged in this candidate.
-Update release notes and the changelog after it merges; these images demonstrate
-the existing local-file workflow, not DSM correction or flyable passages.
+**DSM scope:** this candidate includes merged correction (#11). The offline
+local-file demo keeps its default Auto setting, so correction is off; these
+images do not demonstrate DSM lowering or flyable passages. Follow the
+[DSM user guide](../../user/generate.md#dsm-terrain-correction-inferred-ground-preview)
+for settings, comparison steps, reports and approximation limits.
+Release review and coordinator authorization remain required before tagging.
