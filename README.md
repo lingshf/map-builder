@@ -209,7 +209,12 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
 * **Highway bridges.** `bridge=*` (not `no`) highways are generated as `bridge` solids with a `deck`
   and an `under` passage probe. The `under` probe is emitted only where the clearance over the ground
   or crossing road is at least 4 m, so a low bridge has a `deck` probe only. Trees inside the deck
-  footprint are not generated; a clearance or grade shortfall is a report warning.
+  footprint are not generated; a clearance or grade shortfall is a report warning. Decks have 1 m high, 0.3 m wide
+  parapets on both edges (part of the deck shell; the `deck` probe runs between them, so a deck narrower than
+  2.7 m has none). Where the deck stands more than 6 m above the ground it also gets concrete piers (1.5 m x deck
+  width - 1 m, evenly spaced at most 40 m apart, from 1 m below the ground to the deck underside) as extra closed
+  shells of the same `bridge` object; a pier moves up to 5 m along the deck, else is skipped, to stay at least 3 m
+  from the `under` probe and off at-grade road ribbons. `PlanOptions.bridge_piers=False` turns piers off.
 * **Elevated building parts and building passages.** A part with `min_height` at least 2.6 m above
   the ground gets an `elevated` passage probe along its longest edge, and a
   `tunnel=building_passage` way through a building cuts a straight corridor: the building becomes two

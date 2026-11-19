@@ -118,10 +118,10 @@ class ValleyTest(unittest.TestCase):
             road = next(o for o in self.plan.objects if o.mb_id == road_id)
             r_tops = [road.location[2] + v[2] for v in road.mesh.vertices
                       if abs(v[0] + road.location[0] - x) < 0.5 and abs(v[1] + road.location[1]) < 2.0]
-            tops = [deck.location[2] + v[2] for v in deck.mesh.vertices
-                    if abs(v[0] + deck.location[0] - x) < 0.01 and abs(v[1] + deck.location[1]) < 4.1]
+            tops = [deck.location[2] + v[2] for v in deck.mesh.vertices   # the parapet's inner edge: surface and top
+                    if abs(v[0] + deck.location[0] - x) < 0.01 and 3.65 < abs(v[1] + deck.location[1]) < 3.75]
             self.assertTrue(r_tops and tops)
-            self.assertLess(abs(max(tops) - max(r_tops)), 0.05)
+            self.assertLess(abs(min(tops) - max(r_tops)), 0.05)
 
     def test_probes_present_and_pass_in_the_validator(self):
         self.assertEqual([p["id"] for p in self.plan.passage_probes], [f"{self.bridge}:deck", f"{self.bridge}:under"])
@@ -150,6 +150,129 @@ class ValleyTest(unittest.TestCase):
         again, _, _ = valley_scene()
         self.assertEqual(again.passage_probes, self.plan.passage_probes)
         self.assertEqual(objects(again, "bridge")[0].mesh.vertices, objects(self.plan, "bridge")[0].mesh.vertices)
+
+
+def valley_scene_long(extra=(), joins=(), opts=None, half_len=60.0):
+    """A bridge over the valley, ``2 * half_len`` m long, ending on at-grade roads."""
+    ways = [([(-100, 0), (-half_len, 0)], {"highway": "secondary"}),
+            ([(half_len, 0), (100, 0)], {"highway": "secondary"}),
+            ([(-half_len, 0), (0, 0), (half_len, 0)], {"highway": "secondary", "bridge": "yes"})]
+    return make_scene(ways + list(extra), valley_height, joins=[(2, 0, 0, 1), (2, 2, 1, 0)] + list(joins), opts=opts)
+
+
+def shells(obj):
+    """Vertex sets of the connected shells of the object's mesh, in world coordinates."""
+    parent = list(range(len(obj.mesh.vertices)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    for f in obj.mesh.faces:
+        for a in f[1:]:
+            parent[find(a)] = find(f[0])
+    groups = {}
+    for i, v in enumerate(obj.mesh.vertices):
+        groups.setdefault(find(i), []).append(tuple(c + o for c, o in zip(v, obj.location)))
+    return sorted(groups.values(), key=lambda g: min(p[0] for p in g))
+
+
+def volume(obj, verts):
+    inside = set(verts)
+    vol = 0.0
+    for f in obj.mesh.faces:
+        pts = [tuple(c + o for c, o in zip(obj.mesh.vertices[i], obj.location)) for i in f]
+        if pts[0] not in inside:
+            continue
+        for k in range(1, len(pts) - 1):
+            a, b, c = pts[0], pts[k], pts[k + 1]
+            vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+                    + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+    return vol
+
+
+class PierTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.plan, cls.ids, cls.grid = valley_scene_long()
+        cls.obj = objects(cls.plan, "bridge")[0]
+        cls.parts = shells(cls.obj)
+        cls.piers = cls.parts[1:-1]   # sorted by x: the deck spans the lot, so it sorts first by its min x
+
+    def pier_shells(self, obj, parts):
+        return [p for p in parts if max(q[0] for q in p) - min(q[0] for q in p) < 3.0]
+
+    def test_two_closed_positive_shells_touching_the_underside(self):
+        piers = self.pier_shells(self.obj, self.parts)
+        self.assertEqual(len(self.parts), 3)
+        self.assertEqual(len(piers), 2)
+        col, _ = plan_collision(self.plan)
+        zo = self.plan.frame.z_offset
+        for p in piers:
+            self.assertEqual(len(p), 8)
+            self.assertGreater(volume(self.obj, p), 1.0)
+            px = (min(q[0] for q in p) + max(q[0] for q in p)) / 2
+            hit = ray_cast(col, (px, 3.9, 1.0 - zo), (0.0, 0.0, 1.0), 40.0)   # the deck underside beside the pier
+            self.assertAlmostEqual(sum(sorted(q[2] for q in p)[-4:]) / 4, 1.0 - zo + hit.t, delta=0.01)
+            low = sorted(p, key=lambda q: q[2])[:4]   # 1 m below the lowest ground under the footprint
+            self.assertAlmostEqual(low[0][2] + zo, min(terrain_height(self.grid, q[0], q[1]) for q in low) - 1.0, delta=0.3)
+            self.assertLess(low[0][2] + zo, min(terrain_height(self.grid, q[0], q[1]) for q in low))
+            self.assertAlmostEqual(max(q[1] for q in p) - min(q[1] for q in p), 7.0, delta=1e-6)   # 8 m deck - 1 m
+        for p, nominal in zip(piers, (-20.0, 20.0)):   # evenly spaced, shifted off a profile kink by at most 5 m
+            self.assertLessEqual(abs((min(q[0] for q in p) + max(q[0] for q in p)) / 2 - nominal), 5.0)
+
+    def test_triangle_budget_per_pier(self):
+        again, _, _ = valley_scene_long(opts=PlanOptions(trees=False, scatter=False, bridge_piers=False))
+        bare = objects(again, "bridge")[0]
+        self.assertEqual(len(shells(bare)), 1)
+        extra = sum(1 for _ in self.obj.mesh.triangles()) - sum(1 for _ in bare.mesh.triangles())
+        self.assertEqual(extra, 2 * 12)
+
+    def test_probes_pass_and_package_is_valid(self):
+        self.assertEqual([p["id"] for p in self.plan.passage_probes], [f"{self.ids[2]}:deck", f"{self.ids[2]}:under"])
+        self.assertNotIn("passage_probes_blocked", self.plan.report)
+        with tempfile.TemporaryDirectory() as d:
+            plan_to_package(self.plan, os.path.join(d, "p.mbmap"), "piers", synthetic_sources())
+            v = validate_package(os.path.join(d, "p.mbmap"))
+        self.assertTrue(v.ok, v.errors)
+        self.assertEqual([w for w in v.warnings if "probe" in w], [])
+
+    def test_pier_shifts_off_an_at_grade_road_ribbon(self):
+        road = ([(20, -45), (20, 45)], {"highway": "residential"})
+        plan, ids, _ = valley_scene_long(extra=[road])
+        obj = objects(plan, "bridge")[0]
+        piers = self.pier_shells(obj, shells(obj))
+        self.assertEqual(len(piers), 2)
+        hw = 3.0 * 0.5 + 0.5   # generous bound on a residential ribbon half width
+        for p in piers:
+            xs = [q[0] for q in p]
+            self.assertTrue(min(xs) > 20.0 + hw - 1e-6 or max(xs) < 20.0 - hw + 1e-6, (min(xs), max(xs)))
+        self.assertNotIn("passage_probes_blocked", plan.report)
+
+    def test_pier_keeps_3_m_from_the_under_probe(self):
+        plan, ids, _ = valley_scene_long(half_len=40.0)   # 80 m: one pier, nominally right under the probe
+        obj = objects(plan, "bridge")[0]
+        piers = self.pier_shells(obj, shells(obj))
+        under = next(p for p in plan.passage_probes if p["id"].endswith(":under"))
+        px = under["path_map"][0][0]
+        self.assertEqual(len(piers), 1)
+        self.assertGreaterEqual(min(abs(q[0] - px) for q in piers[0]), 3.0)
+        self.assertNotIn("passage_probes_blocked", plan.report)
+
+    def test_ray_along_the_deck_edge_hits_the_parapet(self):
+        col, _ = plan_collision(self.plan)
+        zo = self.plan.frame.z_offset
+        z = 15.0 + ROAD_LIFT_M + 0.5 - zo
+        hit = ray_cast(col, (-80.0, 3.85, z), (1.0, 0.0, 0.0), 40.0)
+        self.assertIsNotNone(hit)
+        self.assertEqual(col.objects[hit.object]["mb_id"], self.ids[2])
+        self.assertAlmostEqual(-80.0 + hit.t, -60.5, delta=0.01)
+
+    def test_short_low_bridge_has_no_piers(self):
+        plan, _, _ = valley_scene()
+        self.assertEqual(len(shells(objects(plan, "bridge")[0])), 1 + len(
+            self.pier_shells(objects(plan, "bridge")[0], shells(objects(plan, "bridge")[0]))))
 
 
 class CrossingTest(unittest.TestCase):

@@ -27,6 +27,19 @@ MAX_DECK_PROBE_POINTS = 64
 APPROACH_MAX_DEVIATION_DEG = 30.0   # an approach road leaves the deck end within this of straight
 APPROACH_TIE_DEG = 5.0   # two candidates this close are ambiguous: none is exempt
 SEGMENT_SAMPLE_M = 1.0
+PARAPET_HEIGHT_M = 1.0
+PARAPET_WIDTH_M = 0.3
+PIER_MIN_CLEARANCE_M = 6.0   # piers only where the deck stands more than this above the ground
+PIER_SPACING_M = 40.0
+PIER_DEPTH_M = 1.5   # along the deck
+PIER_SIDE_INSET_M = 1.0   # the pier is this much narrower than the deck
+PIER_SINK_M = 1.0   # below the lowest ground under the footprint
+PIER_MAX_SHIFT_M = 5.0
+PIER_SHIFT_STEP_M = 0.5
+PIER_PROBE_GAP_M = 3.0
+PIER_ROAD_MARGIN_M = 0.25
+PIER_TRIANGLES = 12
+PIER_VERTICES = 8
 
 
 def _layer(tags):
@@ -169,12 +182,13 @@ def _road_triangles(plan, ctx, ids):
     return out
 
 
-def _deck_triangles(mesh, count):
+def _deck_triangles(mesh, count, n):
     """The underside triangles of the swept deck: ``(path segment, ((x, y, path node) x 3) CCW in plan)``. The
-    underside quad of segment ``i`` is face ``4 i`` of the sweep, split as the collision split it."""
+    underside quad of segment ``i`` is face ``n i`` of the sweep (``n`` profile points), split as the collision
+    split it."""
     out = []
     for i in range(count):
-        q = [(mesh.vertices[v][0], mesh.vertices[v][1], v // 4) for v in mesh.faces[4 * i]]
+        q = [(mesh.vertices[v][0], mesh.vertices[v][1], v // n) for v in mesh.faces[n * i]]
         for tri in ((q[0], q[1], q[2]), (q[0], q[2], q[3])):
             tri = _ccw(*tri)
             if tri:
@@ -300,14 +314,43 @@ def _road_nodes(roads):
     return table
 
 
-def _assign_materials(mesh, road_color):
+def _deck_profile_2d(half, parapets):
+    """The deck section (lateral right, up), CCW: the slab, plus with ``parapets`` one on each edge as part of
+    the same outline. Returns ``(points, index of the first deck-surface point)``; the surface edge is from
+    that point to the next one."""
+    slab = [(-half, -DECK_THICKNESS_M), (half, -DECK_THICKNESS_M), (half, 0.0)]
+    if not parapets:
+        return slab + [(-half, 0.0)], 2
+    inner = half - PARAPET_WIDTH_M
+    return slab + [(half, PARAPET_HEIGHT_M), (inner, PARAPET_HEIGHT_M), (inner, 0.0), (-inner, 0.0),
+                   (-inner, PARAPET_HEIGHT_M), (-half, PARAPET_HEIGHT_M), (-half, 0.0)], 5
+
+
+def _split_caps(mesh):
+    """Replace the two end caps of a parapeted deck (one concave polygon each: a fan triangulation would cover the
+    notch between the parapets) by convex pieces: the slab and one parapet on each side."""
+    pieces = ((0, 1, 2, 5, 6, 9), (2, 3, 4, 5), (6, 7, 8, 9))
+    caps = [mesh.faces.pop(), mesh.faces.pop()]   # the end cap, then the start cap
+    mat, col = mesh.face_materials[-2:], mesh.face_colors[-2:]
+    del mesh.face_materials[-2:], mesh.face_colors[-2:]
+    for cap, m, c in zip(caps, mat[::-1], col[::-1]):
+        order = cap if cap == tuple(sorted(cap)) else tuple(reversed(cap))   # ring order, ascending
+        for piece in pieces:
+            face = tuple(order[i] for i in piece)
+            if cap != order:   # reversed, still starting at the piece's first point (the fan apex is never collinear)
+                face = (face[0],) + face[:0:-1]
+            mesh.faces.append(face)
+            mesh.face_materials.append(m)
+            mesh.face_colors.append(c)
+
+
+def _assign_materials(mesh, road_color, n, surface):
+    """The deck surface faces (the sweep quads on the profile edge ``surface`` -> ``surface + 1``) get the road
+    material."""
     top = mesh.material_index("MB Road")
-    for k, f in enumerate(mesh.faces):
-        nz = 0.0
-        for a in range(len(f)):
-            p, q = mesh.vertices[f[a]], mesh.vertices[f[(a + 1) % len(f)]]
-            nz += (p[0] - q[0]) * (p[1] + q[1])
-        if nz > 1e-9:   # Newell normal z, CCW outward: the faces looking up are the deck surface
+    for k in range(len(mesh.faces)):
+        quad = mesh.faces[k]
+        if len(quad) == 4 and k % n == surface and {v % n for v in quad} == {surface, (surface + 1) % n}:
             mesh.face_materials[k] = top
             mesh.face_colors[k] = road_color
 
@@ -402,9 +445,15 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
             else:
                 path_xy.append(ext)
     n_path = len(path_xy)
-    budget.reserve(f.id, 4 * n_path, 8 * (n_path - 1) + 4)
-    prof = [(-half, -DECK_THICKNESS_M), (half, -DECK_THICKNESS_M), (half, 0.0), (-half, 0.0)]
+    parapets = half - PARAPET_WIDTH_M >= PROBE_RADIUS_M + 0.05   # the deck probe runs between the parapets
+    prof, surface = _deck_profile_2d(half, parapets)
+    np_ = len(prof)
+    piers_max = max(0, math.ceil(total / PIER_SPACING_M) - 1) if ctx.options.bridge_piers else 0
+    budget.reserve(f.id, np_ * n_path + PIER_VERTICES * piers_max,
+                   (2 * np_ + 2) * (n_path - 1) + 2 * np_ + PIER_TRIANGLES * piers_max)
     mesh = sweep(prof, [(x, y, 0.0) for x, y in path_xy], True, name=f"bridge_{g.short_name(f.id)}")
+    if parapets:
+        _split_caps(mesh)
     node = lambda m: min(max(m - front, 0), len(s) - 1)   # noqa: E731  path node -> deck sample
 
     # clearance over the crossing roads is judged on the exported triangles: the road meshes as built and the
@@ -424,7 +473,7 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
         road_tris = [t for t in road_tris if not _in_approach(t, approach.get(t[2], ()))]
     records = []
     if road_tris:
-        deck_tris = _deck_triangles(mesh, n_path - 1)
+        deck_tris = _deck_triangles(mesh, n_path - 1, np_)
         pairs = _triangle_pairs(deck_tris, road_tris)
         records = _crossing_points(pairs, deck_tris, road_tris)
     for nodes, wd, rz, _rid in records:
@@ -461,11 +510,18 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     cx = sum(p[0] for p in xy) / len(xy)
     cy = sum(p[1] for p in xy) / len(xy)
     oz = top[0] - z_off
-    vz = (-DECK_THICKNESS_M, -DECK_THICKNESS_M, 0.0, 0.0)
-    mesh.vertices = [(x - cx, y - cy, top[node(v // 4)] - z_off + vz[v % 4] - oz)
+    vz = [v for _, v in prof]
+    mesh.vertices = [(x - cx, y - cy, top[node(v // np_)] - z_off + vz[v % np_] - oz)
                      for v, (x, y, _) in enumerate(mesh.vertices)]
     road_color = (0.12, 0.12, 0.12) if f.tags.get("highway") not in g.FOOT else (0.35, 0.32, 0.28)
-    _assign_materials(mesh, road_color)
+    _assign_materials(mesh, road_color, np_, surface)
+    under = _under_probe(f, xy, s, dirs, top, half, tz, g, z_off)
+    n_piers = 0
+    if piers_max:
+        piers = _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under, road_boxes)
+        for corners, zs, zb in piers:
+            _add_pier(mesh, corners, zs, zb, z_off, oz, cx, cy)
+        n_piers = len(piers)
     budget.commit(mesh)
     plan.report["warnings"].extend(warns)
 
@@ -506,8 +562,111 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     deck = {"id": f"{f.id}:deck", "kind": "bridge", "feature": f.id, "radius_m": PROBE_RADIUS_M,
             "path_map": [[round(xy[i][0], 4), round(xy[i][1], 4),
                           round(top[i] + DECK_PROBE_HEIGHT_M - z_off, 4)] for i in idx]}
-    under = _under_probe(f, xy, s, dirs, top, half, tz, g, z_off)
     return total, [deck] + ([under] if under else [])
+
+
+def _interp(s, vals, t):
+    """Linear interpolation of ``vals`` at arc length ``t`` (clamped) over the sorted arc lengths ``s``."""
+    if t <= s[0]:
+        return vals[0]
+    for i in range(1, len(s)):
+        if t <= s[i]:
+            w = (t - s[i - 1]) / (s[i] - s[i - 1])
+            return vals[i - 1] + (vals[i] - vals[i - 1]) * w
+    return vals[-1]
+
+
+def _on_road(x, y, roads_near):
+    for a, b, hw in roads_near:
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        n2 = dx * dx + dy * dy
+        u = 0.0 if n2 == 0 else max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy) / n2))
+        if math.hypot(x - a[0] - u * dx, y - a[1] - u * dy) <= hw + PIER_ROAD_MARGIN_M:
+            return True
+    return False
+
+
+def _seg_dist(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    n2 = dx * dx + dy * dy
+    u = 0.0 if n2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / n2))
+    return math.hypot(p[0] - a[0] - u * dx, p[1] - a[1] - u * dy)
+
+
+def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
+    """Pier shells ``(plan corners CCW, underside z at the two ends along the deck, bottom z)`` for the deck
+    sampled at ``xy`` / arc length ``s`` with top heights ``top``. Evenly spaced at most ``PIER_SPACING_M``
+    apart; each is shifted along the deck by at most ``PIER_MAX_SHIFT_M`` (else skipped) until it stands where the
+    deck is more than ``PIER_MIN_CLEARANCE_M`` above the ground, is at least ``PIER_PROBE_GAP_M`` from the
+    ``under`` probe segment, is clear of every at-grade road ribbon (other than bridges) and of the deck's own
+    kinks, so its top follows the underside."""
+    total = s[-1]
+    count = math.ceil(total / PIER_SPACING_M) - 1
+    if count < 1:
+        return []
+    a, b = PIER_DEPTH_M / 2.0, (deck_w - PIER_SIDE_INSET_M) / 2.0
+    xs = [p[0] for p in xy]
+    ys = [p[1] for p in xy]
+    pad = deck_w + a + PIER_MAX_SHIFT_M
+    near = [(r.geometry[i], r.geometry[i + 1], g.road_width(r.tags)[0] / 2.0)
+            for (bx0, by0, bx1, by1), r in road_boxes
+            if r.id != f.id and bx1 + pad >= min(xs) and bx0 - pad <= max(xs)
+            and by1 + pad >= min(ys) and by0 - pad <= max(ys)
+            for i in range(len(r.geometry) - 1)]
+    probe = None
+    if under_probe:   # back to plan metres: the probe path is in map frame, the same frame as xy
+        probe = tuple((p[0], p[1]) for p in under_probe["path_map"])
+    shifts = [0.0]
+    for k in range(1, int(PIER_MAX_SHIFT_M / PIER_SHIFT_STEP_M) + 1):
+        shifts += [k * PIER_SHIFT_STEP_M, -k * PIER_SHIFT_STEP_M]
+    out, last = [], None
+    for k in range(1, count + 1):
+        for sh in shifts:
+            t = total * k / (count + 1) + sh
+            if t - a < 0.0 or t + a > total or (last is not None and t - last < 2 * a):
+                continue
+            # the underside is linear over the pier only if no sample kink lies within it
+            z_lo = _interp(s, top, t - a) - DECK_THICKNESS_M
+            z_hi = _interp(s, top, t + a) - DECK_THICKNESS_M
+            if abs(_interp(s, top, t) - DECK_THICKNESS_M - (z_lo + z_hi) / 2.0) > 0.004:
+                continue
+            i = min(range(len(s)), key=lambda m: abs(s[m] - t))
+            d = dirs[i]
+            cx, cy = _interp(s, xs, t), _interp(s, ys, t)
+            nx, ny = -d[1], d[0]
+            corners = [(cx + d[0] * u + nx * v, cy + d[1] * u + ny * v) for u, v in ((-a, -b), (a, -b), (a, b), (-a, b))]
+            pts = []
+            for ui in range(5):
+                for vi in range(int(2 * b / 0.5) + 2):
+                    u = -a + 2 * a * ui / 4
+                    v = -b + 2 * b * vi / (int(2 * b / 0.5) + 1)
+                    pts.append((cx + d[0] * u + nx * v, cy + d[1] * u + ny * v))
+            ground = [tz(*p) for p in pts]
+            if min(z_lo, z_hi) - max(ground) - g.ROAD_LIFT_M <= PIER_MIN_CLEARANCE_M:
+                continue
+            if probe and any(_seg_dist(p, *probe) < PIER_PROBE_GAP_M for p in pts):
+                continue
+            if near and any(_on_road(p[0], p[1], near) for p in pts):
+                continue
+            out.append((corners, (z_lo, z_hi), min(ground) - PIER_SINK_M))
+            last = t
+            break
+    return out
+
+
+def _add_pier(mesh, corners, zs, z_bottom, z_off, oz, cx, cy):
+    """Append a closed box shell (8 vertices, 6 quads = 12 triangles) to ``mesh`` in its local frame: bottom at
+    ``z_bottom``, top at the deck underside ``zs`` = (z at the first pair of corners, z at the second); corners
+    CCW in plan, the first two at the low end of the deck."""
+    zt = (zs[0], zs[0], zs[1], zs[1])
+    lo = [mesh.add_vertex(x - cx, y - cy, z_bottom - z_off - oz) for x, y in corners]
+    hi = [mesh.add_vertex(x - cx, y - cy, z - z_off - oz) for (x, y), z in zip(corners, zt)]
+    color = (0.6, 0.6, 0.6)
+    mesh.add_face(tuple(reversed(lo)), "MB Concrete", color)
+    mesh.add_face(tuple(hi), "MB Concrete", color)
+    for i in range(4):
+        j = (i + 1) % 4
+        mesh.add_face((lo[i], lo[j], hi[j], hi[i]), "MB Concrete", color)
 
 
 def _under_probe(f, xy, s, dirs, top, half, tz, g, z_off):
