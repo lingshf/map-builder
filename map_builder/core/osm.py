@@ -334,9 +334,12 @@ class Polygon:
         return not any(point_in_ring(x, y, h) for h in self.holes)
 
 
-def _assemble_rings(way_lists):
-    """Join open member ways into closed rings. Returns (rings, ok)."""
+def _assemble_rings(way_lists, work=None):
+    """Join open member ways into closed rings. Returns (rings, ok). ``work`` (optional, a
+    :class:`_MaskWork`) is charged the member vertices and every ring-end comparison."""
     segs = [list(w) for w in way_lists if len(w) >= 2]
+    if work is not None:
+        work.add(sum(len(s) for s in segs))
     rings = []
     ok = True
     while segs:
@@ -347,6 +350,8 @@ def _assemble_rings(way_lists):
             if guard > 10000:
                 ok = False
                 break
+            if work is not None:
+                work.add(len(segs) + len(cur))   # the scan, and the copy a prepend makes
             for k, s in enumerate(segs):
                 if s[0] == cur[-1]:
                     cur.extend(s[1:])
@@ -418,6 +423,13 @@ class Classified:
         self.outside_buildings = []
         self.mask_trees = []
         self.mask_areas = []
+        # Feature ids left out of the DSM mask: content ways that are outers of a margin-only multipolygon of
+        # their area family, which supplies the footprint with its holes (classify content_bbox).
+        self.mask_suppressed = set()
+        # Margin-only candidate assembly work, charged to the mask validation budget (classify max_mask_work);
+        # ``mask_work_exceeded``: the MaskWorkExceeded message once that budget ran out during assembly.
+        self.mask_work = 0
+        self.mask_work_exceeded = None
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -464,17 +476,28 @@ def surface_mask_eligible(tags):
 def _bbox_hit_test(data, content_bbox):
     """Predicate over lists of node-id lists: True if any listed node lies in ``content_bbox`` (south, west,
     north, east) or any segment between consecutive listed nodes crosses it (Overpass's bbox semantics for
-    ways; a relation is selected by its member ways). Always True when ``content_bbox`` is None."""
+    ways; a relation is selected by its member ways). Always True when ``content_bbox`` is None.
+
+    Like Overpass, a segment whose endpoints differ by more than 180 degrees of longitude is taken the short
+    way, across the antimeridian: it is split at +-180 and both parts are tested (an area itself never
+    reaches the antimeridian, :data:`geodesy.ANTIMERIDIAN_GUARD_M`, but a way leaving it may cross it)."""
     if content_bbox is None:
         return lambda node_lists: True
     s, w, n, e = content_bbox
+
+    def seg_hits(a, b):
+        if abs(b[0] - a[0]) > 180.0:
+            shift = 360.0 if a[0] > b[0] else -360.0   # b moved next to a, then a next to b
+            return (_clip_segment(a, (b[0] + shift, b[1]), w, s, e, n) is not None
+                    or _clip_segment((a[0] - shift, a[1]), b, w, s, e, n) is not None)
+        return _clip_segment(a, b, w, s, e, n) is not None
 
     def hits(node_lists):
         for nids in node_lists:
             ll = [(data.nodes[x][1], data.nodes[x][0]) for x in nids if x in data.nodes]
             if any(w <= p[0] <= e and s <= p[1] <= n for p in ll):
                 return True
-            if any(_clip_segment(a, b, w, s, e, n) is not None for a, b in zip(ll, ll[1:])):
+            if any(seg_hits(a, b) for a, b in zip(ll, ll[1:])):
                 return True
         return False
     return hits
@@ -533,7 +556,7 @@ def _normal_subset(data, content_bbox):
 
 
 def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None,
-             mask_extent=None, content_bbox=None):
+             mask_extent=None, content_bbox=None, max_mask_work=None):
     """Classified features of ``data`` for ``area``. ``mask_extent`` (x0, y0, x1, y1 in the map frame,
     default the area rectangle) is the terrain grid extent used to select the DSM mask candidates
     (``bridges``, ``outside_buildings``, ``mask_trees``, ``mask_areas``); generated features are always
@@ -545,16 +568,46 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     the generated scene or the report (buildings, building:part ownership, multipolygon outer suppression,
     areas, roads, trees, ``outside``, ``invalid``, ``unsupported``, warnings) is the same as without the wider
     fetch. The rest of ``data``, fetched only for the margin, adds DSM mask candidates only
-    (:func:`_add_margin_mask_candidates`). None (a local file, or no wider fetch): everything is content."""
+    (:func:`_add_margin_mask_candidates`). None (a local file, or no wider fetch): everything is content.
+
+    Assembling the margin-only candidates is charged to ``max_mask_work`` geometric tests (default
+    :data:`dsm.MASK_VALIDATION_WORK_BUDGET`), the budget that :func:`generate.dsm_obstacles` then continues
+    from (``mask_work``); when it runs out, assembly stops and ``mask_work_exceeded`` is set, so the
+    correction is skipped with a warning. Nothing generated or reported depends on it."""
     if mask_extent is None:
         mask_extent = (-area.half[0], -area.half[1], area.half[0], area.half[1])
     if content_bbox is None:
         return _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
     content = _normal_subset(data, content_bbox)
     out = _classify(content, area, max_features, max_part_pair_checks, max_association_work, mask_extent)
-    _add_margin_mask_candidates(out, data, content, area, mask_extent)
+    if max_mask_work is None:
+        from .dsm import MASK_VALIDATION_WORK_BUDGET as max_mask_work
+    work = _MaskWork(max_mask_work)
+    try:
+        _add_margin_mask_candidates(out, data, content, area, mask_extent, work)
+    except _MaskWorkExhausted:
+        out.mask_work_exceeded = (f"DSM mask candidate assembly needs more than {max_mask_work} geometric tests "
+                                  "(the mask validation work budget)")
+    out.mask_work = min(work.n, max_mask_work)
     _check_feature_count(out, max_features)
     return out
+
+
+class _MaskWorkExhausted(Exception):
+    """Internal: :class:`_MaskWork` ran out (caught by :func:`classify`)."""
+
+
+class _MaskWork:
+    """Counter of the geometric tests assembling margin-only DSM mask candidates, raising
+    :class:`_MaskWorkExhausted` as soon as ``limit`` is exceeded."""
+
+    def __init__(self, limit):
+        self.limit, self.n = limit, 0
+
+    def add(self, k=1):
+        self.n += k
+        if self.n > self.limit:
+            raise _MaskWorkExhausted()
 
 
 def _check_feature_count(out, max_features):
@@ -570,40 +623,93 @@ def _is_area_tagged(tags):
                                 "bare_rock"))
 
 
-def _mask_polygons(outers, inners):
+def _mask_polygons(outers, inners, work):
     """Polygons for a margin-only DSM mask candidate, or [] when a ring is degenerate or a hole has no outer.
-    Cheap on purpose (linear): ring topology (self-intersections, crossing holes) is not checked here but by
+    Cheap on purpose: ring topology (self-intersections, crossing holes) is not checked here but by
     :func:`generate.dsm_obstacles`, which validates every mask polygon once per distinct geometry against the
-    cumulative :data:`dsm.MASK_VALIDATION_WORK_BUDGET` (exhaustion skips the correction with a warning)."""
-    polys = []
+    cumulative :data:`dsm.MASK_VALIDATION_WORK_BUDGET` (exhaustion skips the correction with a warning).
+    Hole assignment is charged to ``work`` (a :class:`_MaskWork`): the outers are indexed by bbox in a
+    uniform grid, so a hole is tested only against the outers whose bbox covers its cell."""
+    polys, boxes, areas = [], [], []
     for o in outers:
         o = _clean_ring(o)
-        if len(o) < 3 or abs(ring_area(o)) < 0.5:
+        a = ring_area(o) if len(o) >= 3 else 0.0
+        if len(o) < 3 or abs(a) < 0.5:
             continue
-        if ring_area(o) < 0:
+        if a < 0:
             o.reverse()
-        polys.append(Polygon(o))
+        p = Polygon(o)
+        polys.append(p)
+        boxes.append(p.bbox())
+        areas.append(abs(a))
+    if not inners:
+        return polys
+    if not polys:
+        return []
+    gx0, gy0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    gx1, gy1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    g = max(1, min(_MASK_GRID_MAX_CELLS, math.isqrt(len(polys))))
+    cw, ch = max(gx1 - gx0, 1e-9) / g, max(gy1 - gy0, 1e-9) / g
+
+    def cell(x, y):
+        return min(g - 1, max(0, int((x - gx0) / cw))), min(g - 1, max(0, int((y - gy0) / ch)))
+    cells, big = {}, []
+    for k, b in enumerate(boxes):
+        (i0, j0), (i1, j1) = cell(b[0], b[1]), cell(b[2], b[3])
+        n_cells = (i1 - i0 + 1) * (j1 - j0 + 1)
+        work.add(min(n_cells, _MASK_GRID_MAX_SPAN + 1))
+        if n_cells > _MASK_GRID_MAX_SPAN:
+            big.append(k)   # covers much of the grid: tested against every hole instead
+            continue
+        for i in range(i0, i1 + 1):
+            for j in range(j0, j1 + 1):
+                cells.setdefault((i, j), []).append(k)
     for h in inners:
         h = _clean_ring(h)
         if len(h) < 3 or abs(ring_area(h)) < MIN_HOLE_AREA_M2:
             return []
         if ring_area(h) > 0:
             h.reverse()
-        owners = [p for p in polys if point_in_ring(h[0][0], h[0][1], p.outer)]
-        if not owners:
+        x, y = h[0]
+        best, n, left = None, 0, work.limit - work.n
+        if gx0 <= x <= gx1 and gy0 <= y <= gy1:
+            for k in (cells.get(cell(x, y), []) + big) if big else cells.get(cell(x, y), ()):
+                n += _MASK_CANDIDATE_COST
+                b = boxes[k]
+                if b[0] <= x <= b[2] and b[1] <= y <= b[3]:
+                    ring = polys[k].outer
+                    n += _MASK_VERTEX_COST * len(ring)
+                    if n > left:
+                        break
+                    # the smallest enclosing outer (the first listed among equals)
+                    if point_in_ring(x, y, ring) and (best is None or (areas[k], k) < (areas[best], best)):
+                        best = k
+        work.add(n)   # raises once the budget is used up (also after the break above)
+        if best is None:
             return []
-        min(owners, key=lambda p: abs(ring_area(p.outer))).holes.append(h)
+        polys[best].holes.append(h)
     return polys
 
 
-def _add_margin_mask_candidates(out, data, content, area, mask_extent):
+# Hole assignment work units, in the cost of one ring topology test of the mask validation (about 0.4 us).
+_MASK_CANDIDATE_COST = 2     # an outer bbox tested against a hole
+_MASK_VERTEX_COST = 2        # per outer vertex of a point-in-ring test
+
+_MASK_GRID_MAX_CELLS = 256   # per axis, the hole-to-outer index of _mask_polygons
+_MASK_GRID_MAX_SPAN = 16     # an outer covering more cells is tested against every hole instead
+
+
+def _add_margin_mask_candidates(out, data, content, area, mask_extent, work):
     """Adds to ``out`` the DSM mask candidates among the elements of ``data`` that are not in ``content`` (the
     normal-extent subset): surface building footprints (``outside_buildings``) and forest/wood polygons
     (``mask_areas``) from closed ways and multipolygon relations, bridge ways (``bridges``) and trees outside
     the area (``mask_trees``), selected against ``mask_extent`` like the content candidates. Nothing else is
-    touched: these elements never generate, colour, scatter, count or report anything. A margin-only way that
-    is an outer of a margin-only multipolygon of the same area family (or of an untagged one with inner
-    rings) is not used on its own, so a solid copy never covers the relation's holes."""
+    touched: these elements never generate, colour, scatter, count or report anything. A way that is an outer
+    of a margin-only multipolygon of the same area family (or of an untagged one with inner rings) is not
+    used on its own in the mask, so a solid copy never covers the relation's holes: a margin-only way is not
+    added, and a content way (still generated as in the normal response) is listed in ``mask_suppressed``,
+    which :func:`generate.dsm_obstacles` leaves out of the mask. Ring assembly and hole assignment are
+    charged to ``work`` (:class:`_MaskWork`)."""
     from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
     bridge_rect = _expand(mask_extent, BRIDGE_CANDIDATE_MARGIN_M)
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
@@ -649,14 +755,21 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent):
             continue
         if any(r not in data.ways for r, _role in ways):
             continue
-        orings, _ok1 = _assemble_rings([data.ways[r][0] for r, role in ways if role != "inner"])
-        irings, ok2 = _assemble_rings([data.ways[r][0] for r, role in ways if role == "inner"])
+        orings, _ok1 = _assemble_rings([data.ways[r][0] for r, role in ways if role != "inner"], work)
+        irings, ok2 = _assemble_rings([data.ways[r][0] for r, role in ways if role == "inner"], work)
         if not ok2 or not orings:
             continue
         o_pts, i_pts = [way_points(r) for r in orings], [way_points(r) for r in irings]
         if any(p is None for p in o_pts + i_pts):
             continue
-        add(f"osm:relation/{rid}", tags, _mask_polygons(o_pts, i_pts))
+        add(f"osm:relation/{rid}", tags, _mask_polygons(o_pts, i_pts, work))
+
+    for wid in content.ways:
+        fams = outer_of.get(wid)
+        if fams:
+            nids, tags = content.ways[wid]
+            if None in fams or _area_family(tags) in fams:
+                out.mask_suppressed.add(f"osm:way/{wid}")
 
     for wid, (nids, tags) in data.ways.items():
         if wid in content.ways:
@@ -669,7 +782,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent):
         if as_area:
             pts = way_points(nids)
             if pts is not None:
-                add(fid, tags, _mask_polygons([pts], []))
+                add(fid, tags, _mask_polygons([pts], [], work))
         elif (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"):
             pts = way_points(nids)
             if pts is not None:

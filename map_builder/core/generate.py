@@ -1541,13 +1541,18 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
     tests (default :data:`dsm.MASK_VALIDATION_WORK_BUDGET`), checked as it goes: each candidate may use at
     most what is left, and :class:`dsm.MaskWorkExceeded` is raised as soon as it is used up. Identical
     geometries (e.g. relations sharing their rings) are validated and masked once. ``stats`` (a dict)
-    receives ``validation_work``, the geometric tests used."""
+    receives ``validation_work``, the geometric tests used, including those classify spent assembling the
+    margin-only candidates (``classified.mask_work``; ``mask_work_exceeded`` raises at once).
+
+    Footprints and forests listed in ``classified.mask_suppressed`` (ways whose footprint, with its holes,
+    a multipolygon using them as an outer supplies) are left out, so a solid copy never fills a courtyard."""
     from .osm import _expand, _rect_overlaps
     if excluded is None:
         excluded = {}
     if work_budget is None:
         work_budget = dsm.MASK_VALIDATION_WORK_BUDGET
-    used = [0]
+    used = [getattr(classified, "mask_work", 0)]
+    suppressed = getattr(classified, "mask_suppressed", ())
     if areas is None:
         areas = [a for a in classified.areas if not landcover_ring_problem(a, max_work)]
         bad = sum(1 for a in classified.areas if a.tags.get("_class") == "forest") - sum(
@@ -1574,6 +1579,10 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
         return p
 
     try:
+        exceeded = getattr(classified, "mask_work_exceeded", None)
+        if exceeded or used[0] > work_budget:
+            raise dsm.MaskWorkExceeded(exceeded or f"DSM mask validation needs more than {work_budget} ring "
+                                                   "topology tests (the mask validation work budget)")
         buildings, seen, keys, bad = [], set(), {}, 0
         for f in (list(classified.buildings) + list(getattr(classified, "outline_features", {}).values())
                   + list(getattr(classified, "outside_buildings", ()))):
@@ -1581,7 +1590,7 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
             if key in seen:
                 continue
             seen.add(key)
-            if not near(f.geometry.bbox(), dsm.BUILDING_BUFFER_M):
+            if f.id.split("#")[0] in suppressed or not near(f.geometry.bbox(), dsm.BUILDING_BUFFER_M):
                 continue
             gk = geometry_key(f.geometry)
             if gk not in keys:
@@ -1596,7 +1605,8 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
                  if near((f.geometry[0], f.geometry[1]) * 2, dsm.TREE_RADIUS_M)]
         forests, keys, bad = [], {}, 0
         for a in areas:   # validated by the caller (they also colour the terrain): not charged again
-            if a.tags.get("_class") == "forest" and near(a.geometry.bbox(), 0.0):
+            if (a.tags.get("_class") == "forest" and a.id.split("#")[0] not in suppressed
+                    and near(a.geometry.bbox(), 0.0)):
                 gk = geometry_key(a.geometry)
                 if gk not in keys:
                     keys[gk] = None

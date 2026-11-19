@@ -133,7 +133,8 @@ def acquire(area, settings, client=None, progress=None):
                         if margin > OSM_FETCH_MARGIN_M else None)
     s = grid.spacing
     classified = classify(osm, area, mask_extent=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * s,
-                                                  grid.y0 + (grid.ny - 1) * s), content_bbox=content_bbox)
+                                                  grid.y0 + (grid.ny - 1) * s), content_bbox=content_bbox,
+                          max_mask_work=settings.plan_options.max_mask_validation_work)
     return grid, classified, [dict(grid.provenance), osm_source_entry(osm, settings.osm_license)]
 
 

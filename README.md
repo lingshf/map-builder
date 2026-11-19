@@ -80,7 +80,12 @@ the surrounding ground before the terrain, roads and buildings are built.
   relations that merely reference content ways) only adds mask candidates — surface building
   footprints, forest/wood polygons, bridge ways and trees: they never colour the terrain, drive
   scatter, or appear in counts, `invalid_features` or `unsupported_features`, and their ring
-  topology is checked only by the budgeted, deduplicated mask validation below. So the generated
+  topology is checked only by the budgeted, deduplicated mask validation below. A content way that
+  is the outer of a multipolygon known only to the wider response (same area family, or an
+  untagged one with inner rings) is still generated as in the normal response, but its solid
+  footprint is left out of the mask, so it never fills that multipolygon's courtyard or clearing.
+  Ways leaving an area near the antimeridian are bbox-tested as Overpass does, the short way
+  across ±180. So the generated
   scene (objects, colours, materials, report) is the same with the correction on or off; only
   terrain heights and the correction's report fields differ.
 * Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The
@@ -92,8 +97,9 @@ the surrounding ground before the terrain, roads and buildings are built.
   The fill is smooth and never goes above or below the surrounding unmasked heights. The result is
   `min(original, filled)`: terrain is never raised and unmasked points are not changed.
 * The correction is skipped with a warning, and the uncorrected surface model used, if fewer than
-  5 % of the points are unmasked, if validating the mask polygons' ring topology would exceed its
-  cumulative work budget (5 000 000 geometric tests over all mask polygons, checked as it goes;
+  5 % of the points are unmasked, if assembling the margin-only mask candidates (ring joining and
+  hole-to-outer assignment) plus validating the mask polygons' ring topology would exceed their
+  shared cumulative work budget (5 000 000 geometric tests, checked as it goes;
   `reason: mask validation work budget exceeded`), if the mask rasterisation would exceed its work budget
   (20 000 000 edge and row-crossing units), or if the fill does not converge within its bounded
   cycles (a fill that has not converged is never applied). These do not fail the build; the hard
