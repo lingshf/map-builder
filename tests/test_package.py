@@ -1530,12 +1530,20 @@ class ReviewRound2Test(TempDirCase):
             pkg.write_package(self.p("shells_w.mbmap"), members, manifest)
 
     def test_orientation_check_is_linear_in_shells(self):
-        import time
         boxes = [(box_mesh(x * 3, y * 3, x * 3 + 1, y * 3 + 1, 0, 1), True) for x in range(60) for y in range(50)]
-        t0 = time.perf_counter()
-        probs = self.orient(boxes)
+        orig, seen = pkg._signed_volume, []
+
+        def counting(tris):
+            seen.append(len(tris))
+            return orig(tris)
+        pkg._signed_volume = counting
+        try:
+            probs = self.orient(boxes)
+        finally:
+            pkg._signed_volume = orig
         self.assertEqual(len(probs), 3001)                                            # + "no positive shell"
-        self.assertLess(time.perf_counter() - t0, 10.0)
+        self.assertEqual(len(seen), 3000)                                             # one volume per shell
+        self.assertEqual(sum(seen), 3000 * 12)                                        # each triangle once: linear
 
     # 2: the one-to-one matcher is a maximum matching, independent of order
     def test_one_to_one_matching_is_order_independent(self):

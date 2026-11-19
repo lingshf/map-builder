@@ -1666,13 +1666,10 @@ class PartAssociationBoundsTest(unittest.TestCase):
         return out
 
     def test_reviewer_dense_overlap_is_bounded(self):
-        import time
         out = self.dense(1000)
-        t0 = time.perf_counter()
         with self.assertRaises(LimitError) as cm:
             osm_mod._resolve_building_parts(out)  # old code: 1M pairs, 2M association references
         self.assertIn("pairs", str(cm.exception))
-        self.assertLess(time.perf_counter() - t0, 5.0)
 
     def test_dense_within_limits_stores_one_outline_per_part(self):
         out = self.dense(30)

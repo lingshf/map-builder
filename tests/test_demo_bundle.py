@@ -37,10 +37,14 @@ def good_preset():
 
 class PresetTests(unittest.TestCase):
     def test_committed_presets_load(self):
-        for n in ("synthetic", "sf-fidi"):
+        for n in ("synthetic", "sf-fidi", "pittsburgh"):
             p = db.load_preset(n)
             self.assertEqual(p["name"], n)
             self.assertIn("overview", [c["name"] for c in p["cameras"]])
+
+    def test_pittsburgh_preset_matches_the_v0_1_0_cameras(self):
+        saved = json.load(open(os.path.join(REPO, "docs", "demo", "v0.1.0", "pittsburgh-cameras.json")))
+        self.assertEqual(db.load_preset("pittsburgh"), saved)
 
     def test_rejects_bad_presets(self):
         bad = []
