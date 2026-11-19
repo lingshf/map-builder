@@ -44,9 +44,12 @@ namespace MapBuilder.Reference
         // GLB (glb.py)
         public const long MaxGlbBytes = 1024L * 1024 * 1024;
         public const long MaxVisualTriangles = 8_000_000;
+        public const long MaxVisualPositions = 3 * MaxVisualTriangles; // decoded POSITION vertices, this reader's cap
         public const int MaxNodes = 1_000_000, MaxNodeDepth = 64;
         // orientation probes (package.py)
-        public const double ProbeMatchM = 0.05, ProbeMinDot = 0.99;
+        public const int ProbeMax = 3;
+        public const double ProbeMatchM = 0.05, ProbeMinDot = 0.99, ProbeUnitTol = 1e-4, ProbeVertexTolM = 1e-6;
+        public const double ProbeMinNormalXZ = 0.05, ProbeMinAbsXYM = 1.0, ProbeMirrorClearanceM = 0.5;
     }
 
     public struct Vec3
@@ -350,12 +353,11 @@ namespace MapBuilder.Reference
 
         static List<VisualNode> ReadNodes(JsonElement gl, byte[] data, int binOff, int binLen, bool hasBin)
         {
-            if (gl.ValueKind != JsonValueKind.Object || !gl.TryGetProperty("asset", out var asset) || asset.ValueKind != JsonValueKind.Object
-                || !asset.TryGetProperty("version", out var ver) || ver.ValueKind != JsonValueKind.String || ver.GetString() != "2.0")
-                throw new MbmapException("glb: asset.version must be 2.0");
+            if (gl.ValueKind != JsonValueKind.Object) throw new MbmapException("glb: JSON chunk must be an object");
+            if (Json.Str(Json.Obj(gl, "asset", "glb"), "version", "glb: asset") != "2.0") throw new MbmapException("glb: asset.version must be 2.0");
             if (gl.TryGetProperty("extensionsRequired", out var req) && !(req.ValueKind == JsonValueKind.Array && req.GetArrayLength() == 0))
                 throw new MbmapException("glb: required extensions are not allowed");
-            var buffers = Json.OptArray(gl, "buffers");
+            var buffers = Json.OptObjects(gl, "buffers", "glb");
             if (buffers.Count > 1) throw new MbmapException("glb: at most one (GLB-stored) buffer is allowed");
             long blen = 0;
             if (buffers.Count == 1)
@@ -365,117 +367,139 @@ namespace MapBuilder.Reference
                 blen = Json.Long(buffers[0], "byteLength", "glb: buffer");
                 if (blen < 0 || blen > binLen || binLen - blen > 3) throw new MbmapException("glb: buffer byteLength does not match the BIN chunk");
             }
-            foreach (var im in Json.OptArray(gl, "images"))
+            foreach (var im in Json.OptObjects(gl, "images", "glb"))
                 if (im.TryGetProperty("uri", out _)) throw new MbmapException("glb: external image URIs are not allowed");
-            var views = Json.OptArray(gl, "bufferViews");
-            var accessors = Json.OptArray(gl, "accessors");
-            var meshes = Json.OptArray(gl, "meshes");
-            var nodes = Json.OptArray(gl, "nodes");
-            if (nodes.Count > Limits.MaxNodes) throw new MbmapException("glb: too many nodes");
+            var views = Json.OptObjects(gl, "bufferViews", "glb");
+            var accessors = Json.OptObjects(gl, "accessors", "glb");
+            var meshes = Json.OptObjects(gl, "meshes", "glb");
+            var nodes = Json.OptObjects(gl, "nodes", "glb", Limits.MaxNodes);
 
-            long triBudget = 0;
+            long triBudget = 0, posBudget = 0;
             var meshCache = new Dictionary<int, List<Triangle>>();
+            var posCache = new Dictionary<int, float[]>();
+
+            void SpendTriangles(long n)
+            {
+                if (n < 0 || n > Limits.MaxVisualTriangles - triBudget) throw new MbmapException($"glb: more than {Limits.MaxVisualTriangles} visual triangles");
+                triBudget += n;
+            }
 
             List<Triangle> MeshTriangles(int mi)
             {
                 if (meshCache.TryGetValue(mi, out var cached))
                 {
-                    triBudget += cached.Count;
-                    if (triBudget > Limits.MaxVisualTriangles) throw new MbmapException("glb: too many visual triangles");
+                    SpendTriangles(cached.Count); // instanced mesh: its triangles count again
                     return cached;
                 }
-                var mesh = meshes[mi];
                 var outList = new List<Triangle>();
-                foreach (var p in Json.Array(mesh, "primitives", "glb: mesh"))
+                int pk = 0;
+                foreach (var p in Json.Array(meshes[mi], "primitives", "glb: mesh"))
                 {
-                    long mode = p.TryGetProperty("mode", out var md) ? Json.AsLong(md, "glb: primitive mode") : 4;
+                    string tag = $"glb: mesh {mi} primitive {pk++}";
+                    if (p.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag} must be an object");
+                    long mode = p.TryGetProperty("mode", out var md) ? Json.AsLong(md, $"{tag}.mode") : 4;
                     if (mode == 5 || mode == 6) throw new MbmapException("glb: triangle strips/fans are not supported");
                     if (mode < 0 || mode > 6) throw new MbmapException("glb: invalid primitive mode");
-                    if (p.TryGetProperty("targets", out var tg) && tg.ValueKind == JsonValueKind.Array && tg.GetArrayLength() > 0)
+                    if (p.TryGetProperty("targets", out var tg) && !(tg.ValueKind == JsonValueKind.Array && tg.GetArrayLength() == 0))
                         throw new MbmapException("glb: morph targets are not allowed");
                     if (mode != 4) continue;
-                    var attrs = Json.Obj(p, "attributes", "glb: primitive");
-                    double[] pos = ReadAccessor(Json.Int(attrs, "POSITION", "glb: attributes"), true);
-                    int nverts = pos.Length / 3;
-                    long[] idx;
+                    var attrs = Json.Obj(p, "attributes", tag);
+                    int pai = Json.Index(attrs, "POSITION", accessors.Count, $"{tag}.attributes");
+
+                    // Validate all metadata and budgets before allocating anything.
+                    var pos = Locate(pai, true, $"glb: accessor {pai}");
+                    int nverts = (int)pos.Count; // Locate bounds count by the buffer length (< 2 GiB)
+                    AccessorView idx = default;
+                    long nIdx;
                     if (p.TryGetProperty("indices", out var ie))
                     {
-                        double[] raw = ReadAccessor((int)Json.AsLong(ie, "glb: indices"), false);
-                        idx = new long[raw.Length];
-                        for (int i = 0; i < raw.Length; i++) idx[i] = (long)raw[i];
+                        int iai = Json.AsIndex(ie, accessors.Count, $"{tag}.indices");
+                        idx = Locate(iai, false, $"glb: accessor {iai}");
+                        nIdx = idx.Count;
                     }
+                    else nIdx = nverts;
+                    if (nIdx % 3 != 0) throw new MbmapException($"{tag}: triangle index count is not a multiple of 3");
+                    SpendTriangles(nIdx / 3);
+
+                    if (!posCache.TryGetValue(pai, out var pv))
+                    {
+                        if (pos.Count > Limits.MaxVisualPositions - posBudget) throw new MbmapException($"glb: more than {Limits.MaxVisualPositions} decoded POSITION vertices");
+                        posBudget += pos.Count;
+                        pv = new float[3L * nverts];
+                        for (long k = 0; k < nverts; k++)
+                            for (int c = 0; c < 3; c++)
+                            {
+                                float x = Bin.F32(data, (int)(pos.Start + k * pos.Stride + 4 * c));
+                                if (!float.IsFinite(x)) throw new MbmapException("glb: non-finite POSITION");
+                                pv[3 * k + c] = x;
+                            }
+                        posCache[pai] = pv;
+                    }
+                    int[] ix = new int[nIdx];
+                    if (idx.Count == 0) for (int k = 0; k < ix.Length; k++) ix[k] = k;
                     else
-                    {
-                        idx = new long[nverts];
-                        for (int i = 0; i < nverts; i++) idx[i] = i;
-                    }
-                    if (idx.Length % 3 != 0) throw new MbmapException("glb: triangle index count is not a multiple of 3");
-                    triBudget += idx.Length / 3;
-                    if (triBudget > Limits.MaxVisualTriangles) throw new MbmapException("glb: too many visual triangles");
-                    Vec3 P(long i)
-                    {
-                        if (i < 0 || i >= nverts) throw new MbmapException("glb: index out of range");
-                        return new Vec3(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]);
-                    }
-                    for (int k = 0; k < idx.Length; k += 3) outList.Add(new Triangle(P(idx[k]), P(idx[k + 1]), P(idx[k + 2])));
+                        for (long k = 0; k < nIdx; k++)
+                        {
+                            int o = (int)(idx.Start + k * idx.Stride);
+                            uint v = idx.ComponentType == 5125 ? Bin.U32(data, o)
+                                   : idx.ComponentType == 5123 ? BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(data, o, 2)) : data[o];
+                            if (v >= (uint)nverts) throw new MbmapException($"{tag}: vertex index out of range");
+                            ix[k] = (int)v;
+                        }
+                    Vec3 P(int i) => new Vec3(pv[3L * i], pv[3L * i + 1], pv[3L * i + 2]);
+                    for (int k = 0; k < ix.Length; k += 3) outList.Add(new Triangle(P(ix[k]), P(ix[k + 1]), P(ix[k + 2])));
                 }
                 meshCache[mi] = outList;
                 return outList;
             }
 
-            // Returns components as doubles; position: float32 VEC3; otherwise unsigned integer scalars.
-            double[] ReadAccessor(int ai, bool position)
+            // Validates an accessor (position: float32 VEC3; otherwise unsigned integer scalars) and its
+            // bufferView against the BIN chunk, without allocating. Every range check is subtraction-based on
+            // values already known to be non-negative, so no untrusted sum can overflow.
+            AccessorView Locate(int ai, bool position, string tag)
             {
-                if (ai < 0 || ai >= accessors.Count) throw new MbmapException("glb: bad accessor index");
                 var a = accessors[ai];
                 if (a.TryGetProperty("sparse", out _)) throw new MbmapException("glb: sparse accessors are not supported");
-                long ct = Json.Long(a, "componentType", "glb: accessor");
-                string type = Json.Str(a, "type", "glb: accessor");
+                long ct = Json.Long(a, "componentType", tag);
+                string type = Json.Str(a, "type", tag);
                 int size = ct == 5126 || ct == 5125 ? 4 : ct == 5123 || ct == 5122 ? 2 : ct == 5121 || ct == 5120 ? 1 : 0;
                 int nc = type == "SCALAR" ? 1 : type == "VEC3" ? 3 : 0;
-                if (position && (ct != 5126 || nc != 3 || (a.TryGetProperty("normalized", out var nz) && nz.ValueKind == JsonValueKind.True)))
+                bool normalized = a.TryGetProperty("normalized", out var nz) && Json.AsBool(nz, $"{tag}.normalized");
+                if (position && (ct != 5126 || nc != 3 || normalized))
                     throw new MbmapException("glb: POSITION must be float32 VEC3");
-                if (!position && (nc != 1 || !(ct == 5121 || ct == 5123 || ct == 5125)))
+                if (!position && (nc != 1 || normalized || !(ct == 5121 || ct == 5123 || ct == 5125)))
                     throw new MbmapException("glb: indices must be unsigned integer scalars");
-                long count = Json.Long(a, "count", "glb: accessor");
-                int vi = Json.Int(a, "bufferView", "glb: accessor");
-                if (count < 1 || count > blen || vi < 0 || vi >= views.Count) throw new MbmapException("glb: invalid accessor count or bufferView");
+                long count = Json.Long(a, "count", tag);
+                if (count < 1) throw new MbmapException($"{tag}.count must be at least 1");
+                int vi = Json.Index(a, "bufferView", views.Count, tag);
                 var v = views[vi];
-                if ((v.TryGetProperty("buffer", out var bi) ? Json.AsLong(bi, "glb: bufferView buffer") : 0) != 0 || blen == 0)
+                string vtag = $"glb: bufferView {vi}";
+                if ((v.TryGetProperty("buffer", out var bi) ? Json.AsLong(bi, $"{vtag}.buffer") : 0) != 0 || blen == 0)
                     throw new MbmapException("glb: only buffer 0 (the BIN chunk) is supported");
-                long voff = v.TryGetProperty("byteOffset", out var vo) ? Json.AsLong(vo, "glb: byteOffset") : 0;
-                long vlen = Json.Long(v, "byteLength", "glb: bufferView");
-                long aoff = a.TryGetProperty("byteOffset", out var ao) ? Json.AsLong(ao, "glb: byteOffset") : 0;
-                if (voff < 0 || vlen < 0 || voff + vlen > blen || aoff < 0 || aoff > vlen || aoff % size != 0)
-                    throw new MbmapException("glb: bufferView/accessor range is outside the buffer");
+                long voff = v.TryGetProperty("byteOffset", out var vo) ? Json.AsLong(vo, $"{vtag}.byteOffset") : 0;
+                long vlen = Json.Long(v, "byteLength", vtag);
+                if (voff < 0 || voff > blen || vlen < 0 || vlen > blen - voff) throw new MbmapException($"{vtag}: range is outside the buffer");
+                long aoff = a.TryGetProperty("byteOffset", out var ao) ? Json.AsLong(ao, $"{tag}.byteOffset") : 0;
+                if (aoff < 0 || aoff > vlen || aoff % size != 0) throw new MbmapException($"{tag}: byteOffset is outside its bufferView or misaligned");
                 int elem = size * nc;
                 long stride = elem;
                 if (v.TryGetProperty("byteStride", out var st))
                 {
-                    stride = Json.AsLong(st, "glb: byteStride");
-                    if (stride < elem || stride > 252 || stride % 4 != 0) throw new MbmapException("glb: invalid byteStride");
+                    stride = Json.AsLong(st, $"{vtag}.byteStride");
+                    if (stride < elem || stride > 252 || stride % 4 != 0) throw new MbmapException($"{vtag}: invalid byteStride");
                 }
-                if (aoff + stride * (count - 1) + elem > vlen) throw new MbmapException("glb: accessor overruns its bufferView");
-                var vals = new double[count * nc];
-                long start = binOff + voff + aoff;
-                for (long k = 0; k < count; k++)
-                    for (int c = 0; c < nc; c++)
-                    {
-                        int o = (int)(start + k * stride + c * size);
-                        vals[k * nc + c] = ct == 5126 ? Bin.F32(data, o) : ct == 5125 ? Bin.U32(data, o)
-                                         : ct == 5123 ? BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(data, o, 2)) : data[o];
-                    }
-                if (position) foreach (var x in vals) if (!double.IsFinite(x)) throw new MbmapException("glb: non-finite POSITION");
-                return vals;
+                long avail = vlen - aoff;
+                if (avail < elem || count - 1 > (avail - elem) / stride) throw new MbmapException($"{tag}: count overruns its bufferView");
+                // Now binOff + voff + aoff + stride * (count - 1) + elem <= binOff + blen <= data.Length.
+                return new AccessorView { Start = binOff + voff + aoff, Count = count, Stride = stride, ComponentType = ct };
             }
 
             List<int> roots = new List<int>();
-            var scenes = Json.OptArray(gl, "scenes");
+            var scenes = Json.OptObjects(gl, "scenes", "glb");
             if (scenes.Count > 0)
             {
-                int si = gl.TryGetProperty("scene", out var se) ? (int)Json.AsLong(se, "glb: scene") : 0;
-                if (si < 0 || si >= scenes.Count) throw new MbmapException("glb: bad default scene index");
-                foreach (var r in Json.OptArray(scenes[si], "nodes")) roots.Add((int)Json.AsLong(r, "glb: scene node"));
+                int si = gl.TryGetProperty("scene", out var se) ? Json.AsIndex(se, scenes.Count, "glb: scene") : 0;
+                foreach (var r in Json.OptArray(scenes[si], "nodes")) roots.Add(Json.AsIndex(r, nodes.Count, "glb: scene node"));
             }
             else for (int i = 0; i < nodes.Count; i++) roots.Add(i);
 
@@ -486,17 +510,15 @@ namespace MapBuilder.Reference
             while (stack.Count > 0)
             {
                 var (ni, parent, depth) = stack.Pop();
-                if (depth > Limits.MaxNodeDepth || ni < 0 || ni >= nodes.Count || !visited.Add(ni))
-                    throw new MbmapException("glb: invalid node hierarchy (bad index, cycle, shared child or too deep)");
+                if (depth > Limits.MaxNodeDepth || !visited.Add(ni))
+                    throw new MbmapException("glb: invalid node hierarchy (cycle, shared child or too deep)");
                 var node = nodes[ni];
-                if (node.ValueKind != JsonValueKind.Object) throw new MbmapException("glb: node must be an object");
                 if (node.TryGetProperty("skin", out _) || node.TryGetProperty("weights", out _)) throw new MbmapException("glb: skins and morph weights are not allowed");
                 double[] m = Mat.Mul(parent, Mat.Local(node));
                 var vn = new VisualNode { Name = node.TryGetProperty("name", out var nm) ? Json.AsString(nm, "glb: node name") : $"node{ni}" };
                 if (node.TryGetProperty("mesh", out var me))
                 {
-                    int mi = (int)Json.AsLong(me, "glb: node mesh");
-                    if (mi < 0 || mi >= meshes.Count) throw new MbmapException("glb: bad mesh index");
+                    int mi = Json.AsIndex(me, meshes.Count, "glb: node mesh");
                     bool flip = Mat.Det3(m) < 0; // glTF: negative determinant means clockwise front faces
                     foreach (var t in MeshTriangles(mi))
                     {
@@ -506,9 +528,15 @@ namespace MapBuilder.Reference
                 }
                 result.Add(vn);
                 var children = Json.OptArray(node, "children");
-                for (int i = children.Count - 1; i >= 0; i--) stack.Push(((int)Json.AsLong(children[i], "glb: child"), m, depth + 1));
+                for (int i = children.Count - 1; i >= 0; i--) stack.Push((Json.AsIndex(children[i], nodes.Count, "glb: node child"), m, depth + 1));
             }
             return result;
+        }
+
+        /// <summary>A validated accessor: absolute byte offset into the GLB, element count, stride, component type.</summary>
+        struct AccessorView
+        {
+            public long Start, Count, Stride, ComponentType;
         }
     }
 
@@ -570,16 +598,39 @@ namespace MapBuilder.Reference
         public string Node;
         public Vec3 PointMap, PointGltf, PointUnity, NormalMap, NormalUnity;
         public Triangle TriangleMap;
+
+        public OrientationProbe Clone() => (OrientationProbe)MemberwiseClone();
     }
 
     /// <summary>Orientation-probe checks (docs/PACKAGE_FORMAT.md "Orientation probes").</summary>
     public static class ProbeCheck
     {
+        /// <summary>Self-consistency every check relies on: unit normals (|len - 1| &lt;= 1e-4, as package.py)
+        /// with a usable horizontal component, point_map off both axes and a vertex of triangle_map. Without
+        /// these a scaled normal or a stray point could satisfy the dot-product tests.</summary>
+        public static string Intrinsic(OrientationProbe p)
+        {
+            if (Math.Abs(p.NormalMap.Length - 1) > Limits.ProbeUnitTol || Math.Abs(p.NormalUnity.Length - 1) > Limits.ProbeUnitTol)
+                return "normal_map/normal_unity_x_negated must be unit vectors";
+            if (Math.Abs(p.NormalMap.X) < Limits.ProbeMinNormalXZ && Math.Abs(p.NormalMap.Z) < Limits.ProbeMinNormalXZ)
+                return "normal_map must have |nx| >= 0.05 or |nz| >= 0.05";
+            if (Math.Abs(p.PointMap.X) < Limits.ProbeMinAbsXYM || Math.Abs(p.PointMap.Y) < Limits.ProbeMinAbsXYM)
+                return "point_map must have |x| >= 1 m and |y| >= 1 m";
+            double tol = Limits.ProbeVertexTolM;
+            var t = p.TriangleMap;
+            if (Vec3.Distance(p.PointMap, t.A) > tol && Vec3.Distance(p.PointMap, t.B) > tol && Vec3.Distance(p.PointMap, t.C) > tol)
+                return "triangle_map does not contain point_map";
+            return null;
+        }
+
         /// <summary>Producer fields agree with this reader's axis mapping, and triangle_map is a collision
         /// triangle of the node in CCW cyclic order whose Unity-mapped front face (with the winding flip)
-        /// matches normal_unity_x_negated. Returns null on success, else the reason.</summary>
+        /// matches normal_unity_x_negated, and no vertex of the node lies near the X-mirror of point_map.
+        /// Returns null on success, else the reason.</summary>
         public static string AgainstCollision(OrientationProbe p, CollisionMesh col, CollisionObject obj)
         {
+            string why = Intrinsic(p);
+            if (why != null) return why;
             if (Vec3.Distance(Axes.MapToGltf(p.PointMap), p.PointGltf) > 1e-6 || Vec3.Distance(Axes.MapToUnity(p.PointMap), p.PointUnity) > 1e-6
                 || Vec3.Distance(Axes.MapToUnity(p.NormalMap), p.NormalUnity) > 1e-6)
                 return "point_gltf/point_unity_x_negated/normal_unity_x_negated disagree with this reader's axis mapping";
@@ -597,6 +648,14 @@ namespace MapBuilder.Reference
             var u = Axes.MapTriangleToUnity(p.TriangleMap);
             var nu = Vec3.FaceNormal(u.A, u.B, u.C);
             if (nu == null || Vec3.Dot(nu.Value, p.NormalUnity) <= Limits.ProbeMinDot) return "Unity-mapped collision triangle faces the wrong way";
+            var mirror = new Vec3(-p.PointMap.X, p.PointMap.Y, p.PointMap.Z);
+            for (int t = obj.TriStart; t < obj.TriStart + obj.TriCount; t++)
+            {
+                var ct = col.GetTriangle(t);
+                for (int s = 0; s < 3; s++)
+                    if (Vec3.Distance(ct[s], mirror) <= Limits.ProbeMirrorClearanceM)
+                        return "the node has a vertex within 0.5 m of the X-mirror of point_map";
+            }
             return null;
         }
 
@@ -604,6 +663,12 @@ namespace MapBuilder.Reference
         /// world space and imported index order (e.g. read back from the Mesh glTFast created).</summary>
         public static string InUnity(OrientationProbe p, IReadOnlyList<Triangle> unityTriangles)
         {
+            string why = Intrinsic(p);
+            if (why != null) return why;
+            var t0 = Axes.MapTriangleToUnity(p.TriangleMap);
+            double vt = Limits.ProbeVertexTolM;
+            if (Vec3.Distance(p.PointUnity, t0.A) > vt && Vec3.Distance(p.PointUnity, t0.B) > vt && Vec3.Distance(p.PointUnity, t0.C) > vt)
+                return "point_unity_x_negated is not a vertex of triangle_map mapped to Unity";
             double tol = Limits.ProbeMatchM;
             bool point = false;
             foreach (var t in unityTriangles)
@@ -633,16 +698,97 @@ namespace MapBuilder.Reference
         public long Bytes;
     }
 
+    public sealed class SourceInfo
+    {
+        public string Kind, Provider, Product, Attribution; // Product may be null
+    }
+
+    /// <summary>The manifest fields a consumer displays, validated (presence and JSON kind) as package.py does.</summary>
+    public sealed class ManifestSummary
+    {
+        public string Name, SchemaVersion, CreatedUtc, VerticalDatum;
+        public double OriginLatDeg, OriginLonDeg, ZOffsetM, WidthM, HeightM;
+        public List<SourceInfo> Sources = new List<SourceInfo>();
+
+        internal static ManifestSummary Read(JsonElement m)
+        {
+            var s = new ManifestSummary
+            {
+                Name = Json.NonEmptyStr(m, "name", "manifest"),
+                SchemaVersion = Json.Str(m, "schema_version", "manifest"),
+                CreatedUtc = Json.Str(m, "created_utc", "manifest"),
+            };
+            if (!MbmapPackage.IsUtc(s.CreatedUtc)) throw new MbmapException("manifest.created_utc must be an ISO-8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ)");
+            var geo = Json.Obj(m, "georeference", "manifest");
+            var origin = Json.Obj(geo, "origin", "manifest.georeference");
+            s.OriginLatDeg = Json.Num(origin, "lat_deg", "manifest.georeference.origin");
+            s.OriginLonDeg = Json.Num(origin, "lon_deg", "manifest.georeference.origin");
+            if (s.OriginLatDeg < -84 || s.OriginLatDeg > 84 || s.OriginLonDeg < -180 || s.OriginLonDeg > 180)
+                throw new MbmapException("manifest.georeference.origin is out of range");
+            if (Json.Str(geo, "horizontal_datum", "manifest.georeference") != MbmapPackage.HorizontalDatum)
+                throw new MbmapException($"manifest.georeference.horizontal_datum must be '{MbmapPackage.HorizontalDatum}'");
+            Json.NonEmptyStr(geo, "projection", "manifest.georeference");
+            s.VerticalDatum = Json.NonEmptyStr(geo, "vertical_datum", "manifest.georeference");
+            s.ZOffsetM = Json.Num(geo, "z_offset_m", "manifest.georeference");
+            if (Json.Str(geo, "height_formula", "manifest.georeference") != MbmapPackage.HeightFormula)
+                throw new MbmapException($"manifest.georeference.height_formula must be '{MbmapPackage.HeightFormula}'");
+            if (Json.Str(geo, "units", "manifest.georeference") != "metre") throw new MbmapException("manifest.georeference.units must be 'metre'");
+            var area = Json.Obj(m, "area", "manifest");
+            s.WidthM = Json.Num(area, "width_m", "manifest.area");
+            s.HeightM = Json.Num(area, "height_m", "manifest.area");
+            if (!(s.WidthM > 0) || !(s.HeightM > 0)) throw new MbmapException("manifest.area.width_m/height_m must be positive");
+            var sources = Json.Array(m, "sources", "manifest");
+            if (sources.Count == 0) throw new MbmapException("manifest.sources must be a non-empty array");
+            bool elevation = false;
+            for (int i = 0; i < sources.Count; i++)
+            {
+                string tag = $"manifest.sources[{i}]";
+                var e = sources[i];
+                if (e.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag} must be an object");
+                var src = new SourceInfo
+                {
+                    Kind = Json.Str(e, "kind", tag), Provider = Json.NonEmptyStr(e, "provider", tag),
+                    Attribution = Json.Str(e, "attribution", tag), Product = Json.OptStrOrNull(e, "product", tag),
+                };
+                if (src.Kind != "elevation" && src.Kind != "features") throw new MbmapException($"{tag}.kind must be 'elevation' or 'features'");
+                var lic = Json.Obj(e, "license", tag);
+                if (!lic.EnumerateObject().MoveNext()) throw new MbmapException($"{tag}.license must not be empty");
+                elevation |= src.Kind == "elevation";
+                s.Sources.Add(src);
+            }
+            if (!elevation) throw new MbmapException("manifest: no elevation source (vertical datum provenance missing)");
+            return s;
+        }
+    }
+
     public sealed class MbmapPackage : IDisposable
     {
         public const string Schema = "map-builder.package";
         public const int SupportedMajor = 1;
+        public const string VisualPath = "visual/map.glb", CollisionPath = "collision/map.mbcol", NoticesPath = "NOTICES.txt",
+                            ReportPath = "report.json", HeightfieldPath = "collision/terrain.mbhf";
+        public const string HorizontalDatum = "WGS84 (EPSG:4326)", HeightFormula = "H = z + z_offset_m";
         static readonly Regex SemVer = new Regex(@"^([0-9]+)\.([0-9]+)\.([0-9]+)\z");
+        static readonly Regex Utc = new Regex(@"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z\z");
+        // canonical path -> role (package.py MEMBERS); the mapping is enforced in both directions
         static readonly Dictionary<string, string> KnownRoles = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            { "visual/map.glb", "visual" }, { "collision/map.mbcol", "collision" }, { "NOTICES.txt", "notices" },
-            { "report.json", "report" }, { "collision/terrain.mbhf", "heightfield" },
+            { VisualPath, "visual" }, { CollisionPath, "collision" }, { NoticesPath, "notices" },
+            { ReportPath, "report" }, { HeightfieldPath, "heightfield" },
         };
+        static readonly string[] RequiredRoles = { "visual", "collision", "notices" };
+        static readonly Dictionary<string, string> MediaTypes = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            { VisualPath, "model/gltf-binary" }, { CollisionPath, "application/vnd.map-builder.mbcol" },
+            { NoticesPath, "text/plain; charset=utf-8" }, { ReportPath, "application/json" },
+            { HeightfieldPath, "application/vnd.map-builder.mbhf" },
+        };
+
+        static string CanonicalPath(string role)
+        {
+            foreach (var kv in KnownRoles) if (kv.Value == role) return kv.Key;
+            return null;
+        }
 
         /// <summary>"sha256:" + hex SHA-256 of the raw manifest.json bytes; set only after every member verified.</summary>
         public string PackageId;
@@ -653,6 +799,7 @@ namespace MapBuilder.Reference
         public CollisionMesh Collision;
         public HeightField Heightfield;   // null if the package has none
         public List<OrientationProbe> Probes = new List<OrientationProbe>();
+        public ManifestSummary Info;      // typed, validated manifest fields a consumer displays
 
         public void Dispose() => ManifestDocument?.Dispose();
 
@@ -702,21 +849,39 @@ namespace MapBuilder.Reference
                 if (!sv.Success) throw new MbmapException("manifest: schema_version must be MAJOR.MINOR.PATCH");
                 if (sv.Groups[1].Value != SupportedMajor.ToString()) throw new MbmapException($"manifest: unsupported schema major version {sv.Groups[1].Value}");
 
-                // 3. files[] <-> members one-to-one, then sizes and hashes.
+                // 3. files[] <-> members one-to-one, and canonical path <-> role in both directions (package.py
+                //    MEMBERS): a canonical path must carry its role, a canonical role must use its path, and any
+                //    other member is "unknown" (a reference-validator warning; warnings are errors).
                 int k = 0;
-                var listed = new HashSet<string>(StringComparer.Ordinal);
+                var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var roles = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var f in Json.Array(m, "files", "manifest"))
                 {
-                    string tag = $"files[{k++}]";
+                    string tag = $"manifest: files[{k++}]";
+                    if (f.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag} must be an object");
                     var fe = new FileEntry
                     {
                         Path = Json.Str(f, "path", tag), Role = Json.Str(f, "role", tag), MediaType = Json.Str(f, "media_type", tag),
                         Sha256 = Json.Str(f, "sha256", tag), Bytes = Json.Long(f, "bytes", tag),
                     };
-                    if (fe.Path == "manifest.json" || !SafeName(fe.Path) || !listed.Add(fe.Path)) throw new MbmapException($"{tag}: bad or duplicate path");
-                    if (KnownRoles.TryGetValue(fe.Path, out var role) && role != fe.Role) throw new MbmapException($"{tag}: role does not match its path");
+                    if (fe.Path == "manifest.json" || !SafeName(fe.Path)) throw new MbmapException($"{tag}.path must be a safe relative member path other than manifest.json");
+                    if (!listed.Add(fe.Path)) throw new MbmapException($"{tag}.path lists a member path twice");
+                    if (KnownRoles.TryGetValue(fe.Path, out var role))
+                    {
+                        if (fe.Role != role) throw new MbmapException($"{tag} ({fe.Path}) must have role '{role}'");
+                        if (fe.MediaType != MediaTypes[fe.Path]) throw new MbmapException($"{tag} ({fe.Path}): media_type must be '{MediaTypes[fe.Path]}'");
+                        if (!roles.Add(role)) throw new MbmapException($"manifest: role '{role}' listed twice");
+                    }
+                    else
+                    {
+                        string canonical = CanonicalPath(fe.Role);
+                        if (canonical != null) throw new MbmapException($"{tag}: role '{fe.Role}' must use path '{canonical}'");
+                        throw new MbmapException($"{tag}: unknown package member (warnings are errors)");
+                    }
                     pkg.Files.Add(fe);
                 }
+                foreach (var req in RequiredRoles)
+                    if (!roles.Contains(req)) throw new MbmapException($"manifest: required member {CanonicalPath(req)} (role '{req}') not listed");
                 foreach (var name in entries.Keys)
                     if (name != "manifest.json" && !listed.Contains(name)) throw new MbmapException("unlisted file in package");
                 foreach (var fe in pkg.Files)
@@ -727,40 +892,67 @@ namespace MapBuilder.Reference
                     if (!string.Equals(Hex(Sha256(data)), fe.Sha256, StringComparison.Ordinal)) throw new MbmapException($"{Label(fe.Path)}: SHA-256 mismatch");
                     pkg.Members[fe.Path] = data;
                 }
-                foreach (var req in new[] { "visual", "collision", "notices" })
-                    if (!pkg.Files.Exists(f => f.Role == req)) throw new MbmapException($"required member with role '{req}' missing");
+
+                // Manifest fields that name members must name the canonical ones.
+                if (Json.Str(Json.Obj(m, "visual", "manifest"), "path", "manifest.visual") != VisualPath)
+                    throw new MbmapException($"manifest: visual.path must be '{VisualPath}'");
+                var colInfo = Json.Obj(m, "collision", "manifest");
+                if (Json.Str(colInfo, "path", "manifest.collision") != CollisionPath)
+                    throw new MbmapException($"manifest: collision.path must be '{CollisionPath}'");
+                if (Json.Str(colInfo, "format", "manifest.collision") != "mbcol" || Json.Long(colInfo, "version", "manifest.collision") != 1
+                    || Json.Str(colInfo, "frame", "manifest.collision") != "map" || Json.Str(colInfo, "winding", "manifest.collision") != "ccw_outward")
+                    throw new MbmapException("manifest: collision must be {format: 'mbcol', version: 1, frame: 'map', winding: 'ccw_outward'}");
+                bool hasHf = m.TryGetProperty("heightfield", out var hfInfo) && hfInfo.ValueKind != JsonValueKind.Null;
+                if (hasHf)
+                {
+                    if (hfInfo.ValueKind != JsonValueKind.Object) throw new MbmapException("manifest: heightfield must be an object or null");
+                    if (Json.Str(hfInfo, "path", "manifest.heightfield") != HeightfieldPath)
+                        throw new MbmapException($"manifest: heightfield.path must be '{HeightfieldPath}'");
+                }
+                if (hasHf != roles.Contains("heightfield"))
+                    throw new MbmapException("manifest: heightfield must be non-null exactly when the heightfield member is listed");
+                if (Json.Str(m, "notices", "manifest") != NoticesPath) throw new MbmapException($"manifest: notices must be '{NoticesPath}'");
+                if (Json.OptStrOrNull(m, "report", "manifest") != (roles.Contains("report") ? ReportPath : null))
+                    throw new MbmapException($"manifest: report must be '{ReportPath}' when {ReportPath} is listed, otherwise null");
+                pkg.Info = ManifestSummary.Read(m);
 
                 // 4. Payloads.
-                var colInfo = Json.Obj(m, "collision", "manifest");
-                pkg.Collision = CollisionMesh.Read(pkg.Member(Json.Str(colInfo, "path", "manifest.collision"), "collision"));
+                pkg.Collision = CollisionMesh.Read(pkg.Member(CollisionPath, "collision"));
                 if (Json.Long(colInfo, "triangle_count", "manifest.collision") != pkg.Collision.TriangleCount
                     || Json.Long(colInfo, "vertex_count", "manifest.collision") != pkg.Collision.VertexCount)
                     throw new MbmapException("manifest.collision counts differ from the .mbcol header");
-                if (m.TryGetProperty("heightfield", out var hfInfo) && hfInfo.ValueKind == JsonValueKind.Object)
+                if (hasHf)
                 {
-                    var h = HeightField.Read(pkg.Member(Json.Str(hfInfo, "path", "manifest.heightfield"), "heightfield"));
+                    var h = HeightField.Read(pkg.Member(HeightfieldPath, "heightfield"));
                     if (Json.Long(hfInfo, "nx", "manifest.heightfield") != h.Nx || Json.Long(hfInfo, "ny", "manifest.heightfield") != h.Ny
                         || Math.Abs(Json.Num(hfInfo, "x0", "manifest.heightfield") - h.X0) > 1e-9 || Math.Abs(Json.Num(hfInfo, "y0", "manifest.heightfield") - h.Y0) > 1e-9
                         || Math.Abs(Json.Num(hfInfo, "spacing_m", "manifest.heightfield") - h.Spacing) > 1e-9)
                         throw new MbmapException("manifest.heightfield nx/ny/x0/y0/spacing_m differ from the .mbhf file");
                     pkg.Heightfield = h;
                 }
-                else if (pkg.Files.Exists(f => f.Role == "heightfield")) throw new MbmapException("heightfield member present but manifest.heightfield is null");
 
+                var probes = Json.Array(m, "orientation_probes", "manifest");
+                if (probes.Count > Limits.ProbeMax) throw new MbmapException($"manifest: orientation_probes must be an array of at most {Limits.ProbeMax}");
+                var probeNodes = new HashSet<string>(StringComparer.Ordinal);
                 int pi = 0;
-                foreach (var p in Json.Array(m, "orientation_probes", "manifest"))
+                foreach (var p in probes)
                 {
                     string tag = $"orientation probe {pi++}";
+                    if (p.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag} must be an object");
                     var tri = Json.Array(p, "triangle_map", tag);
                     if (tri.Count != 3) throw new MbmapException($"{tag}: triangle_map needs 3 points");
-                    pkg.Probes.Add(new OrientationProbe
+                    var probe = new OrientationProbe
                     {
                         Node = Json.Str(p, "node", tag),
                         PointMap = Json.V3(p, "point_map", tag), PointGltf = Json.V3(p, "point_gltf", tag),
                         PointUnity = Json.V3(p, "point_unity_x_negated", tag),
                         NormalMap = Json.V3(p, "normal_map", tag), NormalUnity = Json.V3(p, "normal_unity_x_negated", tag),
-                        TriangleMap = new Triangle(Json.AsV3(tri[0], tag), Json.AsV3(tri[1], tag), Json.AsV3(tri[2], tag)),
-                    });
+                        TriangleMap = new Triangle(Json.AsV3(tri[0], $"{tag}.triangle_map"), Json.AsV3(tri[1], $"{tag}.triangle_map"), Json.AsV3(tri[2], $"{tag}.triangle_map")),
+                    };
+                    if (!probeNodes.Add(probe.Node)) throw new MbmapException($"{tag}: more than one probe for the node");
+                    string why = ProbeCheck.Intrinsic(probe);
+                    if (why != null) throw new MbmapException($"{tag}: {why}");
+                    pkg.Probes.Add(probe);
                 }
 
                 // 5. Only now does package_id bind the verified payload.
@@ -782,6 +974,8 @@ namespace MapBuilder.Reference
         }
 
         static string Label(string path) => KnownRoles.ContainsKey(path) ? path : "(unlisted path)";
+
+        internal static bool IsUtc(string s) => Utc.IsMatch(s);
 
         static bool SafeName(string n)
         {
@@ -873,7 +1067,25 @@ namespace MapBuilder.Reference
             if (v.ValueKind != JsonValueKind.Array || v.GetArrayLength() != 3) throw new MbmapException($"{tag}: expected a 3-vector");
             return new Vec3(AsNum(v[0], tag), AsNum(v[1], tag), AsNum(v[2], tag));
         }
+        public static bool AsBool(JsonElement v, string tag) =>
+            v.ValueKind == JsonValueKind.True ? true : v.ValueKind == JsonValueKind.False ? false : throw new MbmapException($"{tag} must be a boolean");
+        /// <summary>An integer in [0, limit), validated as a long before narrowing to int.</summary>
+        public static int AsIndex(JsonElement v, int limit, string tag)
+        {
+            long x = AsLong(v, tag);
+            if (x < 0 || x >= limit) throw new MbmapException($"{tag} is out of range");
+            return (int)x;
+        }
+        public static int Index(JsonElement e, string key, int limit, string tag) => AsIndex(Get(e, key, tag), limit, $"{tag}.{key}");
         public static string Str(JsonElement e, string key, string tag) => AsString(Get(e, key, tag), $"{tag}.{key}");
+        public static string NonEmptyStr(JsonElement e, string key, string tag)
+        {
+            string s = Str(e, key, tag);
+            return s.Length > 0 ? s : throw new MbmapException($"{tag}.{key} must be a non-empty string");
+        }
+        /// <summary>Optional key: absent or null gives null, otherwise it must be a string.</summary>
+        public static string OptStrOrNull(JsonElement e, string key, string tag) =>
+            !e.TryGetProperty(key, out var v) || v.ValueKind == JsonValueKind.Null ? null : AsString(v, $"{tag}.{key}");
         public static long Long(JsonElement e, string key, string tag) => AsLong(Get(e, key, tag), $"{tag}.{key}");
         public static int Int(JsonElement e, string key, string tag)
         {
@@ -898,6 +1110,20 @@ namespace MapBuilder.Reference
             e.ValueKind == JsonValueKind.Object && e.TryGetProperty(key, out var v)
                 ? (v.ValueKind == JsonValueKind.Array ? new List<JsonElement>(v.EnumerateArray()) : throw new MbmapException($"'{key}' must be an array"))
                 : new List<JsonElement>();
+        /// <summary>Optional array whose elements must all be objects (count checked before materialising).</summary>
+        public static List<JsonElement> OptObjects(JsonElement e, string key, string tag, int maxCount = int.MaxValue)
+        {
+            if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty(key, out var v)) return new List<JsonElement>();
+            if (v.ValueKind != JsonValueKind.Array) throw new MbmapException($"{tag}: '{key}' must be an array");
+            if (v.GetArrayLength() > maxCount) throw new MbmapException($"{tag}: too many '{key}'");
+            var r = new List<JsonElement>(v.GetArrayLength());
+            foreach (var x in v.EnumerateArray())
+            {
+                if (x.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag}: {key}[{r.Count}] must be an object");
+                r.Add(x);
+            }
+            return r;
+        }
         public static double[] NumArray(JsonElement e, string key, int n, string tag)
         {
             var v = Get(e, key, tag);

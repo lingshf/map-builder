@@ -25,22 +25,25 @@ static class Program
             Console.WriteLine($"INVALID: {e.Message}");
             return 1;
         }
+        catch (Exception e) when (!(e is OutOfMemoryException || e is AccessViolationException))
+        {
+            // Backstop: the reader validates every field it touches, so this indicates a reader bug; the package
+            // is still refused rather than crashing the consumer. The message is not echoed (it may quote input).
+            Console.WriteLine($"INVALID: unexpected {e.GetType().Name} while reading the package");
+            return 1;
+        }
     }
 
     static int Report(MbmapPackage p)
     {
-        var m = p.Manifest;
+        var m = p.Info;
         var c = p.Collision;
         var failures = new List<string>();
-        var geo = m.GetProperty("georeference");
-        var origin = geo.GetProperty("origin");
-        var area = m.GetProperty("area");
-        Console.WriteLine($"package    {m.GetProperty("name").GetString()}  (schema {m.GetProperty("schema_version").GetString()}, created {m.GetProperty("created_utc").GetString()})");
+        Console.WriteLine($"package    {m.Name}  (schema {m.SchemaVersion}, created {m.CreatedUtc})");
         Console.WriteLine($"package_id {p.PackageId}");
         Console.WriteLine($"members    {p.Files.Count} verified (size + SHA-256): {string.Join(", ", p.Files.ConvertAll(f => f.Path))}");
-        Console.WriteLine($"origin     lat {origin.GetProperty("lat_deg").GetDouble()}, lon {origin.GetProperty("lon_deg").GetDouble()}; " +
-                          $"H = z + {geo.GetProperty("z_offset_m").GetDouble()} m ({geo.GetProperty("vertical_datum").GetString()})");
-        Console.WriteLine($"area       {area.GetProperty("width_m").GetDouble()} x {area.GetProperty("height_m").GetDouble()} m");
+        Console.WriteLine($"origin     lat {m.OriginLatDeg}, lon {m.OriginLonDeg}; H = z + {m.ZOffsetM} m ({m.VerticalDatum})");
+        Console.WriteLine($"area       {m.WidthM} x {m.HeightM} m");
 
         var perClass = new int[CollisionMesh.ClassNames.Length];
         foreach (var b in c.TriangleClass) perClass[b]++;
@@ -51,7 +54,7 @@ static class Program
         Console.WriteLine($"triangles  by class: {string.Join(", ", classes)}");
 
         // Visual/collision binding: every glTF node with triangles <-> one collision object of the same name.
-        var nodes = Glb.Read(p.Member(m.GetProperty("visual").GetProperty("path").GetString(), "visual"));
+        var nodes = Glb.Read(p.Member(MbmapPackage.VisualPath, "visual"));
         var visual = new Dictionary<string, VisualNode>(StringComparer.Ordinal);
         foreach (var n in nodes)
             if (n.TrianglesGltf.Count > 0 && !visual.TryAdd(n.Name, n)) failures.Add("two glTF nodes with triangles share a name");
@@ -75,11 +78,26 @@ static class Program
             string ok = ProbeCheck.InUnity(probe, Import(vn, negateX: true, reverseWinding: true));
             string noFlip = ProbeCheck.InUnity(probe, Import(vn, negateX: true, reverseWinding: false));
             string noNegate = ProbeCheck.InUnity(probe, Import(vn, negateX: false, reverseWinding: true));
+            // Tampered probes must be refused by both checks: a scaled (non-unit) normal, and a point_map moved
+            // off triangle_map (with its derived points kept consistent so only the vertex check can catch it).
+            var scaled = probe.Clone();
+            scaled.NormalMap = Scale(probe.NormalMap, 2);
+            scaled.NormalUnity = Scale(probe.NormalUnity, 2);
+            var offVertex = probe.Clone();
+            offVertex.PointMap = new Vec3(probe.PointMap.X, probe.PointMap.Y, probe.PointMap.Z + 1);
+            offVertex.PointGltf = Axes.MapToGltf(offVertex.PointMap);
+            offVertex.PointUnity = Axes.MapToUnity(offVertex.PointMap);
+            var imported = Import(vn, negateX: true, reverseWinding: true);
+            bool scaledRejected = ProbeCheck.AgainstCollision(scaled, c, obj) != null && ProbeCheck.InUnity(scaled, imported) != null;
+            bool offRejected = ProbeCheck.AgainstCollision(offVertex, c, obj) != null && ProbeCheck.InUnity(offVertex, imported) != null;
             if (ok != null) failures.Add($"{tag} (X negated + winding reversed): {ok}");
             if (noFlip == null) failures.Add($"{tag}: control without the winding flip was not detected");
             if (noNegate == null) failures.Add($"{tag}: control without the X negation was not detected");
+            if (!scaledRejected) failures.Add($"{tag}: control with a non-unit normal was not detected");
+            if (!offRejected) failures.Add($"{tag}: control with point_map off triangle_map was not detected");
             Console.WriteLine($"{tag}    {obj.Class} node, unity point {probe.PointUnity}: " +
-                              $"{(ok == null ? "PASS" : "FAIL")}; controls rejected: no winding flip={(noFlip != null ? "yes" : "NO")}, no X negation={(noNegate != null ? "yes" : "NO")}");
+                              $"{(ok == null ? "PASS" : "FAIL")}; controls rejected: no winding flip={YesNo(noFlip != null)}, no X negation={YesNo(noNegate != null)}, " +
+                              $"non-unit normal={YesNo(scaledRejected)}, point off triangle={YesNo(offRejected)}");
         }
 
         if (p.Heightfield != null)
@@ -103,11 +121,8 @@ static class Program
         else Console.WriteLine("heightfield none");
         Console.WriteLine($"surface    highest z at the map origin: {c.HighestZ(0, 0):0.###} m");
 
-        foreach (var s in m.GetProperty("sources").EnumerateArray())
-        {
-            string product = s.TryGetProperty("product", out var pr) && pr.ValueKind == JsonValueKind.String ? pr.GetString() : "?";
-            Console.WriteLine($"source     {s.GetProperty("kind").GetString()}: {product}; attribution: {s.GetProperty("attribution").GetString()}");
-        }
+        foreach (var s in m.Sources)
+            Console.WriteLine($"source     {s.Kind}: {s.Product ?? "?"}; attribution: {s.Attribution}");
         Console.WriteLine("notices    ship/show NOTICES.txt with the map");
 
         foreach (var f in failures) Console.WriteLine($"FAIL: {f}");
@@ -117,6 +132,9 @@ static class Program
 
     // Simulates what a glTF importer does on the way into Unity; a real consumer reads the triangles back
     // from the meshes its importer (e.g. glTFast) created, in world space and imported index order.
+    static Vec3 Scale(Vec3 v, double s) => new Vec3(v.X * s, v.Y * s, v.Z * s);
+    static string YesNo(bool b) => b ? "yes" : "NO";
+
     static List<Triangle> Import(VisualNode n, bool negateX, bool reverseWinding) =>
         n.TrianglesGltf.ConvertAll(t => Axes.GltfTriangleToUnity(t, negateX, reverseWinding));
 }

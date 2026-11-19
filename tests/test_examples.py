@@ -13,6 +13,7 @@ import unittest
 import zipfile
 
 from map_builder.core.collision import read_collision, read_heightfield
+from map_builder.core.glb import read_glb
 from map_builder.core.package import validate_package
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,6 +116,10 @@ class SyntheticSampleTest(unittest.TestCase):
             _approx_equal(self, a.objects, b.objects, "objects", stale)
             _approx_equal(self, read_heightfield(fresh["collision/terrain.mbhf"]),
                           read_heightfield(committed["collision/terrain.mbhf"]), "heightfield", stale)
+            (ga, na), (gb, nb) = read_glb(fresh["visual/map.glb"]), read_glb(committed["visual/map.glb"])
+            _approx_equal(self, ga, gb, "glb.json", stale)
+            _approx_equal(self, [(n.index, n.name, n.extras, n.matrix, n.triangles) for n in na],
+                          [(n.index, n.name, n.extras, n.matrix, n.triangles) for n in nb], "glb.nodes", stale)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

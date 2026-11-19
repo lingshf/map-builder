@@ -16,11 +16,14 @@ py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem 
 py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 ```
 
-The build is deterministic. With the fixed `--created-utc`, it is byte-identical and gives
+The build is deterministic. With the fixed `--created-utc`, Python 3.12 on Windows x64
+(the platform the sample was generated on) reproduces it byte-identically and gives
 `package_id = sha256:33ca4bc6b0f058ce3c175914a580fd2e52c657b9c75fb258e634c1b3496597b6`.
 Validation reports `VALID: 0 error(s), 1 warning(s)`; the warning is two degenerate
 (zero-area) collision triangles, which is allowed. `tests/test_examples.py` checks that the
-committed file still validates and matches a fresh build. After an intentional format or
+committed file still validates and matches a fresh build; on other platforms, where the
+maths library may differ in the last float bit, it compares every member structurally
+(including the GLB's JSON and buffer contents) with a 1e-4 tolerance on floats. After an intentional format or
 generator change, regenerate the sample and commit it.
 
 Licensing: the fixture is not OpenStreetMap data, so the build passes `--osm-license` and the sample's `sources[]` and `NOTICES.txt` carry that SYNTHETIC statement, not an OpenStreetMap/ODbL attribution. Omit `--osm-license` for real OSM extracts; they are then credited as OpenStreetMap (ODbL 1.0).

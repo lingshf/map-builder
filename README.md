@@ -91,8 +91,9 @@ py -3.12 tools\mbmap_cli.py build --osm area.osm --dem dem.tif --datum EGM2008 -
 py -3.12 tools\mbmap_cli.py validate out.mbmap      # exit 0 if VALID
 ```
 
-`--created-utc 2026-01-01T00:00:00Z` fixes the timestamp. With the same inputs, the package and
-its `package_id` are then byte-identical. [examples/README.md](examples/README.md) gives the command
+`--created-utc 2026-01-01T00:00:00Z` fixes the timestamp. With the same inputs on the same
+platform, the package and its `package_id` are then byte-identical (other platforms' maths
+libraries may differ in the last float bit). [examples/README.md](examples/README.md) gives the command
 for the committed synthetic sample and shows the C# reference reader.
 
 ## Tests

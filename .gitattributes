@@ -1,0 +1,3 @@
+# Fixtures are hashed into package provenance; keep identical bytes on every OS.
+tests/fixtures/** -text
+*.mbmap binary

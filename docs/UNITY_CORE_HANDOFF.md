@@ -95,8 +95,10 @@ vegetation and props. Options:
   temporary step and measure the error. Note also that the heightfield resamples the terrain
   triangles, so between samples it is not the exact terrain surface.
 
-The existing prism/height-grid Core *can*: use `.mbhf` directly as a terrain grid (with a
-resampling caveat), and use object AABBs for a broad phase. It *cannot*: collide exactly with
+None of this is implemented yet. Once a consumer-side adapter translates `.mbhf` samples
+(including no-data cells) into the Core's terrain representation, the existing
+prism/height-grid Core could use it as a terrain grid (with a resampling caveat) and use
+object AABBs for a broad phase. Even then it could not collide exactly with
 terrain triangles, sloped or complex roofs, roads, vegetation or user geometry.
 
 Rules either way:

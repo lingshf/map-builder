@@ -47,7 +47,7 @@ py -3.12 -m unittest tests.test_acceptance -v
 CLI on the SYNTHETIC fixture (also run in CI):
 
 ```
-py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc --datum SYNTHETIC --dem-license "SYNTHETIC test data (no licence required)" --lat 47.0 --lon 8.0 --width 400 --height 300 --name synthetic_sample --out $env:TEMP\s.mbmap
+py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc --datum SYNTHETIC --dem-license "SYNTHETIC test data (no licence required)" --osm-license "SYNTHETIC test fixture (hand-written OSM-format XML, not OpenStreetMap data; no licence required)" --lat 47.0 --lon 8.0 --width 400 --height 300 --name synthetic_sample --out $env:TEMP\s.mbmap
 py -3.12 tools\mbmap_cli.py validate $env:TEMP\s.mbmap
 ```
 
