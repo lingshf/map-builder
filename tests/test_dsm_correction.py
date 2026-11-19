@@ -1444,7 +1444,8 @@ class ReviewRound5Test(unittest.TestCase):
         import hashlib
         normal, wide = self._fixture()
         area = Area(*self.AREA)
-        q30, q65 = (overpass_query(*area.geographic_bbox(margin_m=m)) for m in (30.0, 65.0))
+        q30 = overpass_query(*area.geographic_bbox(margin_m=30.0))
+        q65 = overpass_query(*area.geographic_bbox(margin_m=65.0), enclosing_at=area.frame.to_geographic(0.0, 0.0))
         cache = tempfile.TemporaryDirectory()
         self.addCleanup(cache.cleanup)
         _, off, src_off, queries = self._acquire([(200, normal)], False, cache.name)
@@ -2284,6 +2285,34 @@ class ReviewRound11Test(unittest.TestCase):
                       max_mask_work=5000)
         self.assertIsNone(cl.mask_work_exceeded)                        # before: exceeded, no correction at all
         self.assertEqual((len(cl.mask_trees), cl.outside_buildings), (1, []))
+
+    def test_forest_enclosing_the_area_is_requested_and_masks(self):
+        # round 16: a forest whose boundary is wholly outside the query bbox was never in the mask response
+        from map_builder.core.osm import overpass_query
+        area = Area(*self.AREA)
+        lat, lon = area.frame.to_geographic(0.0, 0.0)
+        q = overpass_query(*area.geographic_bbox(margin_m=65.0), enclosing_at=(lat, lon))
+        self.assertIn(f"is_in({lat:.7f},{lon:.7f})->.enc;", q)
+        self.assertIn('rel(pivot.enc)["landuse"="forest"];', q)
+        self.assertIn('way(pivot.enc)["natural"="wood"];', q)
+        self.assertNotIn("is_in", overpass_query(*area.geographic_bbox(margin_m=30.0)))   # content unchanged
+        b = OsmBuilder()
+        b.node(0.0, 0.0, {"natural": "tree"})
+        normal = parse_osm_xml(b.xml().encode())
+        b.way(square(0.0, 0.0, 200.0), {"landuse": "forest"}, closed=True)   # what is_in returns
+        wide = parse_osm_xml(b.xml().encode())
+        ext = (-50.0, -50.0, 50.0, 50.0)
+        g = ElevationGrid(-50.0, -50.0, 10.0, 11, 11, [[ground(-50 + i * 10.0, -50 + j * 10.0) + (15.0 if i == j == 5
+                                                                                             else 0.0)
+                                                        for i in range(11)] for j in range(11)], dict(COPERNICUS))
+        without = build_plan(area, g, classify(normal, area, mask_extent=ext, mask_data=normal),
+                             PlanOptions(trees=True, seed=1))
+        self.assertTrue(without.report["terrain_correction"]["applied"])   # before: the canopy taken as ground
+        cl = classify(normal, area, mask_extent=ext, mask_data=wide)
+        self.assertEqual(len(cl.mask_areas), 1)
+        tc = build_plan(area, g, cl, PlanOptions(trees=True, seed=1)).report["terrain_correction"]
+        self.assertFalse(tc["applied"])
+        self.assertEqual(tc["masked_points"], 121)
 
 
 def pipeline_mask_message(cls_name):

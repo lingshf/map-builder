@@ -140,7 +140,9 @@ def acquire(area, settings, client=None, progress=None):
             # recorded with a warning); the normal request's cache write still raises, as without the mask.
             mask_cache = _BestEffortCache(cache)
             try:
-                mask_data = fetch_overpass(area, client, settings.overpass_url, mask_cache, margin_m=margin, **fetch)
+                # also the forests enclosing the area centre: no member of theirs need fall in the bbox
+                mask_data = fetch_overpass(area, client, settings.overpass_url, mask_cache, margin_m=margin,
+                                           enclosing_forests=True, **fetch)
             except (NetworkError, CoverageError, FormatError, LimitError) as exc:
                 # a structured summary only: the class and a fixed message (the exception text may quote the
                 # response, e.g. a parser diagnostic; it is never persisted)

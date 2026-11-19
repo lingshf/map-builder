@@ -73,7 +73,9 @@ the surrounding ground before the terrain, roads and buildings are built.
   is the content. Only when the correction is enabled does it make a second Overpass request, the
   same query with a wider bbox: the grid's overshoot of the area (below one spacing) plus 45 m, the
   farthest a mask can reach (a bridge centreline: at most 30 m half deck width plus its 15 m
-  buffer), rounded up to a whole metre. The normal request is byte-identical to the one made with
+  buffer), rounded up to a whole metre, plus the forest areas enclosing the area centre (Overpass
+  `is_in`: a forest whose boundary lies wholly outside the bbox would otherwise be missing, and its
+  canopy taken for ground). The normal request is byte-identical to the one made with
   the correction off (it shares its cache entry), and it is classified exactly as then, so the
   selected buildings, `building:part` ownership, multipolygon outer suppression, landcover, roads,
   trees, and the classification's counts, `invalid_features` and `unsupported_features` come from

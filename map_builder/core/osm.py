@@ -43,7 +43,13 @@ FEATURE_SELECTORS = (
 )
 
 
-def overpass_query(s, w, n, e, timeout_s=90):
+# Forest areas enclosing a point (Overpass ``is_in``): a forest whose boundary lies wholly outside the bbox has no
+# member in it, so the bbox selectors above miss it even when its canopy covers every DEM sample.
+ENCLOSING_FOREST_SELECTORS = (("way", "landuse", "forest"), ("rel", "landuse", "forest"),
+                              ("way", "natural", "wood"), ("rel", "natural", "wood"))
+
+
+def overpass_query(s, w, n, e, timeout_s=90, enclosing_at=None):
     """Overpass QL for everything :func:`classify` uses, so that an Overpass import and a local
     XML import of the same data classify alike.
 
@@ -52,12 +58,20 @@ def overpass_query(s, w, n, e, timeout_s=90):
     building:part ways and relations (a relation whose own members fall outside the bbox still
     owns the parts inside it). Their member relations (building multipolygon outlines, part
     relations) are added, and the final ``>`` recursion brings in every member way and node.
-    The query text is part of the cache key, so changing it never reuses stale cached data."""
+    The query text is part of the cache key, so changing it never reuses stale cached data.
+
+    ``enclosing_at`` = (lat, lon) also selects the forest areas enclosing that point (the DSM mask request only;
+    the content query is unchanged)."""
     b = f"{s:.7f},{w:.7f},{n:.7f},{e:.7f}"
     sel = "".join(f"  {typ}[\"{key}\"]({b});\n" if value is None else f"  {typ}[\"{key}\"=\"{value}\"]({b});\n"
                   for typ, key, value in FEATURE_SELECTORS)
+    pre = ""
+    if enclosing_at is not None:
+        lat, lon = (float(v) for v in enclosing_at)
+        pre = f"is_in({lat:.7f},{lon:.7f})->.enc;\n"
+        sel += "".join(f"  {typ}(pivot.enc)[\"{key}\"=\"{value}\"];\n" for typ, key, value in ENCLOSING_FOREST_SELECTORS)
     return (
-        f"[out:xml][timeout:{timeout_s}][maxsize:{MAX_OSM_BYTES}];\n(\n{sel}"
+        f"[out:xml][timeout:{timeout_s}][maxsize:{MAX_OSM_BYTES}];\n{pre}(\n{sel}"
         ")->.feat;\n(\n"
         f"  relation[\"type\"=\"building\"]({b});\n"
         "  rel(bw.feat)[\"type\"=\"building\"];\n  rel(br.feat)[\"type\"=\"building\"];\n"
@@ -76,7 +90,7 @@ def _validated_overpass(body, description):
 
 
 def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False,
-                   cache_dataset_id=None, margin_m=OSM_FETCH_MARGIN_M):
+                   cache_dataset_id=None, margin_m=OSM_FETCH_MARGIN_M, enclosing_forests=False):
     """Fetches the area plus ``margin_m`` on each side (:data:`OSM_FETCH_MARGIN_M` for the content; a wider
     second request only supplies DSM mask candidates near the grid edge, see :func:`classify` ``mask_data``).
     ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
@@ -100,7 +114,7 @@ def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cac
                 raise ValueError("allow_cache_override requires an explicit, credential-free cache_dataset_id")
             cache_scope = "override:" + check_cache_dataset_id(cache_dataset_id, url)
     s, w, n, e = area.geographic_bbox(margin_m=margin_m)
-    q = overpass_query(s, w, n, e)
+    q = overpass_query(s, w, n, e, enclosing_at=area.frame.to_geographic(0.0, 0.0) if enclosing_forests else None)
     description = f"overpass:{endpoint}"
     key = f"{OSM_DATASET_ID}|{cache_scope}\n{q}"
     data = None
