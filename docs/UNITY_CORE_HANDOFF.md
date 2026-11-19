@@ -113,8 +113,9 @@ Rules either way:
   cull back faces. The winding gives only the contact normal, which depends on the class kind:
   outward for solids, up (+Z) for surfaces, and inward into the free space for tubes.
 * Format 2.0 adds the `bridge`, `tunnel` and `structure` classes, but map-builder does not
-  generate them yet: bridges and tunnels are omitted and elevated parts are solid, and these
-  are listed in `report.json`. Core and Unity can implement the mapping below now.
+  generate bridges and tunnels yet: they are omitted and listed in `report.json`. Elevated building
+  parts and building passages are generated and emit `elevated` / `tunnel` passage probes.
+  Core and Unity can implement the mapping below now.
 
 ### Class ids and kinds
 

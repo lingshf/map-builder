@@ -72,6 +72,12 @@
 <node id="1088" lat="47.000359807" lon="8.000000000"><tag k="natural" v="tree"/><tag k="height" v="11"/></node>
 <node id="1089" lat="47.000359796" lon="8.001577795"><tag k="natural" v="tree"/></node>
 <node id="1090" lat="46.998920561" lon="7.997896329"><tag k="natural" v="tree"/></node>
+<node id="1091" lat="46.999748116" lon="7.997870000"></node>
+<node id="1092" lat="46.999748121" lon="7.998185556"></node>
+<node id="1093" lat="46.999892044" lon="7.998185551"></node>
+<node id="1094" lat="46.999892038" lon="7.997869995"></node>
+<node id="1096" lat="46.999820074" lon="7.997699072"></node>
+<node id="1097" lat="46.999820085" lon="7.998356480"></node>
 <way id="1007"><nd ref="1001"/><nd ref="1002"/><nd ref="1003"/><nd ref="1004"/><nd ref="1005"/><nd ref="1006"/><nd ref="1001"/><tag k="building" v="yes"/><tag k="height" v="12"/></way>
 <way id="1012"><nd ref="1008"/><nd ref="1009"/><nd ref="1010"/><nd ref="1011"/><nd ref="1008"/></way>
 <way id="1017"><nd ref="1013"/><nd ref="1014"/><nd ref="1015"/><nd ref="1016"/><nd ref="1013"/></way>
@@ -90,5 +96,7 @@
 <way id="1077"><nd ref="1073"/><nd ref="1074"/><nd ref="1075"/><nd ref="1076"/><nd ref="1073"/><tag k="landuse" v="forest"/></way>
 <way id="1082"><nd ref="1078"/><nd ref="1079"/><nd ref="1080"/><nd ref="1081"/><nd ref="1078"/><tag k="leisure" v="park"/></way>
 <way id="1087"><nd ref="1083"/><nd ref="1084"/><nd ref="1085"/><nd ref="1086"/><nd ref="1083"/><tag k="natural" v="water"/></way>
+<way id="1095"><nd ref="1091"/><nd ref="1092"/><nd ref="1093"/><nd ref="1094"/><nd ref="1091"/><tag k="building" v="yes"/><tag k="height" v="9"/></way>
+<way id="1098"><nd ref="1096"/><nd ref="1097"/><tag k="highway" v="service"/><tag k="tunnel" v="building_passage"/></way>
 <relation id="1018"><member type="way" ref="1012" role="outer"/><member type="way" ref="1017" role="inner"/><tag k="building" v="apartments"/><tag k="building:levels" v="4"/><tag k="type" v="multipolygon"/></relation>
 </osm>

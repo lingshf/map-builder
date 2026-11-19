@@ -24,5 +24,7 @@ Ship and display source attribution from `NOTICES.txt`.
 The map uses ENU metres; glTF and Unity have different axis conventions.
 Do not guess axes or derive gameplay collision from imported visual meshes.
 A heightfield cannot represent underpasses. Schema 2.0 supports bridge/tunnel
-classes and passage probes, but generated flyable passages are not in this
-baseline. Older schema 1.x packages must be regenerated for the current reader.
+classes and passage probes. Elevated building parts and `tunnel=building_passage`
+ways through buildings are generated as flyable passages, each with a passage probe
+(a probe that collision blocks is left out and listed in the report). Generated bridges
+and tunnels are not in this baseline. Older schema 1.x packages must be regenerated for the current reader.

@@ -156,7 +156,7 @@ class ScenePlan:
         self.shared_meshes = {}
         self.report = {"counts": {}, "unsupported_features": [], "invalid_features": [], "warnings": [],
                        "inferred": {}}
-        # manifest passage_probes entries ({id, kind, feature, path_map, radius_m}); no generator emits any yet
+        # manifest passage_probes entries ({id, kind, feature, path_map, radius_m})
         self.passage_probes = []
 
     def count(self, key, n=1):
@@ -581,8 +581,8 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     prov["height_m"] = round(height, 2)
     prov["eave_height_m"] = round(wall_top_flat, 2)
     if elevated:
-        prov["elevated"] = (f"volume starts {min_h:.1f} m above ground; the space beneath is NOT modelled "
-                            "as traversable in v1")
+        prov["elevated"] = (f"volume starts {min_h:.1f} m above the base datum; the space beneath is free "
+                            "(an 'elevated' passage probe is emitted when it is at least 2.6 m high)")
     return mesh, origin, prov
 
 
@@ -1660,10 +1660,16 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
     if opts.buildings:
         def build_one(f, extra_prov=None, reason_prefix=""):
             """Build one footprint; returns True if generated, else reports it in invalid_features."""
+            pre = passages.take_prebuilt(ctx, f.id)
             try:
-                mesh, origin, prov = build_building(
-                    f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
-                    max_work=opts.max_triangulation_work, reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
+                if pre is not None:
+                    mesh, origin, prov = pre
+                    budget.reserve(f.id, len(mesh.vertices), sum(len(fc) - 2 for fc in mesh.faces))
+                else:
+                    mesh, origin, prov = build_building(
+                        f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
+                        max_work=opts.max_triangulation_work,
+                        reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
             except TriangulationError as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": f"{reason_prefix}triangulation failed: {e}"})
@@ -1678,11 +1684,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             for k, v in prov.items():
                 if isinstance(v, str) and v.startswith(("inferred", "fallback")) and not k.endswith("_source"):
                     plan.inferred(f"building.{k}")
-            if "elevated" in prov:
-                plan.report["unsupported_features"].append(
-                    {"id": f.id, "reason": "elevated volume (min_height/building:min_level): generated as a "
-                                           "closed solid; flying beneath it is not supported in v1",
-                     "tags": {k: v for k, v in f.tags.items() if k in ("min_height", "building:min_level")}})
+            if "elevated" in prov and not getattr(f, "passage_upper", False):
+                passages.elevated_probe(plan, ctx, f)
             if "terrain_warning" in prov:
                 plan.report["warnings"].append(f"{f.id}: {prov['terrain_warning']}")
             if "rejected_tags" in prov:
@@ -1700,7 +1703,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         built = set()
         for f in classified.buildings:
             for piece in passages.split(plan, ctx, f):
-                if build_one(piece):
+                if build_one(piece, getattr(piece, "extra_prov", None)):
                     built.add(piece.id)
         # Outlines replaced by building:part features (Simple 3D Buildings). The parts were built
         # first; an outline none of whose parts survived is generated itself (otherwise the
@@ -1752,8 +1755,11 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         # objects are listed in the original feature order.
         ownership = RoadOwnership()
         road_specs = {}
-        order = {id(f): k for k, f in enumerate(classified.roads)}
-        for f in sorted(classified.roads, key=road_priority):
+        passage_roads = passages.handled_roads(ctx)
+        road_notes = {f.id: note for f, note in passage_roads}
+        road_feats = list(classified.roads) + [f for f, _ in passage_roads]
+        order = {id(f): k for k, f in enumerate(road_feats)}
+        for f in sorted(road_feats, key=road_priority):
             try:
                 mesh, origin, prov = build_road(f, terrain, z_offset,
                                                 reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
@@ -1779,6 +1785,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                 plan.inferred("road.width")
             if "overlap" in prov:
                 plan.count("roads_clipped_by_higher_priority")
+            if f.id in road_notes:
+                prov["passage"] = road_notes[f.id]
             if "terrain_edge" in prov:
                 plan.count("roads_trimmed_at_terrain_edge")
             road_specs[order[id(f)]] = ObjectSpec(mesh.name, f.id, "road", "Roads", mesh=mesh, location=origin,
@@ -1866,6 +1874,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             if capped:
                 plan.report["warnings"].append(f"tree limit {opts.max_trees} reached; scatter truncated")
         plan.count("trees", n_trees)
+    passages.finish(plan, ctx)
     plan.report["counts"]["objects"] = len(plan.objects)
     plan.report["z_offset_m"] = z_offset
     plan.report["budget"] = budget.to_dict()

@@ -106,6 +106,8 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
 
 | S2-ROOF | Unit + acceptance (Python 3.12, Windows) | 445 tests OK (adds 	ests/test_roofs.py: per shape closed, outward, positive volume, maximum z = total height and eave z within 1 mm; orientation/direction ridge and low-edge coordinates; fallbacks; 25 k roof-triangle cap at 1800 vertices) |
 | S2-ROOF | Sample regenerated (local file, auto = off) | After the refactor-only commit the sample was byte-identical (package_id `sha256:93446c4f…`); with the dome it is VALID: 0 error(s), 1 warning(s); 74 objects, 4987 collision triangles (+42: way/1043 is a dome, 5 rings of 4 + apex), new package_id `sha256:ef66b4a5…`; fixture `build_plan` median 15–18 ms before and after (within noise) |
+| S2-ELEV | Unit + acceptance (Python 3.12, Windows) | 487 tests OK (adds `tests/test_passages.py`: split ids and heights, closed manifolds, probes PASS, dead end/courtyard/low building unsupported, blocked probe reported; review round 1: failing lower parts keep the building whole, road ownership, probe cap, local finished-scene check) |
+| S2-ELEV | Sample regenerated + C# reader (.NET 8, Windows) | VALID: 0 error(s), 1 warning(s); 78 objects, 5057 collision triangles, 2 passage probes (`way/1048:under`, `way/1098:passage`), package_id `sha256:391cbd48…`; C# reader `OK` with both passage probes PASS |
 
 ## Not validated
 

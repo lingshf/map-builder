@@ -4,8 +4,9 @@
 
 This is a **synthetic** package. It is built with the CLI from the hand-written fixtures in
 [tests/fixtures](../tests/fixtures/README.md), and it is not a real place or real data. It has a
-400 × 300 m area, 74 objects, 4987 collision triangles, a 2 m heightfield, 3 orientation
-probes and no passage probes (no generator emits bridges, tunnels or elevated parts yet). It uses
+400 × 300 m area, 78 objects, 5057 collision triangles, a 2 m heightfield, 3 orientation
+probes and 2 passage probes (one beneath the elevated building part, one through the split building
+passage). It uses
 package format 2.0.0. Regenerate it from the repository root:
 
 ```powershell
@@ -19,7 +20,7 @@ py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 
 The build is deterministic. With the fixed `--created-utc`, Python 3.12 on Windows x64
 (the platform the sample was generated on) reproduces it byte-identically and gives
-`package_id = sha256:ef66b4a5be150186ece546d983916f0c3595b1faf39cec040018b2773d44337b`.
+`package_id = sha256:391cbd4827c6791c3c9915c84250c75939647244a59669a417d492d522d7e9a2`.
 Validation reports `VALID: 0 error(s), 1 warning(s)`; the warning is two degenerate
 (zero-area) collision triangles, which is allowed. `tests/test_examples.py` checks that the
 committed file still validates and matches a fresh build; on other platforms, where the
