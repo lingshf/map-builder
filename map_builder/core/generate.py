@@ -1749,8 +1749,11 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         # objects are listed in the original feature order.
         ownership = RoadOwnership()
         road_specs = {}
-        order = {id(f): k for k, f in enumerate(classified.roads)}
-        for f in sorted(classified.roads, key=road_priority):
+        passage_roads = passages.handled_roads(ctx)
+        road_notes = {f.id: note for f, note in passage_roads}
+        road_feats = list(classified.roads) + [f for f, _ in passage_roads]
+        order = {id(f): k for k, f in enumerate(road_feats)}
+        for f in sorted(road_feats, key=road_priority):
             try:
                 mesh, origin, prov = build_road(f, terrain, z_offset,
                                                 reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
@@ -1776,6 +1779,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                 plan.inferred("road.width")
             if "overlap" in prov:
                 plan.count("roads_clipped_by_higher_priority")
+            if f.id in road_notes:
+                prov["passage"] = road_notes[f.id]
             if "terrain_edge" in prov:
                 plan.count("roads_trimmed_at_terrain_edge")
             road_specs[order[id(f)]] = ObjectSpec(mesh.name, f.id, "road", "Roads", mesh=mesh, location=origin,

@@ -53,9 +53,8 @@ def run(out_dir):
     dup.data = upper.data.copy()
     dup.location.y += 30.0
     upper.users_collection[0].objects.link(dup)
-    # the elevated part moved onto the ground blocks its own probe
-    elev = by_id(root, ELEVATED)
-    elev.location.z -= 6.0
+    # the carved upper part lowered into the corridor blocks the passage probe
+    upper.location.z -= 3.5
     bpy.context.view_layer.update()
 
     res, err = run_op(bpy.ops.map_builder.export)
@@ -66,7 +65,12 @@ def run(out_dir):
     ents = {e["mb_id"] for e in col.objects}
     dup_id = f"{parts[2]}~{dup.name}"
     check(dup_id in ents and parts[2] in ents, f"passages: duplicated upper part has the distinct id {dup_id!r}")
-    probes = {p["id"] for p in r.manifest["passage_probes"]}
-    check(f"osm:way/1098:passage" in probes, "passages: the building passage probe is exported")
-    check(any("passage probe" in w and "blocked" in w for w in r.warnings),
-          "passages: the elevated part moved down blocks its probe, reported as a validator warning")
+    ids_list = [p["id"] for p in r.manifest["passage_probes"]]
+    check("osm:way/1098:passage" in ids_list, "passages: the building passage probe is exported")
+    check(ELEVATED + ":under" in ids_list, "passages: the unedited elevated-part probe is still exported")
+    idx = ids_list.index("osm:way/1098:passage")
+    check(any(w.startswith(f"passage probe {idx} is blocked") for w in r.warnings),
+          f"passages: the lowered carved upper part blocks probe {idx} (:passage), reported as a validator warning")
+    other = ids_list.index(ELEVATED + ":under")
+    check(not any(w.startswith(f"passage probe {other} ") for w in r.warnings),
+          "passages: the unedited :under probe is not reported")

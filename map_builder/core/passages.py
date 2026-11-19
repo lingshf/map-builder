@@ -34,6 +34,8 @@ class _State:
         self.handled = {}     # passage feature id -> dict(a, b, t0, t1, height)
         self.reasons = {}     # passage feature id -> why no building was cut
         self.probes = []      # ids of the probes this module emitted
+        self.boxes = None     # passage feature id -> bbox, computed once
+        self.dropped = []     # probes not exported: {id, reason}
 
 
 def _state(ctx):
@@ -153,12 +155,14 @@ def split(plan, ctx, feature):
     st = _state(ctx)
     poly = feature.geometry
     box = poly.bbox()
+    if st.boxes is None:
+        st.boxes = {p.id: (min(q[0] for q in p.geometry), min(q[1] for q in p.geometry),
+                           max(q[0] for q in p.geometry), max(q[1] for q in p.geometry)) for p in passages}
     cands = []
     for p in passages:
         if p.id in st.handled:
             continue
-        xs, ys = [q[0] for q in p.geometry], [q[1] for q in p.geometry]
-        if not _bbox_overlap(box, (min(xs), min(ys), max(xs), max(ys))):
+        if not _bbox_overlap(box, st.boxes[p.id]):
             continue
         res = _crossing_of(p, poly)
         if res is not None:
@@ -241,7 +245,18 @@ def split(plan, ctx, feature):
     upper.extra_prov = {"passage": f"upper part over the corridor of {way}, built as an elevated volume from the "
                                    "passage height",
                         "passage_height": height_prov}
-    st.handled[passage.id] = {"a": a, "b": b, "t0": t0, "t1": t1, "height": clearance}
+    # The replacement is all-or-nothing: every part must be buildable (terrain humps can make a part fail), else
+    # the original building stays and nothing of the passage is staged.
+    opts = ctx.options
+    for piece in lows + [upper]:
+        try:
+            gen.build_building(piece, terrain, ctx.z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
+                               max_work=opts.max_triangulation_work)
+        except (gen.TriangulationError, gen.InvalidFeature) as e:
+            return refuse(f"the replacement part {piece.id} cannot be generated ({e})")
+    st.handled[passage.id] = {"a": a, "b": b, "t0": t0, "t1": t1, "height": clearance, "feature": passage,
+                              "note": f"{_tag_label(passage.tags)} way generated at grade under the building cut by it "
+                                      f"(passage height {clearance:.2f} m)"}
     plan.count("building_passages")
     return lows + [upper]
 
@@ -267,37 +282,29 @@ def _emit(plan, ctx, probe):
         _state(ctx).probes.append(probe["id"])
 
 
+def handled_roads(ctx):
+    """``[(passage feature, provenance note)]``: the passage ways whose building was cut. ``build_plan`` builds
+    them with the ordinary roads, so road ownership and the budget treat them like any other road."""
+    st = _state(ctx)
+    return [(info["feature"], info["note"]) for info in st.handled.values()]
+
+
 def build(plan, ctx):
     gen = _gen()
     st = _state(ctx)
     unsupported = []
+    roads = {o.mb_id for o in plan.objects if o.mb_class == "road"}
     for f in getattr(ctx.classified, "passages", ()):
         info = st.handled.get(f.id)
         if info is None:
             unsupported.append(f)
             continue
-        try:
-            mesh, origin, prov = gen.build_road(
-                f, ctx.terrain, ctx.z_offset, reserve=lambda v, t, fid=f.id: ctx.budget.reserve(fid, v, t),
-                max_work=ctx.options.max_triangulation_work, limit=ctx.budget.remaining())
-        except gen.InvalidFeature as e:
-            ctx.budget.release()
-            plan.report["invalid_features"].append({"id": f.id, "reason": str(e)})
+        if not ctx.options.roads:
             continue
-        if mesh is None:
-            ctx.budget.release()
-            plan.report["invalid_features"].append({"id": f.id, "reason": prov["reason"]})
+        if f.id not in roads:
+            st.dropped.append({"id": f"{f.id}:passage", "reason": "the passage road was not generated (see "
+                                                                  "invalid_features or the covering road)"})
             continue
-        ctx.budget.commit(mesh)
-        if prov["width"].startswith("inferred"):
-            plan.inferred("road.width")
-        prov["passage"] = (f"{_tag_label(f.tags)} way generated at grade under the building cut by it "
-                           f"(passage height {info['height']:.2f} m)")
-        ctx.add(gen.ObjectSpec(mesh.name, f.id, "road", "Roads", mesh=mesh, location=origin, provenance=prov))
-        w = prov["width_m"]
-        for a, b in zip(f.geometry, f.geometry[1:]):
-            ctx.road_segments.append((a, b, w / 2 + 1.0))
-        plan.count("roads")
         a, b = info["a"], info["b"]
         e = PROBE_RUNOUT_M / math.hypot(b[0] - a[0], b[1] - a[1])
         pts = [(a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s)
@@ -355,16 +362,97 @@ def elevated_probe(plan, ctx, feature):
     _emit(plan, ctx, _probe(ctx, f"{feature.id}:under", feature.id, pts, clearance, lambda x, y: zmax))
 
 
+def _local_plan(plan, probes, span):
+    """A view of ``plan`` holding only what a probe capsule can touch: objects whose bounding box meets a probe's
+    padded box, and for the terrain and road surfaces (faces no larger than ``span``, one terrain cell) only the
+    faces near a probe. A capsule cannot hit anything else, so the result of the check is the same as on the
+    whole scene, at a fraction of the collision-preparation cost. Other objects are kept whole."""
+    from types import SimpleNamespace
+    gen = _gen()
+    boxes = []
+    for p in probes:
+        pad = p["radius_m"] + 1.0
+        xs, ys, zs = [q[0] for q in p["path_map"]], [q[1] for q in p["path_map"]], [q[2] for q in p["path_map"]]
+        boxes.append((min(xs) - pad, min(ys) - pad, min(zs) - pad, max(xs) + pad, max(ys) + pad, max(zs) + pad))
+
+    def hit(lo, hi):
+        return any(lo[0] <= b[3] and hi[0] >= b[0] and lo[1] <= b[4] and hi[1] >= b[1]
+                   and lo[2] <= b[5] and hi[2] >= b[2] for b in boxes)
+
+    shared_r = {}
+    objs = []
+    for spec in plan.objects:
+        if spec.mesh is None:
+            md = plan.shared_meshes.get(spec.mesh_key)
+            if md is None or not md.vertices:
+                continue
+            r = shared_r.get(spec.mesh_key)
+            if r is None:
+                r = shared_r[spec.mesh_key] = (max(math.hypot(x, y) for x, y, _ in md.vertices),
+                                               min(z for _, _, z in md.vertices), max(z for _, _, z in md.vertices))
+            s = abs(spec.scale) if not isinstance(spec.scale, (tuple, list)) else max(abs(c) for c in spec.scale)
+            x, y, z = spec.location
+            if hit((x - r[0] * s, y - r[0] * s, z + r[1] * s), (x + r[0] * s, y + r[0] * s, z + r[2] * s)):
+                objs.append(spec)
+            continue
+        md = spec.mesh
+        if not md.faces:
+            continue
+        if spec.rotation_z != 0.0 or spec.scale != 1.0:
+            objs.append(spec)
+            continue
+        x0, y0, z0 = spec.location
+        vx, vy, vz = zip(*md.vertices)
+        if not hit((min(vx) + x0, min(vy) + y0, min(vz) + z0), (max(vx) + x0, max(vy) + y0, max(vz) + z0)):
+            continue
+        if spec.mb_class not in ("terrain", "road"):
+            objs.append(spec)    # solids must stay closed; other classes are small or may span the scene
+            continue
+        # a face is kept if one of its vertices is near a probe in plan view (a face spans at most one terrain cell)
+        near = [any(b[0] - span <= x + x0 <= b[3] + span and b[1] - span <= y + y0 <= b[4] + span for b in boxes)
+                for x, y in zip(vx, vy)]
+        keep = [f for f in md.faces if any(near[i] for i in f)]
+        if len(keep) == len(md.faces):
+            objs.append(spec)
+        elif keep:
+            used = sorted({i for f in keep for i in f})
+            remap = {v: k for k, v in enumerate(used)}
+            sub = gen.MeshData(md.name)
+            sub.vertices = [md.vertices[i] for i in used]
+            sub.faces = [tuple(remap[i] for i in f) for f in keep]
+            sub.face_materials = [0] * len(keep)
+            sub.face_colors = [(0.5, 0.5, 0.5)] * len(keep)
+            sub.materials = ["MB Probe Check"]
+            objs.append(gen.ObjectSpec(spec.name, spec.mb_id, spec.mb_class, spec.collection, mesh=sub,
+                                       location=spec.location))
+    return SimpleNamespace(objects=objs, shared_meshes=plan.shared_meshes)
+
+
 def finish(plan, ctx):
     """D21: probes this module emitted are checked against the finished plan; a blocked one is not exported and
-    is listed in ``report['passage_probes_blocked']`` with the blocking object's ``mb_id``."""
+    is listed in ``report['passage_probes_blocked']`` with the blocking object's ``mb_id``. The manifest holds at
+    most ``PASSAGE_PROBE_MAX`` probes: surplus probes of this module are not exported and are listed in
+    ``report['passage_probes_dropped']``."""
+    from .package import PASSAGE_PROBE_MAX
     st = _state(ctx)
     mine = [p for p in plan.passage_probes if p["id"] in st.probes]
-    if not mine:
-        return
-    _, blocked = check_probes(plan, mine)
-    if not blocked:
-        return
-    gone = {b["id"] for b in blocked}
-    plan.passage_probes[:] = [p for p in plan.passage_probes if p["id"] not in gone]
-    plan.report.setdefault("passage_probes_blocked", []).extend(blocked)
+    dropped = list(st.dropped)
+    if mine:
+        others = len(plan.passage_probes) - len(mine)
+        room = max(0, PASSAGE_PROBE_MAX - others)
+        _, blocked = check_probes(_local_plan(plan, mine[:PASSAGE_PROBE_MAX], 1.5 * ctx.terrain.spacing),
+                                  mine[:PASSAGE_PROBE_MAX])
+        gone = {b["id"] for b in blocked}
+        survivors = [p for p in mine[:PASSAGE_PROBE_MAX] if p["id"] not in gone]
+        for p in survivors[room:]:
+            dropped.append({"id": p["id"], "reason": f"the manifest holds at most {PASSAGE_PROBE_MAX} passage probes"})
+            gone.add(p["id"])
+        for p in mine[PASSAGE_PROBE_MAX:]:
+            dropped.append({"id": p["id"], "reason": f"the manifest holds at most {PASSAGE_PROBE_MAX} passage probes"})
+            gone.add(p["id"])
+        if gone:
+            plan.passage_probes[:] = [p for p in plan.passage_probes if p["id"] not in gone]
+        if blocked:
+            plan.report.setdefault("passage_probes_blocked", []).extend(blocked)
+    if dropped:
+        plan.report.setdefault("passage_probes_dropped", []).extend(dropped)

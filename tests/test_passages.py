@@ -1,7 +1,7 @@
 """Building passages (core/passages.py, D24) and the probe under elevated parts (D21)."""
 
 import unittest
-
+from unittest import mock
 from map_builder.core.generate import PlanOptions, build_plan
 from map_builder.core.osm import Classified, Feature
 from map_builder.core.query import capsule_hits
@@ -122,6 +122,74 @@ class PassageFallbackTest(unittest.TestCase):
 
     def test_already_elevated_building(self):
         self.check_unchanged(plan_for([building(BLD, height="12", min_height="4")], [passage()]), "min_height")
+
+
+class ReviewRound1Test(unittest.TestCase):
+    def test_failing_lower_parts_keep_the_building_whole(self):
+        h = [[0.0] * 11 for _ in range(11)]
+        h[5][5] = 6.0          # a hump inside the footprint: the lower parts cannot be generated
+        plan = plan_for([building(BLD, height="9")], [passage()], grid=make_grid(h, x0=-50, y0=-50))
+        self.assertEqual(list(parts(plan, "osm:way/1")), ["osm:way/1"])
+        self.assertEqual(plan.passage_probes, [])
+        self.assertNotIn("osm:way/2", [o.mb_id for o in plan.objects])
+        entry = plan.report["unsupported_features"][0]
+        self.assertEqual(entry["id"], "osm:way/2")
+        self.assertIn("osm:way/1#1 cannot be generated", entry["reason"])
+
+    def test_passage_road_goes_through_road_ownership(self):
+        from .test_scene_generation import road
+
+        def faces(passages):
+            cl = Classified()
+            cl.buildings = [building(BLD, height="9")]
+            cl.passages = passages
+            cl.roads = [road([(-60, 0), (60, 0)], fid="osm:way/5", highway="service")]
+            plan = build_plan(tiny_area(), flat_grid(), cl, OPTS)
+            return plan, sum(len(o.mesh.faces) for o in plan.objects if o.mb_class == "road" and o.mesh)
+
+        plan, with_passage = faces([passage()])
+        _, without = faces([])
+        self.assertEqual(with_passage, without)      # the shared ribbon is emitted once
+        roads = {o.mb_id for o in plan.objects if o.mb_class == "road"}
+        for p in plan.passage_probes:
+            self.assertIn(p["feature"], roads)
+
+    def test_probe_needs_the_passage_road(self):
+        opts = PlanOptions(trees=False, roads=False)
+        cl = Classified()
+        cl.buildings = [building(BLD, height="9")]
+        cl.passages = [passage()]
+        plan = build_plan(tiny_area(), flat_grid(), cl, opts)
+        self.assertEqual([p for p in plan.passage_probes if p["id"].endswith(":passage")], [])
+        self.assertNotIn("osm:way/2", [o.mb_id for o in plan.objects])
+
+    def test_manifest_probe_cap_is_enforced(self):
+        from unittest import mock
+        from map_builder.core import package
+        under = [building(rect_ccw(100 * k, 100, 100 * k + 10, 110), fid=f"osm:way/{10 + k}", height="12",
+                          min_height="6") for k in range(3)]
+        grid = flat_grid(n=11, spacing=40.0, x0=-50.0, y0=-50.0)
+        with mock.patch.object(package, "PASSAGE_PROBE_MAX", 2):
+            plan = plan_for(under, grid=grid)
+        self.assertEqual(len(plan.passage_probes), 2)
+        dropped = plan.report["passage_probes_dropped"]
+        self.assertEqual(len(dropped), 1)
+        self.assertIn("at most 2", dropped[0]["reason"])
+
+    def test_finished_scene_check_is_local(self):
+        from map_builder.core import passages as structures
+        seen = []
+        real = structures.check_probes
+
+        def spy(plan, probes, *a, **k):
+            seen.append(sum(len(o.mesh.faces) for o in plan.objects if o.mesh))
+            return real(plan, probes, *a, **k)
+
+        with mock.patch.object(structures, "check_probes", spy):
+            plan = plan_for([building(BLD, height="12", min_height="6")])
+        total = sum(len(o.mesh.faces) for o in plan.objects if o.mesh)
+        self.assertEqual(len(seen), 1)
+        self.assertLess(seen[0], total)      # the 10 x 10 cell terrain is pruned to the probe's surroundings
 
 
 class ElevatedProbeTest(unittest.TestCase):
