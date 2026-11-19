@@ -14,6 +14,7 @@ archive. It binds the payload only after every member has been verified against 
 """
 
 import copy
+import datetime
 import hashlib
 import json
 import math
@@ -91,15 +92,15 @@ HEIGHTFIELD_TOL_M = 1e-3
 
 _MB_ID = re.compile(r"(osm:(node|way|relation)/\d+|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+_UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
 
 
 def is_utc_timestamp(s):
-    """True for a real calendar instant written as YYYY-MM-DDTHH:MM:SS[.fff]Z."""
+    """True for a real calendar instant written as YYYY-MM-DDTHH:MM:SS[.fff]Z (ASCII digits)."""
     if not isinstance(s, str) or not _UTC.fullmatch(s):
         return False
     try:
-        time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
+        datetime.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
     except ValueError:
         return False
     return True

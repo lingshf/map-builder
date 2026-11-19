@@ -156,7 +156,8 @@ class SyntheticSampleTest(unittest.TestCase):
         cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cli)
         args = [a if a != "2026-01-01T00:00:00Z" else "2026-01-01 00:00" for a in BUILD_ARGS]
-        for bad in (args, [a if a != "2026-01-01T00:00:00Z" else "2026-02-30T00:00:00Z" for a in BUILD_ARGS]):
+        for bad in (args, [a if a != "2026-01-01T00:00:00Z" else "2026-02-30T00:00:00Z" for a in BUILD_ARGS],
+                    [a if a != "2026-01-01T00:00:00Z" else "2026-01-01T00:00:60Z" for a in BUILD_ARGS]):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as cm:
                     cli.main(bad + ["--out", os.path.join(tempfile.gettempdir(), "never_written.mbmap")])
@@ -165,7 +166,8 @@ class SyntheticSampleTest(unittest.TestCase):
     def test_validator_rejects_impossible_created_utc(self):
         from map_builder.core.package import is_utc_timestamp
         self.assertTrue(is_utc_timestamp("2024-02-29T23:59:59.5Z"))
-        for bad in ("2026-02-30T00:00:00Z", "2026-13-01T00:00:00Z", "2026-01-01T24:00:00Z", None):
+        for bad in ("2026-02-30T00:00:00Z", "2026-13-01T00:00:00Z", "2026-01-01T24:00:00Z",
+                    "2026-01-01T00:00:60Z", "2026-01-01T00:00:61Z", "2026-01-01T00:00:00.\u0661Z", None):
             self.assertFalse(is_utc_timestamp(bad), bad)
 
 

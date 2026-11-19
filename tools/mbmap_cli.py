@@ -21,7 +21,7 @@ from map_builder.core.generate import PlanOptions  # noqa: E402
 from map_builder.core.package import is_utc_timestamp, validate_package  # noqa: E402
 from map_builder.core.pipeline import Settings, build_package  # noqa: E402
 
-_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+_UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 
 def main(argv=None):
