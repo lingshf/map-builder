@@ -97,7 +97,7 @@ _UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 # HTTP Authorization-style headers and bearer/basic credentials.
 _CREDENTIAL_NAMES = (r"api[_-]?key|apikey|key|access[_-]?key|token|access[_-]?token|refresh[_-]?token|id[_-]?token"
                      r"|auth|password|passwd|pwd|secret|client[_-]?secret|signature|sig|x-amz-[a-z-]+")
-_SECRET = re.compile(r"(?i)((?:^|[?&;#\s])(?:" + _CREDENTIAL_NAMES + r")=)"
+_SECRET = re.compile(r"(?i)((?:^|[^a-z0-9_-])(?:" + _CREDENTIAL_NAMES + r")=)"
                      r"|([a-z][a-z0-9+.-]*://[^/\s@?#]*@)"
                      r"|(\b(?:proxy-)?authorization\s*[:=])|(\bx-api-key\s*[:=])"
                      r"|(\bbearer\s+[a-z0-9._~+/-]{8,})|((?-i:\bBasic)\s+[A-Za-z0-9+/]{12,}={0,2})")

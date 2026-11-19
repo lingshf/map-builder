@@ -1,0 +1,23 @@
+schema_version = "1.0.0"
+
+id = "map_builder"
+version = "0.1.0"
+name = "Map Builder"
+tagline = "Real-terrain OSM scenes exported as validated map packages"
+maintainer = "map-builder contributors"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+# Licence of the add-on code. Assumed GPL-3.0-or-later (required for Blender
+# add-ons that import bpy); confirm before publishing.
+license = ["SPDX:GPL-3.0-or-later"]
+
+tags = ["Import-Export", "Scene"]
+
+[permissions]
+network = "Download Copernicus DEM tiles and OpenStreetMap data"
+files = "Read elevation/OSM files, write caches and map packages"
+
+[build]
+paths_exclude_pattern = ["__pycache__/", "*.pyc"]
