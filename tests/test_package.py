@@ -1501,6 +1501,17 @@ class ReviewRound2Test(TempDirCase):
         col = read_collision(write_collision([ColObject("b", "osm:way/9", "building", list(m.vertices),
                                                         [tuple(t) for t in m.triangles()])]))
         self.assertEqual(pkg.collision_orientation_problems(col), [])
+        # a building collapsed by a zero scale has no solid left (round 6)
+        for sx, sy, sz in ((0, 0, 1), (1, 1, 0)):
+            flat = MeshData("flat")
+            for v in outer.vertices:
+                flat.add_vertex(v[0] * sx, v[1] * sy, v[2] * sz)
+            for f in outer.faces:
+                flat.add_face(f, "MB Wall", (0.7, 0.7, 0.7))
+            col = read_collision(write_collision([ColObject("b", "osm:way/9", "building", list(flat.vertices),
+                                                            [tuple(t) for t in flat.triangles()])]))
+            probs = pkg.collision_orientation_problems(col)
+            self.assertTrue(any("no closed shell with positive volume" in p for p in probs), probs)
         # package level: visual and collision agree, so only the independent orientation check catches it
         bad = obj("twin", "osm:way/9", "building", merged_mesh([(box_mesh(60, 60, 70, 70, 0, 10), False),
                                                                 (box_mesh(80, 60, 85, 65, 0, 5), True)]))

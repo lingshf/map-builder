@@ -686,6 +686,9 @@ def _building_problems(k, tris):
         problems.append(f"{tag}: shell {s} of {n} has signed volume {vol:.6g} m^3; every shell must have "
                         "positive volume (faces CCW seen from outside). Inverted shells and enclosed "
                         "cavities are not supported in v1")
+    if not any(vol > 0.0 for _st, vol in shells):
+        problems.append(f"{tag} has no closed shell with positive volume (collapsed or flattened, e.g. by a zero "
+                        "scale); a building collision object must be a solid")
     return problems
 
 
