@@ -97,7 +97,12 @@ def acquire(area, settings, client=None, progress=None):
     """Returns (ElevationGrid, Classified, sources list). Raises on any failure; never substitutes data.
     The terrain grid limit is checked first, before any file or network access. The heightfield limit
     belongs to package export (see :func:`build_package`); acquisition and plans produce no heightfield."""
-    grid_layout(area, settings.terrain_spacing)
+    x0, y0, nx, ny = grid_layout(area, settings.terrain_spacing)
+    # The grid may overshoot the area on the +x/+y sides by up to one spacing; DSM mask candidates are
+    # selected against the grid extent (osm.classify mask_extent), so Overpass fetches that overshoot plus
+    # the usual 30 m margin (generated content is still selected against the area).
+    overshoot = max(0.0, x0 + (nx - 1) * settings.terrain_spacing - area.half[0],
+                    y0 + (ny - 1) * settings.terrain_spacing - area.half[1])
     client = client or HttpClient()
     cache = DiskCache(settings.cache_dir) if settings.cache_dir else NullCache()
     if settings.elevation_source == "file":
@@ -112,8 +117,11 @@ def acquire(area, settings, client=None, progress=None):
     else:
         osm = fetch_overpass(area, client, settings.overpass_url, cache,
                              allow_cache_override=settings.allow_cache_override,
-                             cache_dataset_id=settings.osm_cache_dataset_id)
-    classified = classify(osm, area)
+                             cache_dataset_id=settings.osm_cache_dataset_id,
+                             margin_m=30.0 + math.ceil(overshoot))
+    s = grid.spacing
+    classified = classify(osm, area, mask_extent=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * s,
+                                                  grid.y0 + (grid.ny - 1) * s))
     return grid, classified, [dict(grid.provenance), osm_source_entry(osm, settings.osm_license)]
 
 
@@ -301,11 +309,18 @@ def elevation_correction_note(correction):
     """Text for the elevation source entry (``processing``) when the DSM correction was applied, else None."""
     if not (correction or {}).get("applied"):
         return None
-    return (f"DSM terrain correction applied by map-builder (derived; raw source data unchanged): "
-            f"{correction['masked_points']} of {correction['total_points']} terrain points under buildings, "
-            f"trees, forest and bridge decks were lowered toward the surrounding ground (max "
-            f"{correction['max_lowering_m']:g} m, mean {correction['mean_lowering_m']:g} m); an approximation, "
-            "not a bare-earth DTM. See report.json terrain_correction.")
+    masked, total = correction["masked_points"], correction["total_points"]
+    lowered = correction.get("lowered_points", 0)
+    if not lowered:
+        return (f"DSM terrain correction ran (map-builder, derived; raw source data unchanged) but lowered no "
+                f"points: {masked} of {total} terrain points lie under buildings, trees, forest or bridge decks "
+                "and none was above the interpolated surrounding ground; the terrain equals the source. See "
+                "report.json terrain_correction.")
+    return (f"DSM terrain correction applied by map-builder (derived; raw source data unchanged): {lowered} of "
+            f"{total} terrain points ({masked} masked under buildings, trees, forest and bridge decks) were "
+            f"lowered toward the surrounding ground (max {correction['max_lowering_m']:g} m, mean over the masked "
+            f"points {correction['mean_lowering_m']:g} m); an approximation, not a bare-earth DTM. See report.json "
+            "terrain_correction.")
 
 
 def generate_plan(area, settings, client=None, progress=None):

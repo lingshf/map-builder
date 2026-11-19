@@ -357,7 +357,10 @@ counted in `edits.removed` and listed in `report.json`.
     buildings where the terrain reaches the roof underside, footprints or trees outside
     the terrain extent, landcover with invalid ring topology, and rejected building parts
   * `terrain_correction`: the DSM correction outcome (`applied`, `setting`, `reason`,
-    `masked_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, mask parameters).
+    `masked_points`, `lowered_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, and
+    once the fill ran `fill_cycles`, `fill_residual_m`, `fill_converged`; mask parameters, feature
+    counts, `excluded_invalid` and `rasterisation_work`). A fill that did not converge is not
+    applied (`reason: fill did not converge`).
     Informative only; when applied, the elevation entry in `sources` also has an optional
     `processing` string (sources are an open object, so this is not a format change)
   * counts and warnings

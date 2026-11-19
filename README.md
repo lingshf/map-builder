@@ -60,16 +60,31 @@ the surrounding ground before the terrain, roads and buildings are built.
 * Masked DEM points are those within 15 m of a building footprint (all buildings, including
   courtyards), within 6 m of a `natural=tree`, inside `landuse=forest`/`natural=wood`, or within
   width/2 + 15 m of a `highway`/`railway` way with `bridge=*` (not `no`).
+* Only valid polygons are masked: building footprints and forest areas whose rings fail the same
+  topology check as generation (e.g. a hole crossing its outer ring), or exceed the footprint
+  vertex limit, are left out and counted in `mask.excluded_invalid`.
+* Mask candidates are selected against the terrain grid extent, not the area: buildings, trees and
+  bridge ways just outside the area still mask the edge samples within their buffer, but are not
+  generated. Online acquisition fetches OSM for the area plus 30 m (plus the grid's overshoot of
+  the area, below one spacing) for this.
 * Masked points are filled by harmonic (Laplace) interpolation from the unmasked ground. The
-  equation is solved coarse to fine (multigrid: a nested-iteration guess from halved grids, then
-  V-cycles of red-black Gauss-Seidel until the largest update is below 5 mm). The work is linear in
-  the grid size. A plane, such as a uniform slope, is reproduced under a masked area. The fill is
-  smooth and never goes above or below the surrounding unmasked heights. The result is
+  equation is solved coarse to fine (multigrid: a nested-iteration guess from coarsened grids, with
+  semi-coarsening along the long axis of elongated grids, then V- or W-cycles of red-black
+  Gauss-Seidel until the largest update is below 5 mm). The work is linear in the grid size and
+  bounded. A plane, such as a uniform slope, is reproduced under a masked area that is enclosed by
+  unmasked ground; where the mask reaches the grid edge, the fill is levelled towards that edge.
+  The fill is smooth and never goes above or below the surrounding unmasked heights. The result is
   `min(original, filled)`: terrain is never raised and unmasked points are not changed.
-* If fewer than 5 % of the points are unmasked, the correction is skipped with a warning.
+* The correction is skipped with a warning, and the uncorrected surface model used, if fewer than
+  5 % of the points are unmasked, if the mask rasterisation would exceed its work budget
+  (20 000 000 edge and row-crossing units), or if the fill does not converge within its bounded
+  cycles (a fill that has not converged is never applied). These do not fail the build; the hard
+  input limits (feature count, grid size) still do.
 * `report.json` gets a `terrain_correction` entry (`applied`, `setting`, `reason`,
-  `masked_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`, mask parameters and
-  feature counts). When applied, the terrain's `surface` provenance becomes
+  `masked_points`, `lowered_points`, `total_points`, `max_lowering_m`, `mean_lowering_m`,
+  `fill_cycles`, `fill_residual_m`, `fill_converged`, mask parameters and feature counts).
+  `lowered_points` counts the masked points that actually went down; the `processing` note says
+  so, or that the correction ran but lowered no points. When applied, the terrain's `surface` provenance becomes
   `inferred:DSM corrected (…)` and the elevation source carries a `processing` note, also shown in
   `NOTICES.txt`. Source hashes and the raw elevation provenance are unchanged.
 
@@ -149,7 +164,10 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
   reveal ground that differs from the surrounding points, such as hills or hollows inside a big
   forest, cuttings, or river banks under a bridge. Where a masked area touches the edge of the
   area, the fill there is levelled towards the edge (zero slope across it). `man_made=bridge`
-  outlines are not masked (only the bridge ways are), and bridge ways are clipped to the area.
+  outlines are not masked (only the bridge ways are). Features outside the area mask the edge only
+  if they are in the OSM input: online that is the area plus 30 m (plus the grid overshoot), so a
+  very wide bridge deck more than about 30 m outside can be missed; a local OSM file is used in
+  full. Invalid footprints and forest polygons are not masked.
 * The target size is about 1 × 1 km. There is no streaming, no LOD generation and no
   frame-rate or performance guarantee.
 * The online paths (Copernicus download, Overpass, and online acquisition inside Blender) are

@@ -475,5 +475,254 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(tc["setting"], {0: "auto"}.get(len(flag), "on" if applied else "off"))
 
 
+def _idx(g, x, y):
+    return int(round((y - g.y0) / g.spacing)) * g.nx + int(round((x - g.x0) / g.spacing))
+
+
+class ReviewRound1Test(unittest.TestCase):
+    """Regression tests for the PR #11 round-1 review findings. All data SYNTHETIC."""
+
+    AREA = (47.0, 8.0, 100.0, 100.0)
+
+    # --- finding 1: ring topology is validated before the mask is built -----------------------------------
+
+    def test_invalid_forest_does_not_lower_terrain_outside_it(self):
+        outer = square(0, 0, 20)
+        hole = square(25, 0, 8)[::-1]      # CW hole crossing the outer ring at x = 20 (x 17..33)
+        # the hazard: even-odd rasterising of these rings marks points outside the forest
+        g = make_grid(ground, n=41, spacing=2.5)
+        self.assertTrue(dsm.build_mask(g, forests=[[outer, hole]]).mask[_idx(g, 30, 0)])
+
+        def h(x, y):   # 20 m "canopy" both inside the forest and in the crossing hole's outside part
+            return ground(x, y) + (20.0 if max(abs(x), abs(y)) <= 20 or (20 < x <= 33 and abs(y) <= 8) else 0.0)
+        g = make_grid(h, n=41, spacing=2.5)
+        cl = Classified()
+        cl.areas.append(Feature("osm:relation/9", "area", {"landuse": "forest", "_class": "forest"},
+                                Polygon(outer, [hole])))
+        plan = build_plan(Area(*self.AREA), g, cl, PlanOptions(trees=False))
+        self.assertIn("osm:relation/9", {e["id"] for e in plan.report["invalid_features"]})
+        tc = plan.report["terrain_correction"]
+        self.assertEqual(tc["mask"]["features"]["forest_areas"], 0)
+        self.assertEqual(tc["mask"]["excluded_invalid"], {"forest_areas": 1})
+        self.assertFalse(tc["applied"])
+        self.assertEqual(tc["reason"], "nothing to mask")
+        terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+        z = plan.report["z_offset_m"]
+        for (i, j, x, y), v in zip(points(g), terrain.mesh.vertices):
+            self.assertAlmostEqual(v[2] + z, g.heights[j][i], places=6, msg=(x, y))
+
+    def test_invalid_building_footprints_are_excluded_from_the_mask(self):
+        bowtie = [(-10.0, -10.0), (10.0, 10.0), (10.0, -10.0), (-10.0, 10.0)]   # self-intersecting
+        cl = Classified()
+        cl.buildings.append(Feature("osm:way/1", "building", {"building": "yes"}, Polygon(bowtie)))
+        cl.outside_buildings.append(Feature("osm:way/2", "building", {"building": "yes"},
+                                            Polygon([(p[0] + 55.0, p[1]) for p in bowtie])))
+        cl.buildings.append(Feature("osm:way/3", "building", {"building": "yes"}, Polygon(square(-30, -30, 4))))
+        excluded = {}
+        buildings, _, _, _ = dsm_obstacles(cl, excluded=excluded)
+        self.assertEqual(buildings, [[square(-30, -30, 4)]])
+        self.assertEqual(excluded, {"buildings": 2})
+        # too many ring vertices: excluded like the generator would reject it
+        excluded = {}
+        buildings, _, _, _ = dsm_obstacles(cl, max_ring_vertices=3, excluded=excluded)
+        self.assertEqual((buildings, excluded), ([], {"buildings": 3}))
+        g = make_grid(lambda x, y: ground(x, y) + (9.0 if max(abs(x), abs(y)) <= 10 else 0.0), n=21, spacing=6.0)
+        plan = build_plan(Area(*self.AREA), g, cl, PlanOptions(trees=False))
+        tc = plan.report["terrain_correction"]
+        self.assertEqual(tc["mask"]["features"]["buildings"], 1)
+        self.assertEqual(tc["mask"]["excluded_invalid"], {"buildings": 2})
+        terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+        z = plan.report["z_offset_m"]
+        k = _idx(g, 0, 0)
+        self.assertAlmostEqual(terrain.mesh.vertices[k][2] + z, g.heights[10][10], places=6)   # bowtie: unchanged
+
+    # --- finding 2: rasteriser memory and work budget ------------------------------------------------------
+
+    def test_many_holes_rasterise_in_bounded_memory(self):
+        import tracemalloc
+        nx, ny = 76, 2001
+        g = ElevationGrid(0.0, 0.0, 1.0, nx, ny, [[0.0] * nx for _ in range(ny)], dict(COPERNICUS))
+        outer = [(-1.0, -1.0), (77.0, -1.0), (77.0, 2002.0), (-1.0, 2002.0)]
+        holes = [[(x, -0.5), (x, 2001.5), (x + 0.05, 2001.5), (x + 0.05, -0.5)]
+                 for x in (0.52 + 0.15 * k for k in range(500))]          # 500 tall CW slivers
+        tracemalloc.start()
+        try:
+            m = dsm.build_mask(g, forests=[[outer] + holes])
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 8 * 1024 * 1024, peak)   # the old all-crossings rasteriser used ~63 MiB
+        for j in (0, 1000, 2000):
+            for i in range(nx):
+                inside_hole = any(x < i < x + 0.05 for x in (0.52 + 0.15 * k for k in range(500)))
+                self.assertEqual(bool(m.mask[j * nx + i]), not inside_hole, (i, j))
+        self.assertGreater(m.work, 1000 * ny)
+
+    def test_work_budget_is_checked_before_any_terrain_change(self):
+        from map_builder.core.errors import LimitError
+        g = make_grid(lambda x, y: ground(x, y) + (9.0 if max(abs(x), abs(y)) <= 8 else 0.0))
+        fp = [[square(0, 0, 8)]]
+        need = dsm.build_mask(g, buildings=fp).work
+        self.assertEqual(dsm.build_mask(g, buildings=fp, work_budget=need).work, need)
+        with self.assertRaises(LimitError):
+            dsm.build_mask(g, buildings=fp, work_budget=need - 1)
+        before = [list(r) for r in g.heights]
+        out, entry, warning = dsm.apply_correction(g, True, buildings=fp, work_budget=need - 1)
+        self.assertIs(out, g)
+        self.assertEqual(g.heights, before)
+        self.assertFalse(entry["applied"])
+        self.assertEqual(entry["reason"], "mask rasterisation work budget exceeded")
+        self.assertIn("DSM terrain correction skipped", warning)
+        out, entry, warning = dsm.apply_correction(g, True, buildings=fp, work_budget=need)
+        self.assertTrue(entry["applied"])
+        self.assertEqual(entry["mask"]["rasterisation_work"], need)
+
+    # --- finding 3: the fill converges on elongated grids or is skipped -------------------------------------
+
+    def test_elongated_grid_fill_converges_or_is_skipped(self):
+        nx, ny, s = 5001, 51, 30.0
+
+        def plane(x):
+            return 100.0 + 0.04 * x
+        heights = [[plane(i * s) + (20.0 if 500 <= i < 4500 else 0.0) for i in range(nx)] for _ in range(ny)]
+        g = ElevationGrid(0.0, 0.0, s, nx, ny, heights, dict(COPERNICUS))
+        mask = bytearray(1 if 500 <= i < 4500 else 0 for _ in range(ny) for i in range(nx))   # a 120 km strip
+        out, stats = dsm.correct_grid(g, mask)
+        self.assertIn("fill_cycles", stats)
+        self.assertIn("fill_residual_m", stats)
+        if out is None:
+            self.assertEqual(stats["skipped"], "fill did not converge")
+            self.assertFalse(stats["fill_converged"])
+            return
+        self.assertTrue(stats["fill_converged"])
+        self.assertLessEqual(stats["fill_cycles"], dsm.vcycle_cap(nx, ny))
+        err = max(abs(out.heights[j][i] - plane(i * s)) for j in range(ny) for i in range(nx))
+        self.assertLess(err, 0.5)
+
+    def test_fill_that_does_not_converge_is_not_applied(self):
+        g, mask = _plane_with_square(129, 2.0, 50.0, bump=10.0)
+        out, entry, warning = dsm.apply_correction(g, True, buildings=[[square(0, 0, 30)]])
+        self.assertTrue(entry["applied"])
+        self.assertTrue(entry["fill_converged"])
+        self.assertGreaterEqual(entry["fill_cycles"], 1)
+        self.assertLessEqual(entry["fill_residual_m"], dsm.VCYCLE_TOLERANCE_M)
+        cap = dsm.vcycle_cap
+        dsm.vcycle_cap = lambda nx, ny: 0
+        try:
+            out, entry, warning = dsm.apply_correction(g, True, buildings=[[square(0, 0, 30)]])
+        finally:
+            dsm.vcycle_cap = cap
+        self.assertIs(out, g)
+        self.assertFalse(entry["applied"])
+        self.assertEqual(entry["reason"], "fill did not converge")
+        self.assertFalse(entry["fill_converged"])
+        self.assertEqual(entry["fill_cycles"], 0)
+        self.assertGreater(entry["fill_residual_m"], dsm.VCYCLE_TOLERANCE_M)
+        self.assertIn("did not converge", warning)
+
+    # --- finding 4: mask candidates just outside the area ---------------------------------------------------
+
+    def _edge_osm(self):
+        b = OsmBuilder()
+        ids = {"building": b.way(square(62, 0, 6), {"building": "yes"}, closed=True),   # x 56..68, area edge 50
+               "tree": b.node(53.0, -20.0, {"natural": "tree"}),
+               "bridge": b.way([(-70.0, -62.0), (70.0, -62.0)], {"highway": "primary", "bridge": "yes"}),
+               "far": b.way(square(200, 0, 6), {"building": "yes"}, closed=True),
+               "far_tree": b.node(80.0, 0.0, {"natural": "tree"})}
+        return parse_osm_xml(b.xml().encode()), ids
+
+    def test_features_just_outside_the_area_are_mask_candidates_only(self):
+        data, ids = self._edge_osm()
+        area = Area(*self.AREA)
+        cl = classify(data, area, mask_extent=(-50.0, -50.0, 55.0, 55.0))
+        self.assertEqual([f.id for f in cl.outside_buildings], [f"osm:way/{ids['building']}"])
+        self.assertEqual([f.id for f in cl.mask_trees], [f"osm:node/{ids['tree']}"])
+        self.assertEqual(cl.trees, [])
+        self.assertEqual([f.id for f in cl.bridges], [f"osm:way/{ids['bridge']}"])
+        self.assertTrue(all(abs(p[1] + 62.0) < 1e-3 for p in cl.bridges[0].geometry))
+        self.assertEqual(cl.buildings, [])
+        self.assertEqual(cl.roads, [])
+        self.assertNotIn(f"osm:way/{ids['bridge']}", {u["id"] for u in cl.unsupported})   # outside the area
+        # every candidate counts toward max_features
+        from map_builder.core.errors import LimitError
+        with self.assertRaises(LimitError):
+            classify(data, area, max_features=2, mask_extent=(-50.0, -50.0, 55.0, 55.0))
+        classify(data, area, max_features=3, mask_extent=(-50.0, -50.0, 55.0, 55.0))
+
+        # edge samples under them are masked and lowered; none of them is generated
+        def h(x, y):
+            bump = 15.0 if (x >= 50 and abs(y) <= 6) or math.hypot(x - 53, y + 20) <= 3 or y <= -45 else 0.0
+            return ground(x, y) + bump
+        # -50..55: the grid overshoots the area by 5 m on the +x/+y sides
+        g = ElevationGrid(-50.0, -50.0, 5.0, 22, 22, [[h(-50 + i * 5.0, -50 + j * 5.0) for i in range(22)]
+                                                      for j in range(22)], dict(COPERNICUS))
+        plan = build_plan(area, g, cl, PlanOptions(trees=True, seed=1))
+        tc = plan.report["terrain_correction"]
+        self.assertTrue(tc["applied"])
+        self.assertEqual(tc["mask"]["features"], {"buildings": 1, "trees": 1, "forest_areas": 0, "bridges": 1})
+        terrain = next(o for o in plan.objects if o.mb_class == "terrain")
+        z = plan.report["z_offset_m"]
+        for x, y in ((50.0, 0.0), (55.0, 0.0), (50.0, -20.0), (0.0, -50.0)):
+            k = _idx(g, x, y)
+            self.assertLess(terrain.mesh.vertices[k][2] + z, g.heights[k // g.nx][k % g.nx] - 5.0, (x, y))
+        self.assertEqual([o.mb_class for o in plan.objects], ["terrain"])   # nothing generated outside
+
+    def test_default_mask_extent_is_the_area(self):
+        data, ids = self._edge_osm()
+        cl = classify(data, Area(*self.AREA))
+        self.assertEqual([f.id for f in cl.outside_buildings], [f"osm:way/{ids['building']}"])   # within 15 m
+        self.assertEqual([f.id for f in cl.mask_trees], [f"osm:node/{ids['tree']}"])             # within 6 m
+        self.assertEqual(len(cl.bridges), 1)
+
+    def test_online_acquisition_fetches_the_grid_overshoot_plus_a_margin(self):
+        from map_builder.core import pipeline
+        seen = {}
+        data, _ = self._edge_osm()
+
+        def fake_fetch(area, client, *a, **kw):
+            seen.update(kw)
+            return data
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        _, dem, _ = write_synthetic_fixtures(tmp.name)
+        orig = pipeline.fetch_overpass
+        pipeline.fetch_overpass = fake_fetch
+        try:
+            settings = Settings(elevation_source="file", elevation_file=dem, elevation_vertical_datum="SYNTHETIC",
+                                elevation_license="SYNTHETIC", terrain_spacing=30.0)
+            grid, cl, _ = pipeline.acquire(Area(*self.AREA), settings, client=object())
+        finally:
+            pipeline.fetch_overpass = orig
+        # 100 m at 30 m spacing: 5 points, -50..70, so the grid overshoots the area by 20 m
+        self.assertEqual((grid.nx, grid.x0), (5, -50.0))
+        self.assertEqual(seen["margin_m"], 50.0)
+        self.assertTrue(all(abs(p[1] + 62.0) < 1e-3 for p in cl.bridges[0].geometry))
+
+    # --- finding 5: lowered points and the provenance note --------------------------------------------------
+
+    def test_lowered_points_and_note(self):
+        from map_builder.core.pipeline import elevation_correction_note
+        bump = make_grid(lambda x, y: ground(x, y) + (6.0 if math.hypot(x, y) <= 6.0 else 0.0), n=41, spacing=1.0)
+        _, entry, _ = dsm.apply_correction(bump, True, trees=[(0.0, 0.0)])
+        self.assertTrue(entry["applied"])
+        self.assertGreater(entry["lowered_points"], 100)
+        self.assertLessEqual(entry["lowered_points"], entry["masked_points"])
+        note = elevation_correction_note(entry)
+        self.assertIn(f"{entry['lowered_points']} of {entry['total_points']} terrain points", note)
+        self.assertIn(f"{entry['masked_points']} masked", note)
+        pit = make_grid(lambda x, y: ground(x, y) - (5.0 if math.hypot(x, y) <= 6.0 + 1e-6 else 0.0), n=41,
+                        spacing=1.0)
+        out, entry, _ = dsm.apply_correction(pit, True, trees=[(0.0, 0.0)])
+        self.assertTrue(entry["applied"])
+        self.assertGreater(entry["masked_points"], 100)
+        self.assertEqual(entry["lowered_points"], 0)
+        self.assertEqual(out.heights, pit.heights)
+        note = elevation_correction_note(entry)
+        self.assertIn("ran", note)
+        self.assertIn("lowered no points", note)
+        self.assertNotIn("were lowered", note)
+        self.assertIsNone(elevation_correction_note({"applied": False}))
+
+
 if __name__ == "__main__":
     unittest.main()

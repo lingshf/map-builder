@@ -67,8 +67,9 @@ def _validated_overpass(body, description):
 
 
 def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False,
-                   cache_dataset_id=None):
-    """``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
+                   cache_dataset_id=None, margin_m=30.0):
+    """Fetches the area plus ``margin_m`` on each side (the margin supplies DSM mask candidates near the
+    edge, see :func:`classify`; generated content is still selected against the area). ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
     by a caller that knows the alternative endpoint's terms permit caching. Caching an override also
     requires a caller-chosen, credential-free ``cache_dataset_id``: endpoint paths (which may embed
     credentials) never appear in cache keys, metadata, diagnostics or provenance."""
@@ -88,7 +89,7 @@ def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cac
             if cache_dataset_id is None:
                 raise ValueError("allow_cache_override requires an explicit, credential-free cache_dataset_id")
             cache_scope = "override:" + check_cache_dataset_id(cache_dataset_id, url)
-    s, w, n, e = area.geographic_bbox(margin_m=30.0)
+    s, w, n, e = area.geographic_bbox(margin_m=margin_m)
     q = overpass_query(s, w, n, e)
     description = f"overpass:{endpoint}"
     key = f"{OSM_DATASET_ID}|{cache_scope}\n{q}"
@@ -391,12 +392,16 @@ class Classified:
         # on terrain and on the roof actually built), so generation checks the emitted meshes'
         # map-frame Z extents and warns only then. Bounded by the part/outline pair limit.
         self.overlap_candidates = []
-        # Not generated, kept for the DSM terrain correction mask (core/dsm.py): highway/railway ways
-        # tagged bridge=* (other than "no"), clipped to the area (kind "bridge"; they are still reported in
-        # ``unsupported``), and building footprints whose centroid lies outside the area (counted in
-        # ``outside``) but which may still overlap the terrain grid near the area edge.
+        # Not generated, kept for the DSM terrain correction mask (core/dsm.py). Selected against the mask
+        # extent (the DEM grid extent; default the area) expanded by each feature's mask buffer, so that
+        # features just outside the area still mask the edge samples: highway/railway ways tagged bridge=*
+        # (other than "no"), clipped to the extent + dsm.BRIDGE_CANDIDATE_MARGIN_M (kind "bridge"; those in
+        # the area are still reported in ``unsupported``), building footprints whose centroid lies outside
+        # the area (counted in ``outside``) with a bbox within the extent + the building buffer, and
+        # natural=tree nodes outside the area within the extent + the tree radius (``mask_trees``).
         self.bridges = []
         self.outside_buildings = []
+        self.mask_trees = []
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -432,7 +437,18 @@ def _unsupported_reason(tags):
     return None
 
 
-def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None):
+def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None,
+             mask_extent=None):
+    """Classified features of ``data`` for ``area``. ``mask_extent`` (x0, y0, x1, y1 in the map frame,
+    default the area rectangle) is the terrain grid extent used to select the DSM mask candidates
+    (``bridges``, ``outside_buildings``, ``mask_trees``); generated features are always selected against
+    the area. Every kept feature, mask candidates included, counts toward ``max_features``."""
+    from .dsm import BRIDGE_CANDIDATE_MARGIN_M, BUILDING_BUFFER_M, TREE_RADIUS_M
+    if mask_extent is None:
+        mask_extent = (-area.half[0], -area.half[1], area.half[0], area.half[1])
+    bridge_rect = _expand(mask_extent, BRIDGE_CANDIDATE_MARGIN_M)
+    building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
+    tree_rect = _expand(mask_extent, TREE_RADIUS_M)
     if max_part_pair_checks is None:
         max_part_pair_checks = MAX_PART_PAIR_CHECKS
     if max_association_work is None:
@@ -608,7 +624,7 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
                 continue
             if ("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no":
-                bparts = _clip_polyline(pts, area)
+                bparts = _clip_polyline(pts, area, bridge_rect)
                 for k, part in enumerate(bparts):
                     out.bridges.append(Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part))
             if "highway" not in tags:
@@ -641,7 +657,7 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
         if "building" in tags or "building:part" in tags:
             if not area.contains(cx, cy):
                 out.outside += 1
-                if any(_bbox_overlaps(p.bbox(), area) for p in polys):
+                if any(_rect_overlaps(p.bbox(), building_rect) for p in polys):
                     out.outside_buildings.extend(Feature(fid, "building", tags, p) for p in polys)
                 continue
             reason = _unsupported_reason(tags)
@@ -669,11 +685,13 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
             x, y = frame.to_local(lat, lon)
             if area.contains(x, y):
                 out.trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
+            elif tree_rect[0] <= x <= tree_rect[2] and tree_rect[1] <= y <= tree_rect[3]:
+                out.mask_trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
 
     # Enforced before building:part matching: replaced outlines are retained (outline_features)
     # and so count, exactly like the parts and the other buildings still in ``out.buildings``.
     total = (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.bridges)
-             + len(out.outside_buildings))
+             + len(out.outside_buildings) + len(out.mask_trees))
     if total > max_features:
         raise LimitError(f"{total} features exceed the limit of {max_features}; choose a smaller area")
     _resolve_building_parts(out, max_pair_checks=max_part_pair_checks, max_work=max_association_work,
@@ -1047,8 +1065,16 @@ def _area_family(tags):
 
 def _bbox_overlaps(bbox, area):
     hx, hy = area.half
+    return _rect_overlaps(bbox, (-hx, -hy, hx, hy))
+
+
+def _rect_overlaps(bbox, rect):
     x0, y0, x1, y1 = bbox
-    return x1 >= -hx and x0 <= hx and y1 >= -hy and y0 <= hy
+    return x1 >= rect[0] and x0 <= rect[2] and y1 >= rect[1] and y0 <= rect[3]
+
+
+def _expand(rect, margin):
+    return rect[0] - margin, rect[1] - margin, rect[2] + margin, rect[3] + margin
 
 
 def area_class(tags):
@@ -1073,13 +1099,15 @@ def _subset(tags):
     return {k: v for k, v in tags.items() if k in _KEEP_TAGS}
 
 
-def _clip_polyline(pts, area):
-    """Clip a polyline to the area rectangle; returns list of parts (>=2 pts)."""
-    hx, hy = area.half
+def _clip_polyline(pts, area, rect=None):
+    """Clip a polyline to the area rectangle (or ``rect`` = (x0, y0, x1, y1)); returns list of parts (>=2 pts)."""
+    if rect is None:
+        hx, hy = area.half
+        rect = (-hx, -hy, hx, hy)
     parts = []
     cur = []
     for a, b in zip(pts, pts[1:]):
-        seg = _clip_segment(a, b, -hx, -hy, hx, hy)
+        seg = _clip_segment(a, b, *rect)
         if seg is None:
             if len(cur) >= 2:
                 parts.append(cur)
