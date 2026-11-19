@@ -16,8 +16,43 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import demo_bundle as db  # noqa: E402
 
-PANEL_LIMIT = ("`panel.png` not produced: background Blender has no window or OpenGL context, so "
-               "`bpy.ops.screen.screenshot` cannot capture the sidebar (known limit; the UI is not faked)")
+PANEL_LIMIT = ("`panel.png` not produced: no Mesa (llvmpipe) Blender copy configured, and background Blender has "
+               "no window or OpenGL context (see tools/demo/README.md, \"Panel screenshot\")")
+PANEL_DONE = "`panel.png`: the real Map Builder sidebar in Blender's UI (software OpenGL via Mesa llvmpipe)"
+ENV_MESA = "MB_DEMO_BLENDER_MESA"
+
+
+def find_mesa_blender(flag):
+    """Path of the separate Blender copy that has Mesa's opengl32.dll next to blender.exe, or None."""
+    path = flag or os.environ.get(ENV_MESA)
+    if path and os.path.isfile(path) and os.path.isfile(os.path.join(os.path.dirname(path), "opengl32.dll")):
+        return path
+    return None
+
+
+def run_panel(blender, pkg, preset, out_dir):
+    """Screenshot of the add-on panel via panel_shot.py in a windowed Blender; (ok, note)."""
+    import subprocess
+    area = preset["area"]
+    png = os.path.join(out_dir, "panel.png")
+    if os.path.exists(png):
+        os.remove(png)
+    with tempfile.TemporaryDirectory() as td:
+        glb = os.path.join(td, "map.glb")
+        with open(glb, "wb") as f:
+            f.write(pkg["glb"])
+        cmd = [blender, "--factory-startup", "--enable-event-simulate", "--python",
+               os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_shot.py"), "--",
+               "--glb", glb, "--out", png, "--lat", str(area["lat"]), "--lon", str(area["lon"]),
+               "--width", str(area["width_m"]), "--height", str(area["height_m"]),
+               "--name", str(pkg["manifest"].get("name", "map"))]
+        try:
+            subprocess.run(cmd, timeout=180, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return False, f"`panel.png` not produced: Mesa Blender failed ({type(e).__name__})"
+    if os.path.isfile(png):
+        return True, PANEL_DONE
+    return False, "`panel.png` not produced: the Mesa Blender run did not write a screenshot"
 
 
 def parse_args(argv):
@@ -27,6 +62,9 @@ def parse_args(argv):
     ap.add_argument("--before", default=None, help="previous .mbmap (adds -before renders)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--bundle-only", action="store_true", help="skip renders (viewer, probes, summary only)")
+    ap.add_argument("--panel", action="store_true",
+                    help="also write panel.png using the Mesa Blender copy (--mesa-blender or $%s)" % "MB_DEMO_BLENDER_MESA")
+    ap.add_argument("--mesa-blender", default=None, help="blender.exe of a separate copy with Mesa opengl32.dll")
     return ap.parse_args(argv)
 
 
@@ -122,9 +160,18 @@ def main(argv):
         if before is not None:
             render_package(before, preset, "before", a.out)
     expected = db.render_names(preset, before is not None) if not a.bundle_only else []
-    db.write_viewer(a.out, after)
+    probes = db.probe_results(after)
+    db.write_viewer(a.out, after, probes)
     note = "Panel screenshot: " + PANEL_LIMIT
-    text = db.summary_md(preset, after, db.probe_results(after), expected, note, before)
+    if a.panel:
+        mesa = find_mesa_blender(a.mesa_blender)
+        if mesa:
+            ok, note = run_panel(mesa, after, preset, a.out)
+            if ok:
+                expected = expected + ["panel.png"]
+        else:
+            print("--panel: no Mesa Blender copy found; skipping panel.png", file=sys.stderr)
+    text = db.summary_md(preset, after, probes, expected, note, before)
     with open(os.path.join(a.out, "summary.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     print("demo written to", a.out)

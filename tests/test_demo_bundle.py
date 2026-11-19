@@ -49,12 +49,12 @@ class PresetTests(unittest.TestCase):
 class BundleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.pkg = db.read_package(SAMPLE)
+        cls.pkg = db.read_package(SAMPLE, verify=False)  # verification is covered by the tamper test and real runs
 
     def test_viewer_bundle(self):
         out = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, out, True)
-        z = db.write_viewer(out, self.pkg)
+        z = db.write_viewer(out, self.pkg, db.probe_results(self.pkg))
         for f in db.VIEWER_FILES:
             self.assertTrue(os.path.isfile(os.path.join(out, "viewer", f)), f)
         names = db.zip_listing(z)
@@ -85,6 +85,34 @@ class BundleTests(unittest.TestCase):
         self.assertIn("| high | bridge |", md)
         self.assertIn("BLOCKED", md)
         self.assertIn("render-overview-after.png", md)
+
+    def test_tampered_member_is_rejected(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        bad = os.path.join(d, "bad.mbmap")
+        with zipfile.ZipFile(SAMPLE) as zin, zipfile.ZipFile(bad, "w", zipfile.ZIP_DEFLATED) as zout:
+            for zi in zin.infolist():
+                data = zin.read(zi.filename)
+                if zi.filename == "visual/map.glb":
+                    data = data[:-1] + bytes([data[-1] ^ 1])
+                zout.writestr(zi.filename, data)
+        with self.assertRaises(db.DemoError):
+            db.read_package(bad)
+
+    def test_probe_budget_is_shared(self):
+        pkg = dict(self.pkg)
+        m = json.loads(json.dumps(pkg["manifest"]))
+        feat = m["objects"][0]["mb_id"]
+        m["passage_probes"] = [{"id": "p%d" % i, "kind": "bridge", "feature": feat,
+                                "path_map": [[0, 0, 500], [1, 0, 500]], "radius_m": 1} for i in range(3)]
+        pkg["manifest"] = m
+        saved = db.PASSAGE_QUERY_BUDGET
+        db.PASSAGE_QUERY_BUDGET = 100
+        self.addCleanup(setattr, db, "PASSAGE_QUERY_BUDGET", saved)
+        res = [p["result"] for p in db.probe_results(pkg)]
+        self.assertEqual(res[0], "PASS")
+        self.assertIn("UNCHECKED", res)
+        self.assertNotIn("BLOCKED", res)
 
     def test_vendor_files_present(self):
         for rel in ("three.module.min.js", "jsm/loaders/GLTFLoader.js", "jsm/controls/OrbitControls.js"):

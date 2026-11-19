@@ -101,11 +101,15 @@ async function main() {
   if (!pp.length) list.innerHTML = "<li>none in this package</li>";
   for (const p of pp) {
     const ok = p.result === "PASS";
-    const mat = new THREE.MeshBasicMaterial({ color: ok ? 0x18c24a : 0xe0212a, transparent: true, opacity: 0.55 });
+    const color = ok ? 0x18c24a : p.result === "UNCHECKED" ? 0x888888 : 0xe0212a;
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 });
     const pts = p.path_gltf;
     for (let i = 0; i + 1 < pts.length || i === 0; i++) scene.add(capsule(pts[i], pts[Math.min(i + 1, pts.length - 1)], p.radius_m, mat));
     const li = document.createElement("li");
-    li.innerHTML = `<span class="${ok ? "pass" : "blocked"}">${p.result}</span> ${p.id} (${p.kind}, r=${p.radius_m} m)`;
+    const status = document.createElement("span");
+    status.className = ok ? "pass" : "blocked";
+    status.textContent = p.result;
+    li.append(status, ` ${p.id} (${p.kind}, r=${p.radius_m} m)`);
     li.title = p.blocked_by.length ? "blocked by " + p.blocked_by.join(", ") : "";
     li.onclick = () => {
       const m = new THREE.Vector3(...pts[Math.floor(pts.length / 2)]);

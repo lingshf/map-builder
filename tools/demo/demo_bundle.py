@@ -15,7 +15,8 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 from map_builder.core.collision import read_collision  # noqa: E402
-from map_builder.core.package import package_id_of  # noqa: E402
+from map_builder.core.errors import LimitError  # noqa: E402
+from map_builder.core.package import PASSAGE_QUERY_BUDGET, package_id_of, validate_package  # noqa: E402
 from map_builder.core.query import capsule_hits  # noqa: E402
 
 PRESET_DIR = os.path.join(HERE, "presets")
@@ -79,38 +80,59 @@ def load_preset(name_or_path):
     return validate_preset(p)
 
 
-def read_package(path):
-    """{'manifest', 'glb', 'collision', 'notices'} of a .mbmap (a zip); members are read by manifest path."""
-    with zipfile.ZipFile(path) as z:
-        raw = z.read("manifest.json")
-        m = json.loads(raw.decode("utf-8"))
-        return {"manifest": m, "package_id": package_id_of(raw), "glb": z.read(m["visual"]["path"]),
-                "collision": z.read(m["collision"]["path"]),
-                "notices": z.read(m.get("notices", "NOTICES.txt")).decode("utf-8")}
+def read_package(path, verify=True):
+    """{'manifest', 'package_id', 'glb', 'collision', 'notices'} of a .mbmap. With ``verify`` (the default; only
+    tests turn it off) the package validator's bounded, hash-verified reader must accept the package first,
+    so a damaged or mismatched package never yields images or probe results under its identity."""
+    pid = None
+    if verify:
+        r = validate_package(path)
+        if not r.ok:
+            raise DemoError(f"package is not valid:\n{r.summary()}")
+        pid = r.package_id
+    try:
+        with zipfile.ZipFile(path) as z:
+            raw = z.read("manifest.json")
+            m = json.loads(raw.decode("utf-8"))
+            return {"manifest": m, "package_id": pid or package_id_of(raw), "glb": z.read(m["visual"]["path"]),
+                    "collision": z.read(m["collision"]["path"]),
+                    "notices": z.read(m.get("notices", "NOTICES.txt")).decode("utf-8")}
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as e:
+        raise DemoError(f"cannot read package: {type(e).__name__}")
 
 
 def probe_results(pkg):
-    """Passage probes with a PASS/BLOCKED result against the package collision (same query as the validator)."""
+    """Passage probes with PASS / BLOCKED / UNCHECKED against the package collision. Like the validator, all
+    probes share one PASSAGE_QUERY_BUDGET; once it runs out the remaining probes are UNCHECKED (reported,
+    never passed or blocked, and the demo carries on)."""
     col = read_collision(pkg["collision"])
+    left = PASSAGE_QUERY_BUDGET
     out = []
     for p in pkg["manifest"].get("passage_probes", []):
-        hits = capsule_hits(col, p["path_map"], p["radius_m"])
+        hits, status = [], None
+        try:
+            res = capsule_hits(col, p["path_map"], p["radius_m"], max_work=left, result=True)
+            left -= res.work
+            hits = res.objects
+            status = "BLOCKED" if hits else "PASS"
+        except LimitError:
+            left = 0
+            status = "UNCHECKED"
         out.append({"id": p["id"], "kind": p["kind"], "feature": p["feature"], "radius_m": p["radius_m"],
                     "path_map": p["path_map"],
                     # map (x, y, z) -> glTF/three (x, z, -y)
                     "path_gltf": [[x, z, -y] for x, y, z in p["path_map"]],
-                    "result": "BLOCKED" if hits else "PASS",
+                    "result": status,
                     "blocked_by": [col.objects[k]["name"] for k in hits[:5]]})
     return out
 
 
-def probes_json(pkg):
+def probes_json(pkg, probes):
     m = pkg["manifest"]
     return {"package_id": pkg["package_id"], "name": m.get("name"), "area": m.get("area"),
-            "passage_probes": probe_results(pkg)}
+            "passage_probes": probes}
 
-
-def write_viewer(out_dir, pkg):
+def write_viewer(out_dir, pkg, probes):
     """out_dir/viewer/ (+ viewer.zip): static three.js page, map.glb, probes.json, NOTICES.txt, vendor/.
     The zip listing is deterministic (sorted names, fixed timestamps)."""
     vdir = os.path.join(out_dir, "viewer")
@@ -120,7 +142,7 @@ def write_viewer(out_dir, pkg):
     with open(os.path.join(vdir, "map.glb"), "wb") as f:
         f.write(pkg["glb"])
     with open(os.path.join(vdir, "probes.json"), "w", encoding="utf-8", newline="\n") as f:
-        json.dump(probes_json(pkg), f, indent=1, sort_keys=True)
+        json.dump(probes_json(pkg, probes), f, indent=1, sort_keys=True)
         f.write("\n")
     with open(os.path.join(vdir, "NOTICES.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write(pkg["notices"])

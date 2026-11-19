@@ -19,10 +19,23 @@ synthetic area; 3 cameras x 2 packages is about 3 minutes). Never port 8765.
 **Probe results** are computed with the package's own collision (`capsule_hits`, same query as the
 validator): green PASS / red BLOCKED capsules in the viewer, a table in `summary.md`.
 
-**Panel screenshot (`panel.png`): known limit.** Background Blender has no window or OpenGL context
-(EEVEE/Workbench crash too), so `bpy.ops.screen.screenshot` cannot capture the sidebar; `summary.md`
-records this instead of faking the UI. Trying Mesa llvmpipe in a separate Blender copy is left as a
-follow-up if a UI screenshot becomes necessary.
+**Panel screenshot (`panel.png`, optional `--panel`).** Background Blender has no window or OpenGL
+context, so the sidebar is captured by a second, windowed Blender run (`panel_shot.py`) on a separate
+Blender copy that uses Mesa llvmpipe (software OpenGL). One-time setup:
+
+1. Download `release-msvc.7z` from https://github.com/pal1000/mesa-dist-win/releases and extract it.
+2. Copy a portable Blender 4.2 folder to a new location (never modify your main install).
+3. Copy everything from the extracted `x64` folder next to the copy's `blender.exe`
+   (`opengl32.dll` is the important one).
+4. Pass `--mesa-blender <path>\blender.exe` or set `MB_DEMO_BLENDER_MESA`.
+
+`py ... run_demo.py -- --preset synthetic --after pkg.mbmap --panel` then writes `panel.png` (Map Builder
+tab open, map in the viewport; about 20 s). Without a configured copy, or if the run fails, the step is
+skipped and `summary.md` records why instead of faking the UI. The tab click is a simulated event
+calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in `panel_shot.py`.
+
+`make_probe_sample.py out.mbmap` derives a small package with three passage probes (PASS, BLOCKED, and
+an id containing markup) from the synthetic sample, for viewer smoke tests.
 
 ## Preset format (`presets/<name>.json`)
 
