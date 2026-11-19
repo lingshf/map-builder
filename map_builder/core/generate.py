@@ -25,6 +25,7 @@ import hashlib
 import math
 import random
 import re
+import struct
 
 from . import dsm, roofs
 from .errors import LimitError, MapBuilderError
@@ -1169,6 +1170,40 @@ def _ribbon_faces(grid, pieces, groups, work):
                     yield i, j, upper, X0, Y0, out
 
 
+SLIVER_AREA_M2 = 1e-3  # xy area under which a face that is not up-facing once stored (float32) is dropped
+
+
+def _f32(v):
+    return struct.unpack("<f", struct.pack("<f", v))[0]
+
+
+def drop_unstorable_slivers(local, tris, loc):
+    """Draped ribbons are stored as float32 world positions; a needle-thin face (clip residue
+    on a steep slope) can lose its orientation in that rounding although it is up-facing in
+    double precision, and the package validator then rejects the surface. Returns
+    ``(tris, dropped)`` without the faces whose stored normal is not up (z <= 0) and whose xy
+    area is below ``SLIVER_AREA_M2``; ``(None, None)`` if a larger face fails (fold)."""
+    from .collision import is_degenerate
+    W = [(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local]
+    keep = []
+    dropped = 0
+    for t in tris:
+        a, b, c = (W[i] for i in t)
+        ux, uy, uz, vx, vy, vz = b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]
+        nz = ux * vy - uy * vx
+        la, lb, lc = (local[i] for i in t)
+        area2 = (lb[0] - la[0]) * (lc[1] - la[1]) - (lb[1] - la[1]) * (lc[0] - la[0])
+        if area2 <= 0:
+            return None, None
+        if nz <= 0 and not is_degenerate(a, b, c):
+            if area2 / 2 > SLIVER_AREA_M2:
+                return None, None
+            dropped += 1
+            continue
+        keep.append(t)
+    return keep, dropped
+
+
 def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WORK, ownership=None, limit=None):
     """Returns (mesh, location, provenance), or (None, None, {"reason": ...}) if no valid ribbon exists.
 
@@ -1221,27 +1256,35 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
                                           f"{_id_list(owners)}; no faces of its own (represented by them)",
                                 "covered_by": owners}
         return None, None, {"reason": "road ribbon lies outside the terrain extent; no ribbon generated"}
-    if reserve is not None:
-        reserve(len(verts), len(tris))
     gx0, gy0, gx1, gy1 = terrain_extent(terrain)
     clipped = any(b[0] < gx0 or b[1] > gx1 or b[2] < gy0 or b[3] > gy1 for b in (_bbox(p) for p in pieces))
 
     cx = sum(p[0] for p in pts) / len(pts)
     cy = sum(p[1] for p in pts) / len(pts)
     z0 = terrain_height(terrain, *pts[0]) - z_offset + ROAD_LIFT_M
-    mesh = MeshData(f"road_{short_name(feature.id)}")
-    color = (0.12, 0.12, 0.12) if feature.tags.get("highway") not in FOOT else (0.35, 0.32, 0.28)
     s = terrain.spacing
+    local = []
     for x, y, i, j, upper in verts:
         h = _plane_height(terrain.heights, i, j, upper, (x - (gx0 + i * s)) / s, (y - (gy0 + j * s)) / s)
-        mesh.add_vertex(x - cx, y - cy, h - z_offset + ROAD_LIFT_M - z0)
+        local.append((x - cx, y - cy, h - z_offset + ROAD_LIFT_M - z0))
+    tris, dropped = drop_unstorable_slivers(local, tris, (cx, cy, z0))
+    if dropped is None:
+        return None, None, {"reason": "road ribbon would contain folded faces; not generated"}
+    if dropped:
+        used = sorted({v for t in tris for v in t})
+        remap = {v: k for k, v in enumerate(used)}
+        local = [local[v] for v in used]
+        tris = [tuple(remap[v] for v in t) for t in tris]
+        if not tris:
+            return None, None, {"reason": "road ribbon has only sliver faces; not generated"}
+    if reserve is not None:
+        reserve(len(local), len(tris))
+    mesh = MeshData(f"road_{short_name(feature.id)}")
+    color = (0.12, 0.12, 0.12) if feature.tags.get("highway") not in FOOT else (0.35, 0.32, 0.28)
+    for v in local:
+        mesh.add_vertex(*v)
     for t in tris:
         mesh.add_face(t, "MB Road", color)
-    # Guarantee: never emit folded (downward-facing) faces.
-    V = mesh.vertices
-    for a, b, c in mesh.triangles():
-        if (V[b][0] - V[a][0]) * (V[c][1] - V[a][1]) - (V[b][1] - V[a][1]) * (V[c][0] - V[a][0]) <= 0:
-            return None, None, {"reason": "road ribbon would contain folded faces; not generated"}
     if ownership is not None:
         for i, j, upper, polys in faces:
             ownership.add((j, i, upper), polys, feature.id)
