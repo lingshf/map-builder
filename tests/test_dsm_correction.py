@@ -90,8 +90,8 @@ class MaskTest(unittest.TestCase):
         cl = classify(parse_osm_xml(b.xml().encode()), Area(47.0, 8.0, 100.0, 100.0))
         self.assertEqual(sorted(f.id for f in cl.bridges), sorted([f"osm:way/{wid}", f"osm:way/{rid}"]))
         unsup = {u["id"] for u in cl.unsupported}
-        self.assertIn(f"osm:way/{wid}", unsup)
-        self.assertIn(f"osm:way/{rid}", unsup)
+        self.assertIn(f"osm:way/{rid}", unsup)   # railway: still reported by classify
+        self.assertEqual([f.id for f in cl.structure_bridges], [f"osm:way/{wid}"])   # routed to its stage
         self.assertIn(f"osm:way/{nid}", {r.id for r in cl.roads})
         _, _, _, bridges = dsm_obstacles(cl)
         widths = sorted(w for _, w in bridges)

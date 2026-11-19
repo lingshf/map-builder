@@ -487,6 +487,15 @@ class Classified:
         # Margin-only candidates (``mask_areas`` and margin-only ``outside_buildings``) are not topology
         # checked here; generate.dsm_obstacles validates them under the mask validation work budget.
         self.bridges = []
+        # Structure features inside the area (D18), routed here instead of ``unsupported``; the stage modules
+        # (core/bridges.py, tunnels.py, passages.py) own them and report them as unsupported until they are
+        # generated. ``structure_bridges`` holds the in-area highway bridge ways (the ``bridges`` list above
+        # is the extent-clipped DSM mask candidate list: it also holds railways and exists only when the
+        # mask is available). Features carry the whole way's polyline clipped to the area.
+        self.structure_bridges = []
+        self.tunnels = []
+        self.passages = []
+        self.route_seq = 0
         self.outside_buildings = []
         self.mask_trees = []
         self.mask_areas = []
@@ -508,9 +517,16 @@ ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "e
 MIN_HOLE_AREA_M2 = 0.01  # inner rings below this are degenerate: the feature is reported, never filled
 
 
+def is_bridge(tags):
+    """The one bridge-tag decision, shared by the DSM mask candidates, the generation routing
+    (:func:`structure_kind`) and :func:`_unsupported_reason`: ``bridge`` set and not ``no``."""
+    b = tags.get("bridge")
+    return bool(b) and b != "no"
+
+
 def _unsupported_reason(tags):
     """Shared v1 support check, applied before a way/relation enters any road, building or area list."""
-    if tags.get("bridge") and tags.get("bridge") != "no":
+    if is_bridge(tags):
         return "bridge (under-bridge flight and elevated decks are not supported in v1; omitted)"
     mm = tags.get("man_made")
     if mm == "bridge":
@@ -532,6 +548,25 @@ def _unsupported_reason(tags):
         pass   # a non-integer layer (e.g. "1;2", "-1.5") is not treated as below ground
     if tags.get("location") in ("underground", "underwater"):
         return f"location={tags['location']} (not supported in v1; omitted)"
+    return None
+
+
+def structure_kind(tags):
+    """Routing class of a highway way that :func:`_unsupported_reason` rejects: ``"bridge"``, ``"tunnel"``,
+    ``"passage"`` (``tunnel=building_passage`` or ``covered=yes``) or None (still unsupported: culverts,
+    ``layer<0``, ``location=underground`` ...). ``man_made`` and ``building=bridge`` never route (D25)."""
+    if (tags.get("man_made") in ("bridge", "tunnel") or "bridge" in (tags.get("building"), tags.get("building:part"))
+            or tags.get("location") in ("underground", "underwater")):
+        return None   # D25: stays unsupported whatever else the way is tagged
+    if is_bridge(tags):
+        return "bridge"
+    t = tags.get("tunnel")
+    if t == "building_passage":
+        return "passage"
+    if t and t != "no":
+        return None if t == "culvert" else "tunnel"
+    if tags.get("covered") == "yes":
+        return "passage"
     return None
 
 
@@ -853,7 +888,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
             pts = way_points(nids) if surface_mask_eligible(tags) else None
             if pts is not None:
                 add(fid, tags, _mask_polygons([pts], [], work))
-        elif (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"):
+        elif (("highway" in tags or "railway" in tags) and is_bridge(tags)):
             pts = way_points(nids)
             if pts is not None:
                 bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent), max_parts=allowance.left)
@@ -1060,7 +1095,7 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             if pts is None:
                 out.invalid.append({"id": fid, "reason": "way references missing nodes"})
                 continue
-            if (("highway" in tags or "railway" in tags) and tags.get("bridge") and tags.get("bridge") != "no"
+            if (("highway" in tags or "railway" in tags) and is_bridge(tags)
                     and not out.mask_unavailable):
                 bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent),
                                         max_parts=max_features - _mask_count(out))
@@ -1082,7 +1117,17 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             # e.g. highway=corridor + tunnel=building_passage is never silently dropped.
             reason = _unsupported_reason(tags)
             if reason:
-                out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
+                kind = structure_kind(tags)
+                if kind is None:
+                    out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
+                else:
+                    target = {"bridge": out.structure_bridges, "tunnel": out.tunnels, "passage": out.passages}[kind]
+                    for k, part in enumerate(parts):
+                        feat = Feature(fid if len(parts) == 1 else f"{fid}#{k}", kind, tags, part)
+                        # where the entry sat in ``unsupported`` before routing: the stages report in place
+                        feat.report_pos = (len(out.unsupported), out.route_seq)
+                        out.route_seq += 1
+                        target.append(feat)
                 continue
             if tags["highway"] in ROAD_EXCLUDE:
                 continue

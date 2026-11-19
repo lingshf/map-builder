@@ -98,6 +98,16 @@ class BakeTransformTest(unittest.TestCase):
             expected = vol0 * abs(scale[0] * scale[1] * scale[2])
             self.assertAlmostEqual(vol, expected, places=6, msg=str(scale))
 
+    def test_mirrored_tube_keeps_its_inward_winding(self):
+        from map_builder.core.collision import ColObject, read_collision, write_collision
+        from map_builder.core.package import collision_orientation_problems
+        from map_builder.core.structures import sweep
+        md = sweep([(-1.0, 0.0), (1.0, 0.0), (1.0, 2.0), (-1.0, 2.0)], [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0)], False)
+        for scale in ((1.0, 1.0, 1.0), (-1.0, 1.0, 1.0), (1.0, -1.0, 1.0)):
+            b = bake_object("t", md.vertices, list(md.triangles()), trs((3.0, 4.0, 1.0), 0.4, scale))
+            col = read_collision(write_collision([ColObject("t", "osm:way/1", "tunnel", b.vertices, b.triangles)]))
+            self.assertEqual(collision_orientation_problems(col), [], str(scale))
+
     def test_loose_vertices_are_dropped_and_reindexed(self):
         verts = [(0, 0, 0), (9, 9, 9), (1, 0, 0), (0, 1, 0)]
         b = bake_object("t", verts, [(0, 2, 3)], trs(loc=(1.0, 2.0, 3.0)))
