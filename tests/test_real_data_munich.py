@@ -95,8 +95,14 @@ class MunichRealDataTest(unittest.TestCase):
                 mesh = self.objects[mb_id].mesh
                 verts = mesh.vertices
                 top = max(v[2] for v in verts)
-                self.assertAlmostEqual(top - eave, rise, delta=TOL, msg=mb_id)
-                roof_verts = [i for i, v in enumerate(verts) if v[2] > eave + TOL]
+                base = min(v[2] for v in verts) + 0.3                    # terrain is z = 0; the foundation is 0.3 m below
+                self.assertAlmostEqual(base, 0.0, delta=TOL, msg=mb_id)
+                # the eave is measured from the mesh: the lowest vertex above the foundation is the wall top
+                measured_eave = min(v[2] for v in verts if v[2] > base + TOL)
+                self.assertAlmostEqual(measured_eave - base, eave, delta=TOL, msg=mb_id)     # wall height
+                self.assertAlmostEqual(top - measured_eave, rise, delta=TOL, msg=mb_id)      # roof rise
+                self.assertAlmostEqual(top - base, eave + rise, delta=TOL, msg=mb_id)        # total height
+                roof_verts = [i for i, v in enumerate(verts) if v[2] > measured_eave + TOL]
                 self.assertTrue(roof_verts, mb_id)
                 faces_on_roof = [f for f in mesh.faces if any(i in roof_verts for i in f)]
                 if shape == "gabled":
@@ -111,7 +117,7 @@ class MunichRealDataTest(unittest.TestCase):
                 else:
                     heights = {round(verts[i][2], 1) for i in roof_verts}
                     self.assertGreater(len(heights), 2, mb_id)           # sloped plane, not a flat lid
-                    low = [v for v in verts if eave - TOL <= v[2] <= eave + TOL]
+                    low = [v for v in verts if abs(v[2] - measured_eave) <= TOL]
                     self.assertTrue(low, mb_id)                          # slope starts at the eave
 
     def test_unmodellable_real_roofs_report_their_fallback(self):
