@@ -25,11 +25,20 @@ Ring = list[Pt]
 Extent = tuple[float, float, float, float]   # x0, y0, x1, y1
 Tags = Mapping[str, str]
 Report = dict[str, object]   # {id, reason[, tags]}
-# Any: expat attribute dicts; the required ones are validated in start()/_finish() (``.get`` may yield None).
-_Attrs = dict[str, Any]
-# (element type, attributes, tags, items): items are node-ref strings for a way, (type, ref, role) for a relation.
-# Any: element kind decides the item type; converted to ints in _finish.
-_Element = tuple[str, Any, dict[str, str], list[Any]]   # Any: the attribute dict, see _Attrs
+_Attrs = dict[str, str]   # expat attribute values are always str; ``.get`` yields None for a missing one
+
+
+class _Element:
+    """A top-level node/way/relation being parsed: way ``<nd ref>`` strings in ``refs``, relation members
+    ``(type, ref, role)`` in ``members`` (all converted to ints in _finish)."""
+    __slots__ = ("kind", "attrs", "tags", "refs", "members")
+
+    def __init__(self, kind: str, attrs: _Attrs) -> None:
+        self.kind = kind
+        self.attrs = attrs
+        self.tags: dict[str, str] = {}
+        self.refs: list[str] = []
+        self.members: list[tuple[str, str, str]] = []
 
 
 class _ParseState(TypedDict):
@@ -219,7 +228,7 @@ def parse_osm_xml(data: str | bytes, description: str = "<osm>", max_elements: i
             if state["top"] > max_elements:
                 raise LimitError(f"{description}: more than {max_elements} OSM elements")
             if name in ("node", "way", "relation"):
-                state["cur"] = (name, attrs, {}, [])
+                state["cur"] = _Element(name, attrs)
             elif name == "meta":
                 out.timestamp = attrs.get("osm_base")
         elif depth == 3 and state["cur"] is not None:
@@ -231,19 +240,19 @@ def parse_osm_xml(data: str | bytes, description: str = "<osm>", max_elements: i
                 if k is None or v is None:
                     raise FormatError(f"{description}: malformed <tag> in top-level OSM element #{state['top']} "
                                       "(k and v are required)")
-                cur[2][k] = v
-            elif name == "nd" and cur[0] == "way":
+                cur.tags[k] = v
+            elif name == "nd" and cur.kind == "way":
                 ref = attrs.get("ref")
                 if ref is None:
                     raise FormatError(f"{description}: malformed <nd> in top-level OSM element #{state['top']} "
                                       "(ref is required)")
-                cur[3].append(ref)
-            elif name == "member" and cur[0] == "relation":
+                cur.refs.append(ref)
+            elif name == "member" and cur.kind == "relation":
                 t, ref = attrs.get("type"), attrs.get("ref")
                 if t is None or ref is None:
                     raise FormatError(f"{description}: malformed <member> in top-level OSM element "
                                       f"#{state['top']} (type and ref are required)")
-                cur[3].append((t, ref, attrs.get("role") or ""))
+                cur.members.append((t, ref, attrs.get("role") or ""))
         if name == "remark":
             out.remarks.append("")
             state["remark"] = depth
@@ -253,7 +262,7 @@ def parse_osm_xml(data: str | bytes, description: str = "<osm>", max_elements: i
         state["depth"] = depth - 1
         if state["remark"] == depth and name == "remark":
             state["remark"] = None
-        if depth == 2 and state["cur"] is not None and state["cur"][0] == name:
+        if depth == 2 and state["cur"] is not None and state["cur"].kind == name:
             _finish(out, state["cur"], description, state["top"])
             state["cur"] = None
 
@@ -294,17 +303,18 @@ def parse_osm_xml(data: str | bytes, description: str = "<osm>", max_elements: i
 
 
 def _finish(out: OsmData, cur: _Element, description: str, index: int) -> None:
-    kind, attrs, tags, items = cur
+    kind, attrs, tags = cur.kind, cur.attrs, cur.tags
     try:
+        # a missing attribute defaults to "" -> ValueError, reported like any other invalid number
         if kind == "node":
-            lat, lon = float(attrs.get("lat")), float(attrs.get("lon"))
+            lat, lon = float(attrs.get("lat", "")), float(attrs.get("lon", ""))
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 raise ValueError
-            out.nodes[int(attrs.get("id"))] = (lat, lon, tags)
+            out.nodes[int(attrs.get("id", ""))] = (lat, lon, tags)
         elif kind == "way":
-            out.ways[int(attrs.get("id"))] = ([int(r) for r in items], tags)
+            out.ways[int(attrs.get("id", ""))] = ([int(r) for r in cur.refs], tags)
         else:
-            out.relations[int(attrs.get("id"))] = ([(t, int(r), role) for t, r, role in items], tags)
+            out.relations[int(attrs.get("id", ""))] = ([(t, int(r), role) for t, r, role in cur.members], tags)
     except (TypeError, ValueError):
         # the element's position, never its attribute text (it may carry anything)
         raise FormatError(f"{description}: malformed <{kind}> (top-level OSM element #{index}: id, coordinates "
@@ -415,7 +425,7 @@ def _assemble_rings(way_lists: Iterable[Sequence[int]], work: _MaskWork | None =
     scan of the remaining members, the list shift removing the joined one and the vertices it adds. Closed
     members cost O(1) beyond their copy (no front removal), and prepending is O(added vertices) (a deque),
     so the uncharged work is linear in the input and every ring kept was charged its size."""
-    segs: list[Any] = []   # Any: consumed slots are set to None (never read again), the rest are list[int]
+    segs: list[list[int] | None] = []   # consumed slots are set to None (never read again)
     for w in way_lists:
         if len(w) >= 2:
             if work is not None:
@@ -429,6 +439,7 @@ def _assemble_rings(way_lists: Iterable[Sequence[int]], work: _MaskWork | None =
         rings.append(ring if isinstance(ring, list) else list(ring))
     while head < len(segs):
         first = segs[head]
+        assert first is not None
         segs[head] = None
         head += 1
         if first[0] == first[-1]:
@@ -448,6 +459,7 @@ def _assemble_rings(way_lists: Iterable[Sequence[int]], work: _MaskWork | None =
                 work.add(1 + len(segs) - head)   # the scan of the remaining members, and the shift of pop(k)
             for k in range(head, len(segs)):
                 s = segs[k]
+                assert s is not None   # slots from head on are not consumed yet
                 if s[0] == cur[-1]:
                     cur.extend(s[1:])
                 elif s[-1] == cur[-1]:
@@ -475,8 +487,8 @@ def _assemble_rings(way_lists: Iterable[Sequence[int]], work: _MaskWork | None =
 class Feature:
     report_pos: tuple[int, int]   # structure routes only: (index in ``unsupported`` before routing, route sequence)
 
-    # Any: geometry depends on ``kind``: Polygon (building/building_part/area), polyline list[Pt] (road/bridge/...)
-    # or a point Pt (tree)
+    # Any: geometry depends on ``kind`` (Polygon for building/building_part/area, list[Pt] for road/bridge/...,
+    # Pt for tree); a union would need every consumer to narrow by ``kind``, which the type system cannot see.
     def __init__(self, fid: str, kind: str, tags: Tags, geometry: Any) -> None:
         self.id: str = fid          # e.g. "osm:way/123"
         self.kind: str = kind       # building | building_part | road | area | tree
@@ -668,8 +680,15 @@ def classify(data: OsmData, area: Area, max_features: int = 50_000, max_part_pai
     return out
 
 
-# [declared outline indices, outline ids, relation ids, smallest outline (lazy)]
-_Decl = list[Any]   # Any: heterogeneous record list (frozenset[int], list[str], list[str], int | None)
+class _Decl:
+    """Declaration record shared by every component of one declared part."""
+    __slots__ = ("ois", "oids", "rels", "smallest")
+
+    def __init__(self, ois: frozenset[int], oids: list[str], rels: list[str]) -> None:
+        self.ois = ois             # declared outline indices
+        self.oids = oids           # outline ids
+        self.rels = rels           # relation ids
+        self.smallest: int | None = None   # smallest outline, set lazily
 
 
 class _MaskWorkExhausted(Exception):
@@ -1457,7 +1476,7 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
         by_base.setdefault(_base_id(o.id), []).append(oi)
     # Per part: None (undeclared) or a declaration record shared by every component of the same
     # declared part, so multipolygon x multipolygon declarations are not expanded per component:
-    # [declared outline indices (frozenset), outline ids, relation ids, smallest outline (lazy)].
+    # a _Decl: declared outline indices, outline ids, relation ids, smallest outline (lazy).
     decl_of: list[_Decl | None] = []
     decl_cache: dict[str, _Decl] = {}
     for part in parts:
@@ -1471,7 +1490,7 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
             oids = sorted({o for _, o in d if o is not None})
             ois = frozenset(oi for o in oids for oi in by_base.get(o, ()))
             work.add(len(ois) + 1)
-            rec = decl_cache[base] = [ois, oids, sorted({r for r, _ in d}), None]
+            rec = decl_cache[base] = _Decl(ois, oids, sorted({r for r, _ in d}))
         decl_of.append(rec)
     candidates: list[list[int]] = [[] for _ in parts]
     n_pairs = 0
@@ -1536,7 +1555,7 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
         dec = decl_of[pi]
         within: set[int] = set()
         if dec is not None:
-            ois, oids, rels = dec[0], dec[1], dec[2]
+            ois, oids, rels = dec.ois, dec.oids, dec.rels
             within = {oi for oi in candidates[pi]
                       if oi in ois and part_within_outline(g, outlines[oi].geometry, tol, work)}
             if within:
@@ -1545,10 +1564,10 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
                 n_missed = len(oids) - len(bases)  # bases is a subset of oids
                 if n_missed > 0:
                     shown: list[str] = []
-                    for o in oids:  # stops after at most len(bases) + 10 ids
+                    for oid in oids:  # stops after at most len(bases) + 10 ids
                         work.add(1)
-                        if o not in bases:
-                            shown.append(o)
+                        if oid not in bases:
+                            shown.append(oid)
                             if len(shown) == 10:
                                 break
                     more = f", ... ({n_missed - len(shown)} more)" if n_missed > len(shown) else ""
@@ -1558,10 +1577,10 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
                         f"{', '.join(shown)}{more} too but does not lie within them; it belongs to "
                         f"{outlines[owner[pi]].id} only")
             elif ois:
-                if dec[3] is None:
+                if dec.smallest is None:
                     work.add(len(ois))
-                    dec[3] = min(ois, key=size)
-                owner[pi] = dec[3]
+                    dec.smallest = min(ois, key=size)
+                owner[pi] = dec.smallest
                 rejected.add(pi)
                 out.invalid.append({"id": part.id, "reason": (
                     f"building:part does not lie within its declared outline {_ids(oids)} (building relation "
@@ -1573,7 +1592,7 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
                     f"{part.id}: building:part of building relation {_ids(rels)} whose declared {what} not "
                     "available as a building outline (missing, outside the area, invalid or unsupported); "
                     "the part is generated standalone and not matched to any other outline")
-            exempt = ois
+            exempt: frozenset[int] | set[int] = ois
         else:
             within = {oi for oi in candidates[pi] if part_within_outline(g, outlines[oi].geometry, tol, work)}
             if within:

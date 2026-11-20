@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
 
-from .collision import Collision, ColObject, f32, read_collision, write_collision
+from .collision import Collision, CollisionEntry, ColObject, f32, read_collision, write_collision
 from .glb import node_scale
 from .mesh import MeshData
 from .query import DEFAULT_MAX_WORK, capsule_hits
@@ -30,7 +30,28 @@ Vec2 = tuple[float, float]
 Color = tuple[float, float, float]
 Segment = tuple[Vec2, Vec2, float]
 Region = tuple[float, float, float, float]
-Probe = dict[str, Any]          # Any: probe entries are free-form manifest dicts ({id, feature, path_map, radius_m, ...})
+class Probe(TypedDict):
+    """A passage probe, a manifest ``passage_probes`` entry."""
+    id: str
+    kind: str
+    feature: str
+    path_map: list[list[float]]
+    radius_m: float
+
+
+class ProbeBlock(TypedDict):
+    """A ``passage_probes_blocked`` report entry: ``blocker`` is the blocking object's mb_id (None with a ``reason``)."""
+    id: str
+    blocker: str | None
+    reason: NotRequired[str]
+
+
+class UnsupportedEntry(TypedDict):
+    id: str
+    reason: str | None
+    tags: dict[str, str]
+
+
 Frame = tuple[Vec3, Vec3, float]
 Tri = tuple[Vec3, Vec3, Vec3]
 RoadTri = tuple[Tri, Region, str]     # CCW plan triangle with absolute z, its plan bbox, the road id
@@ -71,7 +92,7 @@ class StageContext:
         self.road_segments = road_segments
         self.probes: list[Probe] = []        # passage probes queued by the stages, checked by finalize_probes
         self.keepout: list[Segment] = []       # (a, b, radius) plan segments where no tree is placed
-        self.pending: list[tuple[int, int, dict[str, Any]]] = []
+        self.pending: list[tuple[int, int, UnsupportedEntry]] = []
 
     def flush_unsupported(self, plan: ScenePlan) -> None:
         n = len(self.classified.unsupported)
@@ -160,7 +181,7 @@ def _frames(path: Sequence[Vec3], half_width: float = 0.0) -> list[Frame]:
     return out
 
 
-def sweep(profile_2d: Sequence[Vec2], path_3d: Iterable[Sequence[float]], closed_ends: bool, name: str = "sweep",
+def sweep(profile_2d: Sequence[Vec2], path_3d: Iterable[Iterable[float]], closed_ends: bool, name: str = "sweep",
           material: str = "MB Concrete", color: Color = (0.6, 0.6, 0.6)) -> MeshData:
     """Mesh of ``profile_2d`` ((lateral, up) points, CCW seen along the direction of travel, lateral to the
     right, up +Z) swept along ``path_3d`` with mitred joints.
@@ -172,7 +193,7 @@ def sweep(profile_2d: Sequence[Vec2], path_3d: Iterable[Sequence[float]], closed
     too short for the profile width at its mitred joints (the inner corner would fold back)."""
     if len(profile_2d) < 3:
         raise _invalid("structure profile needs at least 3 points")
-    path: list[Vec3] = [(float(p[0]), float(p[1]), float(p[2])) for p in path_3d]
+    path = [cast(Vec3, tuple(float(c) for c in p)) for p in path_3d]   # points may be iterators; length is 3 by contract
     if len(path) < 2:
         raise _invalid("structure path needs at least 2 points")
     frames = _frames(path, max(abs(u) for u, _ in profile_2d))
@@ -311,7 +332,7 @@ class _CollisionIndex:
         flat: list[Vec3] = []
         idx: list[int] = []
         tri_obj: list[int] = []
-        table: list[dict[str, Any]] = []
+        table: list[CollisionEntry] = []
         for k in sorted({k for key in keys for k in self.tiles.get(key, ())}):
             verts, tris, by_tile = self._placed(k)
             pick = sorted({n for key in keys for n in by_tile.get(key, ())})
@@ -344,7 +365,7 @@ class WorkBudget:
 
 
 def check_probes(plan: ScenePlan, probes: Sequence[Probe] | None, max_work: int = DEFAULT_MAX_WORK,
-                 budget: WorkBudget | None = None) -> tuple[list[Probe], list[dict[str, Any]]]:
+                 budget: WorkBudget | None = None) -> tuple[list[Probe], list[ProbeBlock]]:
     """Passage probes ``{id, feature, path_map, radius_m, ...}`` against the plan meshes (D21).
 
     Returns ``(kept, blocked)``: ``blocked`` entries are ``{id, blocker}`` (the blocking object's ``mb_id``;
@@ -353,7 +374,7 @@ def check_probes(plan: ScenePlan, probes: Sequence[Probe] | None, max_work: int 
     work budget is shared: when it runs out the remaining probes are returned in ``blocked`` with
     ``blocker=None`` and ``reason="budget_exhausted"``, never silently kept."""
     kept: list[Probe] = []
-    blocked: list[dict[str, Any]] = []
+    blocked: list[ProbeBlock] = []
     if not probes:
         return kept, blocked
     index = _CollisionIndex(plan)
@@ -369,7 +390,7 @@ def check_probes(plan: ScenePlan, probes: Sequence[Probe] | None, max_work: int 
         pad = pr["radius_m"] + 0.5
         # The query's work grows with segments x triangles of every object it reaches, so a long path is tested
         # in chunks of ~CHUNK_M, each against the triangles around it (the union of the hits is the same).
-        chunks: list[list[Vec2]] = []
+        chunks: list[list[tuple[float, ...]]] = []   # map-frame points (x, y, z)
         cur, length = [pts[0]], 0.0
         for a, b in zip(pts, pts[1:]):
             cur.append(b)

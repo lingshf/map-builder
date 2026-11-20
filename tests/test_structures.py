@@ -40,6 +40,12 @@ class SweepTest(unittest.TestCase):
     def test_closed_ends_is_a_valid_solid(self):
         self.assertEqual(problems(sweep(BOX, STRAIGHT, True), "bridge"), [])
 
+    def test_path_may_be_a_generator_of_iterator_points(self):
+        lazy = sweep(BOX, (iter(p) for p in STRAIGHT), True)
+        plain = sweep(BOX, STRAIGHT, True)
+        self.assertEqual(lazy.vertices, plain.vertices)
+        self.assertEqual(lazy.faces, plain.faces)
+
     def test_open_ends_is_a_valid_tube(self):
         self.assertEqual(problems(sweep(BOX, STRAIGHT, False), "tunnel"), [])
 

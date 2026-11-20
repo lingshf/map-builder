@@ -25,8 +25,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import urllib.response
 from collections.abc import Callable, Iterator, Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import IO, TYPE_CHECKING, Any, Protocol, TypedDict
 
 if TYPE_CHECKING:
     import ssl
@@ -156,8 +157,8 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         self._check_deadline: Callable[[], None] | None = check_deadline
         self._remaining: Callable[[], float] | None = remaining
 
-    def http_error_302(self, req: urllib.request.Request, fp: Any, code: int, msg: str,  # Any: stdlib fp is an untyped file-like
-                       headers: http.client.HTTPMessage) -> Any:  # Any: urllib handler return is dynamic
+    def http_error_302(self, req: urllib.request.Request, fp: IO[bytes], code: int, msg: str,
+                       headers: http.client.HTTPMessage) -> urllib.response.addinfourl | None:
         _close_quietly(fp)  # never drain the redirect body
         if self._check_deadline:
             self._check_deadline()
@@ -169,7 +170,7 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
     http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
 
-    def redirect_request(self, req: urllib.request.Request, fp: Any, code: int, msg: str,  # Any: stdlib fp is an untyped file-like
+    def redirect_request(self, req: urllib.request.Request, fp: IO[bytes], code: int, msg: str,
                          headers: http.client.HTTPMessage, newurl: str) -> urllib.request.Request | None:
         safe = redact(req.full_url)
         if self._check_deadline:
@@ -196,6 +197,12 @@ def _clamp_socket_timeout(resp: object, seconds: float) -> None:
             sock.settimeout(seconds)
         except OSError:
             pass
+
+
+class _Mailbox(TypedDict, total=False):
+    """Worker-thread result handed to the caller: a Response or the exception that ended it."""
+    ok: Response
+    err: BaseException
 
 
 class _Watchdog:
@@ -316,7 +323,7 @@ class UrllibTransport:
         # worker thread and the caller waits only until the absolute deadline. A worker still blocked
         # in the resolver is abandoned (its late sockets are shut down by the expired watchdog).
         total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
-        box: dict[str, Any] = {}  # Any: mailbox holding either a Response ("ok") or a BaseException ("err")
+        box: _Mailbox = {}
         if not _WORKER_SLOTS.acquire(blocking=False):
             safe = redact(url)
             raise NetworkError(f"{safe}: too many earlier requests are still stalled (e.g. in DNS resolution); "

@@ -19,7 +19,7 @@ import math
 import os
 from array import array
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, TypeAlias
+from typing import TYPE_CHECKING, BinaryIO, Protocol, TypeAlias
 
 from .cache import check_cache_dataset_id
 from .errors import CoverageError, FormatError, LimitError, NoDataError
@@ -358,6 +358,14 @@ def _local_provenance(path: str, tiff: RasterSource, area: Area, spacing: float,
     }
 
 
+class _AsciiSource:
+    """Stand-in for the byte source of a GeoTiff: a local file reads nothing over the network."""
+
+    def __init__(self, description: str) -> None:
+        self.description = description
+        self.fetched = 0
+
+
 class AsciiGrid:
     """ESRI ASCII grid presented with the same interface as GeoTiff.
 
@@ -378,7 +386,7 @@ class AsciiGrid:
     height: int
 
     def __init__(self, path: str, crs: Crs) -> None:
-        self.src: Any = type("S", (), {"description": path, "fetched": 0})()  # Any: ad-hoc stand-in object
+        self.src = _AsciiSource(path)
         header: dict[str, float] = {}
         with open(path, "rb") as f:
             if os.fstat(f.fileno()).st_size > self.MAX_FILE_BYTES:

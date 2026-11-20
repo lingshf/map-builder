@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict
 
 from .osm import Feature, Polygon, _subset, point_in_ring, ring_area
 from .structures import check_probes, polyline_z_profile
@@ -35,7 +35,7 @@ Box6: TypeAlias = "tuple[float, float, float, float, float, float]"
 Crossing: TypeAlias = ("tuple[Literal['reason'], str]"
                        " | tuple[Literal['cross'], Pt, Pt, float, float]")
 # build_building result: (MeshData in object-local coords, location, provenance)
-Built: TypeAlias = "tuple[MeshData, tuple[float, float, float], dict[str, Any]]"  # Any: provenance values are free-form
+Built: TypeAlias = "tuple[MeshData, tuple[float, float, float], dict[str, str | float]]"
 
 
 class _Handled(TypedDict):

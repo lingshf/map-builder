@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import Any, NotRequired, TypeAlias, TypedDict
+from typing import NotRequired, TypeAlias, TypedDict, cast
 
 from .dem import ElevationGrid
 from .errors import LimitError, NoDataError
@@ -53,6 +53,42 @@ class CorrectionStats(TypedDict):
     max_lowering_m: float
     mean_lowering_m: float
     skipped: NotRequired[str]
+    fill_cycles: NotRequired[float]
+    fill_residual_m: NotRequired[float]
+    fill_converged: NotRequired[float]
+
+
+class DsmMaskFeatures(TypedDict):
+    buildings: int
+    trees: int
+    forest_areas: int
+    bridges: int
+
+
+class DsmMask(TypedDict):
+    building_buffer_m: float
+    tree_radius_m: float
+    bridge_buffer_m: str
+    forest: str
+    features: DsmMaskFeatures
+    excluded_invalid: NotRequired[dict[str, int]]
+    validation_work: NotRequired[int]
+    rasterisation_work: NotRequired[int]
+
+
+class DsmReport(TypedDict):
+    """The ``dsm_correction`` report entry (the CorrectionStats fields are merged in once the fill ran)."""
+    applied: bool
+    enabled: bool
+    setting: str
+    masked_points: int
+    lowered_points: int
+    total_points: int
+    max_lowering_m: float
+    mean_lowering_m: float
+    reason: str | None
+    mask: NotRequired[DsmMask]
+    method: NotRequired[str]
     fill_cycles: NotRequired[float]
     fill_residual_m: NotRequired[float]
     fill_converged: NotRequired[float]
@@ -688,7 +724,7 @@ def apply_correction(grid: ElevationGrid, requested: bool | None, buildings: Seq
                      bridges: Sequence[tuple[Sequence[Point], float]] = (),
                      excluded_invalid: Mapping[str, int] | None = None, work_budget: int = MASK_WORK_BUDGET,
                      validation_work: int | None = None, validation_skipped: str | None = None,
-                     mask_unavailable: str | None = None) -> tuple[ElevationGrid, dict[str, Any], str | None]:
+                     mask_unavailable: str | None = None) -> tuple[ElevationGrid, DsmReport, str | None]:
     """(grid to use, report entry, warning or None). ``requested``: the ``dsm_correction`` setting.
 
     The report entry is ``{applied, enabled, setting, masked_points, lowered_points, total_points,
@@ -704,7 +740,7 @@ def apply_correction(grid: ElevationGrid, requested: bool | None, buildings: Seq
     uncorrected surface model is used (like the "too few unmasked points" skip). So it is when the mask
     candidates are incomplete (``mask_unavailable``, the reason: the wider DSM mask request failed)."""
     enabled, reason = resolve(requested, grid.provenance)
-    entry: dict[str, Any] = {"applied": False, "enabled": enabled,  # Any: heterogeneous JSON report entry
+    entry: DsmReport = {"applied": False, "enabled": enabled,
              "setting": {None: "auto", True: "on", False: "off"}[requested],
              "masked_points": 0, "lowered_points": 0, "total_points": grid.nx * grid.ny, "max_lowering_m": 0.0,
              "mean_lowering_m": 0.0, "reason": reason}
@@ -739,7 +775,7 @@ def apply_correction(grid: ElevationGrid, requested: bool | None, buildings: Seq
                              "surface model")
     entry["mask"]["rasterisation_work"] = mask.work
     corrected, stats = correct_grid(grid, mask)
-    entry.update({k: v for k, v in stats.items() if k != "skipped"})
+    entry.update(cast(DsmReport, {k: v for k, v in stats.items() if k != "skipped"}))
     warning: str | None = None
     if corrected is None:
         entry["reason"] = stats["skipped"]

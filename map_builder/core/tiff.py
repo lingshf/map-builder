@@ -266,8 +266,8 @@ class GeoTiff:
     predictor: int
     block_w: int
     block_h: int
-    offsets: Any  # Any: raw tag value, validated as a non-empty int tuple in _parse
-    counts: Any  # Any: raw tag value, validated as a non-empty int tuple in _parse
+    offsets: tuple[int, ...]   # validated non-empty in _parse
+    counts: tuple[int, ...]
     block_bytes: int
     blocks_across: int
     nodata: float | None
@@ -386,15 +386,15 @@ class GeoTiff:
         if 322 in self.tags:
             self.block_w = self._tag1(322)
             self.block_h = self._tag1(323)
-            self.offsets = self.tags.get(324)
-            self.counts = self.tags.get(325)
+            offsets, counts = self.tags.get(324), self.tags.get(325)
         else:
             self.block_w = self.width
             self.block_h = min(self._tag1(278, self.height), self.height)
-            self.offsets = self.tags.get(273)
-            self.counts = self.tags.get(279)
-        if not self.offsets or not self.counts or len(self.offsets) != len(self.counts):
+            offsets, counts = self.tags.get(273), self.tags.get(279)
+        if not offsets or not counts or len(offsets) != len(counts):
             raise FormatError(f"{d}: missing or inconsistent strip/tile offsets")
+        self.offsets = offsets
+        self.counts = counts
         # Validate geometry before any pixel payload is read.
         if not (0 < self.width <= MAX_DIMENSION and 0 < self.height <= MAX_DIMENSION):
             raise LimitError(f"{d}: raster size {self.width}x{self.height} exceeds {MAX_DIMENSION} pixels per side")

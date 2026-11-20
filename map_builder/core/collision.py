@@ -38,6 +38,14 @@ class Heightfield(TypedDict):
     spacing: float
     z: list[list[float]]
 
+
+# One validated entry of the collision object table (``class`` is a keyword, hence the functional form).
+# Extra keys written by ``ColObject.extra`` may also be present at runtime; they are not typed.
+CollisionEntry = TypedDict("CollisionEntry", {
+    "index": int, "name": str, "mb_id": str, "class": str,
+    "tri_start": int, "tri_count": int, "aabb": list[float],
+})
+
 COL_MAGIC = b"MBCOL\0\0\0"
 HF_MAGIC = b"MBHF\0\0\0\0"
 # magic, version, flags, V, T, O, J, bounds_min[3], bounds_max[3], reserved[2]  -> 64 bytes
@@ -203,13 +211,13 @@ def write_collision(objects: Sequence[ColObject]) -> bytes:
 
 class Collision:
     def __init__(self, vertices: list[Vec3], indices: tuple[int, ...], tri_object: tuple[int, ...],
-                 tri_class: bytes, objects: list[dict[str, Any]],  # Any: parsed JSON object table
+                 tri_class: bytes, objects: list[CollisionEntry],
                  bounds: tuple[Vec3, Vec3], flags: int) -> None:
         self.vertices: list[Vec3] = vertices      # float32 values
         self.indices: tuple[int, ...] = indices   # flat tuple, 3 per triangle
         self.tri_object: tuple[int, ...] = tri_object
         self.tri_class: bytes = tri_class
-        self.objects: list[dict[str, Any]] = objects  # parsed object table
+        self.objects: list[CollisionEntry] = objects  # validated object table
         self.bounds: tuple[Vec3, Vec3] = bounds
         self.flags: int = flags
 
@@ -222,7 +230,7 @@ class Collision:
         i = self.indices
         return v[i[3 * t]], v[i[3 * t + 1]], v[i[3 * t + 2]]
 
-    def object_triangles(self, entry: Mapping[str, Any]) -> list[Triangle]:  # Any: parsed JSON entry
+    def object_triangles(self, entry: CollisionEntry) -> list[Triangle]:
         s = entry["tri_start"]
         return [self.triangle(t) for t in range(s, s + entry["tri_count"])]
 
@@ -294,7 +302,7 @@ def read_collision(data: bytes, max_triangles: int = MAX_TRIANGLES, max_vertices
     body = raw.rstrip(b"\0")
     if b"\0" in body:
         raise PackageError("collision: object table contains NUL bytes before its padding")
-    table = strict_json(body, "collision: object table")
+    table: Any = strict_json(body, "collision: object table")   # Any: raw JSON until validated below
     if not isinstance(table, list) or len(table) != no:
         raise PackageError("collision: object table count does not match the header")
     # Diagnostics name entries by table index only: names and other strings from the file are never echoed.

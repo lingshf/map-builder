@@ -604,7 +604,7 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
     if len(idx) > MAX_DECK_PROBE_POINTS:
         k = MAX_DECK_PROBE_POINTS - 1
         idx = sorted({round(m * (len(xy) - 1) / k) for m in range(k + 1)})
-    deck = {"id": f"{f.id}:deck", "kind": "bridge", "feature": f.id, "radius_m": PROBE_RADIUS_M,
+    deck: Probe = {"id": f"{f.id}:deck", "kind": "bridge", "feature": f.id, "radius_m": PROBE_RADIUS_M,
             "path_map": [[round(xy[i][0], 4), round(xy[i][1], 4),
                           round(top[i] + DECK_PROBE_HEIGHT_M - z_off, 4)] for i in idx]}
     return total, [deck] + ([under] if under else [])
