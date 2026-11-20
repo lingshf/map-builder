@@ -278,7 +278,7 @@ graph LR
 | D88 | Export material identity is a parameter key (a digest of the exact material parameters), not a display name. | C | final |
 | D89 | Review rounds are capped at 3 per PR. After round 3 the coordinator rules, and the remaining non-blocking findings become follow-up tasks. A task spec lists its acceptance cases and checker up front, so review measures against them instead of discovering new criteria (retro v0.4.0: #53, #43/#46). | De (proposed), C | final |
 | D90 | A numeric acceptance target is set only after a same-checker baseline has been measured (spike or frozen replay under the final checker). It is stated as a **floor** (must) plus a **stretch** (aim), and the task doc records the baseline and how it was measured (retro v0.4.0: roof target ≥ 40 was set before measurement and against a 5/67 from a different checker). | De (proposed), C | final |
-| D91 | The performance gate is the whole Generate (CLI and headless Blender) on the real-data presets against the previous release, measured on the same host with the pinned setup (sprint-4 baselines). Blender is reported as Generate and as Generate+Export separately, because package writing and strict validation run in Export. Stage-level growth is reported as information and turned into follow-ups, never a gate, and no unit test asserts a duration (generalises D85, D87). | De (proposed), C | final |
+| D91 | The performance gate is the whole Generate (CLI and headless Blender) on the real-data presets against the previous release, measured on the same host with the pinned setup (sprint-4 baselines). Whole Generate **includes acquisition** served from the frozen cache with network access blocked by the offline guard (a run with any network attempt is invalid); for the CLI it runs through package write and strict validation. Blender is reported as Generate and as Generate+Export separately, because package writing and strict validation run in Export. Stage-level growth is reported as information and turned into follow-ups, never a gate, and no unit test asserts a duration (generalises D85, D87). | De (proposed), C | final |
 | D92 | The C# parity tests are hermetic: a repo-local `NuGet.config` (`<clear/>` + nuget.org), one prebuild per test run under a lock, and restore audit warnings such as NU1900 not treated as errors in test builds. Removes the CS2012 parallel-run race and the host-feed dependency. | De (proposed), C | final |
 | D93 | Sprint 4 (`v0.5.0`) theme: **quality closeout + publishing readiness**. | C | final |
 
@@ -302,7 +302,7 @@ later.
   stretch **TBD after the final-checker replay in S4-ROOF-SPIKE** (D95).
 * **Output quality.** Fewer degenerate collision triangles from both paths without silently changing query
   results (S3-F12, D98). A river that reads as water with textures on (S3-F13).
-* **Performance that does not change bytes.** Strict validation is 9.45 s of the about 20 s Pittsburgh build.
+* **Performance that does not change bytes.** Strict validation is 9.45 s of the 24.3 s Pittsburgh CLI build.
   `_zinfo` deflates every member once only to test the ratio, and `zipfile` then deflates it again. The
   `assign_uvs` cost is S3-F4. Performance tasks must keep every package byte-identical (D97), so they are
   safe to run in parallel with anything that does not touch their files.
@@ -316,13 +316,19 @@ later.
 
 **Pinned timing setup (D91).** Windows host, Python 3.12 for the CLI, portable Blender 4.2.23 for headless runs,
 one build at a time (no parallel load). Inputs are the frozen RC caches of v0.3.0 / RC #56 (`cache-munich`,
-`cache-pittsburgh`), copied fresh for each run, with the network disabled (CLI `NoNetwork` client; Blender runs
-count new cache files, all 0). Areas: Munich 48.1395, 11.5764, 400×400 m; Pittsburgh 40.437, −80.016,
+`cache-pittsburgh`), copied fresh for each run. **Offline is enforced, not inferred:** both harnesses install
+`design/bench/offline_guard.py`, which replaces `socket.getaddrinfo`, `gethostbyname`, `create_connection`,
+`socket.connect` and `connect_ex` with functions that raise and record the attempt; each harness fails unless
+the attempt list is empty (every baseline run below: 0 attempts). The CLI also passes a `NoNetwork` client that
+raises on any cache miss. Areas: Munich 48.1395, 11.5764, 400×400 m; Pittsburgh 40.437, −80.016,
 1200×1000 m. Settings: textures on, seed 1, DSM correction on, terrain spacing 10 m, heightfield spacing 2 m.
 Blender: `blender --background --factory-startup --online-mode --python-exit-code 1 --python
-design/bench/bl_time.py -- <tree> <tag> <cache> <out>`. CLI: `MB_ROOT=<caches> MB_TAG=<tag> PYTHONPATH=<tree>
-python design/bench/cli_time.py munich pittsburgh`. **Generate** ends when the scene exists; package writing
-and strict validation are **Export**, timed separately. The v0.4.0 tree is `git archive 18f0822`.
+design/bench/bl_time.py -- <tree> <tag> <cache> <out>`. CLI: `MB_CACHES=<caches> MB_OUT=<scratch> MB_TAG=<tag>
+PYTHONPATH=<tree> python design/bench/cli_time.py munich pittsburgh`. **Whole Generate (D91) starts at
+acquisition:** reading and parsing the frozen cache (DEM, OSM), then the plan; for the CLI it also includes the
+package write and strict validation (`generate_plan` + `plan_to_package`, the same calls as `build_package`).
+In Blender, **Generate** (the operator, which acquires from the cache) ends when the scene exists; package
+writing and strict validation are **Export**, timed separately. The v0.4.0 tree is `git archive 18f0822`.
 
 | Item | Baseline | How measured |
 |---|---|---|
@@ -331,11 +337,11 @@ and strict validation are **Export**, timed separately. The v0.4.0 tree is `git 
 | `.mbcol` degenerate triangles (validator warning) | sample 2 · Munich CLI 59 / Blender 58 · Pittsburgh CLI 76 / Blender 78 | RC #56 evidence, `tools/mbmap_cli.py validate` |
 | River colour, Pittsburgh overview (mean RGB of pixels x 600–700, y 500–540) | textured **(124, 162, 144)**, G > B · untextured (132, 166, 198) | `docs/demo/v0.4.0/pittsburgh-overview-v040{,-notex}.png` |
 | Root cause of the green river | one `MB Terrain` material with `terrain_grass.png` for every landcover class, including water | `core/textures.py:33`, `core/uv.py:68` |
-| CLI whole Generate, textured, offline, median of 3: v0.4.0 (18f0822) | Munich **4.16 s** (plan 1.33 + package 2.82) · Pittsburgh **20.43 s** (plan 5.20 + package 15.24) | `design/bench/cli_time.py`, same host, sequential runs |
-| CLI whole Generate, same settings: main f8bedf6 | Munich 4.21 s (1.36 + 2.82) · Pittsburgh 20.34 s (5.13 + 15.14), within noise of v0.4.0 | same |
-| Headless Blender **Generate**, median of 3: v0.4.0 / main | Munich **4.27 s** / 4.36 s · Pittsburgh **13.17 s** / 13.31 s | `design/bench/bl_time.py` (timer around `map_builder.generate` only) |
-| Headless Blender **Export** (package write + strict validation), median of 3: v0.4.0 / main | Munich 5.51 s / 5.67 s · Pittsburgh 30.18 s / 29.27 s | same (timer around `map_builder.export` only) |
-| Headless Blender **Generate+Export**, median of 3: v0.4.0 / main | Munich **9.77 s** / 10.03 s · Pittsburgh **43.35 s** / 42.57 s; every run VALID, 0 new cache files | same |
+| CLI whole Generate (acquire + plan + package), textured, offline, median of 3: v0.4.0 (18f0822) | Munich **5.84 s** (acquire + plan 3.02, package 2.83) · Pittsburgh **24.30 s** (9.07, 15.23) | `design/bench/cli_time.py`, same host, sequential runs, 0 network attempts |
+| Same, main f8bedf6 | Munich 5.95 s (3.07, 2.87) · Pittsburgh 24.55 s (9.22, 15.33), within noise of v0.4.0 | same |
+| Headless Blender **Generate** (acquire from cache + scene), median of 3: v0.4.0 / main | Munich **4.17 s** / 4.14 s · Pittsburgh **13.18 s** / 13.20 s | `design/bench/bl_time.py` (timer around `map_builder.generate` only), 0 network attempts |
+| Headless Blender **Export** (package write + strict validation), median of 3: v0.4.0 / main | Munich 5.11 s / 5.20 s · Pittsburgh 29.83 s / 29.23 s | same (timer around `map_builder.export` only) |
+| Headless Blender **Generate+Export**, median of 3: v0.4.0 / main | Munich **9.35 s** / 9.47 s · Pittsburgh **42.93 s** / 42.34 s; every run VALID | same |
 | Strict validation of the Pittsburgh package, median of 3 | **9.45 s**; top costs `_correspondence`, `match_one_to_one`, `match_winding`, `_dist`, `find_secrets` | `validate_package(strict=True)`, cProfile |
 | `build_plan` Pittsburgh | 5.31 s | unprofiled |
 | Deflate passes per package member | **2** (`_zinfo` ratio test, then `zipfile`) | `core/package.py:1130–1141` |
@@ -400,10 +406,10 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 
 | Item | Floor (must) | Stretch (aim) |
 |---|---|---|
-| CLI whole Generate (plan + package), both presets, median of 3 (D91) | ≤ +5 % vs the same-host v0.4.0 median: Munich ≤ 4.37 s, Pittsburgh ≤ 21.45 s | Pittsburgh ≤ 15.0 s (strict validation ≥ 2× faster, single deflate pass) |
-| Headless Blender **Generate**, both presets (D91) | ≤ +5 % vs v0.4.0: Munich ≤ 4.48 s, Pittsburgh ≤ 13.83 s | lower than v0.4.0 (S4-PERF-UV) |
-| Headless Blender **Generate+Export**, both presets (D91) | ≤ +5 % vs v0.4.0: Munich ≤ 10.26 s, Pittsburgh ≤ 45.52 s | Pittsburgh ≤ 35 s (Export carries the writer and validator speed-up of S4-PERF-PKG) |
-| Timing evidence | measured with the pinned setup above and quoted in the PR; stage timings are information only; **no timing assertion in any unit test** | — |
+| CLI whole Generate (acquire + plan + package), both presets, median of 3 (D91) | ≤ +5 % vs the same-host v0.4.0 median: Munich ≤ 6.13 s, Pittsburgh ≤ 25.52 s | Pittsburgh ≤ 19.0 s (strict validation ≥ 2× faster, single deflate pass) |
+| Headless Blender **Generate**, both presets (D91) | ≤ +5 % vs v0.4.0: Munich ≤ 4.38 s, Pittsburgh ≤ 13.84 s | lower than v0.4.0 (S4-PERF-UV) |
+| Headless Blender **Generate+Export**, both presets (D91) | ≤ +5 % vs v0.4.0: Munich ≤ 9.82 s, Pittsburgh ≤ 45.08 s | Pittsburgh ≤ 37 s (Export carries the writer and validator speed-up of S4-PERF-PKG) |
+| Timing evidence | measured with the pinned setup above (offline guard, 0 network attempts) and quoted in the PR; stage timings are information only; **no timing assertion in any unit test** | — |
 | Byte identity of perf tasks (D97) | sample, Munich and Pittsburgh frozen builds byte-identical before/after | — |
 | Munich roofs counted | must: ≥ 29/67 under the final checker, and **every** remaining uncounted roof has a named reason (baseline 34 of 38) | **TBD after the final-checker replay in S4-ROOF-SPIKE** (D95); no number until measured |
 | Degenerate `.mbcol` triangles | must: fewer than the baseline in every package and path, and **no** changed hit on the D98 probe set; any triangle kept to preserve a hit is listed | 0 in the sample and both presets, both paths, with the probe set unchanged |
@@ -435,7 +441,9 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 
 1. **Format frozen per the stability policy** (D101): 2.x published, the previous-minor frozen reader in CI.
 2. **Real data:** both presets VALID through the CLI and headless Blender, probe parity, 0 validator
-   warnings.
+   warnings. This is **stricter than the v0.5.0 release bar**, which allows degenerate-triangle warnings for
+   triangles kept under D98 when they are listed and disclosed; the user decides at v1.0 whether that
+   exception stays.
 3. **Roofs:** every tagged roof is built as tagged or carries a named reason; the v0.5.0 floor holds.
 4. **Consumer:** glTF-Validator clean; the simulator owner confirms one import of the released packages
    (a user action, outside this repo).
@@ -457,7 +465,7 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D98 | Degenerate collision triangles. The validator's `is_degenerate` (area epsilon) is not the query's miss predicate: a validator-degenerate 1 mm triangle can still be hit (watertight ray at t = 1.0). So: (1) remove degenerate triangles **at the source**, by dropping collinear and duplicate ring vertices before triangulation and re-triangulating, so the covered surface is unchanged; (2) acceptance is **measured hit equivalence** before and after, in Python and the C# reader, on a fixed probe set: the passage probes, a deterministic ray and capsule grid, and one ray through the centroid of every triangle that was validator-degenerate before; (3) a triangle that cannot be removed without changing a hit stays and is listed, unless the coordinator explicitly accepts a disclosed query change. The validator keeps the degenerate-triangle **warning** (not an error) for third-party packages. | De (proposed; C confirms at gate) | proposed |
 | D99 | The green river is fixed by replacing the grass pattern with a neutral, luminance-only terrain-detail texture (our own procedural CC0 image) so the landcover vertex colours carry the hue. The terrain is not split by landcover, and the geometry does not change. | De (proposed; C confirms at gate) | proposed |
 | D100 | Extension reproducibility: the release workflow sets every source file's mtime to the tag commit time before `extension build`, so two clean builds from the tag are byte-identical. The platform submission itself is a user action; Dev only prepares `docs/PLATFORM_SUBMISSION.md`. The maintainer contact and the website are user-owned fields (no personal data is invented). | De (proposed; C confirms at gate) | proposed |
-| D101 | Draft `.mbmap` format-stability policy (for user confirmation at v1.0). **Patch** = clarifications, no file change. **Minor** = additive optional content that the frozen previous-minor Python **and C#** readers load unchanged, within today's limits, which are themselves not relaxed in a minor: every ZIP member listed in `files[]` with its SHA-256 (unlisted files are an error in both readers); ≤ 64 entries, ≤ 1.5 GiB uncompressed, manifest ≤ 32 MiB, compression ratio ≤ 200, names ≤ 255 bytes; one GLB-stored buffer, no external or data-URI buffers, no `extensionsRequired` (an error in both readers), glTF content within the C# caps (GLB ≤ 1 GiB, ≤ 8 M visual triangles, ≤ 1 M nodes, depth ≤ 64); every embedded image listed in `asset_notices[]`. Optional glTF content may use `extras`, or an `extensionsUsed`-only extension, only where the positive fixture below shows that both frozen readers ignore it. A future minor is accepted only with a **positive frozen-reader fixture**: a 2.(n+1).0 package with the new content loads in the frozen Python and C# readers in CI (as D57/D65). **Major** = any removal, rename or semantic change of an existing field, collision class or kind, coordinate frame, units, the open-tube rule, a limit above, or a `.mbcol`/`.mbhf` format number the current readers cannot read. Readers accept the same major with any minor and reject another major with a clear error (current behaviour, `core/package.py:1436`). A field is deprecated for at least one minor before removal in the next major. The current writer default stays 2.1.0. | De (proposed; U confirms at v1.0) | draft |
+| D101 | Draft `.mbmap` format-stability policy (for user confirmation at v1.0). **Patch** = clarifications, no file change. **Minor** = additive optional content that the frozen previous-minor Python **and C#** readers load unchanged, within today's limits, which are themselves not relaxed in a minor: every ZIP member **other than `manifest.json`** listed in `files[]` with its SHA-256, one-to-one (unlisted files are an error in both readers; the manifest is not hashed in `files[]`, it is identified by `package_id`, `docs/PACKAGE_FORMAT.md:44–49`); ≤ 64 entries, ≤ 1.5 GiB uncompressed, manifest ≤ 32 MiB, compression ratio ≤ 200, names ≤ 255 bytes; one GLB-stored buffer, no external or data-URI buffers, no `extensionsRequired` (an error in both readers), glTF content within the C# caps (GLB ≤ 1 GiB, ≤ 8 M visual triangles, ≤ 1 M nodes, depth ≤ 64); every embedded image listed in `asset_notices[]`. Optional glTF content may use `extras`, or an `extensionsUsed`-only extension, only where the positive fixture below shows that both frozen readers ignore it. A future minor is accepted only with a **positive frozen-reader fixture**: a 2.(n+1).0 package with the new content loads in the frozen Python and C# readers in CI (as D57/D65). **Major** = any removal, rename or semantic change of an existing field, collision class or kind, coordinate frame, units, the open-tube rule, a limit above, or a `.mbcol`/`.mbhf` format number the current readers cannot read. Readers accept the same major with any minor and reject another major with a clear error (current behaviour, `core/package.py:1436`). A field is deprecated for at least one minor before removal in the next major. The current writer default stays 2.1.0. | De (proposed; U confirms at v1.0) | draft |
 | D102 | Draft v1.0 exit criteria as listed above, for the user to confirm. | De (proposed; U confirms) | draft |
 | D103 | Sample ownership. Output-changing tasks (S4-TEX-WATER, S4-COL-DEGEN, and S4-ROOF-NAMED / S4-ROOF-ENDS only if the fixture's roofs change) regenerate `examples/synthetic_sample.mbmap` only while holding the single exclusive **merge-time sample slot** granted by the coordinator: rebase on main, regenerate, green CI and gate, merge, release the slot. Other PRs keep main's sample bytes. The PR lists the byte change. Perf tasks never change it (D97). Comparisons against v0.4.0 use frozen inputs: the committed Munich roof snapshot, the RC #56 caches by acquisition SHA-256, and the unchanged sample input. | De (proposed; C confirms at gate) | proposed |
 | D104 | Sprint 4 close order follows D48 and D63: S4-REVIEW on main first; its findings define the remaining v0.5.0 scope; then REL-v0.5.0 (version 0.5.0 via the D50 guard), the close check, the retro and the tag. | De (proposed; C confirms at gate) | proposed |

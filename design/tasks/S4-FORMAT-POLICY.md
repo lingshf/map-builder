@@ -14,7 +14,8 @@ C# readers accept 2.1 packages in CI (D57, D65). The simulator needs a written g
 1. Add a "Compatibility and stability policy" section to `docs/PACKAGE_FORMAT.md` that matches D101: what may
    change in patch, minor and major versions; reader rules; deprecation; how `.mbcol`/`.mbhf` format numbers
    relate to the package major. Mark it **draft until the user confirms it at v1.0**. State today's limits as
-   part of the policy (a minor may not relax them): every member listed in `files[]` with SHA-256 (unlisted
+   part of the policy (a minor may not relax them): every ZIP member **other than `manifest.json`** listed in `files[]`
+   with SHA-256, one-to-one (the manifest itself is excluded, `docs/PACKAGE_FORMAT.md:49`; unlisted
    files are an error in both readers); ≤ 64 entries; ≤ 1.5 GiB uncompressed; manifest ≤ 32 MiB; ratio ≤ 200;
    names ≤ 255 bytes; one GLB-stored buffer, no external or data-URI buffers; no `extensionsRequired`; the C#
    glTF caps (GLB ≤ 1 GiB, ≤ 8 M visual triangles, ≤ 1 M nodes, depth ≤ 64); every embedded image listed in
@@ -32,8 +33,9 @@ C# readers accept 2.1 packages in CI (D57, D65). The simulator needs a written g
      never change a frozen reader;
    * a 3.0.0 package is rejected with the "unsupported schema major" error;
    * an unknown `.mbcol` format number is rejected.
-   Any validator behaviour that differs from the policy is fixed in this task (after S4-PERF-PKG) or reported
-   to the coordinator.
+   Policy text describes what the validator and readers **do today**. Any validator behaviour that differs from
+   the policy is **reported to the coordinator** (AC3), not fixed here; a fix is a separate behaviour change
+   only if the coordinator approves it, and then it edits `core/package.py` after S4-PERF-PKG.
 
 ## Acceptance criteria
 

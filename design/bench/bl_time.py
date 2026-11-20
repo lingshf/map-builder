@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
-# S4 baseline harness (D91): headless Blender Generate vs Export, median of 3. See design/roadmap.md, sprint 4 baselines.
+# S4 baseline harness (D91): headless Blender Generate vs Export, median of 3, with offline_guard (any DNS or
+# connect raises and fails the run). See design/roadmap.md, sprint 4 baselines.
 # Usage: blender --background --factory-startup --online-mode --python-exit-code 1 --python bl_time.py -- <tree root> <tag> <frozen cache dir> <out dir>
 import bpy, os, sys, time, shutil, json, statistics
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import offline_guard
+offline_guard.install()
 a = sys.argv[sys.argv.index("--") + 1:]
 root, tag, src_cache, out = a[0], a[1], a[2], a[3]
 key = "munich" if "munich" in src_cache else "pittsburgh"
@@ -29,6 +33,7 @@ for i in range(3):
     ok = validate_package(pkg).ok
     res.append({"gen": t1 - t0, "exp": t2 - t1, "total": t2 - t0, "ok": ok, "ops": [list(r1), list(r2)], "new_cache_files": n1 - n0})
     print("RUN", tag, key, i, res[-1], flush=True)
+offline_guard.assert_offline()
 med = {k: statistics.median(r[k] for r in res) for k in ("gen", "exp", "total")}
-print("MEDIAN", tag, key, json.dumps(med), flush=True)
+print("MEDIAN", tag, key, json.dumps(med), "network_attempts=0", flush=True)
 with open(os.path.join(out, f"res-{tag}-{key}.json"), "w") as f: json.dump({"runs": res, "median": med}, f)

@@ -13,11 +13,13 @@ Same shape as REL-v0.4.0:
 
 ## Acceptance criteria
 
-1. Real-data builds of Munich and Pittsburgh through the CLI **and** headless Blender, VALID with 0 warnings
-   (D53.1, D98). The C# reader passes the same probes. Build time is the median of 3 (D32).
+1. Real-data builds of Munich and Pittsburgh through the CLI **and** headless Blender, VALID (D53.1). The only
+   allowed warnings are degenerate-triangle warnings for triangles kept under D98, each listed in the
+   S4-COL-DEGEN report and disclosed in the release notes; counts are below the v0.4.0 baseline and the D98
+   probe set is unchanged. Any other warning, or an unlisted degenerate, blocks the RC. The C# reader passes the same probes. Build time is the median of 3 (D32).
 2. The release notes state:
    * the roof count against the floor and the stretch, per shape, with the remaining named reasons;
-   * the degenerate-triangle removal;
+   * the degenerate-triangle counts before and after per package and path, and the kept triangles (D98);
    * the water fix;
    * the performance numbers against v0.4.0 (D91);
    * that the format is unchanged at 2.1.0, with a link to the stability policy (draft, D101);

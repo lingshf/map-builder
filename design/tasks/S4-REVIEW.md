@@ -7,7 +7,10 @@ Owner: design · sprint S4 · after all S4 dev tasks · D104
 1. **Roofs:** Munich counted against the floor 29 and the recorded stretch (D95). Every uncounted roof is named
    (38/38 or the new total). The frozen v0.3.0 replay stays 1/67. Spot renders of one vertical-cut gable, one
    mixed end and one named fallback.
-2. **Collision:** 0 degenerate triangles in the sample and both presets through both paths. Probe ids and
+2. **Collision (D98):** the degenerate-triangle count is below the baseline in the sample and both presets
+   through both paths, the D98 probe set gives identical hits before and after, and **no degenerate warning is
+   unreported**: every remaining one is a triangle kept under D98 and listed in the S4-COL-DEGEN report (0 is
+   the stretch, not the gate). Probe ids and
    results are equal in Python and C#.
 3. **Water:** the river region colour rule holds on a re-render (S4-TEX-WATER AC1).
 4. **Performance (D91):** whole Generate, Pittsburgh and Munich, CLI and headless Blender, median of 3, against
