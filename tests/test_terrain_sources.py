@@ -1090,14 +1090,14 @@ class RoundFourTest(unittest.TestCase):
         self.addCleanup(stop.set)
         probe = DeadlineProbe(manual_timer=True)  # the watchdog fires only when the test says so
 
-        def serve():  # an unterminated chunk-size line: the client keeps waiting for its end
+        def serve():  # a chunk that announces 4 KiB but delivers 2 bytes: the framing never completes
             conn, _ = srv.accept()
             with conn:
                 conn.recv(4096)
                 try:
-                    conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n000")
-                    probe.fire()  # the deadline passes mid chunk-size line
-                    stop.wait(30.0)  # keep the peer open: only the watchdog's shutdown can end the read
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1000\r\nab")
+                    probe.fire()  # the deadline passes mid chunk
+                    stop.wait(30.0)  # keep the peer open: only the watchdog's shutdown can end the read (EOF then fails as a truncated body)
                 except OSError:
                     return
         threading.Thread(target=serve, daemon=True).start()
