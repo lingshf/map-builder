@@ -50,7 +50,7 @@ Tri = tuple[int, int, int]
 Vec3 = tuple[float, float, float]
 Matrix = Sequence[Sequence[float]]
 MaterialSpec = tuple[tuple[float, ...], float, float]       # (rgb, roughness, metallic)
-SocketValue = Any   # Any: a Principled socket default is a float, a colour/vector tuple or None depending on the socket
+SocketValue = Any   # Any: Blender socket default (float, colour/vector tuple, None); principled_omissions deliberately tolerates malformed values (TypeError/ValueError), which a precise type would reject
 SocketInfo = tuple[bool, SocketValue]          # (is_linked, default value)
 
 

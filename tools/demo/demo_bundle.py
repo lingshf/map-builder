@@ -56,7 +56,7 @@ class Preset(TypedDict):
 
 
 class Package(TypedDict):
-    manifest: dict[str, Any]  # Any: JSON manifest, schema validated by core.package
+    manifest: dict[str, Any]  # Any: validated package manifest JSON, read through many nested optional keys (open schema owned by core.package)
     package_id: str
     glb: bytes
     collision: bytes
@@ -170,10 +170,17 @@ def probe_results(pkg: Package) -> list[Probe]:
     return out
 
 
-def probes_json(pkg: Package, probes: Sequence[Probe]) -> dict[str, Any]:  # Any: JSON document for the viewer
+class ViewerDocument(TypedDict):
+    package_id: str
+    name: object   # passed through from the manifest unchanged
+    area: object
+    passage_probes: list[Probe]
+
+
+def probes_json(pkg: Package, probes: Sequence[Probe]) -> ViewerDocument:
     m = pkg["manifest"]
     return {"package_id": pkg["package_id"], "name": m.get("name"), "area": m.get("area"),
-            "passage_probes": probes}
+            "passage_probes": list(probes)}
 
 def write_viewer(out_dir: str, pkg: Package, probes: Sequence[Probe]) -> str:
     """out_dir/viewer/ (+ viewer.zip): static three.js page, map.glb, probes.json, NOTICES.txt, vendor/.

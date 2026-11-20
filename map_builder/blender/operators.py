@@ -22,7 +22,7 @@ from ..core.pipeline import Settings, generate_plan
 from . import export as mb_export
 from .scene_build import build_scene, write_report_text
 from .sources import (SettingsInputError, format_report, migrate_legacy_centre, needs_network, parse_degrees,
-                      redact_diagnostics, reject_credentials, settings_kwargs)
+                      redact_diagnostics, reject_credentials, settings_kwargs, UiValues)
 
 if TYPE_CHECKING:
     import bpy.types
@@ -47,7 +47,7 @@ def fail(op: bpy.types.Operator, headline: str, problems: Sequence[object] = ())
     return {"CANCELLED"}
 
 
-def ui_values(s: MB_Settings) -> dict[str, str | float]:
+def ui_values(s: MB_Settings) -> UiValues:
     return {"elevation_source": s.elevation_source, "elevation_file": _abspath(s.elevation_file),
             "elevation_crs": s.elevation_crs, "elevation_vertical_datum": s.elevation_vertical_datum,
             "elevation_license": s.elevation_license, "terrain_spacing": s.terrain_spacing,

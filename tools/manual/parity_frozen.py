@@ -15,7 +15,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Mapping
-from typing import Any
+from typing import NotRequired, TypedDict, cast
 
 import bpy
 
@@ -31,9 +31,21 @@ DATUM, LICENCE = "EGM2008", "Copernicus GLO-30"
 OSM_LICENCE = "OpenStreetMap contributors (ODbL), frozen Overpass response"
 
 
-def probe_set(manifest: Mapping[str, Any]) -> list[tuple[Any, ...]]:  # Any: JSON manifest of a package
+ProbeRow = tuple[str, str | None, str, tuple[tuple[float, ...], ...], float]
+
+
+class ManifestProbe(TypedDict):
+    id: str
+    kind: NotRequired[str]
+    feature: str
+    path_map: list[list[float]]
+    radius_m: float
+
+
+def probe_set(manifest: Mapping[str, object]) -> list[ProbeRow]:
+    probes = cast(list[ManifestProbe], manifest["passage_probes"])
     return sorted((p["id"], p.get("kind"), p["feature"], tuple(tuple(round(c, 3) for c in pt) for pt in p["path_map"]),
-                   p["radius_m"]) for p in manifest["passage_probes"])
+                   p["radius_m"]) for p in probes)
 
 
 def main() -> None:
