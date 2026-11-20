@@ -34,19 +34,24 @@ Package schema stays **2.0.0**.
   could turn a needle-thin road face over even though the single-rounding
   check judged it fine. Generation now drops such faces (narrower than a few
   float32 ulps) for both storage paths and records them in the road's
-  `slivers_dropped` provenance. CLI output is unchanged (S2-F6, #37).
+  `slivers_dropped` provenance. In the tested CLI builds (the Pittsburgh and
+  Munich release packages, rebuilt from the same cached data) the output is
+  byte-identical to before the fix (S2-F6, #37).
 
 ### Changed
 
-- An unsplit bridge approach no longer raises a clearance warning for a road
-  that joins it at grade: the road must share an OSM node with the bridge way
-  within 15 m along the deck, where the deck is still below clearance height.
-  Real undercrossings, including the same road further along, still warn (#32).
+- An unsplit bridge approach no longer raises a false clearance warning. On
+  the ramp ends (where the straight deck line is still below clearance height
+  over the terrain), a crossing is exempt only if the road surface lies within
+  0.3 m of the nominal deck top, above or below (a two-sided surface gap); no
+  shared OSM node is needed. Roads further above or below are still measured
+  on the exported geometry and still warn (#32).
 - Packages now report `generator.version` **0.3.0**, and a unit test keeps it
   equal to the add-on version (D50). v0.1.0 and v0.2.0 packages report
   `generator.version` 0.1.0, a known historical mislabel. Because the
   manifest changes, every `package_id` changes from v0.3.0 on, even where the
-  geometry is byte-identical to v0.2.0. The committed
+  geometry is byte-identical to v0.2.0 (verified for the Pittsburgh and Munich
+  builds in the v0.3.0 evidence). The committed
   `examples/synthetic_sample.mbmap` was regenerated
   (`sha256:2b560d04…`).
 - Tests no longer depend on wall-clock speed: the TLS deadline test is
