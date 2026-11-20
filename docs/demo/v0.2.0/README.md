@@ -71,27 +71,34 @@ output; [summary.md](summary.md) is the kit's generated summary.
 
 ## Recorded evidence
 
-Machine-readable: [evidence.json](evidence.json). Base: main
-`b97f3a3ec2d711e687d654c8ac39d175a427e9b2`.
+Machine-readable: [evidence.json](evidence.json). Recorded on the rebased RC
+head (main `ecf349e`, which includes FIX-CS-PROBE-PARITY #27).
 
 | Check | Result |
 |---|---|
 | Package | `sha256:882855ca2c0cf1b17294743c7f7865a5ede3b532999cdfd02f304d9a824c5b7c`, schema 2.0.0 |
 | Objects | 3290: terrain 1, building 987, road 258, bridge 33, tunnel 5, structure (headwalls) 6, vegetation 2000 |
-| Build + package + validation, excluding acquisition | 18.769 / 20.198 / 21.112 s, **median 20.198 s** (target 120 s or less); all 3 runs byte-identical |
-| Python validator (strict) | `VALID: 0 error(s), 7 warning(s)`: 76 zero-area triangles, 6 `unrecognised mb_id form` (headwall ids, D46) |
+| Build + package + validation, excluding acquisition | 18.898 / 19.196 / 18.953 s, **median 18.953 s** (target 120 s or less); all 3 runs byte-identical |
+| Python validator (strict) | `VALID: 0 error(s), 1 warning(s)`: 76 zero-area triangles |
 | Passage probes | 13 exported (11 bridge, 2 tunnel), all PASS in Python; 29 reported in `passage_probes_blocked` |
-| C# reference reader | `OK`; probes 0-8 PASS; **probes 9-12 not checked** (query budget). Pending fix, see below |
+| C# reference reader | `OK`; **13/13 probes checked and PASS** (passages 0-12), no budget warning, no `mb_id` warning |
 | Renders | 8 Pittsburgh renders + panel, 1280 x 720, 64 samples, Cycles CPU: **280 s** total (budget 30 min) |
 | DSM correction | applied; 5201 of 12221 samples lowered, max 33.255 m |
 
-**RC caveat (D46):** the C# reader stopped after 2,000,000 query units, so
-probes 9-12 were not checked: `264591820:deck`, `550018192:deck` and both Fort
-Pitt Tunnel bores. A throwaway harness that calls the reader's own unbudgeted
-capsule check reports all 13 PASS (about 2.27 M units in total). This is not
-accepted as release evidence. FIX-CS-PROBE-PARITY ports the Python grid query
-accounting to C# and fixes the headwall `mb_id` warning. This evidence will be
-regenerated after the fix merges.
+**Reproduction on the RC head (SPRINT_CLOSE step 2):** the package was first
+built on main `b97f3a3` (median 20.198 s). Rebuilding on the rebased RC head
+gave the **same package id**, and the Python and C# results above. The renders,
+viewer and panel were made from that same package, so they were not redone.
+
+**Release zip in a clean Blender profile (S1-REVIEW G4):** `map_builder-0.2.0.zip`,
+built with `blender --command extension build` from the RC head (32 files,
+SHA-256 `e9f3bcfe58f813a7dd6c8502eb47ca275c274775ffbae4000024bbb326ff5f89`), was
+installed with `extension install-file -r user_default -e` into an empty
+`BLENDER_USER_RESOURCES` profile with the Mesa Blender 4.2.23. On a normal
+start it loads as `bl_ext.user_default.map_builder` and registers the
+`MB_PT_main` sidebar. `tests\blender\run_integration.py` was then run once with
+`map_builder` imported from the installed copy, not the source tree:
+**`OK: 0 failure(s)`**, 99 PASS checks, 15 s.
 
 **Blocked probes (D21)** come from the stacked Fort Pitt decks (each deck
 blocks the other's clearance), short interchange ramps meeting terrain or
@@ -168,6 +175,24 @@ py -3.12 tools\mbmap_cli.py validate "$env:MB_DEMO_ROOT\synthetic.mbmap"
 & $blender --background --factory-startup --python-exit-code 1 `
     --python tools\demo\run_demo.py -- --preset docs\demo\v0.2.0\synthetic-cameras.json `
     --after examples\synthetic_sample.mbmap --out "$env:MB_DEMO_ROOT\demo-synth"
+```
+
+The release zip in a clean profile (G4). The harness adds the source root to
+`sys.path`, so a tiny wrapper imports the installed copy first:
+
+```powershell
+$env:BLENDER_USER_RESOURCES = "$env:MB_DEMO_ROOT\g4-profile"
+New-Item -ItemType Directory "$env:MB_DEMO_ROOT\dist" -Force | Out-Null
+& $blender --background --factory-startup --command extension build --source-dir map_builder --output-dir "$env:MB_DEMO_ROOT\dist"
+& $blender --background --factory-startup --command extension install-file -r user_default -e "$env:MB_DEMO_ROOT\dist\map_builder-0.2.0.zip"
+@'
+import os, runpy, sys
+sys.path.insert(0, os.path.join(os.environ["BLENDER_USER_RESOURCES"], "extensions", "user_default"))
+import map_builder  # the installed copy; print(map_builder.__file__) to confirm
+runpy.run_path(os.path.join(os.getcwd(), "tests", "blender", "run_integration.py"), run_name="__main__")
+'@ | Set-Content "$env:MB_DEMO_ROOT\run_installed.py"
+& $blender --background --factory-startup --python-exit-code 1 --python "$env:MB_DEMO_ROOT\run_installed.py" -- "$env:MB_DEMO_ROOT\g4-out"
+Remove-Item Env:\BLENDER_USER_RESOURCES
 ```
 
 To view the bundle (never port 8765):

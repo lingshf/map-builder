@@ -36,19 +36,19 @@ Package schema stays **2.0.0**.
   [Pittsburgh v0.2.0 demo](docs/demo/v0.2.0/README.md) that compares
   before/after renders from the unchanged v0.1.0 cameras (REL-v0.2.0).
 
+### Changed
+
+- The C# reference reader now counts probe query work the same way as the
+  Python validator, so it checks all 13 Pittsburgh probes within its budget.
+  Both validators accept tunnel headwall ids (`osm:way/N:headwall0`,
+  `osm:way/N:headwall1`) without a warning (#27, D46).
+
 ### Not included
 
 - PERF-PROBE-INDEX (#25) was closed without merging. Probe checking performance
   is unchanged.
 - Railway bridges/tunnels (including funiculars), culverts, `man_made=bridge`
   outlines and `man_made=tunnel` remain unsupported and reported (D25).
-
-### Known issues being fixed before final (D46)
-
-- The C# reference reader can exhaust its query budget before checking every
-  probe on large real maps (Pittsburgh: probes 9-12 unchecked). It also warns
-  `unrecognised mb_id form` on tunnel headwall ids, as does the Python validator.
-  Both are being fixed by FIX-CS-PROBE-PARITY.
 
 ## [0.1.0] - 2026-11-19
 

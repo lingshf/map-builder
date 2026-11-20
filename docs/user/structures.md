@@ -48,13 +48,9 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- my_map.mbmap
 The Python validator tests every exported probe and fails the package if one
 is blocked. The C# reference reader prints one `passage N ... PASS` line per
 probe. A `query budget ... exhausted; probes A..B were not checked` warning
-means those probes were **not tested**, which is different from PASS.
-
-> **v0.2.0 RC note (D46):** on large real maps the C# reader currently uses
-> up its query budget before the last Pittsburgh probes, including both Fort
-> Pitt Tunnel bores. It also warns `unrecognised mb_id form` for tunnel headwall
-> ids such as `osm:way/N:headwall0`. Both issues are being fixed (FIX-CS-PROBE-PARITY)
-> before v0.2.0 is final, and this note will be updated then.
+means those probes were **not tested**, which is different from PASS. Both
+checkers count query work the same way, so a package the Python validator
+accepts is fully checked by the C# reader too (the Pittsburgh demo: 13 of 13).
 
 ## If you edit structures
 
