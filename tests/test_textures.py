@@ -87,6 +87,12 @@ class TextureSetTest(unittest.TestCase):
                 read_glb(glb)
                 self.assertEqual(glb_image_sha256s(glb), [textures.sha256(mat)])
 
+    def test_terrain_texture_is_greyscale(self):
+        """S4-TEX-WATER (D99): R = G = B for every pixel, so the landcover colour alone sets the hue."""
+        rows = make_textures.terrain(__import__("random").Random(1))
+        self.assertTrue(all(r == g == b for row in rows for r, g, b in row))
+        self.assertEqual(textures.TEXTURES["MB Terrain"][0], "terrain_detail.png")
+
     def test_total_bytes_within_budget(self):
         """AC3 (D60): the whole texture set, counted over the shipped directory, is <= 2 MiB."""
         total = sum(os.path.getsize(os.path.join(TEX_DIR, f)) for f in os.listdir(TEX_DIR) if f.endswith(".png"))

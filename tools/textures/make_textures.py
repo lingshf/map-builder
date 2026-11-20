@@ -183,20 +183,16 @@ def asphalt(rng: random.Random) -> Rows:
 
 
 def terrain(rng: random.Random) -> Rows:
-    """Terrain: grass with soil patches (8 m tile)."""
-    mask, detail, blades = fbm(rng, [(4, 3), (8, 2), (16, 1)]), value_noise(rng, 64), white(rng)
-    grass, dry, soil = (92, 126, 58), (128, 134, 72), (122, 100, 72)
+    """Terrain detail: neutral greyscale luminance only (8 m tile, D99). The landcover vertex colour
+    (water, grass, sand, forest) carries the hue, so the image must not."""
+    low, detail, grain = fbm(rng, [(4, 3), (8, 2), (16, 1)]), value_noise(rng, 64), white(rng)
     rows = []
     for y in range(SIZE):
         row = []
         for x in range(SIZE):
-            m = mask[y][x]
-            c = _mix(grass, dry, detail[y][x])
-            s = (m - 0.5) * 5.0
-            if s > 0.0:
-                c = _mix(c, soil, s if s < 1.0 else 1.0)
-            f = 0.86 + 0.24 * blades[y][x]
-            row.append(tuple(_clamp(v * f) for v in c))
+            v = 190.0 * (0.80 + 0.22 * low[y][x] + 0.14 * (detail[y][x] - 0.5) + 0.12 * (grain[y][x] - 0.5))
+            g = _clamp(v)
+            row.append((g, g, g))
         rows.append(row)
     return rows
 
@@ -225,7 +221,7 @@ TEXTURES: list[tuple[str, Callable[[random.Random], Rows]]] = [   # (file name, 
     ("roof_tiles.png", roof_tiles),
     ("roof_gravel.png", roof_gravel),
     ("asphalt.png", asphalt),
-    ("terrain_grass.png", terrain),
+    ("terrain_detail.png", terrain),
     ("concrete.png", concrete),
 ]
 

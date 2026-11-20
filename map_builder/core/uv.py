@@ -65,7 +65,7 @@ TEXTURE_MEAN_ALBEDO = {
     "MB Roof": (0.257, 0.045, 0.02),
     "MB Roof Flat": (0.263, 0.248, 0.22),
     "MB Road": (0.042, 0.042, 0.045),
-    "MB Terrain": (0.161, 0.196, 0.05),
+    "MB Terrain": (0.42, 0.42, 0.42),   # neutral greyscale (D99): landcover vertex colour carries the hue
     "MB Concrete": (0.389, 0.379, 0.35),
     "MB Tunnel": (0.389, 0.379, 0.35),
 }
