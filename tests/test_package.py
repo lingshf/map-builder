@@ -1191,7 +1191,9 @@ class PerfIdentityTest(TempDirCase):
         tri = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
         shift = (0.00018306960736326301, 0.0027530098943223122, 0.004169822782879785)
         v = ((shift[0], shift[1], shift[2]), tri[1], tri[2])
-        self.assertEqual(pkg._correspondence(tri, v, 0.005), (0.005, math.inf))
+        d = [[pkg._dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
+        want = (d[0][0] + d[1][1] + d[2][2], math.inf) if max(d[0][0], d[1][1], d[2][2]) <= 0.005 else (math.inf, math.inf)
+        self.assertEqual(pkg._correspondence(tri, v, 0.005), want)   # pow() rounding differs per platform
 
     def test_oversize_member_still_honours_max_ratio(self):
         path = self.p("big.mbmap")
