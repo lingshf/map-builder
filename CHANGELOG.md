@@ -16,6 +16,15 @@ All notable user-visible changes are recorded here, following
 - `report.json` `passage_probes_dropped` keeps the generation-time `{id, reason}` entries on export; probes of
   deleted features are appended as `{id, reason: "feature_deleted"}` (before: replaced by bare ids).
 
+### Changed
+
+- Hipped roofs on non-rectangular footprints (L, T, U, trapezoid, any simple polygon up to 64 vertices) are now built
+  from the straight skeleton: a sloped face on every footprint edge, with a sloped or multi-height ridge where the
+  footprint needs one. Before, they fell back to flat or to a pyramid. Rectangles and the sample are unchanged.
+- `roof:levels=0` with `roof:shape=hipped` or `pyramidal` and no `roof:height` no longer builds flat: the
+  default roof height is used (an explicit `roof:height` or a non-zero `roof:levels` still wins).
+- On the frozen Munich snapshot the built-as-tagged roofs go from 1 to 12 of 67 (all 11 eligible hipped roofs).
+
 ## [0.3.0] - 2026-11-20
 
 "Passages, roofs and the real-data v2 demo" (end of v2). **Release

@@ -78,7 +78,7 @@ class RoofShapeTest(unittest.TestCase):
         for shape in ("dome", "onion", "gambrel", "mansard"):
             outer = RECT
             mesh, _ = build(outer, roof__shape=shape)
-            extra_v, extra_t = roofs.roof_budget(shape, 4)
+            extra_v, extra_t = roofs.shape_budget(shape, 4)
             self.assertLessEqual(len(mesh.vertices), 2 * 4 + 2 + extra_v, shape)
             self.assertLessEqual(len(list(mesh.triangles())), 2 * 4 + 2 * 2 + 4 + extra_t, shape)
 
@@ -89,7 +89,7 @@ class RoofShapeTest(unittest.TestCase):
             feature = building(RECT, height=str(HEIGHT), roof__height=str(ROOF_H), roof__shape=shape)
             mesh, _, prov = build_building(feature, flat_grid(), 0.0, reserve=lambda v, t: calls.append((v, t)))
             self.assertEqual(prov["roof_shape_built"], shape)
-            self.assertEqual(roofs.roof_budget(shape, 4), (0, 0), shape)
+            self.assertEqual(roofs.shape_budget(shape, 4), (0, 0), shape)
             self.assertEqual(len(calls), 1)
             self.assertLessEqual(calls[0][0] - len(mesh.vertices), 2, (shape, calls))
             self.assertLessEqual(calls[0][1] - len(list(mesh.triangles())), 4, (shape, calls))

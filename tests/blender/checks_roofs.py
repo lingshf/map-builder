@@ -2,7 +2,8 @@
 generated through the Generate operator and compared with the Python pipeline (core generate_plan, same settings):
 mb_id, shape provenance, vertex positions within 1 mm, closed manifold mesh, and shape-specific invariants (apex
 and ridge counts, height, ridge orientation, outward winding). An unsupported roof:shape (scratch OSM file) falls
-back to flat with the same reason as Python. Edited roofs (moved) round-trip through export: collision equals the
+back to flat with the same reason as Python. A hipped L-shaped house (scratch OSM file, S3-ROOF-HIPPED) is built from the
+straight skeleton: Blender == Python within 1 mm and closed manifold with outward winding. Edited roofs (moved) round-trip through export: collision equals the
 evaluated Blender triangles. build_roof stays the single roof entry point of the generator."""
 
 import inspect
@@ -31,6 +32,15 @@ UNSUPPORTED_OSM = """<?xml version='1.0' encoding='UTF-8'?>
 <way id="9001"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/><tag k="building" v="house"/><tag k="roof:shape" v="butterfly"/><tag k="height" v="8"/></way>
 </osm>
 """
+
+
+_L = [(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)]      # an L, in steps of 0.0001 deg lon x 0.00008 deg lat
+HIPPED_L_OSM = ("<?xml version='1.0' encoding='UTF-8'?>\n<osm version=\"0.6\" generator=\"mb-test\">\n"
+                + "".join(f'<node id="{i + 1}" lat="{47.0005 + y * 0.00008:.9f}" lon="{8.0 + x * 0.0001:.9f}"/>\n'
+                          for i, (x, y) in enumerate(_L))
+                + '<way id="9101">' + "".join(f'<nd ref="{i}"/>' for i in (1, 2, 3, 4, 5, 6, 1))
+                + '<tag k="building" v="house"/><tag k="roof:shape" v="hipped"/><tag k="height" v="8"/>'
+                + '<tag k="roof:height" v="3"/></way>\n</osm>\n')
 
 
 def configure(s, osm, name, pkg):
@@ -224,6 +234,26 @@ def run(out_dir):
     top, ap = apex(world_verts(ob))
     check(len(ap) >= 4 and not [e for e, c in welded_edge_faces(ob).items() if c != 2],
           "roofs: fallback roof is a flat closed box top")
+
+    # --- a hipped L-shaped house is built from the straight skeleton ---------------------------------------
+    scratch = os.path.join(out_dir, "roof_hipped_l.osm")
+    with open(scratch, "w", encoding="utf-8") as f:
+        f.write(HIPPED_L_OSM)
+    s3 = bpy.context.scene.map_builder
+    configure(s3, scratch, "roofs_l", os.path.join(out_dir, "roofs_l.mbmap"))
+    res, err = run_op(bpy.ops.map_builder.generate)
+    check(res == {"FINISHED"}, f"roofs: generate an L-shaped hipped house ({err or 'ok'})")
+    ob = by_id(s3.export_collection, "osm:way/9101")
+    plan3, _ = pipeline.generate_plan(make_area(s3), make_settings(s3))
+    sp = next(o for o in plan3.objects if o.mb_id == "osm:way/9101")
+    got = world_verts(ob)
+    want = [tuple(c + o for c, o in zip(v, sp.location)) for v in sp.mesh.vertices]
+    check(sp.provenance["roof_shape_built"] == "hipped" and "straight skeleton" in sp.provenance["roof_construction"],
+          "roofs: the L-shaped hipped house is built hipped from the straight skeleton")
+    check(len(got) == len(want) and matches(got, want), f"roofs: L-shaped hipped vertices equal Python within 1 mm ({len(got)} verts)")
+    check(not [e for e, c in welded_edge_faces(ob).items() if c != 2], "roofs: L-shaped hipped house is closed manifold")
+    check(signed_volume(world_triangles(ob)) > 0, "roofs: L-shaped hipped house is outward-wound")
+    check(sp.provenance["roof_height_m"] == 3.0, "roofs: L-shaped hipped house has the tagged roof height")
 
 
 def top_p_dome(plan):

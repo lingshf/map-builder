@@ -179,10 +179,11 @@ class MunichRealDataTest(unittest.TestCase):
         flat = self.objects["osm:way/85765729"].provenance
         self.assertEqual(flat["roof_shape_built"], "flat")
         self.assertEqual(flat["roof_shape"], "fallback:flat (roof:shape=gabled on non-rectangular footprint)")
-        for mb_id in ("osm:way/80965613", "osm:way/80965653"):
-            prov = self.objects[mb_id].provenance
-            self.assertEqual(prov["roof_shape_built"], "pyramidal")
-            self.assertTrue(prov["roof_shape"].startswith("fallback:pyramidal"), prov["roof_shape"])
+        prov = self.objects["osm:way/80965613"].provenance
+        self.assertEqual(prov["roof_shape_built"], "pyramidal")
+        self.assertTrue(prov["roof_shape"].startswith("fallback:pyramidal"), prov["roof_shape"])
+        prov = self.objects["osm:way/80965653"].provenance      # S3-ROOF-HIPPED: now built from the straight skeleton
+        self.assertEqual(prov["roof_shape_built"], "hipped")
 
 
 if __name__ == "__main__":
