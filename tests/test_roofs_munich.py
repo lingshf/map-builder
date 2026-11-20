@@ -32,7 +32,7 @@ SNAPSHOT = os.path.join(FIX, "munich_roofs.osm")
 EXPECTED = os.path.join(FIX, "munich_roofs_expected.json")
 COUNTEREXAMPLES = os.path.join(FIX, "roof_counterexamples.osm")
 AREA_ARGS = (48.1395, 11.5764, 400.0, 400.0)
-BASELINE = 3            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
+BASELINE = 1            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
 TOTAL = 67
 COLLINEAR_TOL_M = 0.01  # a ring vertex closer than this to the line through its neighbours is collinear
 SKELETON_MAX_VERTICES = 64
@@ -378,6 +378,96 @@ class RoofCheckerTests(unittest.TestCase):
         self.assertNotIn("no_gap", fails)
 
 
+    def test_exterior_only_roof_triangle_fails_inside_while_tiling_is_complete(self):
+        roof = rc.projected_roof(self.tris)
+        ftris = rc.footprint_triangles(self.outer, [])
+        extra = (rc.ROOF, ((100.0, 100.0, 5.0), (101.0, 100.0, 5.0), (100.0, 101.0, 5.0)))
+        total, gap, outside, overlap = rc.roof_coverage(roof + rc.projected_roof([extra]), ftris)
+        self.assertAlmostEqual(gap, 0.0, 9)
+        self.assertAlmostEqual(overlap, 0.0, 9)
+        self.assertAlmostEqual(outside, 0.5, 9)
+        fails = self.fails(self.tris + [extra])
+        self.assertIn("inside", fails)
+        self.assertNotIn("no_gap", fails)
+        self.assertNotIn("no_overlap", fails)
+
+    def _warp(self, dz):
+        return [(m, tuple((p[0], p[1], p[2] + dz) if (m == rc.ROOF and p[:2] == (10, 0) and p[2] == 3.0) else p
+                          for p in t)) for m, t in self.tris]
+
+    def test_warped_slope_fails_planar_at_4_mm_and_at_200_mm(self):
+        for dz in (0.004, 0.2):
+            tris = self._warp(dz)
+            self.assertEqual(len(rc.roof_slopes(tris)), 2, dz)         # slope membership does not depend on dz
+            self.assertIn("planar", self.fails(tris), dz)
+
+    def test_the_planarity_rule_does_not_depend_on_the_tolerance(self):
+        self.assertEqual(len(rc.roof_slopes(self.tris)), 2)
+        self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self._warp(0.0005))), {})
+
+    @staticmethod
+    def _shape_box(kind, w=10.0, d=6.0, eave=3.0, rise=2.0):
+        R, F = rc.ROOF, rc.FACADE
+        a, b, c, e = (0, 0), (w, 0), (w, d), (0, d)
+        if kind == "pyramidal":
+            d = w
+            a, b, c, e = (0, 0), (w, 0), (w, d), (0, d)
+            r0 = r1 = (w / 2, d / 2, eave + rise)
+        else:
+            inset = 3.0 if kind == "hipped" else 0.0
+            r0, r1 = (inset, d / 2, eave + rise), (w - inset, d / 2, eave + rise)
+        P = lambda p: (p[0], p[1], eave)
+        tris = [(R, (P(a), P(b), r1)), (R, (P(a), r1, r0)), (R, (P(c), P(e), r0)), (R, (P(c), r0, r1))]
+        if kind == "gabled":
+            tris += [(F, (P(b), P(c), r1)), (F, (P(e), P(a), r0))]
+        elif kind == "hipped":
+            tris += [(R, (P(b), P(c), r1)), (R, (P(e), P(a), r0))]
+        else:
+            tris = [(R, (P(a), P(b), r1)), (R, (P(b), P(c), r1)), (R, (P(c), P(e), r1)), (R, (P(e), P(a), r1))]
+        return tris, [a, b, c, e]
+
+    def test_shape_signatures_discriminate(self):
+        for kind, outer_kind in (("gabled", "gabled"), ("hipped", "hipped"), ("pyramidal", "pyramidal")):
+            tris, outer = self._shape_box(kind)
+            for shape in ("gabled", "hipped", "pyramidal"):
+                problems = rc.signature_problems(shape, tris, outer, 3.0, 5.0)
+                if (kind, shape) == ("pyramidal", "hipped"):      # a square hip roof is a pyramid
+                    continue
+                self.assertEqual(not problems, shape == kind, (kind, shape, problems))
+
+    def test_lowered_ridge_end_is_not_a_gabled_roof(self):
+        for dz in (-0.008, -0.5):
+            tris, outer = self._shape_box("gabled")
+            low = [(m, tuple((p[0], p[1], 5.0 + dz) if p[:2] == (10, 3) and p[2] == 5.0 else p for p in t))
+                   for m, t in tris]
+            self.assertTrue(rc.signature_problems("gabled", low, outer, 3.0, 5.0), dz)
+            self.assertTrue(rc.signature_problems("pyramidal", low, outer, 3.0, 5.0), dz)
+
+
+class RealRoofShapeControlTests(unittest.TestCase):
+    """The same signature controls on the real v0.3.0 mesh of way/144135890, which is built as a gabled roof."""
+    ID = "osm:way/144135890"
+
+    def _mesh(self):
+        _, decoded, exp, _ = _Built.get()
+        e = exp["buildings"][self.ID]
+        outer = [(p[0], p[1]) for p in feature_rings(SNAPSHOT)[0][self.ID].geometry.outer]
+        return decoded[self.ID]["visual"], outer, e["eave_m"], e["eave_m"] + e["roof_h_m"]
+
+    def test_real_gabled_roof_is_gabled_only(self):
+        tris, outer, eave, top = self._mesh()
+        self.assertEqual(rc.signature_problems("gabled", tris, outer, eave, top), [])
+        self.assertTrue(rc.signature_problems("pyramidal", tris, outer, eave, top))
+        self.assertTrue(rc.signature_problems("hipped", tris, outer, eave, top))
+
+    def test_lowering_one_ridge_end_by_8_mm_is_no_longer_gabled(self):
+        tris, outer, eave, top = self._mesh()
+        end = next(p for _, t in tris for p in t if abs(p[2] - top) <= 1e-3)
+        low = [(m, tuple((p[0], p[1], p[2] - 0.008) if rc._same(p, end) else p for p in t)) for m, t in tris]
+        self.assertTrue(rc.signature_problems("gabled", low, outer, eave, top))
+        self.assertTrue(rc.signature_problems("pyramidal", low, outer, eave, top))
+
+
 class MunichRoofSnapshotTests(unittest.TestCase):
     def test_snapshot_is_the_frozen_set_of_67_buildings(self):
         _, decoded, exp, results = _Built.get()
@@ -386,7 +476,7 @@ class MunichRoofSnapshotTests(unittest.TestCase):
         self.assertTrue(all(decoded[i]["visual"] for i in results))
         self.assertTrue(os.path.getsize(SNAPSHOT) + os.path.getsize(EXPECTED) < 300_000)
 
-    def test_built_as_tagged_baseline_is_3_of_67(self):
+    def test_built_as_tagged_baseline_is_1_of_67(self):
         """The D61 metric, measured from the exported geometry: closed, covered, ridge = eave + h, and the
         silhouette of the tagged shape. Raising it is what S3-SKELETON is for."""
         _, _, exp, results = _Built.get()

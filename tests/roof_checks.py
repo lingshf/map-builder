@@ -330,7 +330,7 @@ def roof_coverage(roof, ftris, budget=None):
 
 
 PLANAR_TOL = MM
-SLOPE_ANGLE = 0.02      # rad: adjacent roof triangles tilted less than this apart belong to one slope
+SLOPE_ANGLE = 0.3      # rad: adjacent roof triangles tilted less than this apart belong to one slope
 
 
 def plane_deviation(tris):
@@ -380,7 +380,8 @@ def roof_slopes(tris):
             t = items[i][0]
             for k in range(3):
                 for j in by_edge[frozenset((key(t[k]), key(t[(k + 1) % 3])))]:
-                    if j not in seen and sum(a * b for a, b in zip(items[i][1], items[j][1])) > math.cos(SLOPE_ANGLE):
+                    if abs(t[k][2] - t[(k + 1) % 3][2]) > MM and j not in seen and sum(
+                            a * b for a, b in zip(items[i][1], items[j][1])) > math.cos(SLOPE_ANGLE):
                         seen.add(j)
                         stack.append(j)
         groups.append(grp)
@@ -459,6 +460,32 @@ def _carried(segs, ends, roof_tris):
     return missing
 
 
+def _same(a, b):
+    return math.dist(a, b) <= MM
+
+
+def _distinct(points):
+    out = []
+    for p in points:
+        if not any(_same(p, q) for q in out):
+            out.append(p)
+    return out
+
+
+def _collinear(points):
+    a = points[0]
+    b = max(points, key=lambda p: math.dist(a, p))
+    return math.dist(a, b) > MM and all(
+        _dist_to_segment((p[0], p[1]), (a[0], a[1]), (b[0], b[1])) <= MM for p in points)
+
+
+def _joined(two, roof_tris):
+    """Some roof triangle has the edge between the two points, which are at least 0.1 m apart."""
+    a, b = two
+    return math.dist(a, b) >= 0.1 and any(
+        sum(_same(p, a) for p in t) and sum(_same(p, b) for p in t) for t in roof_tris)
+
+
 def _is_square(ring, tol=0.01):
     """A 4-vertex ring with equal sides and right angles (the only footprint whose hipped roof is a pyramid)."""
     if len(ring) != 4:
@@ -479,9 +506,14 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
     ends = [t for t in ends if _base_edge_on_footprint(t, segs)]
     top = [p for t in roof_tris for p in t if abs(p[2] - top_z) <= MM]
     problems = []
+    tops = _distinct(top)
     if shape == "hipped":
-        if len({(round(p[0] / MM), round(p[1] / MM)) for p in top}) == 1 and not _is_square(outer):
+        if len(tops) == 1 and not _is_square(outer):
             problems.append("the roof ends in a single apex on a non-square footprint (pyramidal, not hipped)")
+        if len(tops) >= 2 and not _collinear(tops):
+            problems.append("the top points do not lie on one ridge line")
+        if len(tops) == 2 and not _joined(tops, roof_tris):
+            problems.append("the two top points are not joined by a roof edge")
         if ends:
             problems.append(f"{len(ends)} gable-end triangle(s) on a hipped roof")
         if _carried(segs, [], roof_tris):
@@ -489,6 +521,10 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
     elif shape == "gabled":
         if len(ends) < 2:
             problems.append(f"{len(ends)} vertical gable-end triangle(s), need >= 2")
+        if len(tops) != 2 or not _joined(tops, roof_tris):
+            problems.append(f"no horizontal top ridge edge at the top height ({len(tops)} top point(s))")
+        elif not all(any(_same(a, p) for p in tops) for e in ends for a in e if abs(a[2] - top_z) <= MM):
+            problems.append("a gable end does not reach a ridge end")
         if _carried(segs, ends, roof_tris):
             problems.append("a footprint edge outside the gable ends carries no sloped roof triangle")
     elif shape == "skillion":
@@ -501,8 +537,12 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
         if not zs or max(zs) - min(zs) <= 0.1:
             problems.append("the roof does not slope")
     elif shape in ("pyramidal", "dome", "onion"):
-        if len({(round(p[0] / MM), round(p[1] / MM)) for p in top}) != 1:
+        if len(tops) != 1:
             problems.append("the roof does not end in a single apex")
+        if shape == "pyramidal" and ends:
+            problems.append(f"{len(ends)} gable-end triangle(s) on a pyramidal roof")
+        if shape == "pyramidal" and _carried(segs, [], roof_tris):
+            problems.append("a footprint edge carries no sloped roof triangle")
     else:
         zs = [p[2] for t in roof_tris for p in t]
         if not zs or max(zs) - eave_z <= 0.1:

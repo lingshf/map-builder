@@ -29,26 +29,30 @@
    "tagged": "skillion"
   },
   "osm:way/144135890": {
-   "built_as_tagged": true,
+   "built_as_tagged": false,
    "built_shape": "gabled",
-   "class": "already_built",
+   "class": "eligible",
    "eave_m": 15.0,
-   "failed_checks": [],
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
-   "reason": "built as tagged by v0.3.0",
+   "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 4,
    "roof_h_m": 6.0,
    "roof_shape_provenance": "measured:osm roof:shape",
    "tagged": "gabled"
   },
   "osm:way/150797496": {
-   "built_as_tagged": true,
+   "built_as_tagged": false,
    "built_shape": "gabled",
-   "class": "already_built",
+   "class": "eligible",
    "eave_m": 18.0,
-   "failed_checks": [],
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
-   "reason": "built as tagged by v0.3.0",
+   "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 4,
    "roof_h_m": 4.2915,
    "roof_shape_provenance": "measured:osm roof:shape",
@@ -72,7 +76,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 12.0,
-   "failed_checks": [],
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 6,
@@ -423,7 +429,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 18.0,
-   "failed_checks": [],
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -496,7 +504,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 15.0,
-   "failed_checks": [],
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -963,9 +973,9 @@
   }
  },
  "meta": {
-  "baseline_built_as_tagged": 3,
+  "baseline_built_as_tagged": 1,
   "collinear_tol_m": 0.01,
-  "eligible": 61,
+  "eligible": 63,
   "skeleton_max_vertices": 64,
   "source": "frozen from v0.3.0 (eb134a1) over a flat DEM (z = 0), PlanOptions(trees=False)",
   "total": 67,
