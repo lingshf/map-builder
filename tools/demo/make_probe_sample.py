@@ -18,7 +18,7 @@ import demo_bundle as db  # noqa: E402,F401  (sets up sys.path for map_builder)
 
 from map_builder.core.collision import read_collision  # noqa: E402
 from map_builder.core.geodesy import Area  # noqa: E402
-from map_builder.core.package import assemble, validate_package, write_package  # noqa: E402
+from map_builder.core.package import PassageProbe, assemble, validate_package, write_package  # noqa: E402
 
 SAMPLE = os.path.join(db.REPO, "examples", "synthetic_sample.mbmap")
 
@@ -36,7 +36,7 @@ def main(out: str) -> int:
     cx, cy, cz = [(lo[i] + hi[i]) / 2 for i in range(3)]
     ids = {o["name"]: o["mb_id"] for o in m["objects"]}
     feat = ids["bld_way_1007"]
-    probes = [
+    probes: list[PassageProbe] = [
         {"id": "clear-overhead", "kind": "bridge", "feature": feat, "radius_m": 1.0,
          "path_map": [[-60, 0, 60], [60, 0, 60]]},
         {"id": "through-building", "kind": "tunnel", "feature": feat, "radius_m": 1.5,

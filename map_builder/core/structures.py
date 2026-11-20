@@ -49,7 +49,27 @@ class ProbeBlock(TypedDict):
 class UnsupportedEntry(TypedDict):
     id: str
     reason: str | None
-    tags: dict[str, str]
+    tags: NotRequired[dict[str, str]]   # present on classifier entries, absent on those added by generation
+
+class InvalidEntry(TypedDict):
+    """An ``invalid_features`` report entry."""
+    id: str
+    reason: str
+
+
+# Provenance of a generated object: an open set of keys (stages add their own) mapping to a note, a rounded
+# measure in metres, a list of feature ids (``covered_by``) or None (an unknown elevation provider).
+Prov = dict[str, str | float | list[str] | None]
+
+
+def prov_note(prov: Mapping[str, object], key: str) -> str:
+    """The text note under ``key`` (always a str for the keys read this way)."""
+    return cast(str, prov[key])
+
+
+def prov_metres(prov: Mapping[str, object], key: str) -> float:
+    """The rounded measure under ``key`` (always a float for the keys read this way)."""
+    return cast(float, prov[key])
 
 
 Frame = tuple[Vec3, Vec3, float]
@@ -266,7 +286,7 @@ def plan_collision(plan: ScenePlan, exclude: Iterable[str] = ()) -> tuple[Collis
     for spec in plan.objects:
         if spec.mb_id in exclude:
             continue
-        md = spec.mesh if spec.mesh is not None else plan.shared_meshes.get(spec.mesh_key)
+        md = spec.mesh if spec.mesh is not None else spec.shared_mesh(plan.shared_meshes)
         if md is None or not md.faces:
             continue
         verts, tris = _world_mesh(spec, md)
@@ -287,7 +307,7 @@ class _CollisionIndex:
         self.geometry: dict[int, PlacedGeometry] = {}
         radius: dict[int, float] = {}     # local plan radius per mesh (shared meshes are measured once)
         for spec in plan.objects:
-            md = spec.mesh if spec.mesh is not None else plan.shared_meshes.get(spec.mesh_key)
+            md = spec.mesh if spec.mesh is not None else spec.shared_mesh(plan.shared_meshes)
             if md is None or not md.faces:
                 continue
             r = radius.get(id(md))

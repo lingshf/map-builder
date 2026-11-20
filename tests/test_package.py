@@ -2107,6 +2107,27 @@ class TexturedPackageTest(TempDirCase):
         with self.assertRaises(PackageError):
             assemble("t", AREA, synthetic_sources(), b"", b"", [], asset_notices=[{"name": "x"}])
 
+    def test_assemble_edit_entries_may_be_one_shot_iterators(self):
+        objs = scene()
+        col_bytes = write_collision([col_of(o) for o in objs])
+        glb = write_glb([node_of(o) for o in objs], MATERIALS)
+        objects = [{"name": o["name"], "mb_id": o["mb_id"], "class": o["cls"], "collision": True, "provenance": {}}
+                   for o in objs]
+        lists = {"duplicated": [{"object": "a", "source_id": "b"}], "user_added": ["u"], "removed": ["r"]}
+        _, plain, _ = assemble("test", AREA, synthetic_sources(), glb, col_bytes, objects, created_utc=UTC,
+                               edits=lists)
+        _, lazy, _ = assemble("test", AREA, synthetic_sources(), glb, col_bytes, objects, created_utc=UTC,
+                              edits={k: iter(v) for k, v in lists.items()})
+        self.assertEqual(plain, lazy)
+
+    def test_merge_dropped_accepts_iterators(self):
+        from map_builder.core.pipeline import merge_dropped
+        entries = [{"id": "p1", "reason": "x"}]
+        want = merge_dropped({"passage_probes_dropped": entries}, ["gone"])
+        got = merge_dropped({"passage_probes_dropped": iter(entries)}, iter(["gone"]))
+        self.assertEqual(want, got)
+        self.assertEqual(got[-1], {"id": "gone", "reason": "feature_deleted"})
+
 
 def scene_members_v(objs, version):
     col_bytes = write_collision([col_of(o) for o in objs])

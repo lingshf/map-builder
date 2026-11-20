@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from .mesh import MeshData
 from .osm import _unsupported_reason
-from .structures import Probe, Segment, Vec2, Vec3, polyline_z_profile, report_unsupported, sweep
+from .structures import Probe, Prov, Segment, Vec2, Vec3, polyline_z_profile, prov_note, report_unsupported, sweep
 
 if TYPE_CHECKING:
     from .dem import ElevationGrid
@@ -619,9 +619,9 @@ def build(plan: ScenePlan, ctx: StageContext) -> None:
         tubes.append(tube)
         ctx.add(tube.spec)
         plan.count("tunnels")
-        if tube.spec.provenance["width"].startswith("inferred"):
+        if prov_note(tube.spec.provenance, "width").startswith("inferred"):
             plan.inferred("tunnel.width")
-        if tube.spec.provenance["clearance"].startswith("inferred"):
+        if prov_note(tube.spec.provenance, "clearance").startswith("inferred"):
             plan.inferred("tunnel.clearance")
         _cover(plan, ctx, tube)
         walls.extend(_build_headwalls(plan, ctx, tube))
@@ -630,12 +630,14 @@ def build(plan: ScenePlan, ctx: StageContext) -> None:
         return
     terrain = next(s for s in plan.objects if s.mb_id == "terrain:grid")
     # The terrain is the plain grid triangulation, so its triangle count is its face count.
-    before = (len(terrain.mesh.vertices), len(terrain.mesh.faces))
-    cells, _ = cut_terrain(terrain.mesh, ctx.terrain, tubes)
+    terrain_mesh = terrain.mesh
+    assert terrain_mesh is not None
+    before = (len(terrain_mesh.vertices), len(terrain_mesh.faces))
+    cells, _ = cut_terrain(terrain_mesh, ctx.terrain, tubes)
     if cells:
         terrain.provenance["tunnel_cut"] = "terrain inside the tunnel bores (floor to roof) removed"
-        ctx.budget.charge("terrain:grid", max(0, len(terrain.mesh.vertices) - before[0]),
-                          max(0, len(terrain.mesh.faces) - before[1]))
+        ctx.budget.charge("terrain:grid", max(0, len(terrain_mesh.vertices) - before[0]),
+                          max(0, len(terrain_mesh.faces) - before[1]))
     plan.count("terrain_cut_cells", cells)
     for w in walls:
         ctx.add(w)
@@ -682,7 +684,7 @@ def _build_tube(ctx: StageContext, f: Feature) -> _Tube:
         path = path_of(simple)
         mesh = mesh_of(path, origin)
     ctx.budget.charge(f.id, len(mesh.vertices), mesh_triangle_count(mesh))
-    prov = {"width": wprov, "floor_width_m": round(floor_w, 2), "clearance": cprov,
+    prov: Prov = {"width": wprov, "floor_width_m": round(floor_w, 2), "clearance": cprov,
             "clearance_m": round(clearance, 2),
             "profile": f"inferred:floor = road width + 2 x {FLOOR_MARGIN_M:g} m, walls {clearance - ARCH_RISE_M:g} m, "
                        f"{ARCH_SEGMENTS}-segment arch rising {ARCH_RISE_M:g} m",

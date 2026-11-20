@@ -109,8 +109,9 @@ class MB_OT_generate(bpy.types.Operator):
         write_report_text(REPORT_TEXT, format_report(f"Generated collection '{root.name}' "
                                                      f"({len(plan.objects)} objects)", sources, plan.report))
         rep = plan.report
-        n_unsup, n_inv, n_warn = (len(rep.get(k) or []) for k in ("unsupported_features", "invalid_features",
-                                                                  "warnings"))
+        n_unsup = len(rep.get("unsupported_features") or [])
+        n_inv = len(rep.get("invalid_features") or [])
+        n_warn = len(rep.get("warnings") or [])
         self.report({"WARNING" if (n_unsup or n_inv or n_warn) else "INFO"},
                     f"Created '{root.name}': {len(plan.objects)} objects; {n_unsup} unsupported, {n_inv} invalid "
                     f"feature(s), {n_warn} warning(s); see Text '{REPORT_TEXT}'")

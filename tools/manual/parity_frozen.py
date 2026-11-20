@@ -80,7 +80,7 @@ def main() -> None:
             sys.exit("Blender operator failed")
     bl_result = validate_package(bl_pkg)
 
-    want, got = probe_set(cli), probe_set(bl_result.manifest)
+    want, got = probe_set(cli), probe_set(bl_result.manifest)  # type: ignore[arg-type]  # manifest is set for a validated package
     print(f"CLI probes {len(want)}, Blender probes {len(got)}; packages: {out}")
     print(f"validate: CLI ok={cli_result.ok}, Blender ok={bl_result.ok}")
     if want != got:

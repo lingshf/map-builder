@@ -193,6 +193,8 @@ def _road_triangles(plan: ScenePlan, ctx: StageContext, ids: Iterable[str]) -> l
         if rid not in ctx.road_triangles:
             tris: list[RoadTri] = []
             for o in objs.get(rid, ()):
+                if o.mesh is None:
+                    continue
                 lx, ly, lz = o.location
                 vs = [(x + lx, y + ly, z + lz + ctx.z_offset) for x, y, z in o.mesh.vertices]
                 for i, j, k in o.mesh.triangles():

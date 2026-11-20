@@ -11,7 +11,7 @@ import shutil
 import sys
 import zipfile
 from collections.abc import Sequence
-from typing import Any, NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 if REPO not in sys.path:
@@ -19,7 +19,7 @@ if REPO not in sys.path:
 
 from map_builder.core.collision import read_collision  # noqa: E402
 from map_builder.core.errors import LimitError  # noqa: E402
-from map_builder.core.package import PASSAGE_QUERY_BUDGET, package_id_of, validate_package  # noqa: E402
+from map_builder.core.package import PASSAGE_QUERY_BUDGET, Manifest, package_id_of, validate_package  # noqa: E402
 from map_builder.core.query import capsule_hits  # noqa: E402
 
 PRESET_DIR = os.path.join(HERE, "presets")
@@ -56,7 +56,7 @@ class Preset(TypedDict):
 
 
 class Package(TypedDict):
-    manifest: dict[str, Any]  # Any: validated package manifest JSON, read through many nested optional keys (open schema owned by core.package)
+    manifest: Manifest
     package_id: str
     glb: bytes
     collision: bytes
@@ -135,7 +135,7 @@ def read_package(path: str, verify: bool = True) -> Package:
     try:
         with zipfile.ZipFile(path) as z:
             raw = z.read("manifest.json")
-            m = json.loads(raw.decode("utf-8"))
+            m = cast(Manifest, json.loads(raw.decode("utf-8")))
             return {"manifest": m, "package_id": pid or package_id_of(raw), "glb": z.read(m["visual"]["path"]),
                     "collision": z.read(m["collision"]["path"]),
                     "notices": z.read(m.get("notices", "NOTICES.txt")).decode("utf-8")}

@@ -14,7 +14,7 @@ import json
 import os
 import tempfile
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import bpy
 
@@ -23,7 +23,7 @@ from ..core import uv as core_uv
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.glb import node_scale
-from ..core.mesh import MeshData
+from ..core.mesh import UV, MeshData
 from .sources import JsonMapping, check_persistable
 
 if TYPE_CHECKING:
@@ -173,7 +173,7 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
     uvsrc = uv_source(md, origin)
     if uvsrc is not None:
         flat: list[float] = []
-        for face, fuv in zip(uvsrc.faces, uvsrc.face_uvs):
+        for face, fuv in zip(uvsrc.faces, cast("list[tuple[UV, ...] | None]", uvsrc.face_uvs)):  # uv_source only returns meshes with face_uvs
             for k in range(len(face)):
                 flat.extend(fuv[k] if fuv is not None else (0.0, 0.0))
         if len(flat) != 2 * len(me.loops):
@@ -247,10 +247,12 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
                 me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes, textures, spec.location,
                                     created_images)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)
-                me = shared.get(spec.mesh_key)
+                key = spec.mesh_key
+                if key is None:
+                    raise KeyError(key)
+                me = shared.get(key)
                 if me is None:
-                    me = shared[spec.mesh_key] = mesh_from_data(plan.shared_meshes[spec.mesh_key], spec.mesh_key,
-                                                                created_mats, created_meshes)
+                    me = shared[key] = mesh_from_data(plan.shared_meshes[key], key, created_mats, created_meshes)
             # Blender may suffix the name (".001") when another map is already in the file; identities
             # live in mb_id, so the object name only has to be unique, which Blender guarantees.
             ob = bpy.data.objects.new(spec.name, me)

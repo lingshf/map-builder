@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TypeAlias
+
+# What ``json.loads`` can return; the shared type of untrusted parsed JSON until a validator has narrowed it
+JsonValue: TypeAlias = "None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]"
+
 
 class MapBuilderError(Exception):
     """Base error; ``str(err)`` is safe to show to users (no secrets)."""

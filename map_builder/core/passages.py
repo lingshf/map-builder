@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .dem import ElevationGrid
     from .generate import ObjectSpec, ScenePlan
     from .mesh import MeshData
-    from .structures import Probe, StageContext, WorkBudget
+    from .structures import Probe, Prov, StageContext, WorkBudget
 
 Pt: TypeAlias = "Sequence[float]"
 Ring: TypeAlias = "Sequence[tuple[float, ...]]"
@@ -35,7 +35,7 @@ Box6: TypeAlias = "tuple[float, float, float, float, float, float]"
 Crossing: TypeAlias = ("tuple[Literal['reason'], str]"
                        " | tuple[Literal['cross'], Pt, Pt, float, float]")
 # build_building result: (MeshData in object-local coords, location, provenance)
-Built: TypeAlias = "tuple[MeshData, tuple[float, float, float], dict[str, str | float]]"
+Built: TypeAlias = "tuple[MeshData, tuple[float, float, float], Prov]"
 
 
 class _Handled(TypedDict):
@@ -266,15 +266,15 @@ def split(plan: ScenePlan, ctx: StageContext, feature: Feature) -> list[Feature]
         if h_low < 1.0:
             return refuse("terrain under the building is too steep to keep the lower parts at the passage height")
         piece = Feature(f"{feature.id}#{k}", feature.kind, dict(base_tags, height=f"{h_low:.6f}"), Polygon(ring))  # type: ignore[arg-type]  # 2-tuples
-        piece.extra_prov = {"passage": f"lower part {k} of {len(pieces)}: footprint minus the corridor of "  # type: ignore[attr-defined]  # dynamic attribute
+        piece.extra_prov = {"passage": f"lower part {k} of {len(pieces)}: footprint minus the corridor of "
                                        f"{way}, flat top at the passage height",
                             "passage_height": height_prov}
         lows.append(piece)
     utags = {k: v for k, v in feature.tags.items() if k not in ("min_height", "building:min_level")}
     utags["min_height"] = f"{clearance:.6f}"
     upper = Feature(f"{feature.id}#{len(lows) + 1}", feature.kind, utags, Polygon([tuple(p) for p in poly.outer]))
-    upper.passage_upper = True  # type: ignore[attr-defined]  # attribute added dynamically for build_plan
-    upper.extra_prov = {"passage": f"upper part over the corridor of {way}, built as an elevated volume from the "  # type: ignore[attr-defined]  # dynamic attribute
+    upper.passage_upper = True
+    upper.extra_prov = {"passage": f"upper part over the corridor of {way}, built as an elevated volume from the "
                                    "passage height",
                         "passage_height": height_prov}
     # The replacement is all-or-nothing: every part must be buildable (terrain humps can make a part fail), else
@@ -436,12 +436,13 @@ def _local_plan(plan: ScenePlan, probes: Sequence[Probe], grid: ElevationGrid | 
     objs: list[ObjectSpec] = []
     for spec in plan.objects:
         if spec.mesh is None:
-            md = plan.shared_meshes.get(spec.mesh_key)
-            if md is None or not md.vertices:
+            key = spec.mesh_key
+            md = spec.shared_mesh(plan.shared_meshes)
+            if key is None or md is None or not md.vertices:
                 continue
-            r = shared_r.get(spec.mesh_key)
+            r = shared_r.get(key)
             if r is None:
-                r = shared_r[spec.mesh_key] = (max(math.hypot(x, y) for x, y, _ in md.vertices),
+                r = shared_r[key] = (max(math.hypot(x, y) for x, y, _ in md.vertices),
                                                min(z for _, _, z in md.vertices), max(z for _, _, z in md.vertices))
             s = abs(spec.scale) if not isinstance(spec.scale, (tuple, list)) else max(abs(c) for c in spec.scale)
             x, y, z = spec.location

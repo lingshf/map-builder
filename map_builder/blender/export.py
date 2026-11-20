@@ -45,7 +45,7 @@ from .sources import JsonObject
 if TYPE_CHECKING:
     import bpy.types
 
-    from ..core.package import ValidationResult
+    from ..core.package import Manifest, ValidationResult
 
 ColorReader = Callable[[Sequence[int], Sequence[int]], tuple[float, ...]]
 
@@ -526,7 +526,7 @@ def resolve_path(path: str) -> str:
 
 def export_map(context: bpy.types.Context, path: str, name: str, heightfield_spacing: float = 0.0,
                root: bpy.types.Collection | None = None,
-               textures: bool = True) -> tuple[JsonObject, ValidationResult, JsonObject, Edits]:
+               textures: bool = True) -> tuple[Manifest, ValidationResult, JsonObject, Edits]:
     """Export the map collection to ``path``. Returns (manifest, ValidationResult, report, edits) where
     ``report`` is the package report (generation report + ``blender_export`` diagnostics + ``edits``).
     ``textures`` embeds the procedural textures and TEXCOORD_0 (D60); off gives the untextured layout.

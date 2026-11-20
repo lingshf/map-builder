@@ -13,6 +13,8 @@ The authoritative contract is docs/PACKAGE_FORMAT.md. A package is a ZIP archive
 archive. It binds the payload only after every member has been verified against ``files[]``.
 """
 
+from __future__ import annotations
+
 import copy
 import datetime
 import hashlib
@@ -26,17 +28,169 @@ import tempfile
 import time
 import zipfile
 import zlib
+from collections.abc import Iterable, Mapping, Sequence
 from fractions import Fraction
+from os import PathLike
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, Required, TypedDict, TypeGuard, cast
 
 from . import (COLLISION_FORMAT_VERSION, GENERATOR_NAME, GENERATOR_VERSION, HEIGHTFIELD_FORMAT_VERSION,
                PACKAGE_SCHEMA, PACKAGE_SCHEMA_VERSION)
 from .collision import (CLASS_KINDS, CLASSES, DEGENERATE_EPS, KIND_SOLID, KIND_TUBE, MAX_ABS_COORD_M,
                         degenerate_triangle_count, is_degenerate, rasterize_heightfield, read_collision,
                         read_heightfield, strict_json)
-from .errors import LimitError, PackageError
+from .errors import JsonValue, LimitError, PackageError
 from .geodesy import gltf_to_map, map_to_gltf, map_to_unity_x_negated
 from .glb import glb_image_sha256s, read_glb
 from .query import capsule_hits
+
+if TYPE_CHECKING:
+    from .collision import Collision, CollisionEntry
+    from .geodesy import Area
+    from .glb import GlbNode
+
+Vec3 = tuple[float, float, float]
+Tri = tuple[Sequence[float], Sequence[float], Sequence[float]]
+Cell = tuple[int, int, int]
+Num = float | Fraction            # coordinates are floats, or exact Fractions for portal-cap centroids
+class PassageProbe(TypedDict):
+    id: str
+    kind: Literal["bridge", "tunnel", "elevated"]
+    feature: str
+    path_map: list[list[float]]
+    radius_m: float
+
+
+class HeightfieldInfo(TypedDict):
+    nx: int
+    ny: int
+    x0: float
+    y0: float
+    spacing_m: float
+    nan_cells: int
+    rule: str
+
+
+# manifest ``objects[]`` entry (the key ``class`` is a keyword, hence the functional form)
+ObjectEntry = TypedDict("ObjectEntry", {"name": str, "mb_id": str, "class": str, "collision": bool,
+                                        "provenance": dict[str, object]})
+class FileEntry(TypedDict):
+    path: str
+    role: str
+    media_type: str
+    sha256: str
+    bytes: int
+
+
+class OrientationProbe(TypedDict):
+    node: str
+    point_map: list[float]
+    point_gltf: list[float]
+    point_unity_x_negated: list[float]
+    triangle_map: list[list[float]]
+    normal_map: list[float]
+    normal_unity_x_negated: list[float]
+
+
+class GeneratorInfo(TypedDict):
+    name: str
+    version: str
+    blender: str | None
+
+
+class LicenseInfo(TypedDict, total=False):
+    id: str
+    name: str
+    text: str
+    url: str
+
+
+class SourceEntry(TypedDict, total=False):
+    kind: Required[str]
+    provider: Required[str]
+    license: Required[LicenseInfo]
+    attribution: Required[str]
+    product: str
+    notes: str
+    processing: str
+    vertical_datum: str
+
+
+class AssetNotice(TypedDict):
+    name: str
+    attribution: str
+    license: LicenseInfo
+    sha256: list[str]
+
+
+class CollisionInfo(TypedDict):
+    path: str
+    format: str
+    version: int
+    frame: str
+    winding: str
+    triangle_count: int
+    vertex_count: int
+    bounds_min: list[float]
+    bounds_max: list[float]
+    classes: dict[str, int]
+    class_kinds: dict[str, str | None]
+    authority: str
+
+
+class HeightfieldManifest(HeightfieldInfo):
+    path: str
+    format: str
+    version: int
+    authority: str
+
+
+class Manifest(TypedDict):
+    """The manifest of a package that passed ``_check_manifest`` (the checker validates the raw JSON, key by
+    key, before any other code indexes it)."""
+    schema: str
+    schema_version: str
+    name: str
+    created_utc: str
+    generator: GeneratorInfo
+    georeference: dict[str, object]
+    area: dict[str, object]
+    axes: dict[str, object]
+    files: Sequence[FileEntry]
+    visual: dict[str, str]
+    collision: CollisionInfo
+    heightfield: HeightfieldManifest | None
+    objects: Sequence[ObjectEntry]
+    orientation_probes: Sequence[OrientationProbe]
+    passage_probes: list[PassageProbe]
+    sources: Sequence[SourceEntry]
+    edits: Mapping[str, int]
+    notices: str
+    report: str | None
+    warnings_count: int
+    asset_notices: NotRequired[list[AssetNotice]]
+
+
+class WindingStats(TypedDict):
+    considered: int
+    degenerate: int
+    same: int
+    reversed: int
+    ambiguous: int
+    unmatched: int
+    unchecked: int
+    comparisons: int
+    work: int
+    work_exhausted: bool
+    reversed_examples: list[list[list[float]]]
+
+
+class OneToOneStats(TypedDict):
+    matched: int
+    reversed: int
+    unmatched: int
+    visual_only: int
+    work_exhausted: bool
+
 
 PACKAGE_EXTENSION = ".mbmap"
 MANIFEST = "manifest.json"
@@ -47,7 +201,7 @@ MAX_RATIO = 200
 MAX_NAME_LEN = 255
 
 # path -> (role, media_type, required)
-MEMBERS = {
+MEMBERS: dict[str, tuple[str, str, bool]] = {
     "visual/map.glb": ("visual", "model/gltf-binary", True),
     "collision/map.mbcol": ("collision", "application/vnd.map-builder.mbcol", True),
     "NOTICES.txt": ("notices", "text/plain; charset=utf-8", True),
@@ -62,7 +216,7 @@ PROJECTION = ("local tangent plane at the origin: x, y = east, north components 
               "on the WGS84 ellipsoid (h = 0); no scale factor, no earth-curvature correction")
 MAP_FROM_GLTF = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
 MAP_FROM_UNITY = [[-1, 0, 0], [0, 0, -1], [0, 1, 0]]
-AXES = {
+AXES: dict[str, object] = {
     "map": "right-handed; +X east, +Y north, +Z up; metres",
     "gltf": "gltf = (x, z, -y): +X east, +Y up, +Z south; proper rotation, winding preserved",
     "unity_x_negated": ("unity = (-x, z, -y): +X west, +Y up, +Z south (glTF importer negating X); a "
@@ -104,7 +258,7 @@ _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
 
 
-def is_utc_timestamp(s):
+def is_utc_timestamp(s: object) -> bool:
     """True for a real calendar instant written as YYYY-MM-DDTHH:MM:SS[.fff]Z (ASCII digits)."""
     if not isinstance(s, str) or not _UTC.fullmatch(s):
         return False
@@ -129,20 +283,20 @@ _SECRET_KEY = re.compile(r"(?i)(?:x-)?(?:api[_-]?key|apikey|access[_-]?key|secre
 _SAFE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 
 
-def manifest_bytes(manifest):
+def manifest_bytes(manifest: Mapping[str, object]) -> bytes:
     return json.dumps(manifest, indent=1, sort_keys=True, ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
-def package_id_of(manifest_data):
+def package_id_of(manifest_data: bytes) -> str:
     """Package identity from the raw manifest.json bytes."""
     return "sha256:" + hashlib.sha256(manifest_data).hexdigest()
 
 
-def sha256(data):
+def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def safe_member_name(name):
+def safe_member_name(name: object) -> bool:
     """Relative POSIX path: no absolute path, ``..``, backslash, drive letter, empty or ``.`` segment."""
     if not isinstance(name, str) or not name or len(name) > MAX_NAME_LEN:
         return False
@@ -153,7 +307,7 @@ def safe_member_name(name):
     return all(part not in ("", ".", "..") for part in name.split("/"))
 
 
-def _num(v):
+def _num(v: object) -> TypeGuard[float]:
     """A real number (int or float, not bool) with a finite float value. Integers are bounded exactly before
     any float conversion, so an oversized integer (e.g. 10**400) is rejected instead of raising OverflowError."""
     if isinstance(v, bool):
@@ -163,21 +317,21 @@ def _num(v):
     return isinstance(v, float) and math.isfinite(v)
 
 
-def _vec(v, n=3):
+def _vec(v: object, n: int = 3) -> bool:
     return isinstance(v, list) and len(v) == n and all(_num(c) for c in v)
 
 
-def _dist(a, b):
+def _dist(a: Sequence[float], b: Sequence[float]) -> float:
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
-def passage_probe_problems(probes):
+def passage_probe_problems(probes: object) -> list[str]:
     """Structural problems of a manifest ``passage_probes`` value (docs/PACKAGE_FORMAT.md "Passage probes"),
     as index-only messages that never echo strings from the input. Extra keys in an entry are ignored."""
     if not isinstance(probes, list) or len(probes) > PASSAGE_PROBE_MAX:
         return [f"passage_probes must be an array of at most {PASSAGE_PROBE_MAX}"]
-    problems = []
-    seen = {}
+    problems: list[str] = []
+    seen: dict[str, int] = {}
     for i, p in enumerate(probes):
         tag = f"passage_probes[{i}]"
         if not isinstance(p, dict):
@@ -205,37 +359,37 @@ def passage_probe_problems(probes):
     return problems
 
 
-def _cross(a, b, c):
+def _cross(a: Sequence[float], b: Sequence[float], c: Sequence[float]) -> Vec3:
     ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
     vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
     return (uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx)
 
 
-def _unit(v):
+def _unit(v: Sequence[float]) -> Vec3 | None:
     n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
     return None if n == 0 else (v[0] / n, v[1] / n, v[2] / n)
 
 
-_PERMUTATIONS = ((0, 1, 2), (1, 2, 0), (2, 0, 1), (0, 2, 1), (2, 1, 0), (1, 0, 2))   # 3 cyclic, then 3 reversed
+_PERMUTATIONS: tuple[tuple[int, int, int], ...] = ((0, 1, 2), (1, 2, 0), (2, 0, 1), (0, 2, 1), (2, 1, 0), (1, 0, 2))   # 3 cyclic, then 3 reversed
 
 
-def _key_label(path, k, i):
+def _key_label(path: str, k: object, i: int) -> str:
     """Path step for a dict key that never echoes untrusted key text."""
     return f"{path}.{k}" if isinstance(k, str) and _SAFE_KEY.fullmatch(k) else f"{path}[key #{i}]"
 
 
-def find_secrets(obj, path="$"):
+def find_secrets(obj: object, path: str = "$") -> list[str]:
     """Locations of credential-like strings (see ``_SECRET``) anywhere in ``obj``: string values, dict keys,
     and non-empty strings stored under credential-named keys. Locations are built from field names that are
     plain identifiers and from indices, so they never echo the offending text. Iterative (depth-first, in
     document order), so arbitrarily nested parsed JSON cannot exhaust the interpreter stack; linear in the
     size of ``obj``."""
-    hits = []
-    stack = [(obj, path)]
+    hits: list[str] = []
+    stack: list[tuple[object, str]] = [(obj, path)]
     while stack:
         obj, path = stack.pop()
         if isinstance(obj, dict):
-            children = []
+            children: list[tuple[object, str]] = []
             for i, (k, v) in enumerate(obj.items()):
                 where = _key_label(path, k, i)
                 if isinstance(k, str) and _SECRET.search(k):
@@ -252,7 +406,7 @@ def find_secrets(obj, path="$"):
     return hits
 
 
-def secrets_message(where, hits):
+def secrets_message(where: str, hits: Sequence[str]) -> str:
     return (f"{where}: credential-like value(s) at {hits[:5]}{' ...' if len(hits) > 5 else ''}; expected no URL "
             "userinfo, credential query parameters (key, token, apikey, access_token, signature, password, "
             "secret, ...), Authorization headers or bearer/basic credentials")
@@ -260,11 +414,16 @@ def secrets_message(where, hits):
 
 # --- manifest ------------------------------------------------------------------
 
-def build_manifest(name, area, sources, vertical_datum, files, collision_info, heightfield_info, objects,
-                   probes, edits_counts, warnings_count, has_report=True, blender_version=None, created_utc=None,
-                   passage_probes=None, schema_version=PACKAGE_SCHEMA_VERSION, asset_notices=()):
+def build_manifest(name: str, area: Area, sources: Sequence[Mapping[str, object]], vertical_datum: str,
+                   files: Sequence[FileEntry], collision_info: CollisionInfo,
+                   heightfield_info: HeightfieldManifest | None, objects: Sequence[ObjectEntry],
+                   probes: Sequence[OrientationProbe], edits_counts: Mapping[str, int], warnings_count: int,
+                   has_report: bool = True, blender_version: str | None = None, created_utc: str | None = None,
+                   passage_probes: Iterable[PassageProbe] | None = None,
+                   schema_version: str = PACKAGE_SCHEMA_VERSION,
+                   asset_notices: Iterable[Mapping[str, object]] = ()) -> Manifest:
     frame = area.frame
-    manifest = {
+    manifest: Manifest = {
         "schema": PACKAGE_SCHEMA,
         "schema_version": schema_version,
         "name": name,
@@ -289,14 +448,14 @@ def build_manifest(name, area, sources, vertical_datum, files, collision_info, h
         "objects": objects,
         "orientation_probes": probes,
         "passage_probes": copy.deepcopy(list(passage_probes or [])),
-        "sources": sources,
+        "sources": cast("Sequence[SourceEntry]", sources),
         "edits": edits_counts,
         "notices": "NOTICES.txt",
         "report": "report.json" if has_report else None,
         "warnings_count": warnings_count,
     }
     if asset_notices:   # optional (schema 2.1); omitted when empty so 2.0 manifests are unchanged
-        manifest["asset_notices"] = copy.deepcopy(list(asset_notices))
+        manifest["asset_notices"] = cast("list[AssetNotice]", copy.deepcopy(list(asset_notices)))
     return manifest
 
 
@@ -304,11 +463,11 @@ LICENSE_TEXT_KEYS = ("id", "name", "text")   # a source licence declares at leas
 LICENSE_NOTICE_KEYS = ("id", "name", "text", "url")   # each one declared must appear in NOTICES.txt
 
 
-def asset_notice_problems(notices):
+def asset_notice_problems(notices: object) -> list[str]:
     """Shape problems of a manifest ``asset_notices`` value (empty list = fine)."""
     if not isinstance(notices, list):
         return ["asset_notices must be an array"]
-    out = []
+    out: list[str] = []
     for i, a in enumerate(notices):
         lic = a.get("license") if isinstance(a, dict) else None
         if not (isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"]
@@ -326,13 +485,14 @@ def asset_notice_problems(notices):
     return out
 
 
-def notices_text(sources, asset_notices=()):
+def notices_text(sources: Iterable[Mapping[str, object]],
+                 asset_notices: Iterable[Mapping[str, object]] = ()) -> str:
     lines = ["Map package data notices", "========================", "",
              "This package contains visual and collision geometry derived from the sources below.",
              "Procedural details (materials, inferred heights/roofs, scattered vegetation) are generated",
              "by map-builder and are not measurements. See report.json and manifest objects[].provenance.", ""]
     for s in sources:
-        lic = s.get("license") or {}
+        lic = cast("LicenseInfo", s.get("license") or {})
         lines.append(f"- {s.get('product', s.get('provider'))}")
         if s.get("attribution"):
             lines.append(f"  Attribution: {s['attribution']}")
@@ -353,7 +513,7 @@ def notices_text(sources, asset_notices=()):
     if asset_notices:
         lines += ["Assets", "------", "", "Embedded texture assets (visual/map.glb):", ""]
         for a in asset_notices:
-            lic = a.get("license") or {}
+            lic = cast("LicenseInfo", a.get("license") or {})
             lines.append(f"- {a.get('name')}")
             if a.get("attribution"):
                 lines.append(f"  Attribution: {a['attribution']}")
@@ -366,10 +526,10 @@ def notices_text(sources, asset_notices=()):
             if lic.get("text"):
                 lines.append("  Licence text:")
                 lines.append(lic["text"])
-            for h in a.get("sha256") or []:
+            for h in cast("Iterable[JsonValue]", a.get("sha256") or []):
                 lines.append(f"  SHA-256: {h}")
         lines.append("")
-    if any((s.get("license") or {}).get("id") == "ODbL-1.0" for s in sources):
+    if any(cast("LicenseInfo", s.get("license") or {}).get("id") == "ODbL-1.0" for s in sources):
         lines += [
             "OpenStreetMap / ODbL: the geometry in this package is a Produced Work derived from the",
             "OpenStreetMap database. Credit '(c) OpenStreetMap contributors' visibly wherever the map is",
@@ -383,11 +543,11 @@ def notices_text(sources, asset_notices=()):
 
 # --- orientation probes --------------------------------------------------------------
 
-def _cell(p, s):
+def _cell(p: Sequence[float], s: float) -> Cell:
     return (math.floor(p[0] / s), math.floor(p[1] / s), math.floor(p[2] / s))
 
 
-def _near(grid, p, s, radius):
+def _near(grid: Mapping[Cell, Sequence[Sequence[float]]], p: Sequence[float], s: float, radius: float) -> bool:
     cx, cy, cz = _cell(p, s)
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
@@ -398,18 +558,18 @@ def _near(grid, p, s, radius):
     return False
 
 
-def _object_vertex_grid(col, entry):
+def _object_vertex_grid(col: Collision, entry: CollisionEntry) -> dict[Cell, list[Vec3]]:
     s, c = entry["tri_start"], entry["tri_count"]
-    grid = {}
+    grid: dict[Cell, list[Vec3]] = {}
     for vi in set(col.indices[3 * s:3 * (s + c)]):
         p = col.vertices[vi]
         grid.setdefault(_cell(p, PROBE_MIRROR_CLEARANCE_M), []).append(p)
     return grid
 
 
-def node_probe(col, entry):
+def node_probe(col: Collision, entry: CollisionEntry) -> OrientationProbe | None:
     """First qualifying (vertex, triangle) of a collision object in triangle order, or None."""
-    grid = None
+    grid: dict[Cell, list[Vec3]] | None = None
     s = entry["tri_start"]
     for t in range(s, s + entry["tri_count"]):
         tri = col.triangle(t)
@@ -437,10 +597,10 @@ def node_probe(col, entry):
     return None
 
 
-def select_orientation_probes(col, max_probes=PROBE_MAX):
+def select_orientation_probes(col: Collision, max_probes: int = PROBE_MAX) -> list[OrientationProbe]:
     """Up to three probes, one per node: non-terrain nodes first (table order), then terrain."""
     order = ([e for e in col.objects if e["class"] != "terrain"] + [e for e in col.objects if e["class"] == "terrain"])
-    probes = []
+    probes: list[OrientationProbe] = []
     for e in order:
         if len(probes) >= max_probes:
             break
@@ -450,17 +610,18 @@ def select_orientation_probes(col, max_probes=PROBE_MAX):
     return probes
 
 
-def unity_import(gltf_triangles):
+def unity_import(gltf_triangles: Iterable[Tri]) -> list[tuple[Vec3, Vec3, Vec3]]:
     """Simulate a glTF importer that negates X (glTFast/UnityGLTF): positions (-x, y, z) and reversed index
     order. Returns Unity-space triangles in imported index order."""
-    out = []
+    out: list[tuple[Vec3, Vec3, Vec3]] = []
     for a, b, c in gltf_triangles:
         ua, ub, uc = ((-p[0], p[1], p[2]) for p in (a, b, c))
         out.append((ua, uc, ub))
     return out
 
 
-def verify_probe_in_unity(probe, unity_triangles, tol=PROBE_MATCH_M):
+def verify_probe_in_unity(probe: OrientationProbe, unity_triangles: Sequence[Tri],
+                          tol: float = PROBE_MATCH_M) -> str | None:
     """The consumer-side probe check of docs/PACKAGE_FORMAT.md against Unity-space triangles (imported
     index order). Returns None if it passes, otherwise the reason."""
     pu = probe["point_unity_x_negated"]
@@ -484,11 +645,11 @@ def verify_probe_in_unity(probe, unity_triangles, tol=PROBE_MATCH_M):
 
 # --- per-triangle winding match ------------------------------------------------------------
 
-def _centroid(t):
+def _centroid(t: Tri) -> Vec3:
     return ((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3, (t[0][2] + t[1][2] + t[2][2]) / 3)
 
 
-def _centroid_cells(tri, tol):
+def _centroid_cells(tri: Tri, tol: float) -> list[Cell]:
     """Cells (size 2*tol) that can hold the centroid of a triangle whose vertices are each within tol."""
     cs = 2.0 * tol
     cen = _centroid(tri)
@@ -498,7 +659,7 @@ def _centroid_cells(tri, tol):
             for iz in range(lo[2], hi[2] + 1)]
 
 
-def _correspondence(tri, v, tol):
+def _correspondence(tri: Tri, v: Tri, tol: float) -> tuple[float, float]:
     """(best same-orientation, best reversed) total vertex distance over the vertex correspondences whose
     every pair is within ``tol``; ``inf`` where no correspondence of that orientation fits."""
     d = [[_dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
@@ -510,12 +671,12 @@ def _correspondence(tri, v, tol):
     return best[0], best[1]
 
 
-def _match_budget(n, max_work):
+def _match_budget(n: int, max_work: int | None) -> int:
     return MATCH_WORK_PER_TRIANGLE * n + MATCH_WORK_SLACK if max_work is None else max_work
 
 
-def match_winding(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_candidates=MAX_WINDING_CANDIDATES,
-                  max_work=None):
+def match_winding(collision_triangles: Iterable[Tri], visual_triangles: Iterable[Tri], tol: float = WINDING_TOL_M,
+                  max_candidates: int = MAX_WINDING_CANDIDATES, max_work: int | None = None) -> WindingStats:
     """Match each non-degenerate collision triangle to visual triangles (same frame) whose three vertices
     are each within ``tol``. Bounded: visual triangles are hashed by centroid in cells of 2*tol, so each
     query visits at most 8 cells. Candidates with no vertex correspondence within ``tol`` are pruned first;
@@ -525,10 +686,10 @@ def match_winding(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_
     which callers must report as such (it is not a tie)."""
     collision_triangles = list(collision_triangles)
     cs = 2.0 * tol
-    grid = {}
+    grid: dict[Cell, list[Tri]] = {}
     for v in visual_triangles:
         grid.setdefault(_cell(_centroid(v), cs), []).append(v)
-    st = {"considered": 0, "degenerate": 0, "same": 0, "reversed": 0, "ambiguous": 0, "unmatched": 0,
+    st: WindingStats = {"considered": 0, "degenerate": 0, "same": 0, "reversed": 0, "ambiguous": 0, "unmatched": 0,
           "unchecked": 0, "comparisons": 0, "work": 0, "work_exhausted": False, "reversed_examples": []}
     budget = _match_budget(len(collision_triangles), max_work)
     for tri in collision_triangles:
@@ -578,7 +739,8 @@ def match_winding(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_
     return st
 
 
-def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, max_work=None):
+def match_one_to_one(collision_triangles: Iterable[Tri], visual_triangles: Iterable[Tri],
+                     tol: float = WINDING_TOL_M, max_work: int | None = None) -> OneToOneStats:
     """Exporter-side binding (stricter than the consumer diagnostic of :func:`match_winding`): pair every
     collision triangle with a *distinct* visual triangle whose vertices are each within ``tol`` in the same
     cyclic order (any order for a degenerate collision triangle, which has no orientation), and leave no
@@ -598,17 +760,18 @@ def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, m
     collision_triangles = list(collision_triangles)
     visual_triangles = list(visual_triangles)
     cs = 2.0 * tol
-    grid = {}
+    grid: dict[Cell, list[int]] = {}
     for k, v in enumerate(visual_triangles):
         grid.setdefault(_cell(_centroid(v), cs), []).append(k)
-    st = {"matched": 0, "reversed": 0, "unmatched": 0, "visual_only": 0, "work_exhausted": False}
+    st: OneToOneStats = {"matched": 0, "reversed": 0, "unmatched": 0, "visual_only": 0, "work_exhausted": False}
     budget = _match_budget(len(collision_triangles), max_work)
     work = 0
-    cands = []            # per collision triangle: [(distance, visual index)], closest first
-    reversed_only = []
+    cands: list[list[int]] = []            # per collision triangle: [(distance, visual index)], closest first
+    reversed_only: list[bool] = []
     for tri in collision_triangles:
         degenerate = is_degenerate(*tri, DEGENERATE_EPS)
-        row, rev_seen = [], False
+        scored: list[tuple[float, int]] = []
+        rev_seen = False
         for cell in _centroid_cells(tri, tol):
             for k in grid.get(cell, ()):
                 work += 1
@@ -618,12 +781,12 @@ def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, m
                 same, rev = _correspondence(tri, visual_triangles[k], tol)
                 d = min(same, rev) if degenerate else same
                 if d < math.inf:
-                    row.append((d, k))
+                    scored.append((d, k))
                 elif rev < math.inf:
                     rev_seen = True
-        row.sort()
-        cands.append([k for _, k in row])
-        reversed_only.append(rev_seen and not row)
+        scored.sort()
+        cands.append([k for _, k in scored])
+        reversed_only.append(rev_seen and not scored)
     owner = [-1] * len(visual_triangles)          # visual index -> collision index
     mate = [-1] * len(collision_triangles)        # collision index -> visual index
     for u, row in enumerate(cands):               # fast path: closest free candidate
@@ -635,9 +798,9 @@ def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, m
         if mate[root] >= 0 or not cands[root]:
             continue
         # iterative DFS for an augmenting path: alternate free edge (u -> k), matched edge (k -> owner[k])
-        seen = set()
+        seen: set[int] = set()
         stack = [(root, 0)]
-        via = {}                                  # visual k -> collision u it was reached from
+        via: dict[int, int] = {}                                  # visual k -> collision u it was reached from
         end = -1
         while stack and end < 0:
             u, i = stack[-1]
@@ -680,14 +843,16 @@ def match_one_to_one(collision_triangles, visual_triangles, tol=WINDING_TOL_M, m
 WELD_TOL_M = 1e-4                 # building shell vertices closer than this are one vertex (float32 noise)
 
 
-def _weld_ids(tris, tol=WELD_TOL_M):
+def _weld_ids(tris: Iterable[Tri], tol: float = WELD_TOL_M) -> list[tuple[int, ...]]:
     """Welded vertex id triples. Each distinct position joins the first representative within ``tol`` in
     the 27 surrounding cells of size ``tol``, or becomes one. Representatives are kept more than ``tol``
     apart, so a cell holds only a few of them and every lookup is bounded."""
-    exact, reps, out = {}, {}, []
+    exact: dict[Sequence[float], int] = {}
+    reps: dict[Cell, list[tuple[Sequence[float], int]]] = {}
+    out: list[tuple[int, ...]] = []
     nrep = 0
     for t in tris:
-        ids = []
+        ids: list[int] = []
         for p in t:
             i = exact.get(p)
             if i is None:
@@ -708,27 +873,27 @@ def _weld_ids(tris, tol=WELD_TOL_M):
     return out
 
 
-def _find(parent, a):
+def _find(parent: list[int], a: int) -> int:
     while parent[a] != a:
         parent[a] = parent[parent[a]]
         a = parent[a]
     return a
 
 
-def _union(parent, a, b):
+def _union(parent: list[int], a: int, b: int) -> None:
     a, b = _find(parent, a), _find(parent, b)
     if a != b:
         parent[max(a, b)] = min(a, b)
 
 
-def _shells(ids):
+def _shells(ids: Sequence[tuple[int, ...]]) -> list[list[int]] | None:
     """Split a building's triangles (welded id triples) into shells: triangles joined across manifold
     edges (one use in each direction). If a component is not closed on its own, which only happens at
     non-manifold edges (e.g. two shells sharing a face), returns None: the shells cannot be separated
     unambiguously, and a merged group's volume would let an outward shell mask an inverted one. Triangles
     with no edge of non-zero length (collapsed to a point) belong to no shell. Otherwise returns lists of
     triangle indices, in first-triangle order."""
-    edges = {}                                  # undirected edge -> [(triangle, forward)]
+    edges: dict[tuple[int, int], list[tuple[int, bool]]] = {}                                  # undirected edge -> [(triangle, forward)]
     for t, (a, b, c) in enumerate(ids):
         if a == b or b == c or c == a:
             continue                            # collapsed to an edge or point: its edge uses cancel out
@@ -738,7 +903,7 @@ def _shells(ids):
     for uses in edges.values():
         if len(uses) == 2 and uses[0][1] != uses[1][1]:
             _union(parent, uses[0][0], uses[1][0])
-    balance = {}                                # (component, undirected edge) -> forward minus backward
+    balance: dict[tuple[int, tuple[int, int]], int] = {}                                # (component, undirected edge) -> forward minus backward
     for e, uses in edges.items():
         for t, fwd in uses:
             key = (_find(parent, t), e)
@@ -746,7 +911,7 @@ def _shells(ids):
     open_comps = {c for (c, _), n in balance.items() if n}
     if open_comps:
         return None
-    groups = {}
+    groups: dict[int, list[int]] = {}
     for t in range(len(ids)):
         if len(set(ids[t])) == 3:
             groups.setdefault(_find(parent, t), []).append(t)
@@ -756,17 +921,18 @@ def _shells(ids):
 _EPS = 2.0 ** -53
 
 
-def _signed_volume(tris):
+def _signed_volume(tris: Sequence[Sequence[Sequence[Num]]]) -> float:
     """Signed volume of a closed triangle shell whose sign is exact: coordinates are floats or exact
     ``Fraction`` values (portal-cap centroids). A float sum with an error bound is used unless the result
     is within that bound of zero; then the volume is recomputed exactly, so rounding can never make a
     flat shell look like it encloses volume (or flip the sign of a thin one)."""
     r = tris[0][0]                              # a local origin keeps the products small
-    terms = []
+    terms: list[float] = []
     mag = 0.0
     for a, b, c in tris:
         ax, ay, az, bx, by, bz, cx, cy, cz = (
-            (float(Fraction(v) - Fraction(o)) if type(v) is Fraction or type(o) is Fraction else v - o)
+            (float(Fraction(v) - Fraction(o)) if type(v) is Fraction or type(o) is Fraction
+             else cast("float", v) - cast("float", o))   # neither is a Fraction here: plain float arithmetic
             for p in (a, b, c) for v, o in zip(p, r))
         terms.append(ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx))
         mag += (abs(ax) * (abs(by * cz) + abs(bz * cy)) + abs(ay) * (abs(bz * cx) + abs(bx * cz))
@@ -777,16 +943,16 @@ def _signed_volume(tris):
     rf = [Fraction(v) for v in r]
     exact = Fraction(0)
     for a, b, c in tris:
-        ax, ay, az, bx, by, bz, cx, cy, cz = (Fraction(v) - o for p in (a, b, c) for v, o in zip(p, rf))
-        exact += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
+        fax, fay, faz, fbx, fby, fbz, fcx, fcy, fcz = (Fraction(v) - o for p in (a, b, c) for v, o in zip(p, rf))
+        exact += fax * (fby * fcz - fbz * fcy) + fay * (fbz * fcx - fbx * fcz) + faz * (fbx * fcy - fby * fcx)
     if exact == 0:
         return 0.0
     out = float(exact / 6)
     return out if out != 0.0 else math.copysign(5e-324, exact)
 
 
-def _directed_edges(ids):
-    edges = {}
+def _directed_edges(ids: Iterable[tuple[int, ...]]) -> dict[tuple[int, int], int]:
+    edges: dict[tuple[int, int], int] = {}
     for a, b, c in ids:
         for p, q in ((a, b), (b, c), (c, a)):
             if p != q:
@@ -794,7 +960,7 @@ def _directed_edges(ids):
     return edges
 
 
-def _solid_problems(k, cls, tris):
+def _solid_problems(k: int, cls: str, tris: Sequence[Tri]) -> list[str]:
     """Orientation problems of one solid-kind collision object (index ``k`` in the object table)."""
     tag = f"collision: {cls} object #{k}"
     ids = _weld_ids(tris)
@@ -804,7 +970,7 @@ def _solid_problems(k, cls, tris):
     if unbalanced:
         return [f"{tag} is not a closed, consistently oriented solid ({unbalanced} open or inconsistently "
                 "wound edge(s)); solids (building, bridge, structure) must be closed with CCW-outward faces"]
-    shells = []
+    shells: list[tuple[list[Tri], float]] = []
     parts = _shells(ids)
     if parts is None:
         return [f"{tag} has non-manifold edges that do not split into independently closed shells, so its "
@@ -813,7 +979,7 @@ def _solid_problems(k, cls, tris):
     for ts in parts:
         st = [tris[t] for t in ts]
         shells.append((st, _signed_volume(st)))
-    problems = []
+    problems: list[str] = []
     n = len(shells)
     for s, (st, vol) in enumerate(shells):
         if vol > 0.0 or all(is_degenerate(*t) for t in st):
@@ -827,7 +993,7 @@ def _solid_problems(k, cls, tris):
     return problems
 
 
-def _tube_problems(k, cls, tris):
+def _tube_problems(k: int, cls: str, tris: Sequence[Tri]) -> list[str]:
     """Orientation problems of one tube-kind collision object (index ``k`` in the object table).
 
     After welding (as for solids), every directed edge must be matched by its reverse equally often,
@@ -839,13 +1005,14 @@ def _tube_problems(k, cls, tris):
     portal loop (a sealed inward box) is an error. Linear in the triangle count."""
     tag = f"collision: {cls} object #{k}"
     ids = _weld_ids(tris)
-    pos = {}
+    pos: dict[int, Sequence[float]] = {}
     for t, tri in zip(ids, tris):
-        for i, p in zip(t, tri):
-            pos.setdefault(i, p)
+        for i, pt in zip(t, tri):
+            pos.setdefault(i, pt)
     edges = _directed_edges(ids)
     bad = boundary_multi = 0
-    nxt, incoming = {}, {}
+    nxt: dict[int, int] = {}
+    incoming: dict[int, int] = {}
     branching = 0
     for (p, q), n in edges.items():
         m = edges.get((q, p), 0)
@@ -869,14 +1036,14 @@ def _tube_problems(k, cls, tris):
                 "without exactly one incoming and one outgoing boundary edge); a tube may be open only at "
                 "closed portal loops"]
     capped_ids = list(ids)
-    capped = list(tris)
-    seen = set()
+    capped: list[Sequence[Sequence[Num]]] = list(tris)
+    seen: set[int] = set()
     loops = 0
     next_id = max((i for t in ids for i in t), default=-1) + 1
     for start in nxt:
         if start in seen:
             continue
-        loop = []
+        loop: list[int] = []
         v = start
         while v not in seen:            # each boundary vertex has one successor: the walk is a simple cycle
             seen.add(v)
@@ -897,9 +1064,9 @@ def _tube_problems(k, cls, tris):
     if parts is None:
         return [f"{tag} has non-manifold edges that do not split into independently closed shells once its "
                 f"{loops} portal loop(s) are capped, so its orientation cannot be verified"]
-    problems = []
+    problems: list[str] = []
     n = len(parts)
-    vols = []
+    vols: list[float] = []
     first_cap = len(ids)
     for s, ts in enumerate(parts):
         if not any(t >= first_cap for t in ts):
@@ -920,7 +1087,7 @@ def _tube_problems(k, cls, tris):
     return problems
 
 
-def collision_orientation_problems(col):
+def collision_orientation_problems(col: Collision) -> list[str]:
     """Checks the final collision on its own, per docs/PACKAGE_FORMAT.md "Winding" (agreement with the
     visuals does not prove orientation: both could be inverted). Returns a list of error strings, which
     name objects by table index only (never by their names from the file). The rule follows the class
@@ -937,7 +1104,7 @@ def collision_orientation_problems(col):
     * surface (terrain, road, water): every non-degenerate triangle faces up (normal z > 0).
     * tube (tunnel): see :func:`_tube_problems`.
     Other classes (vegetation, props, user) carry no orientation requirement in the contract."""
-    problems = []
+    problems: list[str] = []
     for k, e in enumerate(col.objects):
         cls = e["class"]
         kind = CLASS_KINDS.get(cls)
@@ -958,7 +1125,7 @@ def collision_orientation_problems(col):
 
 # --- writing --------------------------------------------------------------------------
 
-def _zinfo(name, data=b""):
+def _zinfo(name: str, data: bytes = b"") -> zipfile.ZipInfo:
     """Deterministic entry. Deflated unless deflate would compress ``data`` beyond the validator's MAX_RATIO
     (e.g. a constant heightfield): such members are stored, so every written entry passes the ratio check."""
     zi = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))  # deterministic archive
@@ -972,7 +1139,8 @@ def _zinfo(name, data=b""):
     return zi
 
 
-def write_package(path, members, manifest):
+def write_package(path: str | PathLike[str], members: Mapping[str, bytes],
+                  manifest: Mapping[str, object]) -> ValidationResult:
     """Atomically write and validate a package. The archive is written to a temporary file next to
     ``path``, fsynced, validated (in the exporter's strict mode), and only then moved over ``path`` with
     ``os.replace``; on any failure the temporary file is removed and a previous export at ``path`` is left
@@ -1005,14 +1173,20 @@ def write_package(path, members, manifest):
             os.unlink(tmp)
 
 
-def file_entry(path, data):
+def file_entry(path: str, data: bytes) -> FileEntry:
     role, media_type, _ = MEMBERS[path]
     return {"path": path, "role": role, "media_type": media_type, "sha256": sha256(data), "bytes": len(data)}
 
 
-def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=None, report=None,
-             edits=None, blender_version=None, created_utc=None, passage_probes=None,
-             schema_version=PACKAGE_SCHEMA_VERSION, asset_notices=()):
+def assemble(name: str, area: Area, sources: Sequence[Mapping[str, object]], glb_bytes: bytes,
+             collision_bytes: bytes,
+             objects: Sequence[ObjectEntry], heightfield: tuple[bytes, Mapping[str, object]] | None = None,
+             report: Mapping[str, object] | None = None, edits: Mapping[str, object] | None = None,
+             blender_version: str | None = None, created_utc: str | None = None,
+             passage_probes: Iterable[PassageProbe] | None = None,
+             schema_version: str = PACKAGE_SCHEMA_VERSION,
+             asset_notices: Iterable[Mapping[str, object]] = ()
+             ) -> tuple[dict[str, bytes], Manifest, list[OrientationProbe]]:
     """Members + manifest for :func:`write_package`.
 
     ``objects``: manifest object entries ({name, mb_id, class, collision, provenance}).
@@ -1041,43 +1215,48 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
     if bad:
         raise PackageError("invalid passage probes: " + "; ".join(bad))
     probes = select_orientation_probes(col)
-    report = dict(report or {})
+    rep: dict[str, object] = dict(report or {})
     for k in REPORT_KEYS:
-        report.setdefault(k, {} if k == "counts" else [])
-    report["warnings"] = list(report["warnings"])
-    if not probes and PROBES_UNAVAILABLE not in report["warnings"]:
-        report["warnings"].append(PROBES_UNAVAILABLE)
-    report["export"] = dict(report.get("export") or {}, orientation_probes=len(probes))
-    edits = {k: list((edits or {}).get(k, [])) for k in EDIT_KEYS}
-    report["edits"] = edits
-    secrets = find_secrets({"sources": sources, "report": report, "objects": objects, "name": name,
+        rep.setdefault(k, {} if k == "counts" else [])
+    warnings = list(cast("Iterable[object]", rep["warnings"]))
+    rep["warnings"] = warnings
+    if not probes and PROBES_UNAVAILABLE not in warnings:
+        warnings.append(PROBES_UNAVAILABLE)
+    rep["export"] = dict(cast("Mapping[str, object]", rep.get("export") or {}), orientation_probes=len(probes))
+    edit_lists: dict[str, list[object]] = {}
+    for k in EDIT_KEYS:
+        edit_lists[k] = list(cast("Iterable[object]", (edits or {}).get(k, [])))
+    rep["edits"] = edit_lists
+    secrets = find_secrets({"sources": sources, "report": rep, "objects": objects, "name": name,
                                 "asset_notices": asset_notices})
     if secrets:
         raise PackageError("refusing to write the package: " + secrets_message("package", secrets))
     try:
-        report_bytes = json.dumps(report, indent=1, sort_keys=True, ensure_ascii=False,
+        report_bytes = json.dumps(rep, indent=1, sort_keys=True, ensure_ascii=False,
                                   allow_nan=False).encode("utf-8")
     except (TypeError, ValueError) as e:
         raise PackageError(f"report is not finite JSON: {e}") from None
     members = {"visual/map.glb": glb_bytes, "collision/map.mbcol": collision_bytes,
                "NOTICES.txt": notices_text(sources, asset_notices).encode("utf-8"), "report.json": report_bytes}
-    hf_info = None
+    hf_info: HeightfieldManifest | None = None
     if heightfield is not None:
         hf_bytes, hf_meta = heightfield
         members["collision/terrain.mbhf"] = hf_bytes
-        hf_info = dict(hf_meta, path="collision/terrain.mbhf", format="mbhf", version=HEIGHTFIELD_FORMAT_VERSION,
-                       authority="derived from the final terrain-class collision triangles; triangles are "
-                                 "authoritative")
+        hf_info = cast("HeightfieldManifest", dict(
+            hf_meta, path="collision/terrain.mbhf", format="mbhf", version=HEIGHTFIELD_FORMAT_VERSION,
+            authority="derived from the final terrain-class collision triangles; triangles are authoritative"))
     files = [file_entry(p, members[p]) for p in sorted(members)]
-    collision_info = {"path": "collision/map.mbcol", "format": "mbcol", "version": COLLISION_FORMAT_VERSION,
+    collision_info: CollisionInfo = {"path": "collision/map.mbcol", "format": "mbcol",
+                                     "version": COLLISION_FORMAT_VERSION,
                       "frame": "map", "winding": "ccw_outward", "triangle_count": col.triangle_count,
                       "vertex_count": len(col.vertices),
                       "bounds_min": list(col.bounds[0]), "bounds_max": list(col.bounds[1]),
                       "classes": dict(CLASSES), "class_kinds": dict(CLASS_KINDS),
                       "authority": "authoritative static collision; exported from the same final meshes and "
                                    "world transforms as visual/map.glb"}
-    manifest = build_manifest(name, area, sources, elevation[0]["vertical_datum"], files, collision_info, hf_info,
-                              objects, probes, {k: len(v) for k, v in edits.items()}, len(report["warnings"]),
+    manifest = build_manifest(name, area, sources, cast("str", elevation[0]["vertical_datum"]), files,
+                              collision_info, hf_info,
+                              objects, probes, {k: len(v) for k, v in edit_lists.items()}, len(warnings),
                               blender_version=blender_version, created_utc=created_utc,
                               passage_probes=passage_probes, schema_version=schema_version,
                               asset_notices=asset_notices)
@@ -1090,20 +1269,20 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
 # --- validation ---------------------------------------------------------------------------
 
 class ValidationResult:
-    def __init__(self):
-        self.errors = []
-        self.warnings = []
-        self.manifest = None
-        self.package_id = None
-        self.collision = None
-        self.winding = {}
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.manifest: Manifest | None = None
+        self.package_id: str | None = None
+        self.collision: Collision | None = None
+        self.winding: dict[str, WindingStats] = {}
         self.strict = False
 
     @property
-    def ok(self):
+    def ok(self) -> bool:
         return not self.errors
 
-    def summary(self):
+    def summary(self) -> str:
         s = "VALID" if self.ok else "INVALID"
         lines = [f"{s}: {len(self.errors)} error(s), {len(self.warnings)} warning(s)"]
         if self.package_id and self.ok:
@@ -1117,13 +1296,13 @@ _ZIP_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError, Ru
                OverflowError, MemoryError)
 
 
-def _member_label(name, i):
+def _member_label(name: str, i: int) -> str:
     """A zip entry or listed path in diagnostics: the contract's own member paths verbatim, anything else
     by position only (raw strings from the package are never echoed)."""
     return repr(name) if name == MANIFEST or name in MEMBERS else f"#{i}"
 
 
-def validate_package(path, strict=False):
+def validate_package(path: str | PathLike[str], strict: bool = False) -> ValidationResult:
     """Validate a package file; never raises for malformed input (errors are collected).
 
     ``strict`` is the exporter's mode (used by :func:`write_package`): on top of the consumer checks, each
@@ -1148,23 +1327,25 @@ def validate_package(path, strict=False):
     return r
 
 
-def _validate_zip(z, r):
+def _validate_zip(z: zipfile.ZipFile, r: ValidationResult) -> None:
     infos = z.infolist()
     if len(infos) > MAX_ENTRIES:
         r.errors.append(f"too many entries ({len(infos)} > {MAX_ENTRIES})")
         return
-    names, lowered, position = {}, set(), {}
+    names: dict[str, zipfile.ZipInfo] = {}
+    lowered: set[str] = set()
+    position: dict[str, int] = {}
     total = 0
     for i, zi in enumerate(infos):
-        raw = zi.orig_filename
-        tag = f"entry {_member_label(raw, i)}"
-        if not safe_member_name(raw) or raw != zi.filename:
+        oname = zi.orig_filename
+        tag = f"entry {_member_label(oname, i)}"
+        if not safe_member_name(oname) or oname != zi.filename:
             r.errors.append(f"unsafe entry name ({tag})")
-        if raw.lower() in lowered:
+        if oname.lower() in lowered:
             r.errors.append(f"duplicate entry ({tag}; names differ at most in case)")
-        lowered.add(raw.lower())
-        names[raw] = zi
-        position.setdefault(raw, i)
+        lowered.add(oname.lower())
+        names[oname] = zi
+        position.setdefault(oname, i)
         mode = (zi.external_attr >> 16) & 0o170000
         if zi.is_dir() or (mode and mode != stat.S_IFREG):
             r.errors.append(f"{tag} is not a regular file (directory or symlink)")
@@ -1186,7 +1367,7 @@ def _validate_zip(z, r):
         r.errors.append(f"manifest.json exceeds {MAX_MANIFEST_BYTES} bytes")
         return
 
-    def read(name):
+    def read(name: str) -> bytes:
         zi = names[name]
         with z.open(zi) as f:
             data = f.read(zi.file_size + 1)
@@ -1204,24 +1385,26 @@ def _validate_zip(z, r):
     if not isinstance(m, dict):
         r.errors.append("manifest.json must be a JSON object")
         return
-    r.manifest = m
+    man = cast("Manifest", m)   # indexed only after _check_manifest has validated the raw JSON
+    r.manifest = man
     if not _check_version(m, r):
         return
     _check_manifest(m, r)
     if r.errors:
         return
     # files[] <-> archive members, one-to-one, then sizes and hashes
-    listed = {f["path"]: (j, f) for j, f in enumerate(m["files"])}
+    listed = {f["path"]: (j, f) for j, f in enumerate(man["files"])}
     members = set(names) - {MANIFEST}
-    def file_tag(p):
+
+    def file_tag(p: str) -> str:
         return f"files[{listed[p][0]}]" + (f" ({p})" if p in MEMBERS else "")
-    for p in sorted(members - set(listed), key=position.get):
+    for p in sorted(members - set(listed), key=position.__getitem__):
         r.errors.append(f"unlisted file in package: entry {_member_label(p, position[p])}")
     for p in sorted(set(listed) - members, key=lambda q: listed[q][0]):
         r.errors.append(f"listed file missing from package: {file_tag(p)}")
     if r.errors:
         return
-    blobs = {}
+    blobs: dict[str, bytes] = {}
     for p, (j, f) in listed.items():
         tag = file_tag(p)
         if f["bytes"] != names[p].file_size:
@@ -1234,12 +1417,12 @@ def _validate_zip(z, r):
         blobs[f["role"]] = data
     if r.errors:
         return
-    _validate_payloads(m, blobs, r)
+    _validate_payloads(man, blobs, r)
     if not r.errors:
         r.package_id = package_id_of(raw)   # only now does it bind the verified payload
 
 
-def _check_version(m, r):
+def _check_version(m: Mapping[str, JsonValue], r: ValidationResult) -> bool:
     if m.get("schema") != PACKAGE_SCHEMA:
         r.errors.append(f"manifest: schema must be {PACKAGE_SCHEMA!r}")
         return False
@@ -1255,10 +1438,12 @@ def _check_version(m, r):
     return True
 
 
-def _check_manifest(m, r):
+def _check_manifest(m: Mapping[str, JsonValue], r: ValidationResult) -> None:
     err = r.errors.append
 
-    def need(cond, msg):
+    # Any: the locals below are untrusted JSON values; each is checked by the following need(...) before use, and
+    # the checks tolerate any JSON type (a precise type would need isinstance branches that change what is reported)
+    def need(cond: object, msg: str) -> object:
         if not cond:
             err("manifest: " + msg)
         return cond
@@ -1266,11 +1451,11 @@ def _check_manifest(m, r):
     need(isinstance(m.get("name"), str) and m["name"], "name must be a non-empty string")
     need(is_utc_timestamp(m.get("created_utc")),
          "created_utc must be an ISO-8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ)")
-    g = m.get("generator")
+    g: Any = m.get("generator")
     need(isinstance(g, dict) and isinstance(g.get("name"), str) and isinstance(g.get("version"), str)
          and (g.get("blender") is None or isinstance(g.get("blender"), str)),
          "generator must be {name, version, blender: string|null}")
-    geo = m.get("georeference")
+    geo: Any = m.get("georeference")
     if need(isinstance(geo, dict), "georeference missing"):
         o = geo.get("origin")
         need(isinstance(o, dict) and _num(o.get("lat_deg")) and _num(o.get("lon_deg"))
@@ -1283,7 +1468,7 @@ def _check_manifest(m, r):
         need(_num(geo.get("z_offset_m")), "georeference.z_offset_m must be a finite number")
         need(geo.get("height_formula") == HEIGHT_FORMULA, f"georeference.height_formula must be {HEIGHT_FORMULA!r}")
         need(geo.get("units") == "metre", "georeference.units must be 'metre'")
-    a = m.get("area")
+    a: Any = m.get("area")
     if need(isinstance(a, dict), "area missing"):
         need(_num(a.get("width_m")) and a["width_m"] > 0 and _num(a.get("height_m")) and a["height_m"] > 0,
              "area.width_m/height_m must be positive")
@@ -1291,12 +1476,13 @@ def _check_manifest(m, r):
         bb = a.get("geographic_bbox_deg")
         need(isinstance(bb, dict) and all(_num(bb.get(k)) for k in ("south", "west", "north", "east")),
              "area.geographic_bbox_deg must have south/west/north/east")
-    ax = m.get("axes")
+    ax: Any = m.get("axes")
     need(isinstance(ax, dict) and ax.get("map_from_gltf") == MAP_FROM_GLTF and ax.get("map_from_unity") == MAP_FROM_UNITY,
          f"axes.map_from_gltf must be {MAP_FROM_GLTF} and axes.map_from_unity {MAP_FROM_UNITY}")
-    files = m.get("files")
+    files: Any = m.get("files")
     if need(isinstance(files, list), "files must be an array"):
-        seen_paths, seen_roles = set(), set()
+        seen_paths: set[str] = set()
+        seen_roles: set[str] = set()
         for i, f in enumerate(files):
             loc = f"files[{i}]"
             if not (isinstance(f, dict) and isinstance(f.get("path"), str) and isinstance(f.get("role"), str)
@@ -1330,9 +1516,9 @@ def _check_manifest(m, r):
         for p, (role, _, required) in MEMBERS.items():
             if required and role not in seen_roles:
                 err(f"manifest: required member {p} (role {role!r}) not listed")
-    vis = m.get("visual")
+    vis: Any = m.get("visual")
     need(isinstance(vis, dict) and vis.get("path") == "visual/map.glb", "visual.path must be 'visual/map.glb'")
-    c = m.get("collision")
+    c: Any = m.get("collision")
     if need(isinstance(c, dict), "collision missing"):
         expect = {"path": "collision/map.mbcol", "format": "mbcol", "version": COLLISION_FORMAT_VERSION,
                   "frame": "map", "winding": "ccw_outward", "classes": CLASSES, "class_kinds": CLASS_KINDS}
@@ -1341,7 +1527,7 @@ def _check_manifest(m, r):
         need(isinstance(c.get("triangle_count"), int) and isinstance(c.get("vertex_count"), int),
              "collision.triangle_count/vertex_count missing")
         need(_vec(c.get("bounds_min")) and _vec(c.get("bounds_max")), "collision.bounds_min/max missing")
-    hf = m.get("heightfield", None)
+    hf: Any = m.get("heightfield", None)
     if hf is not None and need(isinstance(hf, dict), "heightfield must be an object or null"):
         need(hf.get("path") == "collision/terrain.mbhf", "heightfield.path must be 'collision/terrain.mbhf'")
         need(all(isinstance(hf.get(k), int) for k in ("nx", "ny", "nan_cells"))
@@ -1355,7 +1541,7 @@ def _check_manifest(m, r):
         need(m.get("report") == ("report.json" if listed_report else None),
              "report must be 'report.json' when report.json is listed, otherwise null")
     need(m.get("notices") == "NOTICES.txt", "notices must be 'NOTICES.txt'")
-    objs = m.get("objects")
+    objs: Any = m.get("objects")
     if need(isinstance(objs, list) and objs, "objects must be a non-empty array"):
         for i, o in enumerate(objs):
             if not (isinstance(o, dict) and isinstance(o.get("name"), str) and isinstance(o.get("mb_id"), str)
@@ -1363,11 +1549,11 @@ def _check_manifest(m, r):
                     and isinstance(o.get("provenance"), dict)):
                 err(f"manifest: objects[{i}] must be {{name, mb_id: strings, class: one of {sorted(CLASSES)}, "
                     "collision: true, provenance: object}")
-    need(isinstance(m.get("orientation_probes"), list) and len(m["orientation_probes"]) <= PROBE_MAX,
+    need(isinstance(m.get("orientation_probes"), list) and len(cast("list[JsonValue]", m["orientation_probes"])) <= PROBE_MAX,
          f"orientation_probes must be an array of at most {PROBE_MAX}")
     for msg in passage_probe_problems(m.get("passage_probes")):
         err("manifest: " + msg)
-    srcs = m.get("sources")
+    srcs: Any = m.get("sources")
     if need(isinstance(srcs, list) and srcs, "sources must be a non-empty array"):
         for i, s in enumerate(srcs):
             if not (isinstance(s, dict) and s.get("kind") in ("elevation", "features")
@@ -1386,33 +1572,33 @@ def _check_manifest(m, r):
         else:
             if not any(s["kind"] == "elevation" for s in srcs):
                 err("manifest: no elevation source (vertical datum provenance missing)")
-    ed = m.get("edits")
+    ed: Any = m.get("edits")
     if "asset_notices" in m:
         for msg in asset_notice_problems(m["asset_notices"]):
             err("manifest: " + msg)
     need(isinstance(ed, dict) and all(isinstance(ed.get(k), int) and not isinstance(ed.get(k), bool)
                                       and ed[k] >= 0 for k in EDIT_KEYS),
          "edits must be {duplicated, user_added, removed} counts")
-    wc = m.get("warnings_count")
+    wc: Any = m.get("warnings_count")
     need(isinstance(wc, int) and not isinstance(wc, bool) and wc >= 0, "warnings_count must be a count")
     secrets = find_secrets(m, "manifest")
     if secrets:
         err(secrets_message("manifest", secrets))
 
 
-def _aabb(points):
+def _aabb(points: Iterable[Sequence[float]]) -> list[float]:
     xs, ys, zs = zip(*points)
     return [min(xs), min(ys), min(zs), max(xs), max(ys), max(zs)]
 
 
-def _payload_secrets(r, where, obj):
+def _payload_secrets(r: ValidationResult, where: str, obj: object) -> None:
     """The manifest's credential policy, applied to a parsed JSON payload member (never echoes values)."""
     hits = find_secrets(obj, "$")
     if hits:
         r.errors.append(secrets_message(where, hits))
 
 
-def _validate_payloads(m, blobs, r):
+def _validate_payloads(m: Manifest, blobs: Mapping[str, bytes], r: ValidationResult) -> None:
     try:
         col = read_collision(blobs["collision"])
     except PackageError as e:
@@ -1442,13 +1628,13 @@ def _validate_payloads(m, blobs, r):
     _check_asset_provenance(m, glb_image_sha256s(blobs["visual"]), r)
     _check_binding(m, col, nodes, r)
     if "heightfield" in blobs:
-        _check_heightfield(m["heightfield"], blobs["heightfield"], col, r)
+        _check_heightfield(cast("HeightfieldManifest", m["heightfield"]), blobs["heightfield"], col, r)
     _check_notices(m, blobs["notices"], r)
     if "report" in blobs:
         _check_report(m, blobs["report"], r)
 
 
-def _check_passage_probes(m, col, r):
+def _check_passage_probes(m: Manifest, col: Collision, r: ValidationResult) -> None:
     """Each probe's feature must name a manifest object; each probe capsule is re-checked against the final
     collision (a blocked probe is a warning: the free path the generator intended is obstructed). The probes
     share one query budget; running out is a warning, not an error. Names only indices, never strings."""
@@ -1471,14 +1657,14 @@ def _check_passage_probes(m, col, r):
             r.warnings.append(f"passage probe {i} is blocked by collision object #{res.objects[0]}{more}")
 
 
-def _check_objects(m, col, r):
+def _check_objects(m: Manifest, col: Collision, r: ValidationResult) -> None:
     # names and identities are compared, never echoed: manifest objects by objects[i], collision by #k
-    man = {}
+    man: dict[str, tuple[int, ObjectEntry]] = {}
     for i, o in enumerate(m["objects"]):
         if o["name"] in man:
             r.errors.append(f"manifest: objects[{i}] repeats the name of objects[{man[o['name']][0]}]")
         man.setdefault(o["name"], (i, o))
-    ids = {}
+    ids: dict[str, int] = {}
     for i, o in enumerate(m["objects"]):
         if o["mb_id"] in ids:
             r.errors.append(f"duplicate object identity: objects[{ids[o['mb_id']]}] and objects[{i}] share an mb_id")
@@ -1504,9 +1690,9 @@ def _check_objects(m, col, r):
                             "collision")
 
 
-def _check_binding(m, col, nodes, r):
+def _check_binding(m: Manifest, col: Collision, nodes: Sequence[GlbNode], r: ValidationResult) -> None:
     # glTF nodes are named by node index and collision objects by table index, never by their names
-    by_name = {}
+    by_name: dict[str, GlbNode] = {}
     for n in nodes:
         if n.triangles:
             if n.name in by_name:
@@ -1523,7 +1709,7 @@ def _check_binding(m, col, nodes, r):
             r.errors.append(f"{tag} has no glTF node with triangles of the same name")
             continue
         tag = f"collision object #{k} / glTF node #{node.index}"
-        vis = [tuple(gltf_to_map(p) for p in t) for t in node.triangles]
+        vis: list[Tri] = [(gltf_to_map(a), gltf_to_map(b), gltf_to_map(c)) for a, b, c in node.triangles]
         ctris = col.object_triangles(e)
         va = _aabb([p for t in vis for p in t])
         ca = _aabb([p for t in ctris for p in t])
@@ -1566,7 +1752,7 @@ def _check_binding(m, col, nodes, r):
     _check_probes(m, col, by_name, r)
 
 
-def _check_probes(m, col, by_name, r):
+def _check_probes(m: Manifest, col: Collision, by_name: Mapping[str, GlbNode], r: ValidationResult) -> None:
     probes = m["orientation_probes"]
     expected = select_orientation_probes(col)
     table = {e["name"]: (k, e) for k, e in enumerate(col.objects)}
@@ -1579,16 +1765,17 @@ def _check_probes(m, col, by_name, r):
     if len(probes) != len(expected):
         r.errors.append(f"orientation_probes has {len(probes)} probe(s); {len(expected)} node(s) qualify (max "
                         f"{PROBE_MAX})")
-    seen = set()
+    seen: set[str] = set()
     n_non_terrain = 0
     for k, p in enumerate(probes):
         tag = f"orientation probe {k}"
         keys = ("node", "point_map", "point_gltf", "point_unity_x_negated", "triangle_map", "normal_map",
                 "normal_unity_x_negated")
-        if not (isinstance(p, dict) and all(key in p for key in keys) and isinstance(p["node"], str)
-                and all(_vec(p[key]) for key in keys[1:] if key != "triangle_map")
-                and isinstance(p["triangle_map"], list) and len(p["triangle_map"]) == 3
-                and all(_vec(q) for q in p["triangle_map"])):
+        raw: Mapping[str, object] = p   # the shape is checked here, key by key
+        if not (isinstance(raw, dict) and all(key in raw for key in keys) and isinstance(raw["node"], str)
+                and all(_vec(raw[key]) for key in keys[1:] if key != "triangle_map")
+                and isinstance(raw["triangle_map"], list) and len(raw["triangle_map"]) == 3
+                and all(_vec(q) for q in raw["triangle_map"])):
             r.errors.append(f"{tag}: needs {list(keys)} with 3-vectors")
             continue
         node, pm, nm = p["node"], p["point_map"], p["normal_map"]
@@ -1601,7 +1788,7 @@ def _check_probes(m, col, by_name, r):
         ci, entry = table[node]
         tag = f"orientation probe {k} (collision object #{ci})"
         n_non_terrain += entry["class"] != "terrain"
-        if (_dist(p["point_gltf"], map_to_gltf(pm)) > 1e-6
+        if (_dist(p["point_gltf"], map_to_gltf(cast("Vec3", pm))) > 1e-6
                 or _dist(p["point_unity_x_negated"], map_to_unity_x_negated(pm)) > 1e-6
                 or _dist(p["normal_unity_x_negated"], map_to_unity_x_negated(nm)) > 1e-6):
             r.errors.append(f"{tag}: point_gltf/point_unity_x_negated/normal_unity_x_negated are not the "
@@ -1636,14 +1823,14 @@ def _check_probes(m, col, by_name, r):
             r.errors.append(f"{tag}: the node has a vertex within 0.5 m of the X-mirror of point_map")
             continue
         # against the visual mesh, exactly as a consumer would after an X-negating import
-        reason = verify_probe_in_unity(p, unity_import(by_name[node].triangles))
+        reason = verify_probe_in_unity(cast(OrientationProbe, p), unity_import(by_name[node].triangles))   # shape checked above
         if reason:
             r.errors.append(f"{tag} fails against the visual mesh: {reason}")
     if n_non_terrain != sum(1 for e in expected if table[e["node"]][1]["class"] != "terrain"):
         r.errors.append("orientation_probes must prefer non-terrain nodes that have a qualifying vertex")
 
 
-def _check_heightfield(info, data, col, r):
+def _check_heightfield(info: HeightfieldManifest, data: bytes, col: Collision, r: ValidationResult) -> None:
     try:
         hf = read_heightfield(data)
     except PackageError as e:
@@ -1651,7 +1838,8 @@ def _check_heightfield(info, data, col, r):
         return
     nan_cells = sum(1 for row in hf["z"] for v in row if math.isnan(v))
     if (info["nx"], info["ny"], info["nan_cells"]) != (hf["nx"], hf["ny"], nan_cells) or any(
-            abs(info[a] - hf[b]) > 1e-9 for a, b in (("x0", "x0"), ("y0", "y0"), ("spacing_m", "spacing"))):
+            abs(a - b) > 1e-9 for a, b in ((info["x0"], hf["x0"]), (info["y0"], hf["y0"]),
+                                           (info["spacing_m"], hf["spacing"]))):
         r.errors.append("heightfield: manifest nx/ny/x0/y0/spacing_m/nan_cells differ from the file")
         return
     try:
@@ -1669,7 +1857,7 @@ def _check_heightfield(info, data, col, r):
                 return
 
 
-def _check_asset_provenance(m, image_hashes, r):
+def _check_asset_provenance(m: Manifest, image_hashes: Sequence[str], r: ValidationResult) -> None:
     listed = {h for a in m.get("asset_notices", []) for h in a["sha256"]}
     for i, h in enumerate(image_hashes):
         if h not in listed:
@@ -1682,7 +1870,7 @@ def _check_asset_provenance(m, image_hashes, r):
                 r.warnings.append(f"asset_notices[{k}] lists SHA-256 {h}, which is not an image in visual/map.glb")
 
 
-def _check_notices(m, data, r):
+def _check_notices(m: Manifest, data: bytes, r: ValidationResult) -> None:
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -1691,8 +1879,9 @@ def _check_notices(m, data, r):
     for k, a in enumerate(m.get("asset_notices", [])):
         if a["attribution"] not in text:
             r.errors.append(f"NOTICES.txt lacks the attribution of asset_notices[{k}]")
+        lic = cast("Mapping[str, str]", a["license"])
         for key in LICENSE_NOTICE_KEYS:
-            if a["license"].get(key) and a["license"][key] not in text:
+            if lic.get(key) and lic[key] not in text:
                 r.errors.append(f"NOTICES.txt lacks the licence {key} of asset_notices[{k}] "
                                 f"(asset_notices[{k}].license.{key} must appear verbatim)")
     for k, s in enumerate(m["sources"]):
@@ -1700,13 +1889,14 @@ def _check_notices(m, data, r):
             r.errors.append(f"NOTICES.txt lacks the attribution of sources[{k}]")
         elif not s["attribution"]:
             r.warnings.append(f"sources[{k}] has no attribution text")
+        lic = cast("Mapping[str, str]", s["license"])
         for key in LICENSE_NOTICE_KEYS:
-            if s["license"].get(key) and s["license"][key] not in text:
+            if lic.get(key) and lic[key] not in text:
                 r.errors.append(f"NOTICES.txt lacks the licence {key} of sources[{k}] (sources[{k}].license.{key} "
                                 "must appear verbatim)")
 
 
-def _check_report(m, data, r):
+def _check_report(m: Manifest, data: bytes, r: ValidationResult) -> None:
     try:
         rep = strict_json(data, "report.json")
     except PackageError as e:
@@ -1717,11 +1907,12 @@ def _check_report(m, data, r):
             isinstance(rep.get(k), list) for k in REPORT_KEYS[1:]):
         r.errors.append(f"report.json must be an object with {list(REPORT_KEYS)}")
         return
-    if m["warnings_count"] != len(rep["warnings"]):
-        r.errors.append(f"warnings_count {m['warnings_count']} != {len(rep['warnings'])} warnings in report.json")
+    warns = cast("list[JsonValue]", rep["warnings"])
+    if m["warnings_count"] != len(warns):
+        r.errors.append(f"warnings_count {m['warnings_count']} != {len(warns)} warnings in report.json")
     ed = rep.get("edits")
     if ed is not None:
         if not (isinstance(ed, dict) and all(isinstance(ed.get(k), list) for k in EDIT_KEYS)):
             r.errors.append("report.json edits must list duplicated, user_added and removed")
-        elif any(len(ed[k]) != m["edits"][k] for k in EDIT_KEYS):
+        elif any(len(cast("list[JsonValue]", ed[k])) != m["edits"][k] for k in EDIT_KEYS):
             r.errors.append("report.json edits lists do not match the manifest edits counts")

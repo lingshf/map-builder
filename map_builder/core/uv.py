@@ -25,15 +25,24 @@ box-projected face changes its dominant axis. Only geometry is read; the mesh is
 translation (``origin``), which is what the generator emits for every textured material.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Iterable, Sequence
+from typing import TypeAlias
 
 from . import textures
+from .mesh import UV, MeshData, Vec3
 
 TOL = 1e-6
 UNTEXTURED = ("MB Probe", "MB Foliage", "MB Bark", "MB Default")
 
+WallSegment: TypeAlias = "tuple[float, float, float, float, float, float]"   # ax, ay, bx, by, cumulative U, length
+RoofFace: TypeAlias = "tuple[int, list[Vec3], Vec3, float]"   # material index, points, normal, tile
+FaceUV: TypeAlias = "tuple[UV, ...] | None"
 
-def _normal(pts):
+
+def _normal(pts: Sequence[Sequence[float]]) -> Vec3 | None:
     """Unit normal of a polygon by Newell's method, or None for a degenerate one."""
     nx = ny = nz = 0.0
     for k, p in enumerate(pts):
@@ -60,17 +69,17 @@ TEXTURE_MEAN_ALBEDO = {
 }
 
 
-def compensated_color(material, color):
+def compensated_color(material: str, color: Sequence[float]) -> tuple[float, ...]:
     """COLOR_0 for a face of a textured ``material`` (see :data:`TEXTURE_MEAN_ALBEDO`)."""
     mean = TEXTURE_MEAN_ALBEDO[material]
     return tuple(min(1.0, c / m) for c, m in zip(color, mean))
 
 
-def tile_offset(origin, tile):
+def tile_offset(origin: Sequence[float], tile: float) -> tuple[float, ...]:
     return tuple(tile * math.floor(c / tile) for c in origin)
 
 
-def _wall_segments(mesh):
+def _wall_segments(mesh: MeshData) -> tuple[list[WallSegment], dict[int, tuple[float, float]], float | None]:
     """Wall ring segments (ax, ay, bx, by, cumulative U at a, length), the face -> (U at a, U at b) of each wall
     quad, and the wall base z, read from the leading run of facade wall quads ``(rb[k], rb[j], rt[j], rt[k])``
     the generator emits. ``([], {}, None)`` if none."""
@@ -79,7 +88,12 @@ def _wall_segments(mesh):
     except ValueError:
         return [], {}, None
     v = mesh.vertices
-    segs, quads, base, ring_start, cum, prev_end = [], {}, None, None, 0.0, None
+    segs: list[WallSegment] = []
+    quads: dict[int, tuple[float, float]] = {}
+    base: float | None = None
+    ring_start: int | None = None
+    prev_end: int | None = None
+    cum = 0.0
     for fi, (f, m) in enumerate(zip(mesh.faces, mesh.face_materials)):
         if m != facade or len(f) != 4:
             break
@@ -100,7 +114,7 @@ def _wall_segments(mesh):
     return segs, quads, (None if base is None else max(base, 0.0))
 
 
-def _wall_u(segs, pts, n):
+def _wall_u(segs: Sequence[WallSegment], pts: Sequence[Vec3], n: Vec3) -> list[float] | None:
     """U (metres) of each point of a vertical face with horizontal normal ``n``, measured along the single wall
     segment that is parallel to the face and contains all of its points; None if there is no such segment.
     Choosing the segment per face (not per point) keeps a corner on the segment that owns the face. A gable
@@ -127,13 +141,13 @@ def _wall_u(segs, pts, n):
     return None
 
 
-def _box_uv(p, n):
+def _box_uv(p: Vec3, n: Vec3) -> UV:
     ax = max(range(3), key=lambda i: abs(n[i]))
     i, j = [(1, 2), (0, 2), (0, 1)][ax]
     return p[i], p[j]
 
 
-def assign_uvs(mesh, origin=(0.0, 0.0, 0.0)):
+def assign_uvs(mesh: MeshData, origin: Vec3 = (0.0, 0.0, 0.0)) -> MeshData:
     """Set ``mesh.face_uvs`` (one (u, v) per corner for faces of textured materials, ``None`` otherwise).
 
     ``origin`` is the mesh's world origin (the object location). Meshes without a textured material keep
@@ -144,8 +158,8 @@ def assign_uvs(mesh, origin=(0.0, 0.0, 0.0)):
         mesh.face_uvs = None
         return mesh
     segs, quads, base_z = _wall_segments(mesh) if "MB Facade" in names else ([], {}, None)
-    roof_faces = {}
-    uvs = []
+    roof_faces: dict[int, RoofFace] = {}
+    uvs: list[FaceUV] = []
     for fi, (f, mi) in enumerate(zip(mesh.faces, mesh.face_materials)):
         name, t = names[mi], tile[mi]
         pts = [mesh.vertices[i] for i in f]
@@ -156,6 +170,7 @@ def assign_uvs(mesh, origin=(0.0, 0.0, 0.0)):
         off = tile_offset(origin, t)
         world = [(p[0] + origin[0] - off[0], p[1] + origin[1] - off[1], p[2] + origin[2] - off[2]) for p in pts]
         if name == "MB Facade" and abs(n[2]) < 1e-3 and base_z is not None:
+            us: Sequence[float] | None
             if fi in quads:
                 ua, ub = quads[fi]
                 us = (ua, ub, ub, ua)
@@ -180,18 +195,18 @@ def assign_uvs(mesh, origin=(0.0, 0.0, 0.0)):
 COPLANAR_DOT = 1.0 - 1e-6   # about 0.08 degrees between adjacent faces of one slope
 
 
-def _roof_slopes(roof_faces):
+def _roof_slopes(roof_faces: dict[int, RoofFace]) -> Iterable[list[int]]:
     """Group roof faces into slopes: faces of one material that share an edge (same endpoint positions) and are
     coplanar within :data:`COPLANAR_DOT`. Connectivity, not rounded plane keys, so a slope triangulated into many
     faces whose normals differ by float noise is still one slope."""
     parent = {fi: fi for fi in roof_faces}
 
-    def find(a):
+    def find(a: int) -> int:
         while parent[a] != a:
             parent[a] = parent[parent[a]]
             a = parent[a]
         return a
-    edges = {}
+    edges: dict[tuple[int, frozenset[tuple[float, ...]]], list[int]] = {}
     for fi, (mi, pts, n, _) in roof_faces.items():
         keys = [tuple(round(c, 5) for c in p) for p in pts]
         for k in range(len(keys)):
@@ -201,13 +216,13 @@ def _roof_slopes(roof_faces):
                 if sum(a * b for a, b in zip(n, on)) >= COPLANAR_DOT:
                     parent[find(fi)] = find(other)
             edges[edge].append(fi)
-    groups = {}
+    groups: dict[int, list[int]] = {}
     for fi in roof_faces:
         groups.setdefault(find(fi), []).append(fi)
     return groups.values()
 
 
-def _roof_uvs(roof_faces, uvs):
+def _roof_uvs(roof_faces: dict[int, RoofFace], uvs: list[FaceUV]) -> None:
     """One basis and datum per slope: U along the eave (horizontal), V up the slope, both from the slope's
     mean normal and its minimum corner."""
     for faces in _roof_slopes(roof_faces):
@@ -233,10 +248,9 @@ def _roof_uvs(roof_faces, uvs):
             uvs[fi] = tuple(((a - u0) / t, (b - v0) / t) for a, b in zip(cu, cv))
 
 
-def textured_copy(mesh, origin=(0.0, 0.0, 0.0)):
+def textured_copy(mesh: MeshData, origin: Vec3 = (0.0, 0.0, 0.0)) -> MeshData:
     """A copy of ``mesh`` for the visual export: UVs assigned and COLOR_0 compensated for textured faces.
     The plan's mesh (shared with collision and the Blender scene) is not modified."""
-    from .mesh import MeshData
     out = MeshData(mesh.name)
     out.vertices, out.faces = mesh.vertices, mesh.faces
     out.face_materials, out.materials = mesh.face_materials, mesh.materials
@@ -245,6 +259,6 @@ def textured_copy(mesh, origin=(0.0, 0.0, 0.0)):
     return assign_uvs(out, origin)
 
 
-def textured_materials(meshes):
+def textured_materials(meshes: Iterable[MeshData]) -> list[str]:
     """Names of the textured materials used by ``meshes``."""
     return sorted({n for m in meshes for n in m.materials if n in textures.TEXTURES})

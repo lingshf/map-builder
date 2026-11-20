@@ -7,12 +7,26 @@ straight skeleton) and adds the roof faces
 (:func:`build_roof`). It depends on nothing in ``generate``.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, TypeAlias
 
 from .errors import LimitError
-from .skeleton import SkeletonError, straight_skeleton
+from .skeleton import Node, Pt, Skeleton, SkeletonError, straight_skeleton
 from .triangulate import TriangulationError, triangulate
+
+if TYPE_CHECKING:
+    from .structures import Prov
+    from .mesh import MeshData
+
+Point: TypeAlias = "Sequence[float]"
+Ring: TypeAlias = "Sequence[Point]"
+Color: TypeAlias = "Sequence[float]"
+Tri: TypeAlias = "tuple[int, int, int]"  # vertex or point indices
+AddFace: TypeAlias = "Callable[[Sequence[int], str, Color], None]"  # (vertex indices, material, colour)
 # Shapes that need a rectangular footprint, and those taking roof:orientation / roof:direction.
 RECT_SHAPES = {"gabled", "hipped", "half-hipped", "gambrel", "mansard", "round", "saltbox"}
 ORIENTED_SHAPES = {"gabled", "hipped", "half-hipped", "gambrel", "round", "saltbox"}
@@ -26,7 +40,7 @@ GABLE_APEX_MIN = 1e-3  # the gable apex lies strictly inside its footprint edge
 GABLE_MIN_HEIGHT_RATIO = 0.05  # apex height over the roof's highest point
 
 
-def rect_check(ring):
+def rect_check(ring: Ring) -> bool:
     """Return True if ring is a near-rectangle (4 vertices, ~90 deg corners)."""
     if len(ring) != 4:
         return False
@@ -42,7 +56,7 @@ def rect_check(ring):
     return True
 
 
-def is_convex(ring):
+def is_convex(ring: Ring) -> bool:
     n = len(ring)
     for k in range(n):
         a, b, c = ring[k - 1], ring[k], ring[(k + 1) % n]
@@ -51,7 +65,7 @@ def is_convex(ring):
     return True
 
 
-def add_planar_face(mesh, idx, mat, col, tol=PLANAR_TOL_M):
+def add_planar_face(mesh: MeshData, idx: Sequence[int], mat: str, col: Color, tol: float = PLANAR_TOL_M) -> bool:
     """Add face ``idx``; a polygon with > 3 vertices that is not planar within ``tol`` metres
     is added as explicit triangles instead (a quad along its shorter diagonal, otherwise a
     fan), keeping the winding. Returns True if the face was split."""
@@ -76,7 +90,8 @@ def add_planar_face(mesh, idx, mat, col, tol=PLANAR_TOL_M):
     return False
 
 
-def resolve_shape(shape_tag, outer, holes, prov, skeleton_hipped=False):
+def resolve_shape(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: Prov,
+                  skeleton_hipped: bool = False) -> str:
     """The roof shape that can be built for ``roof:shape`` on this footprint; sets
     ``prov["roof_shape"]`` (``measured:``/``inferred:``/``fallback:``). With ``skeleton_hipped`` a hipped
     roof on a non-rectangular footprint is kept (``plan_roof`` builds it from the straight skeleton)."""
@@ -111,17 +126,17 @@ class RoofPlan:
     counter-clockwise seen from above), so its exact vertex and triangle counts are known."""
     shape_built: str
     n_ring: int = 0
-    points: list = None
-    tris: list = None
+    points: list[Node] | None = None
+    tris: list[Tri] | None = None
     t_max: float = 0.0
-    ends: list = None  # gable-end triangles (index triples into ``points``), emitted vertical as MB Facade
+    ends: list[Tri] | None = None  # gable-end triangles (index triples into ``points``), emitted vertical as MB Facade
 
     @property
-    def skeleton(self):
+    def skeleton(self) -> bool:
         return self.points is not None
 
 
-def flat_plan():
+def flat_plan() -> RoofPlan:
     return RoofPlan("flat")
 
 
@@ -129,7 +144,8 @@ class _GableError(Exception):
     """A gable end that cannot be built (the reason is the message); the plan falls back to hipped."""
 
 
-def plan_roof(shape_tag, outer, holes, prov, orientation=None, direction=None):
+def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: Prov,
+              orientation: str | None = None, direction: float | None = None) -> RoofPlan:
     """Preflight of the roof: the shape that will be built for ``roof:shape`` on this footprint
     (``outer``/``holes`` in the mesh's local frame), with its skeleton for a hipped or gabled roof on a
     non-rectangular footprint. ``orientation`` (``roof:orientation``) and ``direction`` (``roof:direction``
@@ -157,9 +173,9 @@ def plan_roof(shape_tag, outer, holes, prov, orientation=None, direction=None):
         return RoofPlan(shape)
 
 
-def _min_area_axes(ring):
+def _min_area_axes(ring: Sequence[Pt]) -> tuple[Pt, Pt]:
     """Unit vectors (long, short) of the minimum-area bounding rectangle of ``ring``."""
-    best = None
+    best: tuple[float, Pt, Pt, float, float] | None = None
     for k in range(len(ring)):
         a, b = ring[k], ring[(k + 1) % len(ring)]
         ln = math.dist(a, b)
@@ -172,11 +188,13 @@ def _min_area_axes(ring):
         w, h = max(pu) - min(pu), max(pv) - min(pv)
         if best is None or w * h < best[0] - 1e-9:
             best = (w * h, u, v, w, h)
+    assert best is not None  # a canonical skeleton ring has a non-degenerate edge
     _, u, v, w, h = best
     return (u, v) if w >= h else (v, u)
 
 
-def _gable_ends(sk, orientation, direction, prov):
+def _gable_ends(sk: Skeleton, orientation: str | None, direction: float | None,
+                prov: Prov) -> tuple[int, ...]:
     """Faces of the skeleton to turn into gable ends: the triangular faces at a ridge end whose footprint edge is
     perpendicular (within 45 degrees) to the ridge axis. The ridge axis is the long side of the minimum-area
     bounding rectangle, or the short one for ``roof:orientation=across``; without an orientation a
@@ -196,8 +214,8 @@ def _gable_ends(sk, orientation, direction, prov):
                                     "bounding rectangle)" if orientation is None else
                                     f"fallback:along (roof:orientation={orientation} not recognised)")
     n = len(sk.ring)
-    ridge_ends = []
-    reasons = []
+    ridge_ends: list[int] = []
+    reasons: list[str] = []
     for i, f in enumerate(sk.faces):
         if len(f) == 3:
             try:
@@ -207,18 +225,18 @@ def _gable_ends(sk, orientation, direction, prov):
                 reasons.append(str(exc))
     if len(ridge_ends) < 2:
         raise _GableError(reasons[0] if reasons else "the skeleton has fewer than two ridge ends")
-    ends = []
+    perpendicular: list[int] = []
     for i in ridge_ends:
         a, b = sk.ring[i], sk.ring[(i + 1) % n]
         if abs((b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1]) / math.dist(a, b) <= math.sqrt(0.5):
-            ends.append(i)
-    ends = tuple(ends if len(ends) >= 2 else ridge_ends)
+            perpendicular.append(i)
+    ends = tuple(perpendicular if len(perpendicular) >= 2 else ridge_ends)
     if direction is not None and orientation is None:
         _record_ridge_bearing(sk, ends, direction, prov)
     return ends
 
 
-def _ridge_bearing(sk, i):
+def _ridge_bearing(sk: Skeleton, i: int) -> float:
     """Compass bearing in [0, 180) of the emitted ridge that ends in gable end ``i``."""
     N = sk.faces[i][2]
     prev = sk.faces[(i - 1) % len(sk.ring)]
@@ -227,14 +245,19 @@ def _ridge_bearing(sk, i):
     return math.degrees(math.atan2(nn[0] - mm[0], nn[1] - mm[1])) % 180.0
 
 
-def _record_ridge_bearing(sk, ends, direction, prov, tolerance=10.0):
+def _record_ridge_bearing(sk: Skeleton, ends: Iterable[int], direction: float, prov: Prov,
+                          tolerance: float = 10.0) -> None:
     """``prov["roof_ridge_bearing"]`` lists the emitted ridge bearings; ``roof_direction`` is measured only when
     one of them is within ``tolerance`` degrees of perpendicular to the tagged direction, else approximate."""
     want = (direction + 90.0) % 180.0
     bearings = sorted({_ridge_bearing(sk, i) % 180.0 for i in ends})
-    off = lambda b: min(abs(b - want), 180.0 - abs(b - want))
+    def off(b: float) -> float:
+        return min(abs(b - want), 180.0 - abs(b - want))
+
     best = min(bearings, key=off)
-    shown = lambda b: f"{round(b, 1) % 180.0:g}"      # the tolerance is judged on the unrounded bearing
+
+    def shown(b: float) -> str:      # the tolerance is judged on the unrounded bearing
+        return f"{round(b, 1) % 180.0:g}"
     prov["roof_ridge_bearing"] = ", ".join(shown(b) for b in bearings)
     if off(best) <= tolerance:
         prov["roof_direction"] = f"measured:osm roof:direction={direction:g} (ridge {shown(best)}° perpendicular within {tolerance:g}°)"
@@ -242,14 +265,14 @@ def _record_ridge_bearing(sk, ends, direction, prov, tolerance=10.0):
         prov["roof_direction"] = f"approximate: ridge {shown(best)}° vs tagged {direction:g}°"
 
 
-def drop_ridge_claims(prov):
+def drop_ridge_claims(prov: Prov) -> None:
     """Remove the gable ridge/direction provenance when the planned roof is not the one emitted (a flat or
     zero-height downgrade): a roof without a ridge makes no bearing or ``roof:direction`` claim."""
     for key in ("roof_ridge_bearing", "roof_direction", "roof_orientation"):
         prov.pop(key, None)
 
 
-def _gable_node(sk, i):
+def _gable_node(sk: Skeleton, i: int) -> tuple[Node, int]:
     """The gable apex of triangular face ``i`` (A, B, N) as ``((x, y, t), N)``: where the ridge through N meets
     the footprint edge A-B. The faces beside the end keep their planes, N becomes this point."""
     n = len(sk.ring)
@@ -266,7 +289,7 @@ def _gable_node(sk, i):
         raise _GableError("the ridge ends on a footprint corner")
     p0, p1 = sk.ring[(i - 1) % n], sk.ring[(i + 2) % n]
 
-    def dist(a, b, p):
+    def dist(a: Pt, b: Pt, p: Pt) -> float:
         return ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / math.dist(a, b)
 
     fa, fb = dist(p0, A, A) - dist(B, p1, A), dist(p0, A, B) - dist(B, p1, B)
@@ -286,11 +309,11 @@ def _gable_node(sk, i):
     return (p[0], p[1], t), N
 
 
-def _skeleton_plan(outer, sk, ends=()):
+def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofPlan:
     n = len(outer)
     nodes = list(sk.nodes)
     faces = [list(f) for f in sk.faces]
-    gable_apex = {}
+    gable_apex: dict[int, int] = {}
     for i in ends:
         apex, N = _gable_node(sk, i)
         nodes.append(apex)
@@ -298,8 +321,8 @@ def _skeleton_plan(outer, sk, ends=()):
         for j in ((i - 1) % len(sk.ring), (i + 1) % len(sk.ring)):
             faces[j][faces[j].index(N)] = len(nodes) - 1
     index = {(float(p[0]), float(p[1])): k for k, p in enumerate(outer)}
-    node_to_pt = {}
-    points = [(float(p[0]), float(p[1]), 0.0) for p in outer]
+    node_to_pt: dict[int, int] = {}
+    points: list[Node] = [(float(p[0]), float(p[1]), 0.0) for p in outer]
     for k in sorted({k for i, f in enumerate(faces) if i not in gable_apex for k in f}
                     | set(range(len(sk.ring))) | set(gable_apex.values())):
         if k < len(sk.ring):
@@ -309,7 +332,8 @@ def _skeleton_plan(outer, sk, ends=()):
             points.append(nodes[k])
     in_skeleton = set(node_to_pt[k] for k in range(len(sk.ring)))
     extra = [k for k in range(n) if k not in in_skeleton]
-    tris, gable_tris = [], []
+    tris: list[Tri] = []
+    gable_tris: list[Tri] = []
     for i, face in enumerate(faces):
         pts = [(nodes[k][0], nodes[k][1]) for k in face]
         a, b = pts[0], pts[1]
@@ -333,7 +357,7 @@ def _skeleton_plan(outer, sk, ends=()):
                     chain = [ids[at]] + fan + [ids[(at + 1) % 3]]
                     tris += [(chain[j], chain[j + 1], c) for j in range(len(chain) - 1)]
                     continue
-            tris.append(tuple(ids))
+            tris.append((ids[0], ids[1], ids[2]))
     t_max = max(p[2] for p in points)
     if t_max <= 0:
         raise SkeletonError("the skeleton has no height")
@@ -342,11 +366,11 @@ def _skeleton_plan(outer, sk, ends=()):
     return RoofPlan("gabled" if ends else "hipped", n, points, tris, t_max, gable_tris)
 
 
-def _signed(a, b, c):
+def _signed(a: Point, b: Point, c: Point) -> float:
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 
 
-def _along(p, a, b, tol=1e-5):
+def _along(p: Point, a: Point, b: Point, tol: float = 1e-5) -> float | None:
     """Parameter of ``p`` along ``a`` -> ``b`` if it lies strictly between them on the segment, else None."""
     dx, dy = b[0] - a[0], b[1] - a[1]
     ln2 = dx * dx + dy * dy
@@ -356,17 +380,18 @@ def _along(p, a, b, tol=1e-5):
     return None
 
 
-def roof_budget(plan, n_ring, n_footprint_tris):
+def roof_budget(plan: RoofPlan, n_ring: int, n_footprint_tris: int) -> tuple[int, int]:
     """Exact ``(vertices, triangles)`` the roof adds on top of the wall ring (2 n vertices, 2 n wall and
     ``n_footprint_tris`` floor triangles): for a skeleton roof what the plan will emit, otherwise the
     per-shape upper bound of :func:`shape_budget` plus the fixed apex/ridge and flat-top allowance."""
-    if plan.skeleton:
+    if plan.points is not None and plan.tris is not None:
         return len(plan.points) - plan.n_ring, len(plan.tris) + len(plan.ends or ())
     extra_v, extra_t = shape_budget(plan.shape_built, n_ring)
     return 2 + extra_v, n_footprint_tris + 4 + extra_t
 
 
-def resolve_orientation(shape, tags, prov, outer=None, direction=None):
+def resolve_orientation(shape: str, tags: Mapping[str, str], prov: Prov, outer: Ring | None = None,
+                        direction: float | None = None) -> bool:
     """True if the ridge runs across (parallel to the shorter side); sets
     ``prov["roof_orientation"]``. Without ``roof:orientation``, a ``roof:direction``
     (``direction`` in degrees, the way the slope faces) puts the ridge perpendicular to it."""
@@ -392,16 +417,16 @@ def resolve_orientation(shape, tags, prov, outer=None, direction=None):
     return across
 
 
-def _bearing(direction):
+def _bearing(direction: float) -> Pt:
     r = math.radians(direction)
     return math.sin(r), math.cos(r)
 
 
-def _sub(p, q):
+def _sub(p: Point, q: Point) -> Pt:
     return q[0] - p[0], q[1] - p[1]
 
 
-def _frame(ring, across):
+def _frame(ring: Ring, across: bool) -> tuple[Point, Point, Point, Point]:
     """Rectangle corners a, b, c, d (CCW, as ring points) with the ridge parallel to a-b: along
     the longer side, or the shorter one if ``across``."""
     a, b, c, d = ring
@@ -409,7 +434,8 @@ def _frame(ring, across):
         a, b, c, d = b, c, d, a
     return a, b, c, d
 
-def skillion_surface(shape, rings, direction, top, roof_h, prov):
+def skillion_surface(shape: str, rings: Iterable[Ring], direction: float | None, top: float, roof_h: float,
+                     prov: Prov) -> Callable[[Point], float] | None:
     """For a skillion roof, a function (x, y) -> roof underside z; else None. ``direction`` is the parsed\n    ``roof:direction`` in degrees (None if absent)."""
     if shape != "skillion":
         return None
@@ -422,7 +448,7 @@ def skillion_surface(shape, rings, direction, top, roof_h, prov):
     smin, smax = min(proj), max(proj)
     span = max(smax - smin, 1e-6)
 
-    def skillion_z(p):
+    def skillion_z(p: Point) -> float:
         s = p[0] * d[0] + p[1] * d[1]
         return top - roof_h * (s - smin) / span
     return skillion_z
@@ -430,24 +456,24 @@ def skillion_surface(shape, rings, direction, top, roof_h, prov):
 
 # Cross-section profiles (t across 0..1, z as a fraction of the roof height) of the shapes
 # extruded along the ridge; the end walls are vertical.
-GAMBREL = [(0.0, 0.0), (0.18, 0.62), (0.5, 1.0), (0.82, 0.62), (1.0, 0.0)]
+GAMBREL: list[Pt] = [(0.0, 0.0), (0.18, 0.62), (0.5, 1.0), (0.82, 0.62), (1.0, 0.0)]
 SALTBOX_RIDGE_T = 1.0 / 3.0
 ROUND_SEGMENTS = 8
 DOME_SEGMENTS = 6
 # onion: (scale, z fraction) of the rings above the eave, sampled at t = k / 7; the apex follows
-ONION = [(1.0, 0.0), (0.97, 0.10), (0.85, 0.25), (0.62, 0.42), (0.38, 0.60), (0.22, 0.76), (0.10, 0.89),
+ONION: list[Pt] = [(1.0, 0.0), (0.97, 0.10), (0.85, 0.25), (0.62, 0.42), (0.38, 0.60), (0.22, 0.76), (0.10, 0.89),
          (0.0, 1.0)]
 MANSARD_LOW_INSET, MANSARD_TOP_INSET, MANSARD_BREAK_Z = 0.15, 0.30, 0.65  # x short side, x short side, x roof_h
 HALF_HIP_INSET, HALF_HIP_WALL_Z = 0.25, 0.5  # ridge end inset x short side; gable wall height x roof_h
 
 
-def dome_rings(n_ring, segments):
+def dome_rings(n_ring: int, segments: int) -> int:
     """Intermediate rings used for ``segments`` (fewer for a huge footprint so the roof stays
     within MAX_ROOF_TRIANGLES: n x (2 x rings + 1) triangles)."""
     return max(0, min(segments - 1, (MAX_ROOF_TRIANGLES // max(n_ring, 1) - 1) // 2))
 
 
-def shape_budget(shape, n_ring):
+def shape_budget(shape: str, n_ring: int) -> tuple[int, int]:
     """(vertices, triangles) a roof of ``shape`` adds beyond what ``build_building`` reserves
     for the wall ring, the footprint and the apex (2 n + 2 vertices, 2 n + 2 tris + 4)."""
     if shape in ("dome", "onion"):
@@ -458,9 +484,9 @@ def shape_budget(shape, n_ring):
     return 0, 0
 
 
-def _dome_profile(n_ring, shape):
+def _dome_profile(n_ring: int, shape: str) -> list[Pt]:
     rings = dome_rings(n_ring, DOME_SEGMENTS if shape == "dome" else len(ONION) - 1)
-    out = []
+    out: list[Pt] = []
     for k in range(1, rings + 1):
         if shape == "dome":
             th = (math.pi / 2) * k / (rings + 1)
@@ -474,8 +500,10 @@ def _dome_profile(n_ring, shape):
     return out
 
 
-def build_roof(mesh, ring, holes, eave_z, roof_h, plan, tags, prov, *, top_idx, tris, add_face,
-               roof_col, facade, across=False, direction=None):
+def build_roof(mesh: MeshData, ring: Ring, holes: Sequence[Ring], eave_z: float, roof_h: float, plan: RoofPlan,
+               tags: Mapping[str, str], prov: Prov, *, top_idx: Sequence[Sequence[int]],
+               tris: Sequence[Sequence[int]], add_face: AddFace, roof_col: Color, facade: Color,
+               across: bool = False, direction: float | None = None) -> None:
     """Emit the ``plan`` (``plan_roof``) on the wall-top vertices ``top_idx`` (one index list
     per ring, outer first, in the mesh's local frame). ``ring``/``holes`` are the local
     footprint rings, the wall tops are at ``eave_z`` (sloped for a skillion), the highest
@@ -487,7 +515,7 @@ def build_roof(mesh, ring, holes, eave_z, roof_h, plan, tags, prov, *, top_idx, 
     top = eave_z + roof_h
     flat_top = [i for rt in top_idx for i in rt]
     R = "MB Roof"
-    if plan.skeleton:
+    if plan.points is not None and plan.tris is not None:
         scale = roof_h / plan.t_max
         ids = list(top_idx[0])
         for x, y, t in plan.points[plan.n_ring:]:
@@ -527,6 +555,8 @@ def build_roof(mesh, ring, holes, eave_z, roof_h, plan, tags, prov, *, top_idx, 
             a, b, c, d = b, c, d, a
         m1 = tuple((V[b][i] + V[c][i]) / 2 for i in range(2))
         m2 = tuple((V[d][i] + V[a][i]) / 2 for i in range(2))
+        r1: tuple[float, ...]
+        r2: tuple[float, ...]
         if shape == "hipped":
             end = math.dist(V[b][:2], V[c][:2])
             ridge_span = math.dist(m1, m2)
@@ -547,7 +577,9 @@ def build_roof(mesh, ring, holes, eave_z, roof_h, plan, tags, prov, *, top_idx, 
                    direction)
 
 
-def _rect_roof(mesh, rt, eave_z, roof_h, shape, tags, prov, add_face, roof_col, facade, across, direction):
+def _rect_roof(mesh: MeshData, rt: Sequence[int], eave_z: float, roof_h: float, shape: str,
+               tags: Mapping[str, str], prov: Prov, add_face: AddFace, roof_col: Color, facade: Color,
+               across: bool, direction: float | None) -> None:
     """half-hipped / gambrel / round / saltbox / mansard on the rectangle ``rt`` (a, b, c, d CCW)."""
     V = mesh.vertices
     R = "MB Roof"
@@ -555,9 +587,9 @@ def _rect_roof(mesh, rt, eave_z, roof_h, shape, tags, prov, add_face, roof_col, 
     if (math.dist(V[a][:2], V[b][:2]) < math.dist(V[b][:2], V[c][:2])) != across:
         a, b, c, d = b, c, d, a
     A, B, C, D = (V[i][:2] for i in (a, b, c, d))
-    eave = {(0.0, 0.0): a, (1.0, 0.0): b, (1.0, 1.0): c, (0.0, 1.0): d}
+    eave: dict[Pt, int] = {(0.0, 0.0): a, (1.0, 0.0): b, (1.0, 1.0): c, (0.0, 1.0): d}
 
-    def pt(s, t, zf):
+    def pt(s: float, t: float, zf: float) -> int:
         """Vertex at fraction s along a-b and t along a-d (bilinear over the corners), z = eave + zf x roof_h;
         the eave corners reuse the wall-top vertices."""
         if zf == 0.0 and (s, t) in eave:
