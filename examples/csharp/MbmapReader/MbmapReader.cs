@@ -708,9 +708,10 @@ namespace MapBuilder.Reference
         public double RadiusM;
     }
 
-    /// <summary>Capsule-vs-collision check for passage probes. Brute force with a per-object and per-triangle
-    /// AABB prefilter; triangles are two-sided. Mirrors map_builder/core/query.py capsule_hits, including its
-    /// handling of degenerate triangles and nearly parallel segments and its work counting.</summary>
+    /// <summary>Capsule-vs-collision check for passage probes; triangles are two-sided. Mirrors
+    /// map_builder/core/query.py capsule_hits exactly: the same degenerate-triangle and nearly parallel segment
+    /// handling, the same whole-path skip, triangle grid and plane prefilter, and the same work counting
+    /// (docs/PACKAGE_FORMAT.md, "Work accounting").</summary>
     public static class CapsuleCheck
     {
         /// <summary>Object/triangle visits shared by all passage probes of one package (package.py PASSAGE_QUERY_BUDGET).</summary>
@@ -840,31 +841,124 @@ namespace MapBuilder.Reference
         {
             var hits = new List<int>();
             double r = probe.RadiusM + ContactTolM, pad = r + Limits.AabbTableTolM;
-            int segments = Math.Max(1, probe.PathMap.Count - 1);
+            int np = probe.PathMap.Count, segments = Math.Max(1, np - 1);
+            var sp = new Vec3[segments]; var sq = new Vec3[segments];
+            var slo = new Vec3[segments]; var shi = new Vec3[segments];
+            Vec3 wlo = new Vec3(double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity);
+            Vec3 whi = new Vec3(double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity);
+            for (int s = 0; s < segments; s++)
+            {
+                Vec3 p = probe.PathMap[s], q = probe.PathMap[Math.Min(s + 1, np - 1)];
+                sp[s] = p; sq[s] = q;
+                slo[s] = new Vec3(Math.Min(p.X, q.X), Math.Min(p.Y, q.Y), Math.Min(p.Z, q.Z));
+                shi[s] = new Vec3(Math.Max(p.X, q.X), Math.Max(p.Y, q.Y), Math.Max(p.Z, q.Z));
+                wlo = new Vec3(Math.Min(wlo.X, slo[s].X), Math.Min(wlo.Y, slo[s].Y), Math.Min(wlo.Z, slo[s].Z));
+                whi = new Vec3(Math.Max(whi.X, shi[s].X), Math.Max(whi.Y, shi[s].Y), Math.Max(whi.Z, shi[s].Z));
+            }
             foreach (var obj in col.Objects)
             {
-                bool hit = false;
                 var box = obj.Aabb;
+                if (segments > 1 && !Overlap(wlo, whi, box[0], box[1], box[2], box[3], box[4], box[5], pad))
+                {
+                    if (--budget < 0) return null;   // the whole path misses the object: one unit
+                    continue;
+                }
+                bool hit = false;
+                var grid = obj.TriCount > GridMinTris ? GridFor(col, obj) : null;
                 for (int s = 0; s < segments && !hit; s++)
                 {
                     if (--budget < 0) return null;
-                    Vec3 p = probe.PathMap[s], q = probe.PathMap[Math.Min(s + 1, probe.PathMap.Count - 1)];
-                    var lo = new Vec3(Math.Min(p.X, q.X), Math.Min(p.Y, q.Y), Math.Min(p.Z, q.Z));
-                    var hi = new Vec3(Math.Max(p.X, q.X), Math.Max(p.Y, q.Y), Math.Max(p.Z, q.Z));
+                    Vec3 p = sp[s], q = sq[s], lo = slo[s], hi = shi[s];
                     if (!Overlap(lo, hi, box[0], box[1], box[2], box[3], box[4], box[5], pad)) continue;
-                    for (int t = obj.TriStart; t < obj.TriStart + obj.TriCount && !hit; t++)
+                    var cand = grid != null ? grid.Candidates(lo, hi, r) : null;
+                    bool scan = cand == null;
+                    if (!scan)
                     {
-                        if (--budget < 0) return null;
+                        budget -= cand.Count;
+                        if (budget < 0) return null;
+                    }
+                    int count = scan ? obj.TriCount : cand.Count;
+                    for (int i = 0; i < count && !hit; i++)
+                    {
+                        int t = scan ? obj.TriStart + i : cand[i];
+                        if (scan && --budget < 0) return null;
                         var tri = col.GetTriangle(t);
                         Vec3 a = tri.A, b = tri.B, c = tri.C;
                         if (!Overlap(lo, hi, Math.Min(a.X, Math.Min(b.X, c.X)), Math.Min(a.Y, Math.Min(b.Y, c.Y)), Math.Min(a.Z, Math.Min(b.Z, c.Z)),
                                      Math.Max(a.X, Math.Max(b.X, c.X)), Math.Max(a.Y, Math.Max(b.Y, c.Y)), Math.Max(a.Z, Math.Max(b.Z, c.Z)), r)) continue;
+                        if (PlaneClear(p, q, a, b, c, r)) continue;
                         hit = SegmentTriangleDistance(p, q, tri) <= r;
                     }
                 }
                 if (hit) hits.Add(obj.Index);
             }
             return hits;
+        }
+
+        /// <summary>query.py _plane_clear: both segment ends farther than reach from the triangle's plane on the same side.</summary>
+        static bool PlaneClear(Vec3 p, Vec3 q, Vec3 a, Vec3 b, Vec3 c, double reach)
+        {
+            double ux = b.X - a.X, uy = b.Y - a.Y, uz = b.Z - a.Z, vx = c.X - a.X, vy = c.Y - a.Y, vz = c.Z - a.Z;
+            double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            double nn = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (nn < 1e-12) return false;
+            double dp = nx * (p.X - a.X) + ny * (p.Y - a.Y) + nz * (p.Z - a.Z);
+            double dq = nx * (q.X - a.X) + ny * (q.Y - a.Y) + nz * (q.Z - a.Z);
+            double lim = (reach + 1e-6) * nn;
+            return (dp > lim && dq > lim) || (dp < -lim && dq < -lim);
+        }
+
+        /// <summary>query.py _GRID_MIN_TRIS: objects with more triangles than this get a triangle grid.</summary>
+        public const int GridMinTris = 256;
+        public const double GridCellM = 8.0;
+        public const int GridMaxTriCells = 64;
+        public const int GridMaxQueryCells = 1024;
+
+        sealed class TriGrid
+        {
+            public readonly Dictionary<(long, long), List<int>> Cells = new Dictionary<(long, long), List<int>>();
+            public readonly List<int> Big = new List<int>();
+
+            /// <summary>query.py _grid_candidates: sorted triangle ids near the box, or null when it spans too many cells.</summary>
+            public List<int> Candidates(Vec3 lo, Vec3 hi, double reach)
+            {
+                double i0 = Math.Floor((lo.X - reach) / GridCellM), i1 = Math.Floor((hi.X + reach) / GridCellM);
+                double j0 = Math.Floor((lo.Y - reach) / GridCellM), j1 = Math.Floor((hi.Y + reach) / GridCellM);
+                if ((i1 - i0 + 1) * (j1 - j0 + 1) > GridMaxQueryCells) return null;
+                var set = new SortedSet<int>(Big);
+                for (long i = (long)i0; i <= (long)i1; i++)
+                    for (long j = (long)j0; j <= (long)j1; j++)
+                        if (Cells.TryGetValue((i, j), out var l)) set.UnionWith(l);
+                return new List<int>(set);
+            }
+        }
+
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CollisionMesh, Dictionary<int, TriGrid>> Grids =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<CollisionMesh, Dictionary<int, TriGrid>>();
+
+        static TriGrid GridFor(CollisionMesh col, CollisionObject obj)
+        {
+            var perMesh = Grids.GetOrCreateValue(col);
+            lock (perMesh)
+            {
+                if (perMesh.TryGetValue(obj.Index, out var g)) return g;
+                g = new TriGrid();
+                for (int t = obj.TriStart; t < obj.TriStart + obj.TriCount; t++)
+                {
+                    var tri = col.GetTriangle(t);
+                    Vec3 a = tri.A, b = tri.B, c = tri.C;
+                    double i0 = Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X)) / GridCellM), i1 = Math.Floor(Math.Max(a.X, Math.Max(b.X, c.X)) / GridCellM);
+                    double j0 = Math.Floor(Math.Min(a.Y, Math.Min(b.Y, c.Y)) / GridCellM), j1 = Math.Floor(Math.Max(a.Y, Math.Max(b.Y, c.Y)) / GridCellM);
+                    if ((i1 - i0 + 1) * (j1 - j0 + 1) > GridMaxTriCells) { g.Big.Add(t); continue; }
+                    for (long i = (long)i0; i <= (long)i1; i++)
+                        for (long j = (long)j0; j <= (long)j1; j++)
+                        {
+                            if (!g.Cells.TryGetValue((i, j), out var l)) g.Cells[(i, j)] = l = new List<int>();
+                            l.Add(t);
+                        }
+                }
+                return perMesh[obj.Index] = g;
+            }
         }
 
         /// <summary>A collision mesh built in code from (class, vertices, triangle indices) objects, for controls.</summary>

@@ -16,7 +16,8 @@ static class Program
 {
     static int Main(string[] args)
     {
-        if (args.Length != 1) { Console.Error.WriteLine("usage: MbmapReader <package.mbmap>"); return 2; }
+        if (args.Length >= 3 && args[0] == "--probe-work") return ProbeWork(args[1], args[2], args.Length == 4 ? long.Parse(args[3]) : (long?)null);
+        if (args.Length != 1) { Console.Error.WriteLine("usage: MbmapReader <package.mbmap> | --probe-work <map.mbcol> <probes.json> [shared budget]"); return 2; }
         try
         {
             using (var p = MbmapPackage.Load(args[0]))
@@ -34,6 +35,39 @@ static class Program
             Console.WriteLine($"INVALID: unexpected {e.GetType().Name} while reading the package");
             return 1;
         }
+    }
+
+    // Parity aid: runs the capsule check on a bare .mbcol and a JSON array of {"path": [[x, y, z], ...], "radius": r}.
+    // Without a shared budget each probe is unlimited and prints "probe <i> hits=<comma list> work=<units>". With one
+    // (as the validator does), probes draw on it in order and print "probe <i> hits=<list> left=<remaining>"; the
+    // first probe that does not fit prints "probe <i> unchecked" and ends the run.
+    static int ProbeWork(string mbcol, string probesJson, long? shared)
+    {
+        var col = CollisionMesh.Read(File.ReadAllBytes(mbcol));
+        long left = shared ?? 0;
+        using (var doc = JsonDocument.Parse(File.ReadAllText(probesJson)))
+        {
+            int i = 0;
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                var pp = new PassageProbe { Id = $"p{i}", Kind = "bridge", Feature = "x", RadiusM = e.GetProperty("radius").GetDouble() };
+                foreach (var pt in e.GetProperty("path").EnumerateArray())
+                    pp.PathMap.Add(new Vec3(pt[0].GetDouble(), pt[1].GetDouble(), pt[2].GetDouble()));
+                if (shared == null)
+                {
+                    long budget = long.MaxValue;
+                    var hits = CapsuleCheck.Hits(col, pp, ref budget);
+                    Console.WriteLine($"probe {i++} hits={string.Join(",", hits)} work={long.MaxValue - budget}");
+                }
+                else
+                {
+                    var hits = CapsuleCheck.Hits(col, pp, ref left);
+                    if (hits == null) { Console.WriteLine($"probe {i} unchecked"); break; }
+                    Console.WriteLine($"probe {i++} hits={string.Join(",", hits)} left={left}");
+                }
+            }
+        }
+        return 0;
     }
 
     static int Report(MbmapPackage p)
