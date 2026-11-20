@@ -1,0 +1,289 @@
+import math
+import unittest
+from unittest import mock
+
+from map_builder.core import skeleton
+from map_builder.core.errors import LimitError
+from map_builder.core.skeleton import MAX_SKELETON_VERTICES, SkeletonError, straight_skeleton
+from map_builder.core.triangulate import ring_area, triangulate
+
+# Local copy of the independent tiling checks of tests/roof_checks.py (S3-ROOF-CASES). Whichever
+# PR merges second switches this file to the shared module and drops the copy.
+TOL = 1e-9
+
+
+def _clip(subject, clip):
+    """Sutherland-Hodgman: ``subject`` clipped by the convex CCW polygon ``clip``."""
+    out = subject
+    for i in range(len(clip)):
+        a, b = clip[i], clip[(i + 1) % len(clip)]
+        inp, out = out, []
+        if not inp:
+            break
+
+        def side(p):
+            return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+        for j in range(len(inp)):
+            p, q = inp[j - 1], inp[j]
+            sp, sq = side(p), side(q)
+            if sq >= 0:
+                if sp < 0:
+                    out.append(_cross(p, q, sp, sq))
+                out.append(q)
+            elif sp >= 0:
+                out.append(_cross(p, q, sp, sq))
+    return out
+
+
+def _cross(p, q, sp, sq):
+    f = sp / (sp - sq)
+    return (p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1]))
+
+
+def _area(poly):
+    return ring_area(poly) if len(poly) >= 3 else 0.0
+
+
+def face_triangles(sk):
+    tris = []
+    for face in sk.faces:
+        pts = [sk.nodes[k][:2] for k in face]
+        tris += [[pts[i], pts[j], pts[k]] for i, j, k in triangulate(pts, range(len(pts)))]
+    return tris
+
+
+def check_no_overlap(tris, footprint_area):
+    total = 0.0
+    for i in range(len(tris)):
+        for j in range(i + 1, len(tris)):
+            total += _area(_clip(list(tris[i]), tris[j]))
+    return total / footprint_area
+
+
+def _subtract(piece, tri):
+    """``piece`` (convex) minus the convex CCW ``tri``, as a list of convex pieces."""
+    out = []
+    for i in range(len(tri)):
+        a, b = tri[i], tri[(i + 1) % len(tri)]
+        outside = _halfplane(piece, b, a)
+        if len(outside) >= 3 and _area(outside) > 0:
+            out.append(outside)
+        piece = _halfplane(piece, a, b)
+        if len(piece) < 3:
+            break
+    return out
+
+
+def _halfplane(poly, a, b):
+    """``poly`` clipped to the closed left side of the directed line a -> b."""
+    out = []
+    for j in range(len(poly)):
+        p, q = poly[j - 1], poly[j]
+        sp = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        sq = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        if sq >= 0:
+            if sp < 0:
+                out.append(_cross(p, q, sp, sq))
+            out.append(q)
+        elif sp >= 0:
+            out.append(_cross(p, q, sp, sq))
+    return out
+
+
+def check_no_gap(tris, ring):
+    """(footprint - union of all triangles) / footprint: the uncovered part of the independently
+    triangulated footprint, computed by subtracting every triangle from every footprint piece."""
+    pts = list(ring)
+    uncovered = 0.0
+    for i, j, k in triangulate(pts, range(len(pts))):
+        pieces = [[pts[i], pts[j], pts[k]]]
+        for t in tris:
+            pieces = [r for p in pieces for r in _subtract(p, t)]
+        uncovered += sum(_area(p) for p in pieces)
+    return uncovered / ring_area(pts)
+
+def assert_tiles(test, ring):
+    sk = straight_skeleton(ring)
+    area = ring_area(sk.ring)
+    tris = face_triangles(sk)
+    test.assertLessEqual(abs(check_no_gap(tris, sk.ring)), TOL)
+    test.assertLessEqual(check_no_overlap(tris, area), TOL)
+    test.assertLessEqual(abs(sum(_area(t) for t in tris) - area) / area, TOL)  # nothing outside
+    return sk
+
+
+def assert_planar_lifted(test, sk):
+    for i, face in enumerate(sk.faces):
+        pts = [sk.nodes[k] for k in face]
+        a, b = sk.ring[i], sk.ring[(i + 1) % len(sk.ring)]
+        # plane through the ring edge rising with slope 1 towards the interior
+        ln = math.dist(a, b)
+        nx, ny = -(b[1] - a[1]) / ln, (b[0] - a[0]) / ln
+        for x, y, t in pts:
+            test.assertAlmostEqual(nx * (x - a[0]) + ny * (y - a[1]), t, places=7)
+        test.assertEqual(sk.nodes[face[0]][2], 0.0)
+        test.assertEqual(sk.nodes[face[1]][2], 0.0)
+
+
+def face_set(sk):
+    return {frozenset(tuple(round(c, 7) for c in sk.nodes[k]) for k in f) for f in sk.faces}
+
+
+RECT = [(0, 0), (20, 0), (20, 12), (0, 12)]
+L_SHAPE = [(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)]
+L_UNEQUAL = [(0, 0), (10, 0), (10, 4), (6, 4), (6, 10), (0, 10)]
+T_SHAPE = [(0, 0), (12, 0), (12, 4), (8, 4), (8, 10), (4, 10), (4, 4), (0, 4)]
+T_UNEQUAL = [(0, 0), (13, 0), (13, 4), (9, 4), (9, 11), (4, 11), (4, 4), (0, 4)]
+U_SHAPE = [(0, 0), (12, 0), (12, 10), (8, 10), (8, 4), (4, 4), (4, 10), (0, 10)]
+U_UNEQUAL = [(0, 0), (13, 0), (13, 10), (9, 10), (9, 5), (4, 5), (4, 11), (0, 11)]
+Z_SHAPE = [(0, 0), (8, 0), (8, 3), (14, 3), (14, 9), (6, 9), (6, 6), (0, 6)]
+ARROW = [(0, 0), (6, 0), (6, 8), (9, 8), (3, 14), (-3, 8), (0, 8)]
+SHAPES = {"L": L_SHAPE, "L unequal": L_UNEQUAL, "T": T_SHAPE, "T unequal": T_UNEQUAL, "U": U_SHAPE,
+          "U unequal": U_UNEQUAL, "Z": Z_SHAPE, "arrow": ARROW}
+
+
+def regular(n, r=10.0):
+    return [(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n)) for k in range(n)]
+
+
+class TestTilingChecks(unittest.TestCase):
+    def test_gap_check_sees_a_duplicated_half_square(self):
+        sq = [(0, 0), (4, 0), (4, 4), (0, 4)]
+        half = [(0, 0), (4, 0), (4, 4)]
+        self.assertAlmostEqual(check_no_gap([half, half], sq), 0.5, places=9)
+        self.assertAlmostEqual(check_no_overlap([half, half], 16.0), 0.5, places=9)
+        self.assertAlmostEqual(check_no_gap([half, [(0, 0), (4, 4), (0, 4)]], sq), 0.0, places=9)
+
+
+class TestSimpleShapes(unittest.TestCase):
+    def test_rectangle_matches_analytic_hipped(self):
+        sk = straight_skeleton(RECT)
+        self.assertEqual(len(sk.faces), 4)
+        inner = sorted(n for n in sk.nodes[4:])
+        self.assertEqual(len(inner), 2)
+        (x0, y0, t0), (x1, y1, t1) = inner
+        self.assertAlmostEqual(x1 - x0, 20 - 12, places=9)  # ridge length L - W
+        self.assertAlmostEqual(y0, 6.0, places=9)
+        self.assertAlmostEqual(y1, 6.0, places=9)
+        self.assertAlmostEqual(t0, 6.0, places=9)
+        self.assertAlmostEqual(t1, 6.0, places=9)
+        self.assertAlmostEqual(x0, 6.0, places=9)
+        self.assertEqual(sorted(len(f) for f in sk.faces), [3, 3, 4, 4])
+        assert_planar_lifted(self, sk)
+
+    def test_square_and_regular_polygons_have_one_apex(self):
+        for n in (3, 4, 5, 6, 8, 12, 24):
+            with self.subTest(n=n):
+                ring = [(x + 3.0, y - 2.0) for x, y in regular(n)]
+                sk = straight_skeleton(ring)
+                self.assertEqual(len(sk.nodes), n + 1)
+                x, y, t = sk.nodes[n]
+                self.assertAlmostEqual(x, 3.0, places=7)
+                self.assertAlmostEqual(y, -2.0, places=7)
+                self.assertAlmostEqual(t, 10.0 * math.cos(math.pi / n), places=7)
+                self.assertTrue(all(len(f) == 3 for f in sk.faces))
+        sq = straight_skeleton([(0, 0), (6, 0), (6, 6), (0, 6)])
+        self.assertEqual(sq.nodes[4], (3.0, 3.0, 3.0))
+
+
+class TestTiling(unittest.TestCase):
+    def test_shapes_have_planar_faces_that_tile_the_footprint(self):
+        for name, ring in SHAPES.items():
+            with self.subTest(shape=name):
+                sk = assert_tiles(self, ring)
+                self.assertEqual(len(sk.faces), len(ring))
+                assert_planar_lifted(self, sk)
+
+    def test_orientation_and_rotation_do_not_change_the_result(self):
+        for name, ring in SHAPES.items():
+            with self.subTest(shape=name):
+                ref = straight_skeleton(ring)
+                variants = [ring[::-1]] + [ring[k:] + ring[:k] for k in range(1, len(ring))]
+                variants += [(ring[k:] + ring[:k])[::-1] for k in range(len(ring))]
+                for v in variants:
+                    other = straight_skeleton(v)
+                    self.assertEqual(face_set(other), face_set(ref))
+                    self.assertEqual(other.nodes, ref.nodes)
+
+    def test_largest_supported_ring_is_one_apex_within_the_event_cap(self):
+        sk = straight_skeleton(regular(MAX_SKELETON_VERTICES))
+        self.assertEqual(len(sk.nodes), MAX_SKELETON_VERTICES + 1)
+        self.assertLessEqual(sk.events, 4 * MAX_SKELETON_VERTICES)
+
+    def test_event_counter_is_reported(self):
+        self.assertEqual(straight_skeleton(RECT).events, 2)  # one edge event + one spike step
+        self.assertGreater(straight_skeleton(ARROW).events, 1)
+
+
+class TestSplitEvent(unittest.TestCase):
+    def test_reflex_vertex_splits_the_opposite_edge(self):
+        # Reflex corner (6, 4) moves along (-1, -1) and reaches the bottom wavefront edge at
+        # t = 2, at (4, 2): there the 4 m wide horizontal arm collapses onto the ridge y = 2.
+        sk = straight_skeleton(L_UNEQUAL)
+        nodes = {(round(x, 7), round(y, 7), round(t, 7)) for x, y, t in sk.nodes[6:]}
+        self.assertIn((4.0, 2.0, 2.0), nodes)
+        # the bottom edge face has the split node as its only inner node left of the ridge end
+        bottom = [sk.nodes[k] for k in sk.faces[0]]
+        self.assertIn((4.0, 2.0, 2.0), {(round(x, 7), round(y, 7), round(t, 7)) for x, y, t in bottom})
+
+    def test_arrow_head_reflex_vertices(self):
+        sk = assert_tiles(self, ARROW)
+        # both reflex corners (6, 8) and (0, 8) travel into the shaft and create nodes
+        self.assertGreaterEqual(len(sk.nodes) - len(ARROW), 3)
+
+
+class TestDegenerateInput(unittest.TestCase):
+    def test_collinear_runs_are_merged(self):
+        ring = [(0, 0), (5, 0), (20, 0), (20, 6), (20, 12), (7, 12), (0, 12), (0, 3)]
+        sk = straight_skeleton(ring)
+        ref = straight_skeleton(RECT)
+        self.assertEqual(sk.ring, ref.ring)
+        self.assertEqual(sk.faces, ref.faces)
+        self.assertEqual(len(sk.faces), 4)
+
+    def test_closing_vertex_is_accepted(self):
+        self.assertEqual(straight_skeleton(RECT + [RECT[0]]).nodes, straight_skeleton(RECT).nodes)
+
+    def test_self_touching_ring(self):
+        with self.assertRaisesRegex(SkeletonError, "touches itself|self-intersects"):
+            straight_skeleton([(0, 0), (4, 0), (4, 4), (2, 0), (0, 4)])
+
+    def test_self_intersecting_ring(self):
+        with self.assertRaisesRegex(SkeletonError, "self-intersects"):
+            straight_skeleton([(0, 0), (6, 0), (1, 4), (5, 5)])
+
+    def test_zero_length_edge(self):
+        with self.assertRaisesRegex(SkeletonError, "zero-length edge"):
+            straight_skeleton([(0, 0), (4, 0), (4, 0), (4, 4), (0, 4)])
+        with self.assertRaisesRegex(SkeletonError, "zero-length edge"):
+            straight_skeleton([(0, 0), (4, 0), (4, 5e-7), (4, 4), (0, 4)])
+
+    def test_zero_width_spike(self):
+        with self.assertRaisesRegex(SkeletonError, "zero-width spike"):
+            straight_skeleton([(0, 0), (4, 0), (4, 4), (4, 6), (4, 4.5), (0, 4)])
+
+    def test_too_many_vertices(self):
+        with self.assertRaisesRegex(SkeletonError, "65 vertices exceed the limit of 64"):
+            straight_skeleton(regular(MAX_SKELETON_VERTICES + 1))
+
+    def test_fewer_than_three_vertices(self):
+        with self.assertRaisesRegex(SkeletonError, "fewer than 3"):
+            straight_skeleton([(0, 0), (1, 0)])
+
+    def test_spike_steps_are_charged_against_the_cap(self):
+        # RECT needs one edge event plus one spike-resolution step
+        with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 1):
+            with self.assertRaisesRegex(LimitError, "exceeded 1 events"):
+                straight_skeleton(RECT)
+        with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 2):
+            straight_skeleton(RECT)
+
+    def test_event_cap_raises_limit_error(self):
+        with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 0):
+            with self.assertRaisesRegex(LimitError, "exceeded 0 events"):
+                straight_skeleton(RECT)
+
+
+if __name__ == "__main__":
+    unittest.main()
