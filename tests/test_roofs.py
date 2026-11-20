@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 lingshf
 import math
+import random
 import unittest
 
 from map_builder.core import roofs
@@ -109,6 +110,20 @@ class RoofShapeTest(unittest.TestCase):
         self.assertIsNone(roofs.analytic_gable_slope_error(rect_ccw(-10, -6, 10, 6), False))
         self.assertIsNone(roofs.analytic_gable_slope_error([(-10, -6), (10, -6), (10, 6), (-10, 6 + 1e-7)], False))
         self.assertIn("off parallel", roofs.analytic_gable_slope_error([(-10, -6), (10, -6), (11, 6), (-10, 5.5)], False))
+
+    def test_skeleton_gable_survives_a_hair_of_noise_on_a_noisy_l_footprint(self):
+        """A noisy L splits its ridge into two nodes 2e-4 m apart; they are merged, so the gable never depends on
+        float noise (S4-ROOF-NAMED: CI-only 9007 failure)."""
+        l_ring = [(-10.000001477974797, -10.000014143973283), (13.999977313955497, -10.00003311884352),
+                  (14.000016107356643, -3.999945795143959), (-4.000023546915706, -4.000024391166052),
+                  (-3.9999994245597428, 14.00001553617018), (-9.999968971861902, 14.000001912956636)]
+        rng = random.Random(1)
+        for _ in range(60):
+            ring = [(x + rng.uniform(-1e-10, 1e-10), y + rng.uniform(-1e-10, 1e-10)) for x, y in l_ring]
+            prov: dict = {}
+            plan = roofs.plan_roof("gabled", ring, [], prov)
+            self.assertEqual(plan.shape_built, "gabled", prov["roof_shape"])
+            self.assertTrue(plan.skeleton)
 
 def build_big(ring, shape):
     feature = building(ring, height=str(HEIGHT), roof__height=str(ROOF_H), roof__shape=shape)

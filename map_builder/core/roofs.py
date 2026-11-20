@@ -165,6 +165,7 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
     near_rect = rect_check(outer)
     try:
         sk = straight_skeleton(outer)
+        _merge_close_nodes(sk.nodes, sk.faces, len(sk.ring), set(), set())
         if shape == "gabled":
             try:
                 return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, prov))
@@ -402,6 +403,32 @@ def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofP
     if len(tris) + len(gable_tris) > MAX_ROOF_TRIANGLES:
         raise LimitError(f"skeleton roof needs {len(tris) + len(gable_tris)} triangles (limit {MAX_ROOF_TRIANGLES})")
     return RoofPlan("gabled" if ends else "hipped", n, points, tris, t_max, gable_tris)
+
+
+MERGE_NODE_M = 5e-4  # inside the 1 mm planarity tolerance of the roof checker
+
+
+def _merge_close_nodes(nodes: list[Node], faces: list[list[int]], n_ring: int, keep: set[int],
+                       keep_faces: set[int]) -> None:
+    """Merge interior skeleton nodes closer than ``MERGE_NODE_M`` (two events a hair apart on a nearly regular
+    footprint) so no face has a zero-width pinch, which the triangulator rejects. Ring and gable apex nodes are
+    kept; a face reduced to a repeated node loses it, and every face sharing the node gets the same one."""
+    rep: dict[int, int] = {}
+    for k in range(n_ring, len(nodes)):
+        if k in keep:
+            continue
+        for j in range(n_ring, k):
+            if j not in rep and j not in keep and math.dist(nodes[k], nodes[j]) <= MERGE_NODE_M:
+                rep[k] = j
+                break
+    if not rep:
+        return
+    for i, f in enumerate(faces):
+        if i in keep_faces:
+            continue
+        g = [rep.get(k, k) for k in f]
+        g = [k for j, k in enumerate(g) if k != g[j - 1]]
+        faces[i] = g if len(g) >= 3 else f
 
 
 def _signed(a: Point, b: Point, c: Point) -> float:
