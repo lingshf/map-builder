@@ -14,8 +14,9 @@ Owner: dev · sprint S3 · wave 3 · depends on S3-TEX-UV-CORE · D59, D60, D64
   * bind the texture by **material name**; the image comes from `core/textures`, not from the
     node trees;
   * the output must match the CLI writer's layout and bindings.
-* **Notices** (`blender/sources.py`): add the same CC0 texture `sources[]` entry as the CLI
-  when textures are on, so Blender packages' `NOTICES.txt` name the texture provenance.
+* **Notices (D65):** when textures are on, pass the same `asset_notices` entry from
+  `core/textures.py` to the package writer, as the CLI does. `blender/sources.py` lists it in
+  the panel's attribution text. `sources[]` and `core/package.py` are unchanged.
 * **UI**: a "Textures" checkbox, default on (D60), in `props.py`, `ui.py` and `operators.py`.
 * `blender/export.py`: drop the "textures are not exported" note.
 * **Edited meshes.** User meshes without UVs get the world-XY rule (with the per-mesh offset) at
@@ -37,7 +38,8 @@ Owner: dev · sprint S3 · wave 3 · depends on S3-TEX-UV-CORE · D59, D60, D64
    package is VALID.
 3. The panel-registration assertion includes the new property (D27).
 4. Real data: Pittsburgh built in headless Blender with textures is strictly VALID, and the C#
-   reader loads it.
+   reader loads it. Its `NOTICES.txt` has the CC0 Assets section, and the frozen v0.3.0 Python and
+   C# readers accept it.
 5. A demokit render (Cycles CPU) of the synthetic preset, textured vs untextured, is attached
    to the PR.
 

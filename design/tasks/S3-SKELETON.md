@@ -26,8 +26,17 @@ OSM types. The roof tasks build on it; this task does not touch `roofs.py`.
 1. **Rectangle:** the skeleton equals the current analytic hipped result (ridge length L − W;
    4 faces).
 2. **Square / regular n-gon:** a single apex at the centroid, with t = inradius.
-3. **L, T, U and Z shapes:** face count equals edge count; each face is planar when lifted with
-   z = t; faces tile the footprint (projected area sum = footprint area, 1e-9 relative).
+3. **L, T, U and Z shapes and the reflex arrow:**
+   * face count equals edge count;
+   * each face is planar when lifted with z = t;
+   * the faces tile the footprint, shown by the two **independent** checks of
+     `tests/roof_checks.py` (S3-ROOF-CASES): no gap (footprint − union ≤ 1e-9 relative) and no
+     overlap (sum of pairwise intersections ≤ 1e-9 relative). The checks run on the
+     explicitly triangulated faces.
+
+   If S3-ROOF-CASES is not merged yet, this PR carries a local copy of the two checks, and the
+   PR that merges second switches it to the shared module. An area-sum check alone is not
+   accepted.
 4. **Reflex split events:** a concave "arrow" shape produces the expected split node,
    hand-computed in the test.
 5. **Degenerate input:** collinear runs are merged first; a self-touching ring, a zero-length

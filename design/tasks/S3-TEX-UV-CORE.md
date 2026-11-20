@@ -44,11 +44,11 @@ This task is the **only S3 task that changes `examples/synthetic_sample.mbmap`**
 * `core/uv.py`: `assign_uvs(mesh, ...)` implements the rule above.
 * `core/pipeline.py` (export path): call `assign_uvs` before `write_glb`. Textured materials get
   `baseColorTexture`, with the existing factor kept and COLOR_0 kept.
-* **Notices.** When textures are on, add a `sources[]` entry for the texture set: its name;
-  licence `CC0-1.0` with text and URL; attribution "map-builder procedural textures (own
-  work)"; the texture SHA-256 list. The existing notices writer and checker (`package.py`
-  `notices_text` / `_check_notices`) then carry it into `NOTICES.txt`, so the package's
-  standalone notices name the texture provenance.
+* **Notices (D65).** When textures are on, pass one `asset_notices` entry to the package writer
+  (the API added by S3-TEX-FORMAT): name "map-builder procedural textures"; attribution
+  "map-builder procedural textures (own work)"; licence `CC0-1.0` with name, URL and text; the
+  SHA-256 of each embedded PNG. The entry comes from `core/textures.py`. `sources[]` is
+  unchanged, and this task does not edit `core/package.py`.
 * CLI: `--textures/--no-textures`, default **on** (D60). `--no-textures` gives a 2.1.0 package
   whose GLB equals today's untextured GLB, apart from the manifest version fields.
 
@@ -72,10 +72,13 @@ This task is the **only S3 task that changes `examples/synthetic_sample.mbmap`**
    * every primitive with a textured material has `TEXCOORD_0`;
    * untextured primitives (Probe, Foliage, Bark, Default) have none.
 4. **Sample.** The sample is regenerated with textures and is strictly VALID. `--no-textures` on
-   the same input gives the pre-S3 GLB bytes. `NOTICES.txt` contains the CC0 texture entry,
-   and the validator rejects a package whose notices lack it.
+   the same input gives the pre-S3 GLB bytes. `NOTICES.txt` has the CC0 "Assets" section.
+   The 2.1 validator rejects a copy whose `asset_notices` is removed (texture without provenance).
+   The S3-TEX-FORMAT CI step, the frozen v0.3.0 Python and C# readers, accepts this regenerated
+   committed sample with 0 warnings.
 5. **Real data.** Pittsburgh, built with textures, is strictly VALID in Python and loaded by the
-   C# reader. Record the GLB size before and after: the target is ≤ +35 % plus the fixed
+   C# reader. The frozen v0.3.0 Python validator and C# reader also accept this exact package
+   (output in the PR). Record the GLB size before and after: the target is ≤ +35 % plus the fixed
    texture bytes (D60). `.mbcol` bytes are identical with textures on and off.
 
 ## Performance considerations
@@ -88,7 +91,7 @@ at the head (the sample input is unchanged by roof tasks, D64). New tests ≤ 5 
 
 Hard:
 * `core/uv.py` (new) and `tests/test_uv.py` (new);
-* `core/pipeline.py` (export call site, sources entry) and `tools/mbmap_cli.py`;
+* `core/pipeline.py` (export call site, `asset_notices` argument) and `tools/mbmap_cli.py`;
 * `core/__init__.py` (schema version);
 * `examples/synthetic_sample.mbmap` (sole S3 owner);
 * the sample rows of `docs/VALIDATION.md`.

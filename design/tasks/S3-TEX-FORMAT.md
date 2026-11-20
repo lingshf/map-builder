@@ -13,6 +13,10 @@ does not regenerate `examples/synthetic_sample.mbmap`. Its tests build 2.1.0 pac
 the version explicitly. S3-TEX-UV-CORE flips the default when packages first contain textures,
 and it is the sole owner of the sample.
 
+**Owner of every `core/package.py` edit in S3 (D65).** S3-TEX-UV-CORE and S3-TEX-BLENDER only
+call the API added here; they do not edit `package.py`. Sequence: this task first, then UV-CORE
+flips the constant.
+
 ## Scope
 
 * `core/mesh.py`: optional per-face-corner UVs, `MeshData.face_uvs` (`None` = no UVs).
@@ -38,7 +42,25 @@ and it is the sole owner of the sample.
 
   A schema-version check accepts 2.0.x and 2.1.x. The package `schema_version` parameter of
   the writer defaults to the existing constant.
-* C# `examples/csharp/MbmapReader`: the same checks; accepts 2.0 and 2.1; rejects an unknown
+* `core/package.py` (D65), in this order:
+  1. **Schema-version writing:** the package writer takes `schema_version=` (default
+     `PACKAGE_SCHEMA_VERSION`) and writes it into `manifest.schema_version`. The validator
+     keeps today's rule: major 2 is accepted, any minor.
+  2. **Asset notices:** a new optional top-level manifest field, `asset_notices`. It is an array
+     of `{name, attribution, license{id,name,url,text}, sha256[]}`. `sources[]` is **not**
+     changed and keeps `kind` ∈ {elevation, features}, because the v0.3.0 Python and C#
+     readers reject any other kind. Both legacy readers ignore unknown top-level manifest
+     fields (PACKAGE_FORMAT §versioning; neither enumerates manifest keys).
+  3. `notices_text(sources, asset_notices=())` appends an "Assets" section with each entry's
+     name, attribution and licence id, name, URL and text, verbatim. A legacy reader only
+     checks that the `sources[]` notices are present, so the extra section is harmless.
+  4. 2.1 validator rules:
+     * every `asset_notices` entry's attribution and licence keys appear verbatim in
+       `NOTICES.txt`;
+     * if `visual/map.glb` has images, each image's SHA-256 is listed in some
+       `asset_notices[].sha256`. Otherwise it is an error ("texture without provenance");
+     * an `asset_notices` entry whose SHA-256 is not in the GLB gets a warning.
+* C# `examples/csharp/MbmapReader`: the same `asset_notices` rules, plus: the same checks; accepts 2.0 and 2.1; rejects an unknown
   major. Add a `--validate-many <dir>` mode that validates every `.mbmap` in a directory and
   prints one verdict line per file, so the tests can batch.
 * `docs/PACKAGE_FORMAT.md`: 2.1.0 changelog. Textures are optional, and readers that ignore
@@ -57,11 +79,20 @@ and it is the sole owner of the sample.
    all negative fixtures are validated in **one** `--validate-many` call. The class's test
    methods are each ≤ 5 s. The one-off `dotnet build` is reported separately, as for the
    existing parity class.
-4. **Frozen v0.3.0 reader.** The v0.3.0 C# reader (sources from `git archive v0.3.0
-   examples/csharp`) loads a textured 2.1.0 package. Expected: accepted (minor version), with
-   textures ignored and the collision verdicts unchanged. This runs in the C# CI job
-   (`actions/checkout` with `fetch-depth: 0` so the tag resolves; +~20 s) and is reported in
-   the PR.
+4. **Frozen v0.3.0 readers on a full package.** A test helper, `tests/make_textured_fixture.py`,
+   writes a **complete** textured 2.1.0 `.mbmap`. It uses the synthetic input, one 4×4 test
+   texture with its `asset_notices` entry, and the normal package writer, so the manifest,
+   `.mbcol`, heightfield, NOTICES and report are all real. The C# CI job then:
+   * extracts the v0.3.0 Python package and the C# reader with `git archive v0.3.0 map_builder
+     tools examples/csharp` (`actions/checkout` with `fetch-depth: 0`);
+   * runs the **v0.3.0** `tools/mbmap_cli.py validate` and the **v0.3.0** C# reader on **that
+     exact `.mbmap` file**;
+   * runs both on `examples/synthetic_sample.mbmap`. This is the untextured 2.0.0 sample here;
+     after UV-CORE it is the shipped textured 2.1.0 sample, and the step is unchanged.
+
+   Expected: both accept with 0 errors and 0 warnings (C# treats warnings as errors), the
+   collision verdicts are unchanged, and the textures are ignored. The step adds about +25 s.
+   Evidence goes in the PR.
 5. **glTFast smoke import.** Import the textured package's GLB with **glTFast at the version
    pinned by the simulator** (record the version and its source in the PR). Show that it
    imports without errors and the texture is bound, in an Editor scratch project outside
@@ -78,7 +109,8 @@ New Python tests ≤ 5 s; C# as in AC3. PR CI stays ≤ 10 min (expected ≈ +20
 
 ## Conflict domain
 
-Hard: `core/glb.py`, `core/mesh.py`, `examples/csharp/MbmapReader/**`, `docs/PACKAGE_FORMAT.md`,
+Hard: `core/glb.py`, `core/mesh.py`, `core/package.py` (schema-version writing, `asset_notices`,
+notices; sole S3 owner, D65), `tests/make_textured_fixture.py` (new), `examples/csharp/MbmapReader/**`, `docs/PACKAGE_FORMAT.md`,
 `tests/test_package.py`, `tests/test_csharp_parity.py` (new class), `.github/workflows/ci.yml`
 (C# job only). Soft: `docs/UNITY_CORE_HANDOFF.md`. Not `core/__init__.py` and not the sample
 (D64).
