@@ -991,6 +991,56 @@ class RangeCacheValidationTest(unittest.TestCase):
         self.assertIsNotNone(self.fetch(tr))  # same cache: the UTM header must not be replayed
 
 
+DRIBBLE_BYTES = 60   # 3 s of 50 ms dribbling, far longer than the 0.6 s deadline
+
+
+class DeadlineProbe:
+    """Records, without timing anything, how UrllibTransport arms its deadline machinery:
+    the timeout each request worker is joined with, each watchdog timer interval, and every socket
+    shutdown the watchdog performs. A late return or a missing shutdown shows up as a wrong count/value."""
+
+    def __init__(self):
+        self.joins, self.timers, self.shutdowns = [], [], []
+
+    def __enter__(self):
+        import threading
+        from map_builder.core import http as http_mod
+        probe = self
+        real_thread, real_timer, real_shutdown = threading.Thread, threading.Timer, http_mod._shutdown_quietly
+
+        class ProbeThread(real_thread):
+            def join(self, timeout=None):
+                if self.name == "map-builder-http":
+                    probe.joins.append(timeout)
+                return real_thread.join(self, timeout)
+
+        class ProbeTimer(real_timer):
+            def __init__(self, interval, *a, **k):
+                probe.timers.append(interval)
+                real_timer.__init__(self, interval, *a, **k)
+
+        def shutdown(sock):
+            probe.shutdowns.append(sock)
+            real_shutdown(sock)
+        self._patches = [mock.patch.object(threading, "Thread", ProbeThread),
+                         mock.patch.object(threading, "Timer", ProbeTimer),
+                         mock.patch.object(http_mod, "_shutdown_quietly", shutdown)]
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+
+    def assert_armed(self, case, total):
+        case.assertEqual(len(self.joins), 1)
+        case.assertGreaterEqual(self.joins[0], total)
+        case.assertLessEqual(self.joins[0], total + 0.25)   # the caller never waits past deadline + grace
+        case.assertEqual(len(self.timers), 1)
+        case.assertLessEqual(self.timers[0], total + 0.01)  # the watchdog fires at the deadline, not later
+        case.assertGreaterEqual(len(self.shutdowns), 1)     # and it really shuts the stalled socket down
+
 class RoundFourTest(unittest.TestCase):
     def test_nested_inner_ring_goes_to_smallest_enclosing_outer(self):
         b = OsmBuilder()
@@ -1035,7 +1085,9 @@ class RoundFourTest(unittest.TestCase):
             with conn:
                 conn.recv(4096)
                 conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-                while not stop.is_set():  # endless chunk-size line, one byte per 50 ms
+                for _ in range(DRIBBLE_BYTES):  # long chunk-size line, one byte per 50 ms, then close
+                    if stop.is_set():
+                        return
                     try:
                         conn.sendall(b"0")
                     except OSError:
@@ -1045,31 +1097,34 @@ class RoundFourTest(unittest.TestCase):
         th.start()
         self.addCleanup(stop.set)
         port = srv.getsockname()[1]
-        start = time_mod.monotonic()
-        with self.assertRaises(NetworkError) as cm:
+        with DeadlineProbe() as probe, self.assertRaises(NetworkError) as cm:
             UrllibTransport(total_timeout=0.6).request("GET", f"http://127.0.0.1:{port}/", {}, None, 0.4, 10_000)
-        self.assertLess(time_mod.monotonic() - start, 3.0)
+        probe.assert_armed(self, 0.6)
         self.assertIn("time limit", str(cm.exception))
 
     def test_blocked_dns_resolution_returns_at_deadline(self):
         import socket as socket_mod
         import threading
-        import time as time_mod
         release = threading.Event()
         self.addCleanup(release.set)
         real = socket_mod.getaddrinfo
+        resolver_done = []
 
         def blocked(*a, **k):
             release.wait(5.0)
+            resolver_done.append(True)
             return real(*a, **k)
-        with mock.patch("socket.getaddrinfo", blocked):
-            start = time_mod.monotonic()
+        with mock.patch("socket.getaddrinfo", blocked), DeadlineProbe() as probe:
             with self.assertRaises(NetworkError) as cm:
                 UrllibTransport(total_timeout=0.3).request("GET", "http://resolver-stall.invalid/", {}, None,
                                                            10.0, 1000)
-            elapsed = time_mod.monotonic() - start
+            returned_while_blocked = not resolver_done  # waiting on the resolver would have run it to the end
             release.set()
-        self.assertLess(elapsed, 1.0)
+        self.assertTrue(returned_while_blocked)
+        self.assertEqual(len(probe.joins), 1)
+        self.assertGreaterEqual(probe.joins[0], 0.3)
+        self.assertLessEqual(probe.joins[0], 0.3 + 0.25)   # the waiter is released at deadline + grace
+        self.assertLessEqual(probe.timers[0], 0.3 + 0.01)
         self.assertIn("time limit", str(cm.exception))
 
     def test_stalled_workers_are_capped(self):
@@ -1119,17 +1174,18 @@ class RoundFourTest(unittest.TestCase):
                 conn.recv(4096)
                 try:
                     conn.sendall(b"\x16\x03\x03\x40\x00")
-                    while not stop.is_set():
+                    for _ in range(DRIBBLE_BYTES):
+                        if stop.is_set():
+                            return
                         conn.sendall(b"\x00")
                         time_mod.sleep(0.05)
                 except OSError:
                     return
         threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
-        start = time_mod.monotonic()
-        with self.assertRaises(NetworkError) as cm:  # each receive makes progress: only the watchdog stops it
+        with DeadlineProbe() as probe, self.assertRaises(NetworkError) as cm:  # only the watchdog stops it
             UrllibTransport(total_timeout=0.6).request("GET", f"https://127.0.0.1:{port}/", {}, None, 10.0, 1000)
-        self.assertLess(time_mod.monotonic() - start, 3.0)
+        probe.assert_armed(self, 0.6)
         self.assertIn("time limit", str(cm.exception))
 
 
