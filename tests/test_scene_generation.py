@@ -509,6 +509,30 @@ class RoadRibbonTest(unittest.TestCase):
         self.assertLess(float(m.group(2)), 4 * 2 ** -14)
         self.assertLess(float(m.group(3)), 1e-4)
 
+    def test_sliver_turned_only_by_blender_storage_is_dropped(self):
+        # S2-F6, from the headless Blender Pittsburgh build (osm:way/223360727): Blender stores the mesh's local
+        # coordinates and the object location as float32 and bakes f32(f32(local) + f32(loc)). This needle face
+        # is up-facing under the core's single rounding f32(local + loc) but flat (z = 0, non-degenerate in 3D)
+        # after Blender's double rounding, which the package validator rejects.
+        from map_builder.blender.bake import bake_object
+        from map_builder.core.collision import f32, is_degenerate
+        loc = (-523.3789280347364, 356.9213435776889, 137.46144136630159)
+        local = [(-60.29872537158792, 15.750370899771553, -17.523086199304828),
+                 (-60.29867578193023, 18.19219292867291, -18.14419343554107),
+                 (-60.29872537158792, 18.192159681263774, -18.144182253643237),
+                 (-55.0, 15.75, -17.5), (-55.0, 18.19, -18.1)]
+        tris = [(0, 1, 2), (0, 3, 4)]
+        kept, dropped = gen.drop_unstorable_slivers(local, tris, loc)
+        self.assertEqual(kept, [(0, 3, 4)])
+        self.assertEqual(len(dropped), 1)
+        self.assertLess(dropped[0][0], 4 * 2 ** -14)
+        matrix = [[1, 0, 0, f32(loc[0])], [0, 1, 0, f32(loc[1])], [0, 0, 1, f32(loc[2])], [0, 0, 0, 1]]
+        baked = bake_object("road", [tuple(f32(c) for c in v) for v in local], kept, matrix)
+        for a, b, c in baked.triangles:
+            p, q, r = (tuple(f32(x) for x in baked.vertices[i]) for i in (a, b, c))
+            if not is_degenerate(p, q, r):
+                self.assertGreater((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]), 0)
+
     def test_wide_right_angle_turn_is_not_folded(self):
         mesh, _, prov = build_road(road([(0, 0), (3, 0), (3, 3)], width="8"), flat_grid(), 0.0)
         self.assertIsNotNone(mesh, prov)

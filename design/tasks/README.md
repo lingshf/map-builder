@@ -35,6 +35,7 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 | [S2-F1](S2-F1.md) | S2 | dev | S2-REVIEW | `tests/test_terrain_sources.py` | done | #35 |
 | [S2-F2](S2-F2.md) | S2 | dev | S2-REVIEW; area per D49 | `tools/demo/presets/<area>.json` (new), `tests/test_demo_bundle.py` (preset rows), new excerpt tests/fixtures | done | #36 |
 | [S2-F3](S2-F3.md) | S2 | dev | S2-REVIEW | `tests/blender/checks_roofs.py` (new); soft: fixture OSM, sample, VALIDATION | done | #34 |
+| S2-F6 | S2 | dev | REL-v0.3.0 finding (D51): headless Blender Pittsburgh export rejected a down-facing road sliver | `core/generate.py` (`drop_unstorable_slivers` only), `tests/test_scene_generation.py`, `tests/blender/checks_slivers.py` (new); soft: VALIDATION | done | #37 |
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
