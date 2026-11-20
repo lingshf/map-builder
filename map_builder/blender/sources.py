@@ -18,6 +18,7 @@ before creating any datablock.
 """
 
 import json
+import math
 import urllib.parse
 
 from ..core.osm import DEFAULT_OVERPASS_URL
@@ -38,6 +39,30 @@ CREDENTIAL_HINT = ("credential-like value (URL user-info, key/token/password/sig
 
 class SettingsInputError(ValueError):
     """The UI values cannot form valid generation settings (message is safe to show and persist)."""
+
+
+def parse_degrees(text, label):
+    """The centre coordinate typed in the UI as a double (``Area`` validates the range)."""
+    try:
+        value = float(text.strip().replace(",", "."))
+    except ValueError:
+        raise SettingsInputError(f"{label} must be a number in degrees, e.g. 40.437") from None
+    if not math.isfinite(value):
+        raise SettingsInputError(f"{label} must be a finite number")
+    return value
+
+
+def migrate_legacy_centre(s):
+    """Copy the legacy float32 ``lat``/``lon`` of a .blend saved before the text centre into an empty
+    ``centre_lat``/``centre_lon`` (once; a non-zero legacy value, rounded to the 6 decimals the old panel showed).
+    Returns True if anything was migrated."""
+    moved = False
+    for text_prop, legacy_prop in (("centre_lat", "lat"), ("centre_lon", "lon")):
+        legacy = getattr(s, legacy_prop)
+        if not getattr(s, text_prop).strip() and legacy != 0.0:
+            setattr(s, text_prop, f"{legacy:.6f}".rstrip("0").rstrip("."))
+            moved = True
+    return moved
 
 
 def has_credential(value):

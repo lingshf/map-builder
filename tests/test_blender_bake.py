@@ -325,6 +325,24 @@ class ExportPolicyTest(unittest.TestCase):
 
 
 class SourcesTest(unittest.TestCase):
+    def test_legacy_float_centre_migrates_into_the_text_centre(self):
+        from types import SimpleNamespace
+        from map_builder.blender.sources import migrate_legacy_centre, parse_degrees
+        old = SimpleNamespace(centre_lat="", centre_lon="", lat=40.4370002746582, lon=-80.01599884033203)
+        self.assertTrue(migrate_legacy_centre(old))
+        self.assertEqual((old.centre_lat, old.centre_lon), ("40.437", "-80.015999"))   # all float32 holds
+        self.assertEqual(parse_degrees(old.centre_lat, "Latitude"), 40.437)
+        self.assertFalse(migrate_legacy_centre(old))                      # once: the text centre now wins
+        typed = SimpleNamespace(centre_lat="48.1395", centre_lon="11.5764", lat=1.0, lon=2.0)
+        self.assertFalse(migrate_legacy_centre(typed))
+        self.assertEqual((typed.centre_lat, typed.centre_lon), ("48.1395", "11.5764"))
+        fresh = SimpleNamespace(centre_lat="", centre_lon="", lat=0.0, lon=0.0)
+        self.assertFalse(migrate_legacy_centre(fresh))
+        self.assertEqual((fresh.centre_lat, fresh.centre_lon), ("", ""))
+        for bad in ("", "abc", "nan", "inf"):
+            with self.assertRaises(SettingsInputError):
+                parse_degrees(bad, "Latitude")
+
     def test_redact_diagnostics_withholds_credential_like_names(self):
         out = redact_diagnostics(["'curve token=FAKE_REVIEW_ONLY': CURVE objects cannot be exported",
                                   "'bld_1': zero scale", "collection 'token=FAKE_REVIEW_ONLY' is disabled",

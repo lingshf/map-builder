@@ -13,7 +13,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from ..core.geodesy import DEFAULT_MAX_SIDE_M, MIN_SIDE_M
-from .sources import ENV_OVERPASS_URL, FIELD_LABELS, has_credential
+from .sources import ENV_OVERPASS_URL, FIELD_LABELS, has_credential, migrate_legacy_centre
 
 
 def _is_map_collection(self, coll):
@@ -38,12 +38,17 @@ class MB_Settings(bpy.types.PropertyGroup):
         ("CENTER", "Centre + size", "WGS84 centre latitude/longitude and width/height in metres"),
         ("BBOX", "Bounding box", "South, west, north, east in WGS84 degrees"),
     ], default="CENTER")
-    # strings, not FloatProperty: Blender stores float properties as float32 (centimetre error at 40 N), which
-    # moves the area and changes terrain and probes against the CLI
-    lat: StringProperty(name="Latitude", description="Area centre latitude (WGS84, degrees, full precision)",
-                        default="0.0")
-    lon: StringProperty(name="Longitude", description="Area centre longitude (WGS84, degrees, full precision)",
-                        default="0.0")
+    # the centre is text, not FloatProperty: Blender stores floats as float32 (centimetre error at 40 N), which
+    # moves the area and changes terrain and probes against the CLI. ``lat``/``lon`` are the legacy float
+    # properties of older .blend files: registered (so the saved value stays readable), hidden, migrated into
+    # ``centre_lat``/``centre_lon`` on load and at Generate.
+    centre_lat: StringProperty(name="Latitude", description="Area centre latitude (WGS84, degrees, full precision)",
+                               default="")
+    centre_lon: StringProperty(name="Longitude", description="Area centre longitude (WGS84, degrees, full precision)",
+                               default="")
+    lat: FloatProperty(name="Latitude (legacy)", default=0.0, min=-85.0, max=85.0, precision=6, options={"HIDDEN"})
+    lon: FloatProperty(name="Longitude (legacy)", default=0.0, min=-180.0, max=180.0, precision=6,
+                       options={"HIDDEN"})
     width: FloatProperty(name="Width (m)", description="East-west extent in metres", default=1000.0,
                          min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
     height: FloatProperty(name="Height (m)", description="North-south extent in metres", default=1000.0,
@@ -107,11 +112,21 @@ class MB_Settings(bpy.types.PropertyGroup):
                                                   "the value)")
 
 
+@bpy.app.handlers.persistent
+def _migrate_on_load(*_):
+    for scene in bpy.data.scenes:
+        migrate_legacy_centre(scene.map_builder)
+
+
 def register():
     bpy.utils.register_class(MB_Settings)
     bpy.types.Scene.map_builder = PointerProperty(type=MB_Settings)
+    if _migrate_on_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_migrate_on_load)
 
 
 def unregister():
+    if _migrate_on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_migrate_on_load)
     del bpy.types.Scene.map_builder
     bpy.utils.unregister_class(MB_Settings)

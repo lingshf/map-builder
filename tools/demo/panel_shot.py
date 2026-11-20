@@ -43,7 +43,7 @@ def setup():
     map_builder.register()
     s = bpy.context.scene.map_builder
     s.area_mode = "CENTER"
-    s.lat, s.lon, s.width, s.height = repr(ARGS.lat), repr(ARGS.lon), ARGS.width, ARGS.height
+    s.centre_lat, s.centre_lon, s.width, s.height = repr(ARGS.lat), repr(ARGS.lon), ARGS.width, ARGS.height
     s.package_name = ARGS.name
     for ob in list(bpy.data.objects):
         bpy.data.objects.remove(ob)

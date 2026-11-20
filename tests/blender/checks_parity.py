@@ -52,8 +52,8 @@ def _blender_manifest(out_dir, mode):
     pkg = os.path.join(out_dir, f"parity_bl_{mode}.mbmap")
     s = bpy.context.scene.map_builder
     s.area_mode = "CENTER"
-    s.lat, s.lon, s.width, s.height = (str(checks_core.LAT), str(checks_core.LON), checks_core.WIDTH,
-                                       checks_core.HEIGHT)
+    s.centre_lat, s.centre_lon, s.width, s.height = (str(checks_core.LAT), str(checks_core.LON), checks_core.WIDTH,
+                                                     checks_core.HEIGHT)
     s.elevation_source, s.elevation_file = "file", DEM
     s.elevation_crs, s.elevation_vertical_datum, s.elevation_license = "EPSG:4326", "SYNTHETIC", DEM_LICENSE
     s.osm_source, s.osm_file = "file", OSM
@@ -72,10 +72,16 @@ def run(out_dir):
     s = bpy.context.scene.map_builder
     check(s.bl_rna.properties["seed"].default == SEED, "parity: the Blender seed default equals the CLI default (1)")
     from map_builder.blender.operators import make_area
-    s.area_mode, s.lat, s.lon = "CENTER", "40.437", "-80.016"
+    s.area_mode, s.centre_lat, s.centre_lon = "CENTER", "40.437", "-80.016"
     a = make_area(s)
     check((a.frame.lat0, a.frame.lon0) == (40.437, -80.016),
           f"parity: the centre keeps double precision ({a.frame.lat0}, {a.frame.lon0})")
+    s.centre_lat, s.centre_lon, s.lat, s.lon = "", "", 40.437, -80.016      # a .blend saved with the float centre
+    a = make_area(s)
+    check(abs(float(s.centre_lat) - 40.437) < 1e-5 and abs(float(s.centre_lon) + 80.016) < 1e-5
+          and abs(a.frame.lat0 - 40.437) < 1e-5,
+          f"parity: a legacy float centre migrates into the text centre ({s.centre_lat}, {s.centre_lon})")
+    s.lat = s.lon = 0.0
     for blender_mode, cli_mode in (("AUTO", None), ("ON", True)):
         cli, cli_result = _cli_manifest(out_dir, cli_mode)
         bl, bl_result = _blender_manifest(out_dir, blender_mode)

@@ -52,7 +52,7 @@ def main():
 
     map_builder.register()
     m = bpy.context.scene.map_builder
-    m.area_mode, m.lat, m.lon, m.width, m.height = "CENTER", repr(LAT), repr(LON), WIDTH, HEIGHT
+    m.area_mode, m.centre_lat, m.centre_lon, m.width, m.height = "CENTER", repr(LAT), repr(LON), WIDTH, HEIGHT
     m.elevation_source, m.elevation_file = "file", dem
     m.elevation_vertical_datum, m.elevation_license = DATUM, LICENCE
     m.osm_source, m.osm_file = "file", osm
