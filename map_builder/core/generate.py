@@ -1197,25 +1197,37 @@ def drop_unstorable_slivers(local, tris, loc):
     its orientation in that rounding while staying non-degenerate in 3D, and the package validator
     then rejects the surface.
 
+    The plan reaches storage on two paths, and both are checked: the core exporter (CLI) rounds once,
+    ``f32(local + loc)``; the Blender add-on stores the mesh's local coordinates and the object location
+    as float32 (``Mesh.vertices``, ``Object.location``) and bakes ``f32(f32(local) + f32(loc))``. The two
+    roundings can disagree on a needle face, so a face is judged by whichever storage turns it.
+
     Returns ``(tris, dropped)``: ``tris`` without the faces whose stored normal is not up
-    (z <= 0) and whose xy width (2 * area / longest edge) is at most ``SLIVER_ULPS`` float32 ulps
-    of its world coordinates, i.e. the face is thinner than the storage can represent. ``dropped``
-    lists their ``(width_m, area_m2)``. A wider face that fails is a real fold: ``(None, None)``."""
+    (z <= 0) on either path and whose xy width (2 * area / longest edge) is at most ``SLIVER_ULPS``
+    float32 ulps of its world coordinates, i.e. the face is thinner than the storage can represent.
+    ``dropped`` lists their ``(width_m, area_m2)``. A wider face that fails is a real fold: ``(None, None)``."""
     from .collision import is_degenerate
-    W = [(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local]
+    lf = [_f32(v) for v in loc]
+    stores = ([(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local],
+              [(_f32(_f32(x) + lf[0]), _f32(_f32(y) + lf[1]), _f32(_f32(z) + lf[2])) for x, y, z in local])
     keep = []
     dropped = []
     for t in tris:
-        a, b, c = (W[i] for i in t)
-        nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
         la, lb, lc = (local[i] for i in t)
         area2 = (lb[0] - la[0]) * (lc[1] - la[1]) - (lb[1] - la[1]) * (lc[0] - la[0])
         if area2 <= 0:
             return None, None
-        if nz <= 0 and not is_degenerate(a, b, c):
+        turned = None
+        for W in stores:
+            a, b, c = (W[i] for i in t)
+            nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            if nz <= 0 and not is_degenerate(a, b, c):
+                turned = (a, b, c)
+                break
+        if turned is not None:
             longest = max(math.hypot(p[0] - q[0], p[1] - q[1]) for p, q in ((la, lb), (lb, lc), (lc, la)))
             width = area2 / longest
-            ulp = _f32_ulp(max(abs(w) for p in (a, b, c) for w in p[:2]))
+            ulp = _f32_ulp(max(abs(w) for p in turned for w in p[:2]))
             if width > SLIVER_ULPS * ulp:
                 return None, None
             dropped.append((width, area2 / 2))

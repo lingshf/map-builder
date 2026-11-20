@@ -6,6 +6,16 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Blender export no longer fails validation with "road object ... normal does
+  not point up" on steep terrain (seen in Pittsburgh). Blender stores a road's
+  vertices and location as separate float32 values, and that double rounding
+  could turn a needle-thin road face over even though the single-rounding
+  check judged it fine. Generation now drops such faces (narrower than a few
+  float32 ulps) for both storage paths and records them in the road's
+  `slivers_dropped` provenance. CLI output is unchanged (S2-F6).
+
 ## [0.2.0] - 2026-11-20
 
 "Fly under bridges and through tunnels." **Release candidate**, not a published
