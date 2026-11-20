@@ -165,10 +165,94 @@ Who: **U** = user, **C** = coordinator, **De** = design, **Dev** = earlier dev p
 | D49 | S2-F2 uses option (a): a second real-data preset of at most 1×1 km containing elevated parts, a building passage and `roof:shape` tags. The search is time-boxed to half a day; if no candidate turns up, fall back to (c) synthetic-only evidence, and the release notes must state that limit. | C | final |
 | D50 | Option A with a drift guard: `GENERATOR_VERSION` is bumped to "0.3.0" (it had stayed at "0.1.0", so v0.1.0 and v0.2.0 packages report `generator.version` 0.1.0, a known historical mislabel). A unit test asserts that it equals the `bl_info` version, so the two cannot drift again. `package_id` changes from v0.3.0 on; the CHANGELOG and release notes say so. | C | done (#38) |
 | D51 | Option A: the headless Blender Pittsburgh export failure (a down-facing road sliver from Blender's double float32 rounding; pre-existing in v0.2.0) is fixed as S2-F6 before the v0.3.0 tag. REL-v0.3.0 keeps moving, lists S2-F6 as pending, then rebases, rebuilds the packages and reruns the Pittsburgh check in headless Blender. | C | done (#37; Pittsburgh `VALID` in headless Blender, #38) |
+| D52 | Product owner GO for v0.3.0 at 4b73cba. The roofs result of 5/67 is accepted as a disclosed limitation (S2-F5 → v3). The doc fixes went into #39, and the tag sits on the #39 merge commit eb134a1. CLI/Blender probe parity was added as a v3 item. | De (GO), C | done (tag `v0.3.0` on eb134a1) |
+| D53 | Sprint-2 retro: (1) before release, run real-data builds through both the CLI and headless Blender paths; that is what caught S2-F6. (2) Tests must go through the real production path (D39). (3) Keep a single source for the version, with a drift test (D50). (4) Check release-note wording against the code. (5) The merge gate (review commit = head, MERGEABLE, CI green, 0 behind) needed no rework. | C | active |
 
 D30–D47 are copied verbatim from the team dashboard (coordinator, 2026-11-19); entries that
 name no decider were decided by the coordinator. The dashboard numbered the "two sprints, cheap
 demo" decision D18; in this record it is D17, so "D18" in D38 refers to that baseline note.
+
+## v3: sprint 3 (v0.4.0) — non-rectangular roofs and textures
+
+Scope chosen by the user after v0.3.0 ("非矩形屋顶，贴图") from the candidates: non-rectangular
+roofs, CLI/Blender probe parity, LOD, textures and railway. LOD and railway stay later.
+
+### Approach
+
+* **Roofs.** A pure straight-skeleton module (`core/skeleton.py`) gives one planar face per
+  footprint edge. Hipped roofs lift it directly; gabled roofs turn the skeleton's end faces into
+  vertical gable walls. Rectangles keep today's analytic path (byte-identical). Acceptance is
+  fixed first on a frozen Munich snapshot and counterexamples (DoD 10) and measured on the
+  emitted triangles with a shared geometry checker (closed mesh, above eave, ridge height,
+  vertical gable ends, independent overlap and gap checks). The roof outcome is decided in a
+  preflight before budget reservation (D64).
+* **Textures.** glTF 2.0 core PBR only: `TEXCOORD_0` plus embedded PNG `baseColorTexture`, kept
+  multiplied with today's factor and `COLOR_0`. Package format 2.0.0 → 2.1.0 (minor, additive);
+  `.mbcol` and the heightfield are unchanged. Textures are our own procedural images, generated
+  offline, committed and dedicated to CC0. UVs are assigned after generation in `core/uv.py`
+  per material, so the texture track does not edit `generate.py` or `roofs.py`.
+
+### Tasks and waves (max 3 devs)
+
+Task docs: [tasks/README.md](tasks/README.md#sprint-3-v040).
+
+1. Wave 5a: **S3-SKELETON** ∥ **S3-TEX-FORMAT** ∥ **S3-ROOF-CASES** → **S3-TEX-ASSETS**
+2. Wave 5b: **S3-ROOF-HIPPED** ∥ **S3-TEX-UV-CORE** ∥ **S3-PARITY** (½-day time box)
+3. Wave 5c: **S3-ROOF-GABLED** ∥ **S3-TEX-BLENDER**
+4. Close (D63): **S3-REVIEW** → S3-Fn blockers → **REL-v0.4.0** → close check → retro → tag `v0.4.0`
+
+```mermaid
+graph LR
+  CASES[S3-ROOF-CASES] --> HIP[S3-ROOF-HIPPED]
+  SK[S3-SKELETON] --> HIP --> GAB[S3-ROOF-GABLED]
+  FMT[S3-TEX-FORMAT] --> UV[S3-TEX-UV-CORE]
+  AS[S3-TEX-ASSETS] --> UV --> BL[S3-TEX-BLENDER]
+  PAR[S3-PARITY]
+  GAB --> REV[S3-REVIEW]
+  BL --> REV
+  PAR --> REV
+  REV --> REL[REL-v0.4.0]
+```
+
+### Performance and test budgets
+
+| Item | Budget |
+|---|---|
+| Roof stage (Munich) | ≤ +20 % vs v0.3.0, new legal geometry listed separately (D35) |
+| Skeleton | ≤ 64 vertices, event counter cap `MAX_SKELETON_EVENTS`; `LimitError`, never time-based |
+| Fixture build | ≤ +20 % with textures on; ≤ +2 % for untouched stages |
+| Texture set | ≤ 2 MiB committed (counted test); validator cap 4 MiB per GLB |
+| GLB size (Pittsburgh) | ≤ +35 % plus the fixed texture bytes, recorded in REL |
+| New tests | ≤ 5 s each, no wall-clock gates (DoD); Blender checks stay out of PR CI |
+| PR CI | unchanged (≤ 10 min; today ~85 s) |
+
+### Consumer impact (drone-flight-simulator)
+
+* **Core / collision:** none. `.mbcol` format 2 and the heightfield are unchanged; roofs change
+  shape but stay class `building`, and the simulator's Core needs no code change.
+* **Package reader:** 2.1.0 is a minor bump, so a 2.x reader accepts it and may ignore the new
+  glTF fields. The C# example reader validates the embedded images (parity tests).
+* **Unity / glTFast:** imports core PBR `baseColorTexture` with `TEXCOORD_0` natively; the
+  texture is multiplied by the factor (and `COLOR_0` if the shader uses it). Samplers request
+  mipmaps (REPEAT, trilinear). `UNITY_CORE_HANDOFF.md`'s materials checklist is updated by
+  S3-TEX-FORMAT. `--no-textures` gives the v0.3.0 visual for consumers that want it.
+
+### Sprint 3 decisions
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D54 | v3 = sprint 3, target `v0.4.0`: non-rectangular gabled/hipped roofs and textures/UVs. LOD and railway stay later. | U (scope), C (framing) | active |
+| D55 | Gabled/hipped roofs on non-rectangular footprints use a straight skeleton in a pure module (`core/skeleton.py`). Simple polygons only, ≤ 64 vertices, no holes; otherwise the v0.3.0 fallback with a named reason. Gabled is derived from the hipped skeleton; if a gable end is not representable it falls back to hipped, not flat. Half-hipped, gambrel, mansard, round and saltbox stay rectangle-only. | De (proposed; C confirms at gate) | active |
+| D56 | Textures are our own procedural images, generated offline by a seeded script, committed as package data and dedicated to CC0. No third-party, map or Google imagery (D2). | De (proposed; C confirms at gate) | active |
+| D57 | Package schema 2.0.0 → 2.1.0 (minor, additive: optional UVs and embedded images in `visual/map.glb`). `.mbcol` (format 2) and heightfield (format 1) unchanged. S3-TEX-FORMAT adds read/write/validate support; S3-TEX-UV-CORE flips the default constant when packages first carry textures. A frozen v0.3.0 C# reader must accept a textured 2.1.0 package (CI), and a glTFast smoke import at the simulator's pinned version is required (proxy only by coordinator decision, disclosed). Texture provenance is recorded per D65. | De (proposed; C confirms at gate) | active |
+| D58 | GLB textures use glTF 2.0 core only: `TEXCOORD_0`, embedded PNG via bufferView, one REPEAT/trilinear sampler, no required extensions. Validator (Python and C#): PNG only, power-of-two side ≤ 1024, total image bytes ≤ 4 MiB, finite UVs. | De (proposed; C confirms at gate) | active |
+| D59 | UVs are assigned after generation in `core/uv.py` per material (facade tangent/height, roof slope plane, terrain/road world XY, concrete box), with one tile offset per mesh (continuous across shared edges; documented seams only, D64). The texture track does not edit `generate.py` or `roofs.py`. | De (proposed; C confirms at gate) | active |
+| D60 | Textures default **on** in CLI and Blender; `--no-textures` / panel toggle reproduces the v0.3.0 GLB layout. Texture set ≤ 2 MiB; GLB growth ≤ +35 % plus texture bytes. | De (proposed; C confirms at gate) | active |
+| D61 | Roof target: of the 67 tagged non-flat roofs in the frozen Munich snapshot (D64), **≥ 40** built as tagged, by geometry (v0.3.0: 5), every remaining fallback with a named reason. S3-ROOF-CASES may re-baseline it with coordinator sign-off before HIPPED starts. | De (proposed; C confirms at gate) | active |
+| D62 | Hygiene: S3-PARITY (CLI vs Blender probe counts, Munich 3/1, Pittsburgh 13/14), time-boxed to ½ day; a larger fix becomes its own task. | De (proposed; C confirms at gate) | active |
+| D63 | Sprint 3 close order follows D48: S3-REVIEW on main first, its blockers, then REL-v0.4.0, short close check, retro, tag. | De (proposed; C confirms at gate) | active |
+| D64 | Ownership and frozen inputs: S3-TEX-UV-CORE is the only S3 task that regenerates `examples/synthetic_sample.mbmap`; roof tasks keep it byte-identical and put synthetic roof cases in `tests/blender/checks_roofs.py` scratch OSM. The roof count (D61) is geometry-based on the emitted triangles over all 67 roofs of a committed Munich snapshot with heights frozen from v0.3.0; overlap and gap are checked independently. The roof outcome is fixed in a preflight (`plan_roof`) before reservation, and skeleton faces are triangulated explicitly. UVs use one tile offset per mesh. (Review of #40 round 1.) | De (proposed; C confirms at gate) | active |
+| D65 | Texture provenance goes in a new optional top-level manifest field `asset_notices` (name, attribution, licence, SHA-256 per image) and an "Assets" section of `NOTICES.txt`. It is **not** a `sources[]` entry, because the v0.3.0 Python and C# readers accept only `elevation`/`features` there, while both ignore unknown top-level manifest fields. 2.1 validators require every embedded image's SHA-256 in `asset_notices`. The frozen v0.3.0 Python validator and C# reader must accept the exact full textured package (CI step on a full fixture and on the committed sample). S3-TEX-FORMAT owns every `core/package.py` edit (schema-version writing, `asset_notices`, notices) and lands before S3-TEX-UV-CORE. (Review of #40 round 2.) | De (proposed; C confirms at gate) | active |
 
 ## Decisions that need the user
 
@@ -180,5 +264,7 @@ may change them at any time.
 
 ## Non-goals for v2
 
-Streaming/LOD, textures/UVs, straight-skeleton roofs on arbitrary footprints, cable/suspension
+(Textures/UVs and straight-skeleton roofs moved to v3, D54.)
+
+Streaming/LOD, cable/suspension
 bridge superstructure, multi-level interchanges beyond `layer` clearance, interior rooms.
