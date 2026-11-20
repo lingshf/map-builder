@@ -17,6 +17,11 @@ MM = 1e-3
 ROOFS = {"osm:way/1023": "gabled", "osm:way/1028": "hipped", "osm:way/1033": "pyramidal",
          "osm:way/1038": "skillion", "osm:way/1043": "dome"}
 TAG_ROOF_H = {"gabled": 3.0, "skillion": 1.5}  # roof:height tags in the fixture
+# (eave, apex) above the mesh base, hard-coded from the fixture tags; the base is 0.3 m below the ground
+# (foundation sink): gabled height=8 roof:height=3, pyramidal 2 levels (6 m) + 3 m, skillion height=5 roof:height=1.5,
+# dome height=10; hipped has no height tags (defaults for a house)
+ABS_HEIGHTS = {"gabled": (5.3, 8.3), "hipped": (3.7, 7.3), "pyramidal": (6.3, 9.3), "skillion": (3.8, 5.3),
+              "dome": (6.1, 10.3)}
 UNSUPPORTED_OSM = """<?xml version='1.0' encoding='UTF-8'?>
 <osm version="0.6" generator="mb-test">
 <node id="1" lat="47.000500000" lon="8.000000000"/>
@@ -158,6 +163,11 @@ def run(out_dir):
         check(signed_volume(world_triangles(ob)) > 0, f"roofs: {shape} is outward-wound (positive volume)")
         eave = eave_from_walls(ob)
         rise = top_b - eave
+        base_z = min(p[2] for p in got)
+        want_eave, want_apex = ABS_HEIGHTS[shape]
+        check(abs(eave - base_z - want_eave) <= 0.005 and abs(top_b - base_z - want_apex) <= 0.005,
+              f"roofs: {shape} eave {eave - base_z:.3f} m / apex {top_b - base_z:.3f} m above the mesh base = "
+              f"fixture {want_eave} / {want_apex} m")
         want_rise = sp.provenance["roof_height_m"]
         check(abs(rise - want_rise) <= 0.01, f"roofs: {shape} measured rise {rise:.3f} m (apex - wall top) = declared roof height {want_rise} m")
         shape_invariants(shape, got, eave, ob)
@@ -172,23 +182,26 @@ def run(out_dir):
     moved = by_id(root, "osm:way/1043")
     moved.location.z += 2.0
     bpy.context.view_layer.update()
+    if os.path.exists(pkg):
+        os.remove(pkg)
     res, err = run_op(bpy.ops.map_builder.export)
     check(res == {"FINISHED"}, f"roofs: export after moving a roof ({err or 'ok'})")
-    r = validate_package(pkg)
-    check(r.ok, "roofs: exported package validates")
-    _, col, _, _ = read_package(pkg)
-    ents = {e["mb_id"]: e for e in col.objects}
-    for mb_id, shape in ROOFS.items():
-        want = world_triangles(by_id(root, mb_id))
-        got = col.object_triangles(ents[mb_id])
-        err_max = max((abs(a - b) for tw, tg in zip(want, got) for pw, pg in zip(tw, tg) for a, b in zip(pw, pg)),
-                      default=math.inf)
-        check(len(want) == len(got) and err_max <= 1e-4,
-              f"roofs: {shape}{' (moved +2 m)' if mb_id == 'osm:way/1043' else ''} collision == Blender "
-              f"triangles (max err {err_max:.1e} m)")
-    top_c = max(p[2] for t in col.object_triangles(ents["osm:way/1043"]) for p in t)
-    check(abs(top_c - (apex(world_verts(by_id(root, "osm:way/1043")))[0])) <= MM and top_c > top_p_dome(plan) + 1.9,
-          "roofs: moved dome apex is 2 m higher in the exported collision")
+    r = validate_package(pkg) if os.path.exists(pkg) else None
+    check(r is not None and r.ok, "roofs: exported package exists and validates")
+    if r is not None and r.ok:
+        _, col, _, _ = read_package(pkg)
+        ents = {e["mb_id"]: e for e in col.objects}
+        for mb_id, shape in ROOFS.items():
+            want = world_triangles(by_id(root, mb_id))
+            got = col.object_triangles(ents[mb_id])
+            err_max = max((abs(a - b) for tw, tg in zip(want, got) for pw, pg in zip(tw, tg) for a, b in zip(pw, pg)),
+                          default=math.inf)
+            check(len(want) == len(got) and err_max <= 1e-4,
+                  f"roofs: {shape}{' (moved +2 m)' if mb_id == 'osm:way/1043' else ''} collision == Blender "
+                  f"triangles (max err {err_max:.1e} m)")
+        top_c = max(p[2] for t in col.object_triangles(ents["osm:way/1043"]) for p in t)
+        check(abs(top_c - (apex(world_verts(by_id(root, "osm:way/1043")))[0])) <= MM and top_c > top_p_dome(plan) + 1.9,
+              "roofs: moved dome apex is 2 m higher in the exported collision")
 
     # --- unsupported roof:shape falls back to flat with the Python reason ----------------------------------
     scratch = os.path.join(out_dir, "roof_unsupported.osm")
