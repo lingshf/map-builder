@@ -8,10 +8,13 @@
 user-edited Blender scene. Use the add-on for edited maps.
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import re
 import sys
+from collections.abc import Sequence
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,7 +27,7 @@ from map_builder.core.pipeline import Settings, build_package  # noqa: E402
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     v = sub.add_parser("validate", help="validate a .mbmap package")

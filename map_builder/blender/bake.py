@@ -34,20 +34,20 @@ from __future__ import annotations
 
 import math
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 from ..core import GENERATOR_VERSION
 from ..core.collision import MAX_ABS_COORD_M, ColObject, count_degenerate
 from ..core.errors import MapBuilderError
-from ..core.glb import write_glb
+from ..core.glb import GlbNodeSpec, write_glb
 from ..core.mesh import MeshData
-from ..core.pipeline import export_package, resolve_identities
+from ..core.pipeline import Edits, ObjectInfo, export_package, resolve_identities
 from ..core.textures import TEXTURES, asset_notice, load as load_texture
 from .sources import JsonMapping, JsonObject
 
 if TYPE_CHECKING:
     from ..core.geodesy import Area
-    from ..core.package import ValidationResult
+    from ..core.package import Manifest, ValidationResult
 
 Tri = tuple[int, int, int]
 Vec3 = tuple[float, float, float]
@@ -57,17 +57,6 @@ Matrix = Sequence[Sequence[float]]
 MaterialSpec = tuple[tuple[float, ...], float, float] | tuple[tuple[float, ...], float, float, bytes]   # (rgb, roughness, metallic[, PNG])
 SocketValue = Any   # Any: Blender socket default (float, colour/vector tuple, None); principled_omissions deliberately tolerates malformed values (TypeError/ValueError), which a precise type would reject
 SocketInfo = tuple[bool, SocketValue]          # (is_linked, default value)
-
-
-class DuplicatedEdit(TypedDict):
-    object: str
-    source_id: str
-
-
-class Edits(TypedDict):
-    removed: list[str]
-    duplicated: list[DuplicatedEdit]
-    user_added: list[str]
 
 
 DEFAULT_MATERIAL = "MB Default"
@@ -290,7 +279,7 @@ def _provenance(obj: BakedObject, mb_id: str, edits_dup: Mapping[str, str]) -> d
 
 def package_parts(baked: Sequence[BakedObject], generated_ids: Collection[str],
                   materials: Mapping[str, MaterialSpec] | None,
-                  ) -> tuple[bytes, list[ColObject], dict[str, dict[str, object]], Edits]:
+                  ) -> tuple[bytes, list[ColObject], dict[str, ObjectInfo], Edits]:
     """(glb bytes, [ColObject], object_info, edits) from baked objects. Identities follow
     docs/PACKAGE_FORMAT.md via :func:`resolve_identities`; each glTF node and its collision object are
     built from the same world-space triangles (identity node transform)."""
@@ -301,9 +290,9 @@ def package_parts(baked: Sequence[BakedObject], generated_ids: Collection[str],
     dup = {d["object"]: d["source_id"] for d in edits["duplicated"]}
     mats: dict[str, MaterialSpec] = {DEFAULT_MATERIAL: DEFAULT_MATERIAL_SPEC}
     mats.update(materials or {})
-    nodes: list[dict[str, object]] = []
+    nodes: list[GlbNodeSpec] = []
     cols: list[ColObject] = []
-    info: dict[str, dict[str, object]] = {}
+    info: dict[str, ObjectInfo] = {}
     for name, mb_id, cls in resolved:
         b = by_name[name]
         if not b.triangles:
@@ -324,7 +313,7 @@ def export_baked(path: str, name: str, area: Area, sources: Sequence[JsonMapping
                  generated_ids: Collection[str], materials: Mapping[str, MaterialSpec] | None,
                  report: JsonObject, blender_version: str | None = None,
                  heightfield_spacing: float | None = None, created_utc: str | None = None,
-                 passage_probes: Sequence[JsonMapping] = ()) -> tuple[JsonObject, ValidationResult, Edits]:
+                 passage_probes: Sequence[JsonMapping] = ()) -> tuple[Manifest, ValidationResult, Edits]:
     """Write the package atomically (core ``write_package``: a failed write keeps the previous file).
     ``passage_probes`` come from the plan; a probe whose feature mb_id is among ``generated_ids`` (the
     original plan) but no longer among the exported objects is dropped and its id listed in report.json

@@ -19,12 +19,12 @@ if TYPE_CHECKING:
     from .cache import CacheLike
     from .geodesy import Area
     from .http import HttpClient
+    from .structures import InvalidEntry, Prov, UnsupportedEntry
 
 Pt = tuple[float, float]
 Ring = list[Pt]
 Extent = tuple[float, float, float, float]   # x0, y0, x1, y1
 Tags = Mapping[str, str]
-Report = dict[str, object]   # {id, reason[, tags]}
 _Attrs = dict[str, str]   # expat attribute values are always str; ``.get`` yields None for a missing one
 
 
@@ -486,6 +486,8 @@ def _assemble_rings(way_lists: Iterable[Sequence[int]], work: _MaskWork | None =
 
 class Feature:
     report_pos: tuple[int, int]   # structure routes only: (index in ``unsupported`` before routing, route sequence)
+    passage_upper: bool   # set (True) by the passage stage on the part built above a corridor
+    extra_prov: Prov   # set by the passage stage: provenance merged into the building's
 
     # Any: geometry depends on ``kind`` (Polygon for building/building_part/area, list[Pt] for road/bridge/...,
     # Pt for tree); a union would need every consumer to narrow by ``kind``, which the type system cannot see.
@@ -504,8 +506,8 @@ class Classified:
         self.roads: list[Feature] = []
         self.areas: list[Feature] = []
         self.trees: list[Feature] = []
-        self.unsupported: list[Report] = []   # dicts {id, reason, tags subset}
-        self.invalid: list[Report] = []       # dicts {id, reason}
+        self.unsupported: list[UnsupportedEntry] = []   # tags: a subset
+        self.invalid: list[InvalidEntry] = []
         self.warnings: list[str] = []      # strings, copied into the report's ``warnings``
         self.outside = 0
         self.replaced_outlines: list[str] = []  # building outlines superseded by their building:part features

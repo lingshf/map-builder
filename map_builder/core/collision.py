@@ -20,10 +20,10 @@ import json
 import math
 import struct
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, NoReturn, TypeAlias, TypedDict
+from typing import NoReturn, TypeAlias, TypedDict, TypeGuard, cast
 
 from . import COLLISION_FORMAT_VERSION, HEIGHTFIELD_FORMAT_VERSION
-from .errors import LimitError, PackageError
+from .errors import JsonValue, LimitError, PackageError
 
 Vec3: TypeAlias = "tuple[float, float, float]"
 Triangle: TypeAlias = "tuple[Vec3, Vec3, Vec3]"
@@ -86,7 +86,7 @@ def f32(v: float) -> float:
     return _F32.unpack(_F32.pack(v))[0]
 
 
-def strict_json(data: bytes, what: str) -> Any:  # Any: parsed JSON of unknown shape
+def strict_json(data: bytes, what: str) -> JsonValue:
     def no_constant(c: str) -> NoReturn:
         raise ValueError(f"non-finite number {c}")
 
@@ -103,7 +103,7 @@ def strict_json(data: bytes, what: str) -> Any:  # Any: parsed JSON of unknown s
         raise PackageError(f"{what} is not valid strict UTF-8 JSON: {e}") from None
 
 
-def _is_int(v: object) -> bool:
+def _is_int(v: object) -> TypeGuard[int]:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
@@ -302,7 +302,7 @@ def read_collision(data: bytes, max_triangles: int = MAX_TRIANGLES, max_vertices
     body = raw.rstrip(b"\0")
     if b"\0" in body:
         raise PackageError("collision: object table contains NUL bytes before its padding")
-    table: Any = strict_json(body, "collision: object table")   # Any: raw JSON until validated below
+    table = strict_json(body, "collision: object table")   # raw JSON until validated below
     if not isinstance(table, list) or len(table) != no:
         raise PackageError("collision: object table count does not match the header")
     # Diagnostics name entries by table index only: names and other strings from the file are never echoed.
@@ -336,11 +336,11 @@ def read_collision(data: bytes, max_triangles: int = MAX_TRIANGLES, max_vertices
         pts = [verts[i] for i in idx[3 * s:3 * (s + c)]]
         want = [min(p[0] for p in pts), min(p[1] for p in pts), min(p[2] for p in pts),
                 max(p[0] for p in pts), max(p[1] for p in pts), max(p[2] for p in pts)]
-        if any(abs(a - b) > AABB_TABLE_TOL_M for a, b in zip(aabb, want)):
+        if any(abs(a - b) > AABB_TABLE_TOL_M for a, b in zip(cast("list[float]", aabb), want)):
             raise PackageError(f"{tag}: aabb does not match its triangles")
     if total != nt:
         raise PackageError("collision: object triangle ranges do not cover every triangle")
-    return Collision(verts, idx, tri_obj, tri_cls, table, bounds, flags)
+    return Collision(verts, idx, tri_obj, tri_cls, cast("list[CollisionEntry]", table), bounds, flags)
 
 
 def is_degenerate(a: Pt3, b: Pt3, c: Pt3, eps: float = DEGENERATE_EPS) -> bool:

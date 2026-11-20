@@ -247,10 +247,12 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
                 me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes, textures, spec.location,
                                     created_images)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)
-                me = shared.get(spec.mesh_key)
+                key = spec.mesh_key
+                if key is None:
+                    raise KeyError(key)
+                me = shared.get(key)
                 if me is None:
-                    me = shared[spec.mesh_key] = mesh_from_data(plan.shared_meshes[spec.mesh_key], spec.mesh_key,
-                                                                created_mats, created_meshes)
+                    me = shared[key] = mesh_from_data(plan.shared_meshes[key], key, created_mats, created_meshes)
             # Blender may suffix the name (".001") when another map is already in the file; identities
             # live in mb_id, so the object name only has to be unique, which Blender guarantees.
             ob = bpy.data.objects.new(spec.name, me)

@@ -31,7 +31,10 @@ The result is verified before it is returned (planarity at ``z = t`` and total f
 inconsistent result raises :class:`SkeletonError` instead of being returned.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from .errors import LimitError, MapBuilderError
@@ -39,6 +42,12 @@ from .triangulate import TriangulationError, validate_rings
 
 MAX_SKELETON_VERTICES = 64
 MAX_SKELETON_EVENTS = MAX_SKELETON_VERTICES ** 2
+Pt = tuple[float, float]
+Node = tuple[float, float, float]  # (x, y, t)
+Edge = tuple[float, float, float, float, float]  # (dx, dy, nx, ny, c)
+Seg = tuple[int, int]  # directed node pair
+_Event = tuple[float, int, int, int, "_V", "_V"]  # (time, kind 0 edge / 1 split, uid, uid, vertex, partner)
+
 POINT_TOL_M = 1e-6
 EVENT_TOL = 1e-9
 _PARALLEL = 1e-9
@@ -50,35 +59,46 @@ class SkeletonError(MapBuilderError):
 
 @dataclass
 class Skeleton:
-    ring: list  # canonical ring (CCW, collinear runs merged)
-    nodes: list  # [(x, y, t)]; the first len(ring) nodes are the ring vertices
-    faces: list  # one list of node ids per ring edge
+    ring: list[Pt]  # canonical ring (CCW, collinear runs merged)
+    nodes: list[Node]  # the first len(ring) nodes are the ring vertices
+    faces: list[list[int]]  # one list of node ids per ring edge
     events: int  # processed events (the bounded work counter)
 
-    def face_points(self, i):
+    def face_points(self, i: int) -> list[Node]:
         return [self.nodes[k] for k in self.faces[i]]
 
 
 class _V:
     __slots__ = ("p0", "tv", "vel", "prev", "next", "ep", "en", "node", "alive", "uid")
 
-    def __init__(self, p0, tv, vel, ep, en, node, uid):
+    p0: Pt
+    tv: float
+    vel: Pt
+    prev: _V
+    next: _V
+    ep: int
+    en: int
+    node: int
+    alive: bool
+    uid: int
+
+    def __init__(self, p0: Pt, tv: float, vel: Pt, ep: int, en: int, node: int, uid: int) -> None:
         self.p0, self.tv, self.vel, self.ep, self.en, self.node, self.uid = p0, tv, vel, ep, en, node, uid
-        self.prev = self.next = None
+        self.prev = self.next = None  # type: ignore[assignment]  # linked by the caller right after construction
         self.alive = True
 
-    def at(self, t):
+    def at(self, t: float) -> Pt:
         d = t - self.tv
         return (self.p0[0] + self.vel[0] * d, self.p0[1] + self.vel[1] * d)
 
 
-def _signed_area(pts):
+def _signed_area(pts: Sequence[Sequence[float]]) -> float:
     return sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1]
                for i in range(len(pts))) / 2.0
 
 
-def _canonical_ring(ring):
-    pts = [(float(p[0]), float(p[1])) for p in ring]
+def _canonical_ring(ring: Iterable[Sequence[float]]) -> list[Pt]:
+    pts: list[Pt] =  [(float(p[0]), float(p[1])) for p in ring]
     if len(pts) > 1 and pts[0] == pts[-1]:
         pts.pop()
     if any(not (math.isfinite(x) and math.isfinite(y)) for x, y in pts):
@@ -117,25 +137,25 @@ def _canonical_ring(ring):
 
 
 class _Run:
-    def __init__(self, ring):
+    def __init__(self, ring: list[Pt]) -> None:
         self.ring = ring
         m = len(ring)
-        self.nodes = [(x, y, 0.0) for x, y in ring]
-        self.edges = []  # (dx, dy, nx, ny, c)
+        self.nodes: list[Node] = [(x, y, 0.0) for x, y in ring]
+        self.edges: list[Edge] = []
         for i in range(m):
             a, b = ring[i], ring[(i + 1) % m]
             ln = math.dist(a, b)
             dx, dy = (b[0] - a[0]) / ln, (b[1] - a[1]) / ln
             nx, ny = -dy, dx
             self.edges.append((dx, dy, nx, ny, nx * a[0] + ny * a[1]))
-        self.segs = [[] for _ in range(m)]  # directed node pairs per face (excluding the ring edge)
+        self.segs: list[list[Seg]] = [[] for _ in range(m)]  # directed node pairs per face (excluding the ring edge)
         self.events = 0
         self.uid = 0
-        self.verts = []
+        self.verts: list[_V] = []
         self.now = 0.0
 
     # -- nodes and vertices -------------------------------------------------
-    def node(self, p, t):
+    def node(self, p: Pt, t: float) -> int:
         for k in range(len(self.ring), len(self.nodes)):
             x, y, tt = self.nodes[k]
             if abs(tt - t) <= POINT_TOL_M and abs(x - p[0]) <= POINT_TOL_M and abs(y - p[1]) <= POINT_TOL_M:
@@ -143,7 +163,7 @@ class _Run:
         self.nodes.append((p[0], p[1], t))
         return len(self.nodes) - 1
 
-    def velocity(self, ep, en):
+    def velocity(self, ep: int, en: int) -> Pt:
         _, _, n1x, n1y, _ = self.edges[ep]
         _, _, n2x, n2y, _ = self.edges[en]
         det = n1x * n2y - n1y * n2x
@@ -153,30 +173,30 @@ class _Run:
             raise SkeletonError("internal: antiparallel vertex")
         return ((n2y - n1y) / det, (n1x - n2x) / det)
 
-    def antiparallel(self, ep, en):
+    def antiparallel(self, ep: int, en: int) -> bool:
         e1, e2 = self.edges[ep], self.edges[en]
         return abs(e1[0] * e2[1] - e1[1] * e2[0]) < _PARALLEL and e1[0] * e2[0] + e1[1] * e2[1] < 0
 
-    def new_vertex(self, p, t, ep, en, node):
+    def new_vertex(self, p: Pt, t: float, ep: int, en: int, node: int) -> _V:
         vel = (0.0, 0.0) if self.antiparallel(ep, en) else self.velocity(ep, en)
         v = _V(p, t, vel, ep, en, node, self.uid)
         self.uid += 1
         self.verts.append(v)
         return v
 
-    def end_arc(self, v, node):
+    def end_arc(self, v: _V, node: int) -> None:
         v.alive = False
         if node != v.node:
             self.segs[v.ep].append((v.node, node))
             self.segs[v.en].append((node, v.node))
 
-    def ridge(self, u, w, e1, e2):
+    def ridge(self, u: int, w: int, e1: int, e2: int) -> None:
         if u != w:
             self.segs[e1].append((u, w))
             self.segs[e2].append((w, u))
 
     @staticmethod
-    def cycle(v):
+    def cycle(v: _V) -> list[_V]:
         out, w = [v], v.next
         while w is not v:
             out.append(w)
@@ -184,19 +204,20 @@ class _Run:
         return out
 
     # -- event search ---------------------------------------------------------
-    def reflex(self, v):
+    def reflex(self, v: _V) -> bool:
         d1, d2 = self.edges[v.ep], self.edges[v.en]
         return d1[0] * d2[1] - d1[1] * d2[0] < -_PARALLEL
 
-    def find_event(self, alive):
-        t0, best = self.now, None
+    def find_event(self, alive: Iterable[_V]) -> _Event | None:
+        t0 = self.now
+        best: _Event | None = None
         for v in alive:
             w = v.next
             dx, dy = self.edges[v.en][0], self.edges[v.en][1]
             pv, pw = v.at(t0), w.at(t0)
             g = (pw[0] - pv[0]) * dx + (pw[1] - pv[1]) * dy
             gv = (w.vel[0] - v.vel[0]) * dx + (w.vel[1] - v.vel[1]) * dy
-            t = None
+            t: float | None = None
             if g <= POINT_TOL_M and gv <= POINT_TOL_M:
                 t = t0
             elif gv < -1e-12:
@@ -226,7 +247,7 @@ class _Run:
         return best
 
     @staticmethod
-    def _better(cur, cand):
+    def _better(cur: _Event | None, cand: _Event) -> _Event:
         if cur is None:
             return cand
         if cand[0] < cur[0] - EVENT_TOL:
@@ -236,12 +257,12 @@ class _Run:
         return cand if cand[1:4] < cur[1:4] else cur
 
     # -- event handling -------------------------------------------------------
-    def charge(self):
+    def charge(self) -> None:
         self.events += 1
         if self.events > MAX_SKELETON_EVENTS:
             raise LimitError(f"straight skeleton exceeded {MAX_SKELETON_EVENTS} events")
 
-    def settle(self, x, t):
+    def settle(self, x: _V, t: float) -> None:
         """Terminate or repair the cycle containing the fresh vertex ``x`` (spikes, size 2)."""
         while True:
             cyc = self.cycle(x)
@@ -285,7 +306,7 @@ class _Run:
             y.next.prev = y
             x = y
 
-    def edge_event(self, t, v, w):
+    def edge_event(self, t: float, v: _V, w: _V) -> None:
         pv, pw = v.at(t), w.at(t)
         nd = self.node(((pv[0] + pw[0]) / 2.0, (pv[1] + pw[1]) / 2.0), t)
         self.end_arc(v, nd)
@@ -296,7 +317,7 @@ class _Run:
         x.next.prev = x
         self.settle(x, t)
 
-    def split_event(self, t, v, a):
+    def split_event(self, t: float, v: _V, a: _V) -> None:
         b = a.next
         p = v.at(t)
         nd = self.node(p, t)
@@ -311,9 +332,9 @@ class _Run:
         self.settle(x1, t)
         self.settle(x2, t)
 
-    def run(self):
+    def run(self) -> list[list[int]]:
         m = len(self.ring)
-        first = []
+        first: list[_V] = []
         for i in range(m):
             ep, en = (i - 1) % m, i
             if self.antiparallel(ep, en):
@@ -338,9 +359,9 @@ class _Run:
         return self.build_faces()
 
     # -- result ---------------------------------------------------------------
-    def build_faces(self):
+    def build_faces(self) -> list[list[int]]:
         m = len(self.ring)
-        faces = []
+        faces: list[list[int]] = []
         for i in range(m):
             nxt = {i: (i + 1) % m}
             for u, w in self.segs[i]:
@@ -352,16 +373,17 @@ class _Run:
                 if len(face) > len(nxt):
                     raise SkeletonError("internal: face boundary is not closed")
                 face.append(k)
-                k = nxt.get(k)
-                if k is None:
+                step = nxt.get(k)
+                if step is None:
                     raise SkeletonError("internal: face boundary is not closed")
+                k = step
             if len(face) != len(nxt):
                 raise SkeletonError("internal: face boundary is not a single cycle")
             faces.append(face)
         self.verify(faces)
         return faces
 
-    def verify(self, faces):
+    def verify(self, faces: list[list[int]]) -> None:
         scale = max(1.0, max(abs(c) for p in self.ring for c in p))
         total = 0.0
         for i, face in enumerate(faces):
@@ -379,7 +401,7 @@ class _Run:
             raise SkeletonError("internal: skeleton faces do not cover the footprint")
 
 
-def straight_skeleton(ring):
+def straight_skeleton(ring: Iterable[Sequence[float]]) -> Skeleton:
     """Straight skeleton of the simple polygon ``ring`` ([(x, y), ...], either orientation).
 
     Collinear runs are merged first. Raises :class:`SkeletonError` for a self-touching or

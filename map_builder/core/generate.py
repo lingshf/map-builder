@@ -21,18 +21,40 @@ triangulation work) instead reject just that feature and report it in
 ``invalid_features``.
 """
 
+from __future__ import annotations
+
 import hashlib
 import math
+from dataclasses import dataclass
 import random
 import re
 import struct
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Generic, NoReturn, TypeAlias, TypedDict, TypeVar
 
 from . import bridges, dsm, passages, roofs, tunnels
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
-from .structures import StageContext, finalize_probes
+from .structures import (Color, InvalidEntry, Probe, ProbeBlock, Prov, Segment, StageContext, UnsupportedEntry, Vec2,
+                         Vec3, finalize_probes, prov_metres, prov_note)
 from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
 from .triangulate import _Work as _TopologyWork
+
+if TYPE_CHECKING:
+    from .dem import ElevationGrid
+    from .geodesy import Area, LocalFrame
+    from .osm import Classified, Extent, Feature, Polygon
+
+Point: TypeAlias = "Sequence[float]"
+Ring: TypeAlias = "Sequence[Point]"
+Poly: TypeAlias = "list[Vec2]"  # convex CCW polygon
+Box: TypeAlias = "tuple[float, float, float, float]"  # (min x, max x, min y, max y)
+RibbonVert: TypeAlias = "tuple[float, float, int, int, bool]"  # (x, y, i, j, upper): terrain triangle that first made it
+RibbonTris: TypeAlias = "list[tuple[int, ...]]"
+Obstacles: TypeAlias = ("tuple[Sequence[dsm.Polygon], Sequence[dsm.Point], Sequence[dsm.Polygon], "
+                        "Sequence[tuple[Sequence[dsm.Point], float]]]")
+RibbonEdge: TypeAlias = "tuple[float, float, float, float, int, int]"  # (x0, y0, x1, y1, polygon, edge)
+_T = TypeVar("_T")
 
 LEVEL_HEIGHT_M = 3.0
 FOUNDATION_SINK_M = 0.3
@@ -67,7 +89,7 @@ NAMED_COLORS = {"white": (0.9, 0.9, 0.9), "black": (0.03, 0.03, 0.03), "grey": (
                 "gray": (0.4, 0.4, 0.4), "red": (0.5, 0.06, 0.04), "brown": (0.3, 0.15, 0.07),
                 "yellow": (0.8, 0.65, 0.2), "beige": (0.75, 0.65, 0.48), "green": (0.1, 0.3, 0.1),
                 "blue": (0.08, 0.15, 0.4), "orange": (0.7, 0.3, 0.05), "silver": (0.6, 0.6, 0.62)}
-ROAD_WIDTHS = {"motorway": 12.0, "trunk": 10.0, "primary": 8.0, "secondary": 7.0, "tertiary": 6.0,
+ROAD_WIDTHS: dict[str | None, float] = {"motorway": 12.0, "trunk": 10.0, "primary": 8.0, "secondary": 7.0, "tertiary": 6.0,
                "motorway_link": 5.0, "trunk_link": 5.0, "primary_link": 5.0, "secondary_link": 5.0,
                "residential": 5.0, "unclassified": 5.0, "living_street": 4.5, "service": 3.5,
                "pedestrian": 4.0, "track": 3.0, "footway": 2.0, "path": 1.5, "cycleway": 2.0,
@@ -79,28 +101,28 @@ class InvalidFeature(MapBuilderError):
     """A feature that cannot be generated as given; reported in ``invalid_features``."""
 
 
-def stable_hash(text):
+def stable_hash(text: str) -> int:
     return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:12], 16)
 
 
-def short_name(fid):
+def short_name(fid: str) -> str:
     # "osm:way/123#1" -> "way_123_1"
     return re.sub(r"[^A-Za-z0-9]+", "_", fid.split(":", 1)[-1]).strip("_")
 
 
-def parse_length(value):
+def parse_length(value: str | None) -> float | None:
     """OSM length -> metres, or None. Accepts '12', '12 m', '12.5m', "40'", "10'6\"", '30 ft'.
 
     Values that overflow to a non-finite float return None."""
     if value is None:
         return None
     v = value.strip().lower().replace(",", ".")
-    out = None
+    out: float | None = None
     m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(m|meter|meters|metre|metres)?", v)
     if m:
         out = float(m.group(1))
-    elif re.fullmatch(r"(\d+(?:\.\d+)?)\s*(ft|feet)", v):
-        out = float(re.match(r"\d+(?:\.\d+)?", v).group(0)) * 0.3048
+    elif feet := re.fullmatch(r"(\d+(?:\.\d+)?)\s*(ft|feet)", v):
+        out = float(feet.group(1)) * 0.3048
     else:
         m = re.fullmatch(r"(\d+)'(?:\s*(\d+(?:\.\d+)?)\")?", v)
         if m:
@@ -108,7 +130,9 @@ def parse_length(value):
     return out if out is not None and math.isfinite(out) else None
 
 
-def parse_number(value):
+def parse_number(value: str | None) -> float | None:
+    if value is None:
+        return None
     try:
         f = float(value.strip().replace(",", "."))
         return f if math.isfinite(f) else None
@@ -116,11 +140,11 @@ def parse_number(value):
         return None
 
 
-def srgb_to_linear(c):
+def srgb_to_linear(c: float) -> float:
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
-def parse_colour(value):
+def parse_colour(value: str | None) -> tuple[float, ...] | None:
     if not value:
         return None
     v = value.strip().lower()
@@ -134,39 +158,90 @@ def parse_colour(value):
 
 
 class ObjectSpec:
-    def __init__(self, name, mb_id, mb_class, collection, mesh=None, mesh_key=None, location=(0.0, 0.0, 0.0),
-                 rotation_z=0.0, scale=1.0, provenance=None):
+    def __init__(self, name: str, mb_id: str, mb_class: str, collection: str, mesh: MeshData | None = None,
+                 mesh_key: str | None = None, location: Vec3 = (0.0, 0.0, 0.0), rotation_z: float = 0.0,
+                 scale: float = 1.0, provenance: Prov | None = None) -> None:
         self.name = name
         self.mb_id = mb_id
         self.mb_class = mb_class
         self.collection = collection
-        self.mesh = mesh
-        self.mesh_key = mesh_key
+        self.mesh: MeshData | None = mesh   # None for objects that share a mesh (``mesh_key``)
+        self.mesh_key: str | None = mesh_key   # key into ScenePlan.shared_meshes when ``mesh`` is None
         self.location = location
         self.rotation_z = rotation_z
         self.scale = scale
         self.provenance = provenance or {}
 
+    def shared_mesh(self, shared: Mapping[str, MeshData]) -> MeshData | None:
+        """The shared mesh for ``mesh_key``, or None if it has no key or the key is unknown."""
+        return shared.get(self.mesh_key) if self.mesh_key is not None else None
+
+    def mesh_data(self, shared: Mapping[str, MeshData]) -> MeshData:
+        """The object's own mesh, else its shared mesh (KeyError if the key is unknown)."""
+        if self.mesh is not None:
+            return self.mesh
+        if self.mesh_key is None:
+            raise KeyError(self.mesh_key)
+        return shared[self.mesh_key]
+
+
+class BuildingOverlap(TypedDict):
+    """A ``building_overlaps`` report entry."""
+    part: str
+    outline: str
+    kind: str | None
+    part_z_m: list[float]
+    outline_z_m: list[float]
+
+
+class OutlineRestored(TypedDict):
+    id: str
+    rejected_parts: list[str]
+
+
+class OutlinePartial(TypedDict):
+    id: str
+    built_parts: list[str]
+    rejected_parts: list[str]
+
+
+class ScenePlanReport(TypedDict, total=False):
+    """The generation report; sections other than the first five are added as the stages produce them."""
+    counts: dict[str, int]
+    unsupported_features: list[UnsupportedEntry]
+    invalid_features: list[InvalidEntry]
+    warnings: list[str]
+    inferred: dict[str, int]
+    terrain_correction: dsm.DsmReport
+    building_overlaps: list[BuildingOverlap]
+    building_outlines_replaced_by_parts: list[str]
+    building_outlines_restored: list[OutlineRestored]
+    building_outlines_partially_represented: list[OutlinePartial]
+    passage_probes_blocked: list[ProbeBlock]
+    passage_probes_dropped: list[dict[str, str]]
+    z_offset_m: float
+    budget: dict[str, int]
+
 
 class ScenePlan:
-    def __init__(self, frame, area):
+    def __init__(self, frame: LocalFrame, area: Area) -> None:
         self.frame = frame
         self.area = area
-        self.objects = []
-        self.shared_meshes = {}
-        self.report = {"counts": {}, "unsupported_features": [], "invalid_features": [], "warnings": [],
-                       "inferred": {}}
+        self.objects: list[ObjectSpec] = []
+        self.shared_meshes: dict[str, MeshData] = {}
+        self.report: ScenePlanReport = {
+            "counts": {}, "unsupported_features": [], "invalid_features": [], "warnings": [], "inferred": {}}
         # manifest passage_probes entries ({id, kind, feature, path_map, radius_m}); emitted by the bridge stage
-        self.passage_probes = []
+        self.passage_probes: list[Probe] = []
 
-    def count(self, key, n=1):
+    def count(self, key: str, n: int = 1) -> None:
         self.report["counts"][key] = self.report["counts"].get(key, 0) + n
 
-    def inferred(self, key):
+    def inferred(self, key: str) -> None:
         self.report["inferred"][key] = self.report["inferred"].get(key, 0) + 1
 
 
-def mesh_triangle_count(mesh):
+def mesh_triangle_count(mesh: MeshData) -> int:
     return sum(len(f) - 2 for f in mesh.faces)
 
 
@@ -174,59 +249,59 @@ class SceneBudget:
     """Cumulative vertex/triangle budget. ``reserve`` an upper-bound estimate *before*
     allocating an object, then ``commit`` the built mesh to replace the estimate."""
 
-    def __init__(self, max_vertices=MAX_SCENE_VERTICES, max_triangles=MAX_SCENE_TRIANGLES):
+    def __init__(self, max_vertices: int = MAX_SCENE_VERTICES, max_triangles: int = MAX_SCENE_TRIANGLES) -> None:
         self.max_vertices = max_vertices
         self.max_triangles = max_triangles
         self.vertices = 0
         self.triangles = 0
-        self._pending = None
+        self._pending: tuple[str, int, int] | None = None
 
-    def _check(self, fid, vertices, triangles, what):
+    def _check(self, fid: str, vertices: int, triangles: int, what: str) -> None:
         if self.vertices + vertices > self.max_vertices or self.triangles + triangles > self.max_triangles:
             raise LimitError(
                 f"{fid}: {what} {vertices} vertices / {triangles} triangles would exceed the scene budget "
                 f"({self.vertices}/{self.max_vertices} vertices, {self.triangles}/{self.max_triangles} "
                 "triangles used); choose a smaller area, coarser terrain or raise the limit")
 
-    def reserve(self, fid, vertices, triangles):
+    def reserve(self, fid: str, vertices: int, triangles: int) -> None:
         self.release()
         self._check(fid, vertices, triangles, "needs up to")
         self.vertices += vertices
         self.triangles += triangles
         self._pending = (fid, vertices, triangles)
 
-    def charge(self, fid, vertices, triangles):
+    def charge(self, fid: str, vertices: int, triangles: int) -> None:
         """Reserve an exact amount that needs no later commit."""
         self.release()
         self._check(fid, vertices, triangles, "needs")
         self.vertices += vertices
         self.triangles += triangles
 
-    def release(self):
+    def release(self) -> None:
         if self._pending:
             _, v, t = self._pending
             self.vertices -= v
             self.triangles -= t
             self._pending = None
 
-    def commit(self, mesh):
+    def commit(self, mesh: MeshData) -> None:
         fid = self._pending[0] if self._pending else mesh.name
         self.release()
         self.charge(fid, len(mesh.vertices), mesh_triangle_count(mesh))
 
-    def remaining(self):
+    def remaining(self) -> tuple[int, int]:
         """(vertices, triangles) still available, excluding any pending reservation."""
         self.release()
         return self.max_vertices - self.vertices, self.max_triangles - self.triangles
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, int]:
         return {"vertices": self.vertices, "triangles": self.triangles, "max_vertices": self.max_vertices,
                 "max_triangles": self.max_triangles}
 
 
 # --- Terrain surface ----------------------------------------------------------
 
-def _cell(grid, x, y):
+def _cell(grid: ElevationGrid, x: float, y: float) -> tuple[int, int, float, float]:
     fx = min(max((x - grid.x0) / grid.spacing, 0.0), grid.nx - 1.0)
     fy = min(max((y - grid.y0) / grid.spacing, 0.0), grid.ny - 1.0)
     i = max(0, min(int(fx), grid.nx - 2))
@@ -234,7 +309,7 @@ def _cell(grid, x, y):
     return i, j, fx - i, fy - j
 
 
-def _plane_height(h, i, j, upper, tx, ty):
+def _plane_height(h: Sequence[Sequence[float]], i: int, j: int, upper: bool, tx: float, ty: float) -> float:
     """Height in cell (i, j): ``upper`` False -> triangle (v00, v10, v11), True -> (v00, v11, v01)."""
     h00 = h[j][i]
     h11 = h[j + 1][i + 1]
@@ -243,7 +318,7 @@ def _plane_height(h, i, j, upper, tx, ty):
     return h00 + ty * (h[j + 1][i] - h00) + tx * (h11 - h[j + 1][i])
 
 
-def terrain_height(grid, x, y):
+def terrain_height(grid: ElevationGrid, x: float, y: float) -> float:
     """Exact height of the emitted terrain mesh at (x, y).
 
     The terrain mesh splits each cell along the (i, j)-(i+1, j+1) diagonal (see
@@ -256,17 +331,17 @@ def terrain_height(grid, x, y):
 TERRAIN_EDGE_TOL_M = 1e-3  # footprints/points may exceed the terrain extent by at most this much
 
 
-def terrain_extent(grid):
+def terrain_extent(grid: ElevationGrid) -> Extent:
     """(x0, y0, x1, y1) of the terrain mesh."""
     return grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * grid.spacing, grid.y0 + (grid.ny - 1) * grid.spacing
 
 
-def inside_terrain(grid, x, y, tol=TERRAIN_EDGE_TOL_M):
+def inside_terrain(grid: ElevationGrid, x: float, y: float, tol: float = TERRAIN_EDGE_TOL_M) -> bool:
     x0, y0, x1, y1 = terrain_extent(grid)
     return x0 - tol <= x <= x1 + tol and y0 - tol <= y <= y1 + tol
 
 
-def footprint_terrain_range(grid, rings):
+def footprint_terrain_range(grid: ElevationGrid, rings: Sequence[Ring]) -> tuple[float, float]:
     """(min, max) of the terrain surface over a footprint (outer ring + holes, holes excluded).
 
     The terrain is piecewise planar, so its extremes over the footprint lie at ring
@@ -276,7 +351,7 @@ def footprint_terrain_range(grid, rings):
     return min(zs), max(zs)
 
 
-def footprint_terrain_samples(grid, rings):
+def footprint_terrain_samples(grid: ElevationGrid, rings: Sequence[Ring]) -> list[Vec3]:
     """(x, y, terrain z) at every candidate point of :func:`footprint_terrain_range`: ring
     vertices, ring crossings of grid lines and cell diagonals, and grid nodes inside the
     footprint. Any function that is linear on each terrain triangle (e.g. terrain minus a
@@ -303,7 +378,7 @@ def footprint_terrain_samples(grid, rings):
     h = grid.heights
     for j in range(max(0, math.ceil((min(ys) - gy0) / s)), min(vmax, math.floor((max(ys) - gy0) / s)) + 1):
         y = gy0 + j * s
-        xs = []
+        xs: list[float] = []
         for r in rings:
             n = len(r)
             for k in range(n):
@@ -323,7 +398,8 @@ MAX_LEVELS = 200        # building:levels / roof:levels / building:min_level acc
 MAX_HEIGHT_M = 1000.0   # height / min_height / roof:height accepted from tags
 
 
-def _bounded_tag(tags, key, parser, lo, hi, rejected, lo_open=False):
+def _bounded_tag(tags: Mapping[str, str], key: str, parser: Callable[[str], float | None], lo: float, hi: float,
+                 rejected: list[str], lo_open: bool = False) -> float | None:
     """Parsed value of ``tags[key]`` if it lies in [lo, hi] (or (lo, hi]); otherwise None,
     and the raw value is recorded in ``rejected`` (never silently ignored)."""
     raw = tags.get(key)
@@ -341,7 +417,7 @@ def _bounded_tag(tags, key, parser, lo, hi, rejected, lo_open=False):
     return v
 
 
-def building_height(tags):
+def building_height(tags: Mapping[str, str]) -> tuple[float, float, float | None, Prov]:
     """Returns (height, min_height, roof_height_or_None, provenance dict).
 
     ``height`` is the total height. Without an explicit ``height`` tag, the
@@ -353,7 +429,7 @@ def building_height(tags):
     return h, min_h, roof_h, prov
 
 
-def _building_height(tags):
+def _building_height(tags: Mapping[str, str]) -> tuple[float, float, float | None, Prov, bool]:
     """Returns (height, min_height, roof_height_or_None, provenance dict, eave_based).
 
     OSM semantics: ``height`` is the total height (roof included); building:levels
@@ -366,8 +442,8 @@ def _building_height(tags):
     actually built is decided in :func:`build_building`. Numeric tags are bounded
     (levels <= MAX_LEVELS, lengths <= MAX_HEIGHT_M); rejected values are listed in
     ``provenance["rejected_tags"]`` and the affected value falls back."""
-    prov = {}
-    rejected = []
+    prov: Prov = {}
+    rejected: list[str] = []
     h = _bounded_tag(tags, "height", parse_length, 0.5, MAX_HEIGHT_M, rejected)
     levels = _bounded_tag(tags, "building:levels", parse_number, 0.0, MAX_LEVELS, rejected, lo_open=True)
     roof_levels = _bounded_tag(tags, "roof:levels", parse_number, 0.0, MAX_LEVELS, rejected)
@@ -393,7 +469,7 @@ def _building_height(tags):
     if height_rejected:
         prov["height_source"] = f"osm height = {tags['height'][:32]!r}"
         prov["height_reason"] = rejected[0]
-        prov["height"] = "fallback:" + prov["height"].split(":", 1)[1]
+        prov["height"] = "fallback:" + prov_note(prov, "height").split(":", 1)[1]
     min_h = _bounded_tag(tags, "min_height", parse_length, 0.0, MAX_HEIGHT_M, rejected)
     if min_h is not None:
         prov["min_height"] = "measured:osm min_height"
@@ -411,8 +487,9 @@ def _building_height(tags):
     return h, min_h, roof_h, prov, eave_based
 
 
-def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RING_VERTICES,
-                   max_work=DEFAULT_MAX_WORK, reserve=None):
+def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, seed: int = 0,
+                   max_ring_vertices: int = MAX_RING_VERTICES, max_work: int = DEFAULT_MAX_WORK,
+                   reserve: Callable[..., None] | None = None) -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
     """Returns (MeshData in object-local coords, location, provenance).
 
     Raises TriangulationError (invalid rings, work budget) or InvalidFeature (limits)
@@ -432,7 +509,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
             f"{len(off)} vertex/vertices outside, e.g. ({off[0][0]:.2f}, {off[0][1]:.2f})); not generated")
     cx, cy = poly.centroid()
     pts2 = [(p[0] - cx, p[1] - cy) for r in rings for p in r]
-    offsets = []
+    offsets: list[list[int]] = []
     o = 0
     for r in rings:
         offsets.append(list(range(o, o + len(r))))
@@ -449,7 +526,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     roof_shape = plan.shape_built
     if (roof_src is not None and roof_src <= 1e-6 and (roof_shape_tag in ("hipped", "pyramidal") or plan.skeleton)
             and (roof_shape == roof_shape_tag or plan.skeleton)
-            and prov.get("roof_height", "").startswith("inferred:roof:levels")):
+            and isinstance(roof_src_label, str) and roof_src_label.startswith("inferred:roof:levels")):
         # roof:levels=0 on a hipped/pyramidal roof gives no height: use the default roof height (D77)
         roof_src = None
         prov["roof_levels"] = f"ignored:roof:levels={tags.get('roof:levels')} (default roof height for a {roof_shape} roof)"
@@ -563,13 +640,15 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
             roof_col = (0.3, 0.3, 0.31)
 
     mesh = MeshData(f"bld_{short_name(feature.id)}")
-    split = []
+    split: list[bool] = []
 
-    def add_face(idx, mat, col):
+    def add_face(idx: Sequence[int], mat: str, col: roofs.Color) -> None:
         split.append(roofs.add_planar_face(mesh, idx, mat, col))
-    ring_idx_bottom, ring_idx_top = [], []
+    ring_idx_bottom: list[list[int]] = []
+    ring_idx_top: list[list[int]] = []
     for r in rings:
-        rb, rt = [], []
+        rb: list[int] = []
+        rt: list[int] = []
         for p in r:
             lx, ly = p[0] - cx, p[1] - cy
             zt = skillion_z(p) if skillion_z else wall_top_flat
@@ -607,14 +686,18 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
 
 # --- Terrain ----------------------------------------------------------------
 
-class _Buckets:
+T = TypeVar("T")
+
+
+class _Buckets(Generic[T]):
     """Uniform-grid index of bboxes. With ``bounds`` (x0, y0, x1, y1) only the part of each
     bbox inside ``bounds`` is indexed (queries outside it return nothing), so the bucket
     count is bounded by the scene extent, not by the size of the OSM geometry."""
 
-    def __init__(self, items, cell=50.0, bounds=None):
+    def __init__(self, items: Iterable[tuple[T, Extent]], cell: float = 50.0,
+                 bounds: Extent | None = None) -> None:
         self.cell = cell
-        self.map = {}
+        self.map: dict[tuple[int, int], list[T]] = {}
         for it, (x0, y0, x1, y1) in items:
             if bounds is not None:
                 x0, y0 = max(x0, bounds[0]), max(y0, bounds[1])
@@ -625,14 +708,14 @@ class _Buckets:
                 for j in range(int(math.floor(y0 / cell)), int(math.floor(y1 / cell)) + 1):
                     self.map.setdefault((i, j), []).append(it)
 
-    def query(self, x, y):
+    def query(self, x: float, y: float) -> Sequence[T]:
         return self.map.get((int(math.floor(x / self.cell)), int(math.floor(y / self.cell))), ())
 
 
 LANDCOVER_PRIORITY = {"water": 4, "forest": 3, "sand": 2, "grass": 1}
 
 
-def landcover_ring_problem(feature, max_work=DEFAULT_MAX_WORK):
+def landcover_ring_problem(feature: Feature, max_work: int = DEFAULT_MAX_WORK) -> str | None:
     """None if the landcover polygon's rings form a valid polygon with holes, else the reason.
 
     Uses the same topology rules as building footprints (:func:`validate_rings`): simple
@@ -642,7 +725,8 @@ def landcover_ring_problem(feature, max_work=DEFAULT_MAX_WORK):
     return ring_topology_problem(feature.geometry, max_work)
 
 
-def ring_topology_problem(poly, max_work=DEFAULT_MAX_WORK, max_ring_vertices=None, _work=None):
+def ring_topology_problem(poly: Polygon, max_work: int = DEFAULT_MAX_WORK, max_ring_vertices: int | None = None,
+                          _work: _TopologyWork | None = None) -> str | None:
     """None if ``poly``'s rings (outer plus holes) form a valid polygon with holes (:func:`validate_rings`,
     the rules :func:`build_building` triangulates with), else the reason. ``max_ring_vertices`` optionally
     bounds the total ring vertices first, as for building footprints. ``_work``: optional work counter
@@ -653,7 +737,7 @@ def ring_topology_problem(poly, max_work=DEFAULT_MAX_WORK, max_ring_vertices=Non
         if n_ring > max_ring_vertices:
             return f"{n_ring} ring vertices exceed the per-footprint limit of {max_ring_vertices}"
     pts = [p for r in rings for p in r]
-    offsets = []
+    offsets: list[range] = []
     o = 0
     for r in rings:
         offsets.append(range(o, o + len(r)))
@@ -668,7 +752,8 @@ def ring_topology_problem(poly, max_work=DEFAULT_MAX_WORK, max_ring_vertices=Non
     return None
 
 
-def build_terrain(grid, z_offset, areas, coverage=None):
+def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature],
+                  coverage: dict[str, int] | None = None) -> MeshData:
     """Terrain mesh; each cell is split along its (i, j)-(i+1, j+1) diagonal (see terrain_height).
 
     If ``coverage`` is a dict it receives, per area id, the number of cells whose
@@ -687,7 +772,7 @@ def build_terrain(grid, z_offset, areas, coverage=None):
             v01, v11 = v00 + nx, v10 + nx
             cx = grid.x0 + (i + 0.5) * grid.spacing
             cy = grid.y0 + (j + 0.5) * grid.spacing
-            cls = None
+            cls: str | None = None
             for a in buckets.query(cx, cy):
                 if not a.geometry.contains(cx, cy):
                     continue
@@ -704,7 +789,7 @@ def build_terrain(grid, z_offset, areas, coverage=None):
 
 # --- Roads ------------------------------------------------------------------
 
-def road_width(tags):
+def road_width(tags: Mapping[str, str]) -> tuple[float, str]:
     w = parse_length(tags.get("width"))
     if w is not None and 0.5 <= w <= 60:
         return w, "measured:osm width"
@@ -718,20 +803,20 @@ def road_width(tags):
 POLYLINE_DEDUP_TOL_M = 1e-3   # points closer than this are one point (the sweep path, and the bridge approach checks)
 
 
-def _dedupe_indices(pts, tol=POLYLINE_DEDUP_TOL_M):
+def _dedupe_indices(pts: Sequence[Point], tol: float = POLYLINE_DEDUP_TOL_M) -> list[int]:
     """Indices of the points ``_dedupe_polyline`` keeps."""
-    kept = []
+    kept: list[int] = []
     for k, p in enumerate(pts):
         if not kept or math.dist(p, pts[kept[-1]]) > tol:
             kept.append(k)
     return kept
 
 
-def _dedupe_polyline(pts, tol=POLYLINE_DEDUP_TOL_M):
+def _dedupe_polyline(pts: Sequence[Point], tol: float = POLYLINE_DEDUP_TOL_M) -> list[Vec2]:
     return [(float(pts[k][0]), float(pts[k][1])) for k in _dedupe_indices(pts, tol)]
 
 
-def _area2(poly):
+def _area2(poly: Sequence[Point]) -> float:
     a = 0.0
     n = len(poly)
     for k in range(n):
@@ -739,14 +824,15 @@ def _area2(poly):
     return a
 
 
-def _road_pieces(pts, half):
+def _road_pieces(pts: Sequence[Vec2], half: float) -> list[Poly]:
     """Convex CCW polygons whose union is the ribbon footprint: one rectangle per segment
     (butt ends) plus a bevel triangle on the outer side of every join.
 
     Pieces are not folded, but they may overlap (inner side of a turn, U-turns,
     self-crossing polylines); :func:`_ribbon_faces` turns them into interior-disjoint
     faces."""
-    pieces, normals = [], []
+    pieces: list[Poly] = []
+    normals: list[Vec2] = []
     for a, b in zip(pts, pts[1:]):
         dx, dy = b[0] - a[0], b[1] - a[1]
         ln = math.hypot(dx, dy)
@@ -760,7 +846,7 @@ def _road_pieces(pts, half):
         if abs(turn) <= 1e-9 * half * half:
             continue  # straight on, or an exact reversal (butt end)
         s = -1.0 if turn > 0 else 1.0  # outer side of the turn
-        tri = [p, (p[0] + s * n1[0], p[1] + s * n1[1]), (p[0] + s * n2[0], p[1] + s * n2[1])]
+        tri: Poly = [p, (p[0] + s * n1[0], p[1] + s * n1[1]), (p[0] + s * n2[0], p[1] + s * n2[1])]
         if _area2(tri) < 0:
             tri = [tri[0], tri[2], tri[1]]
         if _area2(tri) > 1e-9:
@@ -768,9 +854,9 @@ def _road_pieces(pts, half):
     return pieces
 
 
-def _clip_halfplane(poly, a, b):
+def _clip_halfplane(poly: Sequence[Vec2], a: Vec2, b: Vec2) -> list[Vec2]:
     """Keep the part of convex ``poly`` left of (or on) the directed line a->b."""
-    out = []
+    out: list[Vec2] = []
     n = len(poly)
     for k in range(n):
         p, q = poly[k], poly[(k + 1) % n]
@@ -784,7 +870,7 @@ def _clip_halfplane(poly, a, b):
     return out
 
 
-def _clip_convex(poly, tri):
+def _clip_convex(poly: Sequence[Vec2], tri: Sequence[Vec2]) -> Sequence[Vec2]:
     for k in range(3):
         poly = _clip_halfplane(poly, tri[k], tri[(k + 1) % 3])
         if len(poly) < 3:
@@ -792,7 +878,7 @@ def _clip_convex(poly, tri):
     return poly
 
 
-def _cell_range(grid, x0, x1, y0, y1):
+def _cell_range(grid: ElevationGrid, x0: float, x1: float, y0: float, y1: float) -> tuple[int, int, int, int]:
     s = grid.spacing
     i0 = max(0, int(math.floor((x0 - grid.x0) / s)))
     i1 = min(grid.nx - 2, int(math.floor((x1 - grid.x0) / s)))
@@ -801,7 +887,7 @@ def _cell_range(grid, x0, x1, y0, y1):
     return i0, i1, j0, j1
 
 
-def _bbox(poly):
+def _bbox(poly: Sequence[Point]) -> Box:
     xs, ys = [p[0] for p in poly], [p[1] for p in poly]
     return min(xs), max(xs), min(ys), max(ys)
 
@@ -812,17 +898,17 @@ _OVERLAP_EPS = 1e-7  # m; overlaps thinner than this count as touching
 class _RibbonWork:
     """Bounds the clip/union work of one road ribbon (per-feature limit)."""
 
-    def __init__(self, limit):
+    def __init__(self, limit: int) -> None:
         self.limit = limit
         self.n = 0
 
-    def add(self, k=1):
+    def add(self, k: int = 1) -> None:
         self.n += k
         if self.n > self.limit:
             raise InvalidFeature(f"road ribbon exceeds the work budget ({self.limit} clip/union steps)")
 
 
-def _convex_overlap(p, q, eps=_OVERLAP_EPS):
+def _convex_overlap(p: Sequence[Point], q: Sequence[Point], eps: float = _OVERLAP_EPS) -> bool:
     """True if convex polygons ``p`` and ``q`` share interior thicker than ``eps`` (separating axes)."""
     for poly in (p, q):
         n = len(poly)
@@ -840,21 +926,22 @@ def _convex_overlap(p, q, eps=_OVERLAP_EPS):
     return True
 
 
-def _overlap_groups(polys, members=None, work=None):
+def _overlap_groups(polys: Sequence[Sequence[Point]], members: Iterable[int] | None = None,
+                    work: _RibbonWork | None = None) -> dict[int, int]:
     """Component id per polygon of the graph "interiors overlap" (x-sweep on bboxes + SAT).
 
     ``members`` restricts the graph to those indices (others keep their own id)."""
     idx = list(range(len(polys))) if members is None else list(members)
     parent = {k: k for k in idx}
 
-    def find(a):
+    def find(a: int) -> int:
         while parent[a] != a:
             parent[a] = parent[parent[a]]
             a = parent[a]
         return a
 
     boxes = {k: _bbox(polys[k]) for k in idx}
-    active = []
+    active: list[int] = []
     for k in sorted(idx, key=lambda m: boxes[m][0]):
         bk = boxes[k]
         active = [a for a in active if boxes[a][1] > bk[0] + _OVERLAP_EPS]
@@ -868,11 +955,20 @@ def _overlap_groups(polys, members=None, work=None):
     return {k: find(k) for k in idx}
 
 
-def _line_y(e, x):
+def _line_y(e: RibbonEdge, x: float) -> float:
     return e[1] + (x - e[0]) * (e[3] - e[1]) / (e[2] - e[0])
 
 
-def _union_convex(polys, eps=1e-9):
+@dataclass
+class _Interval:
+    """A vertical-slab interval: lower/upper y and the edges they lie on."""
+    lo_y: float
+    hi_y: float
+    lo_edge: RibbonEdge
+    hi_edge: RibbonEdge
+
+
+def _union_convex(polys: Sequence[Sequence[Vec2]], eps: float = 1e-9) -> list[list[Vec2]]:
     """Union of convex CCW polygons as interior-disjoint convex trapezoids.
 
     Vertical-slab decomposition: slab boundaries are every vertex x and every crossing
@@ -880,8 +976,8 @@ def _union_convex(polys, eps=1e-9):
     each polygon covers one interval between two of its edges. Overlapping intervals
     are merged; each merged interval is a trapezoid, and consecutive slabs bounded by
     the same two edges are joined into one trapezoid."""
-    edges = []  # (x0, y0, x1, y1, polygon, edge) with x0 < x1; vertical edges lie on slab boundaries
-    xs = []
+    edges: list[RibbonEdge] = []  # (x0, y0, x1, y1, polygon, edge) with x0 < x1; vertical edges lie on slab boundaries
+    xs: list[float] = []
     for pi, poly in enumerate(polys):
         n = len(poly)
         for k in range(n):
@@ -895,23 +991,23 @@ def _union_convex(polys, eps=1e-9):
         for f in edges[u + 1:]:
             if f[4] == e[4]:
                 continue
-            lo, hi = max(e[0], f[0]), min(e[2], f[2])
-            if hi <= lo:
+            x_lo, x_hi = max(e[0], f[0]), min(e[2], f[2])
+            if x_hi <= x_lo:
                 continue
-            d_lo = _line_y(e, lo) - _line_y(f, lo)
-            d_hi = _line_y(e, hi) - _line_y(f, hi)
+            d_lo = _line_y(e, x_lo) - _line_y(f, x_lo)
+            d_hi = _line_y(e, x_hi) - _line_y(f, x_hi)
             if (d_lo > 0 > d_hi) or (d_lo < 0 < d_hi):
-                xs.append(lo + (hi - lo) * d_lo / (d_lo - d_hi))
+                xs.append(x_lo + (x_hi - x_lo) * d_lo / (d_lo - d_hi))
     xs.sort()
     cuts = [xs[0]]
     for x in xs[1:]:
         if x - cuts[-1] > eps:
             cuts.append(x)
-    out = []
+    out: list[list[Vec2]] = []
 
-    def trapezoid(lo, hi, x0, x1):
+    def trapezoid(lo: RibbonEdge, hi: RibbonEdge, x0: float, x1: float) -> None:
         pts = [(x0, _line_y(lo, x0)), (x1, _line_y(lo, x1)), (x1, _line_y(hi, x1)), (x0, _line_y(hi, x0))]
-        clean = []
+        clean: list[Vec2] = []
         for p in pts:
             if not clean or math.dist(p, clean[-1]) > 1e-9:
                 clean.append(p)
@@ -920,30 +1016,31 @@ def _union_convex(polys, eps=1e-9):
         if len(clean) >= 3 and _area2(clean) > 1e-12:
             out.append(clean)
 
-    runs = {}  # (lower edge id, upper edge id) -> (start x, lower edge, upper edge)
+    runs: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[float, RibbonEdge, RibbonEdge]] = {}  # (lower edge id, upper edge id) -> (start x, lower edge, upper edge)
     for xa, xb in zip(cuts, cuts[1:]):
         xm = 0.5 * (xa + xb)
-        span = {}
+        span: dict[int, list[tuple[float, RibbonEdge]]] = {}
         for e in edges:
             if e[0] < xm < e[2]:
                 span.setdefault(e[4], []).append((_line_y(e, xm), e))
-        intervals = []
+        intervals: list[_Interval] = []
         for lst in span.values():
             if len(lst) >= 2:
-                lo, hi = min(lst), max(lst)
-                intervals.append([lo[0], hi[0], lo[1], hi[1]])
-        intervals.sort(key=lambda iv: iv[0])
-        merged = []
+                lower, upper = min(lst), max(lst)
+                intervals.append(_Interval(lower[0], upper[0], lower[1], upper[1]))
+        intervals.sort(key=lambda iv: iv.lo_y)
+        merged: list[_Interval] = []
         for iv in intervals:
-            if merged and iv[0] <= merged[-1][1] + eps:
-                if iv[1] > merged[-1][1]:
-                    merged[-1][1], merged[-1][3] = iv[1], iv[3]
+            if merged and iv.lo_y <= merged[-1].hi_y + eps:
+                if iv.hi_y > merged[-1].hi_y:
+                    merged[-1].hi_y, merged[-1].hi_edge = iv.hi_y, iv.hi_edge
             else:
                 merged.append(iv)
-        nxt = {}
+        nxt: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[float, RibbonEdge, RibbonEdge]] = {}
         for iv in merged:
-            key = (iv[2][4:], iv[3][4:])
-            nxt[key] = runs.pop(key, None) or (xa, iv[2], iv[3])
+            key: tuple[tuple[int, ...], tuple[int, ...]] = (iv.lo_edge[4:], iv.hi_edge[4:])
+            prev_run = runs.pop(key, None)
+            nxt[key] = prev_run or (xa, iv.lo_edge, iv.hi_edge)
         for x0, lo, hi in runs.values():
             trapezoid(lo, hi, x0, xa)
         runs = nxt
@@ -952,14 +1049,14 @@ def _union_convex(polys, eps=1e-9):
     return out
 
 
-def _piece_rows(grid, piece):
+def _piece_rows(grid: ElevationGrid, piece: Sequence[Point]) -> tuple[int, int]:
     """Row range (j0, j1) of terrain cells the convex ``piece``'s bbox spans (empty if j0 > j1)."""
     x0, x1, y0, y1 = _bbox(piece)
     _, _, j0, j1 = _cell_range(grid, x0, x1, y0, y1)
     return j0, j1
 
 
-def _piece_row_cells(grid, piece, j):
+def _piece_row_cells(grid: ElevationGrid, piece: Sequence[Vec2], j: int) -> tuple[int, int] | None:
     """Column range (i0, i1) of the cells in row ``j`` whose square meets convex ``piece``, or None."""
     s = grid.spacing
     ya, yb = grid.y0 + j * s, grid.y0 + (j + 1) * s
@@ -973,7 +1070,7 @@ def _piece_row_cells(grid, piece, j):
     return (i0, i1) if i0 <= i1 else None
 
 
-def _piece_cells(grid, piece):
+def _piece_cells(grid: ElevationGrid, piece: Sequence[Vec2]) -> Iterator[tuple[int, int]]:
     """Terrain cells (i, j) whose square meets convex ``piece`` (row strips, not the bbox)."""
     j0, j1 = _piece_rows(grid, piece)
     for j in range(j0, j1 + 1):
@@ -983,13 +1080,13 @@ def _piece_cells(grid, piece):
                 yield i, j
 
 
-def _convex_difference(a, b):
+def _convex_difference(a: Sequence[Vec2], b: Sequence[Vec2]) -> list[Poly]:
     """Interior-disjoint convex CCW pieces covering convex CCW ``a`` minus convex CCW ``b``.
 
     For each edge of ``b`` in turn, the part of the remainder strictly outside that edge
     is one output piece and the part inside it is the new remainder (which ends up as
     a & b and is dropped). Pieces with no area are omitted."""
-    out = []
+    out: list[Poly] = []
     rest = a
     n = len(b)
     for k in range(n):
@@ -1014,7 +1111,7 @@ ROAD_PRIORITY = ("motorway", "trunk", "primary", "secondary", "tertiary", "motor
                  "path")
 
 
-def road_priority(feature):
+def road_priority(feature: Feature) -> tuple[int, float, str]:
     """Ownership sort key of an at-grade road (smaller wins where roads overlap): highway
     class importance, then the wider ribbon, then the feature id (stable tie-break)."""
     hw = feature.tags.get("highway")
@@ -1028,20 +1125,21 @@ class RoadOwnership:
     Roads are built in :func:`road_priority` order; each subtracts the claimed polygons
     from its own ribbon in every terrain triangle, so no two road objects share area."""
 
-    def __init__(self):
-        self.cells = {}  # (j, i, upper) -> [(bbox, convex polygon, feature id)]
+    def __init__(self) -> None:
+        self.cells: dict[tuple[int, int, bool], list[tuple[Box, Sequence[Vec2], str]]] = {}  # (j, i, upper) -> [(bbox, convex polygon, feature id)]
 
-    def subtract(self, key, polys, work):
+    def subtract(self, key: tuple[int, int, bool], polys: list[Sequence[Vec2]],
+                 work: _RibbonWork) -> tuple[list[Sequence[Vec2]], dict[str, float]]:
         """(remaining interior-disjoint convex polygons, {owner id: area removed m2})."""
         owned = self.cells.get(key)
         if not owned:
             return polys, {}
-        removed = {}
-        out = []
+        removed: dict[str, float] = {}
+        out: list[Sequence[Vec2]] = []
         for q in polys:
-            pieces = [q]
+            pieces: list[Sequence[Vec2]] = [q]
             for ob, o, fid in owned:
-                nxt = []
+                nxt: list[Sequence[Vec2]] = []
                 for p in pieces:
                     work.add(len(o))
                     pb = _bbox(p)
@@ -1060,7 +1158,7 @@ class RoadOwnership:
             out.extend(pieces)
         return out, removed
 
-    def add(self, key, polys, fid):
+    def add(self, key: tuple[int, int, bool], polys: Iterable[Sequence[Vec2]], fid: str) -> None:
         cell = self.cells.setdefault(key, [])
         for q in polys:
             cell.append((_bbox(q), q, fid))
@@ -1084,22 +1182,23 @@ class _RibbonWelder:
     a running count exceeds them (counts only grow, so the final mesh would exceed them
     too; a final count exactly equal to the limit is accepted)."""
 
-    def __init__(self, tol_digits=6, max_vertices=None, max_triangles=None, fid=None):
+    def __init__(self, tol_digits: int = 6, max_vertices: int | None = None, max_triangles: int | None = None,
+                 fid: str | None = None) -> None:
         self.tol_digits = tol_digits
         self.max_vertices = max_vertices
         self.max_triangles = max_triangles
         self.fid = fid
-        self.index = {}
-        self.verts = []
-        self.tris = []
+        self.index: dict[tuple[float, float], int] = {}
+        self.verts: list[RibbonVert] = []
+        self.tris: RibbonTris = []
 
-    def _exceeded(self):
+    def _exceeded(self) -> NoReturn:
         raise RoadBudgetExceeded(
             f"{self.fid}: road ribbon needs more than the remaining scene budget ({self.max_vertices} vertices / "
             f"{self.max_triangles} triangles left; counting stopped at {len(self.verts)} vertices / "
             f"{len(self.tris)} triangles); choose a smaller area, coarser terrain or raise the limit")
 
-    def add(self, i, j, upper, polys):
+    def add(self, i: int, j: int, upper: bool, polys: Iterable[Sequence[Vec2]]) -> None:
         index, verts, tris, td = self.index, self.verts, self.tris, self.tol_digits
         mv = self.max_vertices
         for q in polys:
@@ -1113,7 +1212,7 @@ class _RibbonWelder:
                 pos = [verts[index[key]][:2] if key in index else p for key, p in zip(keys, tri)]
                 if _area2(pos) <= _MIN_AREA2:  # re-check on the welded positions (moved by <= 1e-6 m)
                     continue
-                ids = []
+                ids: list[int] = []
                 for key, p in zip(keys, pos):
                     v = index.get(key)
                     if v is None:
@@ -1127,7 +1226,8 @@ class _RibbonWelder:
                 tris.append(tuple(ids))
 
 
-def _ribbon_triangles(faces, tol_digits=6):
+def _ribbon_triangles(faces: Iterable[tuple[int, int, bool, Iterable[Sequence[Vec2]]]],
+                      tol_digits: int = 6) -> tuple[list[RibbonVert], RibbonTris]:
     """(vertices, triangles) of :class:`_RibbonWelder` for a list of (i, j, upper, polygons)."""
     w = _RibbonWelder(tol_digits)
     for i, j, upper, polys in faces:
@@ -1135,7 +1235,8 @@ def _ribbon_triangles(faces, tol_digits=6):
     return w.verts, w.tris
 
 
-def _ribbon_faces(grid, pieces, groups, work):
+def _ribbon_faces(grid: ElevationGrid, pieces: Sequence[Sequence[Vec2]], groups: Mapping[int, int],
+                  work: _RibbonWork) -> Iterator[tuple[int, int, bool, float, float, list[Sequence[Vec2]]]]:
     """Yield (i, j, upper, X0, Y0, polygons) per terrain triangle the ribbon touches, in
     (row, column, lower/upper) order.
 
@@ -1151,7 +1252,7 @@ def _ribbon_faces(grid, pieces, groups, work):
     if not order:
         return
     j_end = max(rows[pi][1] for pi in order)
-    active = []
+    active: list[int] = []
     nxt = 0
     for j in range(rows[order[0]][0], j_end + 1):
         while nxt < len(order) and rows[order[nxt]][0] <= j:
@@ -1160,7 +1261,7 @@ def _ribbon_faces(grid, pieces, groups, work):
         active = [pi for pi in active if rows[pi][1] >= j]
         if not active:
             continue
-        cells = {}
+        cells: dict[int, list[int]] = {}
         for pi in sorted(active):
             rng = _piece_row_cells(grid, pieces[pi], j)
             if rng is None:
@@ -1173,19 +1274,19 @@ def _ribbon_faces(grid, pieces, groups, work):
             X0 = grid.x0 + i * s
             c00, c10, c11, c01 = (X0, Y0), (X0 + s, Y0), (X0 + s, Y0 + s), (X0, Y0 + s)
             for upper, tri in ((False, (c00, c10, c11)), (True, (c00, c11, c01))):
-                by_group = {}
+                by_group: dict[int, list[Sequence[Vec2]]] = {}
                 for pi in cells[i]:
                     work.add()
                     q = _clip_convex(pieces[pi], tri)
                     if len(q) >= 3 and _area2(q) > 1e-12:
                         by_group.setdefault(groups[pi], []).append(q)
-                out = []
+                out: list[Sequence[Vec2]] = []
                 for qs in by_group.values():
                     if len(qs) == 1:
                         out.extend(qs)
                         continue
                     local = _overlap_groups(qs, work=work)
-                    comps = {}
+                    comps: dict[int, list[Sequence[Vec2]]] = {}
                     for k, g in local.items():
                         comps.setdefault(g, []).append(qs[k])
                     for comp in comps.values():
@@ -1201,16 +1302,17 @@ def _ribbon_faces(grid, pieces, groups, work):
 SLIVER_ULPS = 4  # a face whose xy width is within this many float32 ulps of its coordinates is rounding noise
 
 
-def _f32(v):
+def _f32(v: float) -> float:
     return struct.unpack("<f", struct.pack("<f", v))[0]
 
 
-def _f32_ulp(m):
+def _f32_ulp(m: float) -> float:
     """Spacing of float32 values at magnitude ``m``."""
     return 2.0 ** (math.frexp(max(m, 1e-30))[1] - 24)
 
 
-def drop_unstorable_slivers(local, tris, loc):
+def drop_unstorable_slivers(local: Sequence[Vec3], tris: Iterable[tuple[int, ...]], loc: Vec3) -> (
+        tuple[list[tuple[int, ...]], list[tuple[float, float]]] | tuple[None, None]):
     """Draped ribbons are stored as float32 world positions (the collision/visual precision). A
     needle-thin face (clip residue on a steep slope) is up-facing in double precision but can lose
     its orientation in that rounding while staying non-degenerate in 3D, and the package validator
@@ -1229,14 +1331,14 @@ def drop_unstorable_slivers(local, tris, loc):
     lf = [_f32(v) for v in loc]
     stores = ([(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local],
               [(_f32(_f32(x) + lf[0]), _f32(_f32(y) + lf[1]), _f32(_f32(z) + lf[2])) for x, y, z in local])
-    keep = []
-    dropped = []
+    keep: list[tuple[int, ...]] = []
+    dropped: list[tuple[float, float]] = []
     for t in tris:
         la, lb, lc = (local[i] for i in t)
         area2 = (lb[0] - la[0]) * (lc[1] - la[1]) - (lb[1] - la[1]) * (lc[0] - la[0])
         if area2 <= 0:
             return None, None
-        turned = None
+        turned: tuple[Vec3, Vec3, Vec3] | None = None
         for W in stores:
             a, b, c = (W[i] for i in t)
             nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
@@ -1254,7 +1356,10 @@ def drop_unstorable_slivers(local, tris, loc):
         keep.append(t)
     return keep, dropped
 
-def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WORK, ownership=None, limit=None):
+
+def build_road(feature: Feature, terrain: ElevationGrid, z_offset: float, reserve: Callable[..., None] | None = None,
+               max_work: int = DEFAULT_MAX_WORK, ownership: RoadOwnership | None = None,
+               limit: tuple[int, int] | None = None) -> tuple[MeshData | None, Vec3 | None, Prov]:
     """Returns (mesh, location, provenance), or (None, None, {"reason": ...}) if no valid ribbon exists.
 
     The footprint is the union of one rectangle per segment and a bevel triangle at
@@ -1283,8 +1388,8 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
     pieces = _road_pieces(pts, half)
     work = _RibbonWork(max_work)
     groups = _overlap_groups(pieces, work=work)
-    faces = []
-    removed = {}
+    faces: list[tuple[int, int, bool, list[Sequence[Vec2]]]] = []
+    removed: dict[str, float] = {}
     lim_v, lim_t = limit if limit is not None else (None, None)
     welder = _RibbonWelder(max_vertices=lim_v, max_triangles=lim_t, fid=feature.id)
     # Streamed: each terrain triangle's polygons are welded and counted as soon as they are
@@ -1313,13 +1418,14 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
     cy = sum(p[1] for p in pts) / len(pts)
     z0 = terrain_height(terrain, *pts[0]) - z_offset + ROAD_LIFT_M
     s = terrain.spacing
-    local = []
+    local: list[Vec3] = []
     for x, y, i, j, upper in verts:
         h = _plane_height(terrain.heights, i, j, upper, (x - (gx0 + i * s)) / s, (y - (gy0 + j * s)) / s)
         local.append((x - cx, y - cy, h - z_offset + ROAD_LIFT_M - z0))
-    tris, dropped = drop_unstorable_slivers(local, tris, (cx, cy, z0))
-    if dropped is None:
+    kept, dropped = drop_unstorable_slivers(local, tris, (cx, cy, z0))
+    if kept is None or dropped is None:
         return None, None, {"reason": "road ribbon would contain folded faces; not generated"}
+    tris = kept
     if dropped:
         # Ownership (below) still claims the pre-filter polygons: the gap is thinner than the storage can
         # represent, so claiming it keeps lower-priority roads from re-covering it with their own slivers.
@@ -1340,7 +1446,7 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
     if ownership is not None:
         for i, j, upper, polys in faces:
             ownership.add((j, i, upper), polys, feature.id)
-    prov = {"width": wprov, "width_m": round(width, 2),
+    prov: Prov = {"width": wprov, "width_m": round(width, 2),
             "vertical": f"draped on the terrain mesh (+{ROAD_LIFT_M:g} m), split at terrain cell edges and diagonals",
             "joins": "bevel",
             "footprint": "union of segment rectangles and join bevels; overlapping parts merged, no overlapping faces"}
@@ -1356,7 +1462,7 @@ def build_road(feature, terrain, z_offset, reserve=None, max_work=DEFAULT_MAX_WO
     return mesh, (cx, cy, z0), prov
 
 
-def _id_list(ids, limit=10):
+def _id_list(ids: Sequence[str], limit: int = 10) -> str:
     shown = ", ".join(ids[:limit])
     return shown if len(ids) <= limit else f"{shown} and {len(ids) - limit} more"
 
@@ -1364,24 +1470,28 @@ def _id_list(ids, limit=10):
 OVERLAP_Z_TOL_M = 1e-6  # Z ranges sharing less than this count as disjoint (stacked solids)
 
 
-def object_z_range(spec):
+def object_z_range(spec: ObjectSpec) -> tuple[float, float]:
     """(min, max) map-frame Z of an emitted object's mesh: vertices with the object's transform
     applied (rotation is about Z, so only scale and location affect Z)."""
+    assert spec.mesh is not None
     zs = [v[2] for v in spec.mesh.vertices]
     a, b = min(zs) * spec.scale + spec.location[2], max(zs) * spec.scale + spec.location[2]
     return min(a, b), max(a, b)
 
 
-def _check_building_overlaps(plan, candidates, built_specs):
+def _check_building_overlaps(plan: ScenePlan, candidates: Iterable[Mapping[str, str]],
+                             built_specs: Mapping[str, ObjectSpec]) -> None:
     """Warn about kept footprint overlaps (``Classified.overlap_candidates``) whose emitted solids
     share a vertical range: both objects were generated and their map-frame Z extents overlap.
     Pairs with one side not generated, or stacked solids (disjoint Z), are not reported.
     This is a conservative screen: overlapping whole-object Z extents may still clear each other
     within the shared footprint (e.g. under a sloped roof), so the report says "may intersect"."""
-    zr = {}
-    hits = {}
+    zr: dict[str, tuple[float, float]] = {}
+    hits: dict[str, list[str]] = {}
     for c in candidates:
         pid, oid = c.get("part"), c.get("outline")
+        if pid is None or oid is None:
+            continue  # no built spec exists under a None key
         sp, so = built_specs.get(pid), built_specs.get(oid)
         if sp is None or so is None:
             continue
@@ -1405,7 +1515,7 @@ def _check_building_overlaps(plan, candidates, built_specs):
 
 # --- Vegetation -------------------------------------------------------------
 
-def tree_mesh():
+def tree_mesh() -> MeshData:
     m = MeshData("tree_generic")
     sides = 6
     trunk_r, trunk_h, crown_r, crown_b, crown_t = 0.25, 2.6, 2.2, 2.0, 8.0
@@ -1434,7 +1544,8 @@ TREE_UNIT_HEIGHT = 8.0
 SCATTER_DENSITY = {"forest": 1.0 / 60.0, "grass": 1.0 / 600.0}
 
 
-def scatter_points(feature, density, rng, limit, bounds=None):
+def scatter_points(feature: Feature, density: float, rng: random.Random, limit: int,
+                   bounds: Extent | None = None) -> list[Vec2]:
     """Jittered grid points inside ``feature``. With ``bounds`` (x0, y0, x1, y1) only grid
     rows/columns that can jitter into ``bounds`` are visited, so the work is bounded by the
     scene extent (a polygon entirely inside ``bounds`` gets the same points as without it)."""
@@ -1447,7 +1558,7 @@ def scatter_points(feature, density, rng, limit, bounds=None):
         k0 = max(0, math.ceil((bounds[1] - step - y0 - step / 2) / step))
         c0 = max(0, math.ceil((bounds[0] - step - x0 - step / 2) / step))
         x1, y1 = min(x1, bounds[2] + step), min(y1, bounds[3] + step)
-    pts = []
+    pts: list[Vec2] = []
     y = y0 + step / 2 + k0 * step
     while y < y1 and len(pts) < limit:
         x = x0 + step / 2 + c0 * step
@@ -1472,10 +1583,11 @@ class PlanOptions:
     ``max_triangulation_work`` reject a single footprint (reported in
     ``invalid_features``)."""
 
-    def __init__(self, buildings=True, roads=True, trees=True, scatter=True, max_trees=2000, seed=0,
-                 max_objects=20_000, max_vertices=MAX_SCENE_VERTICES, max_triangles=MAX_SCENE_TRIANGLES,
-                 max_ring_vertices=MAX_RING_VERTICES, max_triangulation_work=DEFAULT_MAX_WORK,
-                 max_mask_validation_work=None, bridge_piers=True):
+    def __init__(self, buildings: bool = True, roads: bool = True, trees: bool = True, scatter: bool = True,
+                 max_trees: int = 2000, seed: int = 0, max_objects: int = 20_000,
+                 max_vertices: int = MAX_SCENE_VERTICES, max_triangles: int = MAX_SCENE_TRIANGLES,
+                 max_ring_vertices: int = MAX_RING_VERTICES, max_triangulation_work: int = DEFAULT_MAX_WORK,
+                 max_mask_validation_work: int | None = None, bridge_piers: bool = True) -> None:
         self.bridge_piers = bridge_piers
         self.buildings = buildings
         self.roads = roads
@@ -1496,8 +1608,10 @@ TERRAIN_SURFACE = "piecewise planar, cells split along the (i,j)-(i+1,j+1) diago
 DSM_CORRECTED_SURFACE = "inferred:DSM corrected (buildings/trees/forest/bridges masked); " + TERRAIN_SURFACE
 
 
-def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RING_VERTICES,
-                  max_work=DEFAULT_MAX_WORK, excluded=None, work_budget=None, stats=None):
+def dsm_obstacles(classified: Classified, areas: Sequence[Feature] | None = None, extent: Extent | None = None,
+                  max_ring_vertices: int = MAX_RING_VERTICES, max_work: int = DEFAULT_MAX_WORK,
+                  excluded: dict[str, int] | None = None, work_budget: int | None = None,
+                  stats: dict[str, int] | None = None) -> Obstacles:
     """Mask inputs for :func:`dsm.apply_correction` from classified features, whether or not they are
     generated: every building footprint (outlines replaced by building:part features and footprints whose
     centroid lies outside the area included; holes kept), OSM trees (``mask_trees`` outside the area
@@ -1526,7 +1640,7 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
         excluded = {}
     if work_budget is None:
         work_budget = dsm.MASK_VALIDATION_WORK_BUDGET
-    used = [getattr(classified, "mask_work", 0)]
+    used: list[int] = [getattr(classified, "mask_work", 0)]
     suppressed = getattr(classified, "mask_suppressed", ())
     if areas is None:
         areas = [a for a in classified.areas if not landcover_ring_problem(a, max_work)]
@@ -1534,12 +1648,13 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
             1 for a in areas if a.tags.get("_class") == "forest")
         if bad:
             excluded["forest_areas"] = bad
-    near = (lambda bbox, m: True) if extent is None else (lambda bbox, m: _rect_overlaps(bbox, _expand(extent, m)))
+    near: Callable[[Extent, float], bool] = (
+        (lambda bbox, m: True) if extent is None else (lambda bbox, m: _rect_overlaps(bbox, _expand(extent, m))))
 
-    def geometry_key(poly):
+    def geometry_key(poly: Polygon) -> tuple[tuple[tuple[float, ...], ...], ...]:
         return (tuple(map(tuple, poly.outer)),) + tuple(tuple(map(tuple, h)) for h in poly.holes)
 
-    def problem(poly, ring_vertices):
+    def problem(poly: Polygon, ring_vertices: int | None) -> str | None:
         remaining = work_budget - used[0]
         if remaining <= 0:
             raise dsm.MaskWorkExceeded(f"DSM mask validation needs more than {work_budget} ring topology tests "
@@ -1558,7 +1673,10 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
         if exceeded or used[0] > work_budget:
             raise dsm.MaskWorkExceeded(exceeded or f"DSM mask validation needs more than {work_budget} ring "
                                                    "topology tests (the mask validation work budget)")
-        buildings, seen, keys, bad = [], set(), {}, 0
+        buildings: list[Sequence[Ring]] = []
+        seen: set[tuple[str, int]] = set()
+        keys: dict[tuple[tuple[tuple[float, ...], ...], ...], str | None] = {}
+        bad = 0
         for f in (list(classified.buildings) + list(getattr(classified, "outline_features", {}).values())
                   + list(getattr(classified, "outside_buildings", ()))):
             key = (f.id, id(f.geometry))
@@ -1576,9 +1694,11 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
                 bad += 1
         if bad:
             excluded["buildings"] = bad
-        trees = [tuple(f.geometry) for f in list(classified.trees) + list(getattr(classified, "mask_trees", ()))
-                 if near((f.geometry[0], f.geometry[1]) * 2, dsm.TREE_RADIUS_M)]
-        forests, keys, bad = [], {}, 0
+        trees: list[Point] = [tuple(f.geometry) for f in list(classified.trees) + list(getattr(classified, "mask_trees", ()))
+                              if near((f.geometry[0], f.geometry[1]) * 2, dsm.TREE_RADIUS_M)]
+        forests: list[Sequence[Ring]] = []
+        keys = {}
+        bad = 0
         for a in areas:   # validated by the caller (they also colour the terrain): not charged again
             if (a.tags.get("_class") == "forest" and a.id.split("#")[0] not in suppressed
                     and near(a.geometry.bbox(), 0.0)):
@@ -1600,20 +1720,21 @@ def dsm_obstacles(classified, areas=None, extent=None, max_ring_vertices=MAX_RIN
     finally:
         if stats is not None:
             stats["validation_work"] = used[0]
-    bridges = []
-    widths = {}   # fragments of one way share its tags: its width is parsed once, not per fragment
+    bridges: list[tuple[Sequence[Point], float]] = []
+    widths: dict[int, tuple[Mapping[str, str], float]] = {}   # fragments of one way share its tags: its width is parsed once, not per fragment
     for f in getattr(classified, "bridges", ()):
-        key = id(f.tags)
-        if key not in widths:
-            widths[key] = (f.tags, road_width(f.tags)[0])   # the tags kept alive so the id stays unique
-        pts, width = list(f.geometry), widths[key][1]
+        tags_id = id(f.tags)
+        if tags_id not in widths:
+            widths[tags_id] = (f.tags, road_width(f.tags)[0])   # the tags kept alive so the id stays unique
+        pts, width = list(f.geometry), widths[tags_id][1]
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         if near((min(xs), min(ys), max(xs), max(ys)), width / 2.0 + dsm.BRIDGE_BUFFER_M):
             bridges.append((pts, width))
     return buildings, trees, forests, bridges
 
 
-def build_plan(area, terrain, classified, options=None, dsm_correction=None):
+def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, options: PlanOptions | None = None,
+               dsm_correction: bool | None = None) -> ScenePlan:
     """Scene plan from the elevation grid ``terrain`` and the classified features.
 
     ``dsm_correction``: None (auto: on for surface-model sources such as Copernicus GLO-30, off for local
@@ -1626,7 +1747,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
     opts = options or PlanOptions()
     # Landcover ring topology is validated first: only valid polygons colour the terrain, drive scatter
     # and (forests) feed the DSM mask, so an invalid ring set never lowers terrain outside its feature.
-    areas, area_invalid = [], []
+    areas: list[Feature] = []
+    area_invalid: list[InvalidEntry] = []
     for a in classified.areas:
         problem = landcover_ring_problem(a, opts.max_triangulation_work)
         if problem:
@@ -1635,9 +1757,11 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         else:
             areas.append(a)
     enabled, _ = dsm.resolve(dsm_correction, terrain.provenance)
-    excluded, mask_stats, skip = {}, {}, None
+    excluded: dict[str, int] = {}
+    mask_stats: dict[str, int] = {}
+    skip: str | None = None
     unavailable = getattr(classified, "mask_unavailable", None)
-    obstacles = ((), (), (), ())
+    obstacles: Obstacles = ((), (), (), ())
     if enabled:
         bad_forests = sum(1 for e in area_invalid if e["reason"].startswith("forest area:"))
         if bad_forests:
@@ -1667,20 +1791,22 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
     budget = SceneBudget(opts.max_vertices, opts.max_triangles)
     invalid = plan.report["invalid_features"]
 
-    def add(spec):
+    def add(spec: ObjectSpec) -> None:
         if len(plan.objects) >= opts.max_objects:
             raise LimitError(f"{spec.mb_id}: object limit {opts.max_objects} reached")
         plan.objects.append(spec)
 
     budget.reserve("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
-    coverage = {}
+    coverage: dict[str, int] = {}
     tmesh = build_terrain(terrain, z_offset, areas, coverage)
-    tmesh.grid_layout = (terrain.nx, terrain.ny, terrain.x0, terrain.y0, terrain.spacing)   # lets probes find triangles by cell
+    tmesh.grid_layout = (terrain.nx, terrain.ny, terrain.x0, terrain.y0, terrain.spacing)  # lets probes find triangles by cell
     budget.commit(tmesh)
     if correction["applied"]:
         plan.inferred("terrain.surface")
+    provider = terrain.provenance.get("provider")
     add(ObjectSpec("terrain", "terrain:grid", "terrain", "Terrain", mesh=tmesh,
-                   provenance={"elevation": terrain.provenance.get("provider"), "spacing_m": terrain.spacing,
+                   provenance={"elevation": provider if isinstance(provider, str) else None,
+                               "spacing_m": terrain.spacing,
                                "surface": DSM_CORRECTED_SURFACE if correction["applied"] else TERRAIN_SURFACE}))
     for a in areas:
         if not coverage.get(a.id):
@@ -1695,11 +1821,11 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             "nothing is generated outside it (buildings and trees there are reported invalid, roads are trimmed, "
             "landcover only colours terrain cells)")
 
-    footprints = []
-    road_segments = []
+    footprints: list[tuple[Polygon, Extent]] = []
+    road_segments: list[Segment] = []
     ctx = StageContext(area, terrain, z_offset, budget, opts, add, classified, road_segments)
     if opts.buildings:
-        def build_one(f, extra_prov=None, reason_prefix=""):
+        def build_one(f: Feature, extra_prov: Prov | None = None, reason_prefix: str = "") -> bool:
             """Build one footprint; returns True if generated, else reports it in invalid_features."""
             pre = passages.take_prebuilt(ctx, f.id)
             try:
@@ -1740,8 +1866,8 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
             plan.count("buildings")
             return True
 
-        built_specs = {}
-        built = set()
+        built_specs: dict[str, ObjectSpec] = {}
+        built: set[str] = set()
         for f in classified.buildings:
             for piece in passages.split(plan, ctx, f):
                 if build_one(piece, getattr(piece, "extra_prov", None)):
@@ -1754,7 +1880,9 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         # declared outline); they are absent from ``classified.buildings`` and so count as rejected.
         outline_parts = getattr(classified, "outline_parts", {})
         outline_features = getattr(classified, "outline_features", {})
-        replaced, restored, partial = [], [], []
+        replaced: list[str] = []
+        restored: list[OutlineRestored] = []
+        partial: list[OutlinePartial] = []
         for oid in classified.replaced_outlines:
             pids = outline_parts.get(oid)
             if not pids or oid not in outline_features:
@@ -1795,7 +1923,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
         # are built in ownership order so overlapping ground belongs to exactly one road; the
         # objects are listed in the original feature order.
         ownership = RoadOwnership()
-        road_specs = {}
+        road_specs: dict[int, ObjectSpec] = {}
         passage_roads = passages.handled_roads(ctx)
         road_notes = {f.id: note for f, note in passage_roads}
         road_feats = list(classified.roads) + [f for f, _ in passage_roads]
@@ -1810,7 +1938,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                 budget.release()
                 invalid.append({"id": f.id, "reason": str(e)})
                 continue
-            if mesh is None:
+            if mesh is None or origin is None:
                 budget.release()
                 if prov.get("covered_by"):
                     plan.report["warnings"].append(f"{f.id}: {prov['reason']}")
@@ -1819,10 +1947,10 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                     for a, b in zip(f.geometry, f.geometry[1:]):
                         road_segments.append((a, b, w / 2 + 1.0))
                 else:
-                    invalid.append({"id": f.id, "reason": prov["reason"]})
+                    invalid.append({"id": f.id, "reason": prov_note(prov, "reason")})
                 continue
             budget.commit(mesh)
-            if prov["width"].startswith("inferred"):
+            if prov_note(prov, "width").startswith("inferred"):
                 plan.inferred("road.width")
             if "overlap" in prov:
                 plan.count("roads_clipped_by_higher_priority")
@@ -1832,7 +1960,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                 plan.count("roads_trimmed_at_terrain_edge")
             road_specs[order[id(f)]] = ObjectSpec(mesh.name, f.id, "road", "Roads", mesh=mesh, location=origin,
                                                   provenance=prov)
-            w = prov["width_m"]
+            w = prov_metres(prov, "width_m")
             for a, b in zip(f.geometry, f.geometry[1:]):
                 road_segments.append((a, b, w / 2 + 1.0))
             plan.count("roads")
@@ -1855,7 +1983,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                                               max(a[0], b[0]) + r, max(a[1], b[1]) + r)) for a, b, r in ctx.keepout],
                                 cell=25.0, bounds=scene)
 
-        def in_segment(buckets, x, y):
+        def in_segment(buckets: _Buckets[Segment], x: float, y: float) -> bool:
             for a, b, r in buckets.query(x, y):
                 dx, dy = b[0] - a[0], b[1] - a[1]
                 L = dx * dx + dy * dy
@@ -1864,7 +1992,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
                     return True
             return False
 
-        def blocked(x, y):
+        def blocked(x: float, y: float) -> bool:
             for poly in fp_buckets.query(x, y):
                 if poly.contains(x, y):
                     return True
@@ -1934,7 +2062,7 @@ def build_plan(area, terrain, classified, options=None, dsm_correction=None):
     plan.report["z_offset_m"] = z_offset
     plan.report["budget"] = budget.to_dict()
     # Ensure unique object names (Blender truncates at 63 bytes; keep ours shorter).
-    seen = {}
+    seen: dict[str, int] = {}
     for o in plan.objects:
         base = o.name[:56]
         n = seen.get(base, 0)

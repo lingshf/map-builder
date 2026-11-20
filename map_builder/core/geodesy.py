@@ -25,6 +25,7 @@ Axis conventions (all exact, no scaling)
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 from .errors import AreaError
 
@@ -128,7 +129,7 @@ def gltf_to_map(p: Vec3) -> Vec3:
     return (gx, -gz, gy)
 
 
-def map_to_unity_x_negated(p: Vec3) -> Vec3:
+def map_to_unity_x_negated(p: Sequence[float]) -> Vec3:
     x, y, z = p
     return (-x, z, -y)
 
