@@ -386,6 +386,28 @@ class CrossingTest(unittest.TestCase):
         self.assertIs(prov["clearance_met"], False)
         self.assertLess(prov["clearance_m"], 0.0)
 
+    @staticmethod
+    def _valley_bridge(side_x):
+        return make_scene([([(-100, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
+                           ([(side_x, -45), (side_x, 45)], {"highway": "residential"})],
+                          valley_height, width=300.0)
+
+    def test_a_road_meeting_an_unsplit_approach_gives_no_clearance_warning(self):
+        plan, ids, _ = self._valley_bridge(-60)   # on the plateau, short of the valley: the approach run
+        prov = objects(plan, "bridge")[0].provenance
+        self.assertEqual([w for w in plan.report["warnings"] if "clearance" in w], [])
+        self.assertIsNot(prov["clearance_met"], False)
+        self.assertIn(f"{ids[0]}:under", [p["id"] for p in plan.passage_probes])
+
+    def test_a_low_middle_span_still_warns(self):
+        plan, ids, _ = make_scene(
+            [([(-40, 0), (40, 0)], {"highway": "secondary", "bridge": "yes"}),
+             ([(0, -45), (0, 45)], {"highway": "residential"})],
+            lambda x, y: 0.0, width=300.0)   # never 5 m over the ground: no approach run to exempt
+        self.assertIs(objects(plan, "bridge")[0].provenance["clearance_met"], False)
+        self.assertTrue(any(ids[0] in w and "crossing road" in w and "clearance" in w
+                            for w in plan.report["warnings"]))
+
     def test_connected_approach_roads_give_no_false_low_clearance(self):
         plan, ids, _ = make_scene(
             self.ROADS + [([(-100, 0), (100, 0)], {"highway": "residential", "bridge": "yes", "layer": "1"})],
