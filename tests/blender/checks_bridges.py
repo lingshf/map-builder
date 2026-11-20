@@ -81,7 +81,7 @@ def run(out_dir):
     # valley crossing: has the conditional ``under`` probe (clearance >= 4 m)
     dem, osm = _write_valley(out_dir)
     s.area_mode = "CENTER"
-    s.lat, s.lon, s.width, s.height = LAT, LON, 200.0, 100.0
+    s.lat, s.lon, s.width, s.height = str(LAT), str(LON), 200.0, 100.0
     s.elevation_source, s.elevation_file = "file", dem
     s.osm_source, s.osm_file = "file", osm
     s.export_path = pkg

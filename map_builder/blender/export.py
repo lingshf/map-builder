@@ -26,7 +26,7 @@ import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
-from ..core.pipeline import filter_passage_probes
+from ..core.pipeline import filter_passage_probes, merge_dropped
 from .bake import (DEFAULT_MATERIAL, WHITE, ExportError, bake_object, degenerate_count, export_baked,
                    export_name_clashes, outside_area, principled_omissions)
 from .scene_build import META_KEY
@@ -424,6 +424,6 @@ def export_map(context, path, name, heightfield_spacing=0.0, root=None):
                                            heightfield_spacing=heightfield_spacing or None,
                                            passage_probes=probes)
     report["edits"] = edits
-    report["passage_probes_dropped"] = filter_passage_probes(probes, (o["mb_id"] for o in manifest["objects"]),
-                                                             meta["generated_ids"])[1]
+    deleted = filter_passage_probes(probes, (o["mb_id"] for o in manifest["objects"]), meta["generated_ids"])[1]
+    report["passage_probes_dropped"] = merge_dropped(report, deleted)
     return manifest, result, report, edits

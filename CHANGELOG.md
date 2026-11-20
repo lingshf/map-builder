@@ -6,6 +6,15 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+### Fixed
+
+- Blender and the CLI now emit the same passage probes for the same input. The Blender centre latitude/longitude
+  is stored as text at full double precision (a float32 property moved the area by centimetres, which changed the
+  DSM mask and a probe on Pittsburgh), and the Blender seed default is 1, as in the CLI. A `.blend` saved with
+  an earlier version falls back to centre 0 / 0: re-enter the centre.
+- `report.json` `passage_probes_dropped` keeps the generation-time `{id, reason}` entries on export; probes of
+  deleted features are appended as `{id, reason: "feature_deleted"}` (before: replaced by bare ids).
+
 ## [0.3.0] - 2026-11-20
 
 "Passages, roofs and the real-data v2 demo" (end of v2). **Release

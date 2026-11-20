@@ -82,12 +82,7 @@ atomically writes the ZIP package. A failed export preserves the previous file.
 `report.json` carries warnings, provenance and omissions; do not treat an
 otherwise `VALID` package as proof every passage is clear.
 
-**Known report discrepancy:** `structures.finalize_probes` records generation
-omissions as `{id, reason}` in `passage_probes_dropped`, but
-`pipeline.export_package` overwrites that list with IDs of features deleted
-from the exported scene. The package contract describes the former entries.
-Consequently the exported report can lose generation-time omissions; inspect
-or save the Blender generation report before export replaces the report text.
+The exported `passage_probes_dropped` keeps the generation-time `{id, reason}` entries and appends each probe of a feature deleted in Blender as `{id, reason: "feature_deleted"}`.
 
 ## Package and consumer
 

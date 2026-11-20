@@ -6,6 +6,7 @@ the report Text ('MapBuilder Report') is written only after a successful operati
 report is never overwritten by a failure.
 """
 
+import math
 import os
 
 import bpy
@@ -57,7 +58,18 @@ def make_settings(s):
 def make_area(s):
     if s.area_mode == "BBOX":
         return Area.from_bbox(s.bbox_south, s.bbox_west, s.bbox_north, s.bbox_east)
-    return Area(s.lat, s.lon, s.width, s.height)
+    return Area(parse_degrees(s.lat, "Latitude"), parse_degrees(s.lon, "Longitude"), s.width, s.height)
+
+
+def parse_degrees(text, label):
+    """The centre coordinate typed in the UI as a double (Area validates the range)."""
+    try:
+        value = float(text.strip().replace(",", "."))
+    except ValueError:
+        raise SettingsInputError(f"{label} must be a number in degrees, e.g. 40.437") from None
+    if not math.isfinite(value):
+        raise SettingsInputError(f"{label} must be a finite number")
+    return value
 
 
 def online_access_problem(values):

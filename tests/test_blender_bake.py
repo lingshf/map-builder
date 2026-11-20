@@ -198,12 +198,27 @@ class BakeExportTest(unittest.TestCase):
         self.assertTrue(result.ok, result.summary())
         self.assertEqual(manifest["passage_probes"], [keep])
         with zipfile.ZipFile(path) as z:
-            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"], ["p-gone"])
+            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"],
+                             [{"id": "p-gone", "reason": "feature_deleted"}])
         stray = dict(keep, id="p-stray", feature="osm:way/999999")      # never part of the plan: refused
         with self.assertRaises(PackageError):
             export_baked(f"{self.tmp}/stray.mbmap", "probes", self.area, self.sources, baked, self.generated,
                          MATERIALS, {}, created_utc=UTC, passage_probes=[keep, stray])
         self.assertFalse(os.path.exists(f"{self.tmp}/stray.mbmap"))
+
+    def test_generation_time_drops_survive_the_export(self):
+        baked, moved, deleted, *_ = self.edited_scene()
+        path = f"{self.tmp}/probes-gen.mbmap"
+        hi = 400.0
+        keep = {"id": "p-keep", "kind": "bridge", "feature": moved.mb_id, "path_map": [[0, 0, hi], [10, 0, hi]],
+                "radius_m": 1.0}
+        gone = dict(keep, id="p-gone", feature=deleted.mb_id)
+        gen = {"id": "osm:way/7:passage", "reason": "the passage road was not generated"}
+        export_baked(path, "probes", self.area, self.sources, baked, self.generated, MATERIALS,
+                     {"passage_probes_dropped": [gen]}, created_utc=UTC, passage_probes=[keep, gone])
+        with zipfile.ZipFile(path) as z:
+            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"],
+                             [gen, {"id": "p-gone", "reason": "feature_deleted"}])
 
     def test_malformed_probe_metadata_fails_export_cleanly(self):
         """Review round 2: a JSON null is malformed (not "no probes"), and oversized integers give a

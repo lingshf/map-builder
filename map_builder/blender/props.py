@@ -38,10 +38,12 @@ class MB_Settings(bpy.types.PropertyGroup):
         ("CENTER", "Centre + size", "WGS84 centre latitude/longitude and width/height in metres"),
         ("BBOX", "Bounding box", "South, west, north, east in WGS84 degrees"),
     ], default="CENTER")
-    lat: FloatProperty(name="Latitude", description="Area centre latitude (WGS84, degrees)", default=0.0,
-                       min=-85.0, max=85.0, precision=6)
-    lon: FloatProperty(name="Longitude", description="Area centre longitude (WGS84, degrees)", default=0.0,
-                       min=-180.0, max=180.0, precision=6)
+    # strings, not FloatProperty: Blender stores float properties as float32 (centimetre error at 40 N), which
+    # moves the area and changes terrain and probes against the CLI
+    lat: StringProperty(name="Latitude", description="Area centre latitude (WGS84, degrees, full precision)",
+                        default="0.0")
+    lon: StringProperty(name="Longitude", description="Area centre longitude (WGS84, degrees, full precision)",
+                        default="0.0")
     width: FloatProperty(name="Width (m)", description="East-west extent in metres", default=1000.0,
                          min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
     height: FloatProperty(name="Height (m)", description="North-south extent in metres", default=1000.0,
@@ -91,7 +93,7 @@ class MB_Settings(bpy.types.PropertyGroup):
     scatter: BoolProperty(name="Scatter vegetation", default=True,
                           description="Procedural (inferred) trees inside forests and parks")
     max_trees: IntProperty(name="Max trees", default=2000, min=0, max=20000)
-    seed: IntProperty(name="Seed", default=0, min=0)
+    seed: IntProperty(name="Seed", default=1, min=0)
 
     package_name: StringProperty(name="Map name", default="my_map", update=_scrub("package_name"))
     export_collection: PointerProperty(name="Map collection", type=bpy.types.Collection, poll=_is_map_collection,
