@@ -15,6 +15,8 @@ The bytes are reproducible on any platform and Python >= 3.11:
   does not depend on which zlib (or zlib-ng) Python was built with.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import heapq
@@ -23,6 +25,12 @@ import random
 import struct
 import sys
 import zlib
+from collections.abc import Callable, Iterable, Sequence
+
+Rgb = tuple[int, ...]             # (r, g, b), 0..255
+Rows = list[list[Rgb]]            # image rows of 8-bit RGB pixels
+Field = list[list[float]]         # a size x size scalar field
+Color = tuple[float, ...]
 
 SIZE = 256
 SEED = 56   # D56
@@ -35,11 +43,11 @@ COMMAND = "python -m tools.textures.make_textures"
 
 # ---------------------------------------------------------------- noise helpers (tileable)
 
-def _smooth(t):
+def _smooth(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
-def value_noise(rng, cells, size=SIZE):
+def value_noise(rng: random.Random, cells: int, size: int = SIZE) -> Field:
     """Periodic value noise in [0, 1]: a ``cells`` x ``cells`` random lattice, smoothstep-blended.
     It wraps at the image edges, so the result tiles."""
     lat = [[rng.random() for _ in range(cells)] for _ in range(cells)]
@@ -57,7 +65,7 @@ def value_noise(rng, cells, size=SIZE):
     return out
 
 
-def fbm(rng, octaves, size=SIZE):
+def fbm(rng: random.Random, octaves: Sequence[tuple[int, float]], size: int = SIZE) -> Field:
     """Weighted sum of value-noise octaves ``[(cells, weight), ...]``, normalised to [0, 1]."""
     total = sum(w for _, w in octaves)
     acc = [[0.0] * size for _ in range(size)]
@@ -68,30 +76,32 @@ def fbm(rng, octaves, size=SIZE):
     return acc
 
 
-def white(rng, size=SIZE):
+def white(rng: random.Random, size: int = SIZE) -> Field:
     return [[rng.random() for _ in range(size)] for _ in range(size)]
 
 
-def _clamp(v):
+def _clamp(v: float) -> int:
     v = int(v + 0.5) if v > 0 else 0
     return 255 if v > 255 else v
 
 
-def _mix(c0, c1, t):
+def _mix(c0: Color, c1: Color, t: float) -> Color:
     return tuple(a + (b - a) * t for a, b in zip(c0, c1))
 
 
 # ---------------------------------------------------------------- the textures (RGB rows)
 
-def facade(rng):
+def facade(rng: random.Random) -> Rows:
     """Plaster with a window-grid hint: one window per 3 m x 3 m tile."""
     low, grain = fbm(rng, [(4, 3), (16, 2), (64, 1)]), white(rng)
+    base: Color
     base, frame, glass_top, glass_bot = (214, 204, 186), (236, 234, 228), (88, 100, 112), (58, 68, 80)
     x0, x1, y0, y1, fw = 80, 176, 60, 196, 7
-    rows = []
+    rows: Rows = []
     for y in range(SIZE):
-        row = []
+        row: list[Rgb] = []
         for x in range(SIZE):
+            c: Color
             if x0 <= x < x1 and y0 <= y < y1:
                 if x < x0 + fw or x >= x1 - fw or y < y0 + fw or y >= y1 - fw or abs(x - 128) < 3:
                     c = frame
@@ -107,7 +117,7 @@ def facade(rng):
     return rows
 
 
-def roof_tiles(rng):
+def roof_tiles(rng: random.Random) -> Rows:
     """Clay roof tiles: 8 courses of 8 tiles per 2 m tile, alternate courses offset by half a tile."""
     tone = [[0.85 + 0.25 * rng.random() for _ in range(8)] for _ in range(8)]
     low, grain = fbm(rng, [(8, 2), (32, 1)]), white(rng)
@@ -132,7 +142,7 @@ def roof_tiles(rng):
     return rows
 
 
-def roof_gravel(rng):
+def roof_gravel(rng: random.Random) -> Rows:
     """Flat-roof gravel: speckled grey pebbles with a few warm stones."""
     big, small, warm, grain = value_noise(rng, 64), value_noise(rng, 128), value_noise(rng, 32), white(rng)
     dark, light, tan = (88, 86, 82), (184, 180, 172), (170, 150, 120)
@@ -151,7 +161,7 @@ def roof_gravel(rng):
     return rows
 
 
-def asphalt(rng):
+def asphalt(rng: random.Random) -> Rows:
     """Asphalt with lane-agnostic noise: dark binder, light aggregate specks, wear patches."""
     patch, fine, grain = fbm(rng, [(4, 2), (8, 1)]), value_noise(rng, 128), white(rng)
     base, stone = (60, 60, 62), (150, 148, 142)
@@ -170,7 +180,7 @@ def asphalt(rng):
     return rows
 
 
-def terrain(rng):
+def terrain(rng: random.Random) -> Rows:
     """Terrain: grass with soil patches (8 m tile)."""
     mask, detail, blades = fbm(rng, [(4, 3), (8, 2), (16, 1)]), value_noise(rng, 64), white(rng)
     grass, dry, soil = (92, 126, 58), (128, 134, 72), (122, 100, 72)
@@ -189,7 +199,7 @@ def terrain(rng):
     return rows
 
 
-def concrete(rng):
+def concrete(rng: random.Random) -> Rows:
     """Cast concrete: low-contrast mottling, fine pores and 2 m formwork joints."""
     low, fine, grain = fbm(rng, [(4, 2), (16, 2), (64, 1)]), value_noise(rng, 128), white(rng)
     base = (172, 170, 164)
@@ -208,7 +218,7 @@ def concrete(rng):
     return rows
 
 
-TEXTURES = [   # (file name, generator); the order fixes each texture's seed
+TEXTURES: list[tuple[str, Callable[[random.Random], Rows]]] = [   # (file name, generator); the order fixes each texture's seed
     ("facade_plaster.png", facade),
     ("roof_tiles.png", roof_tiles),
     ("roof_gravel.png", roof_gravel),
@@ -220,12 +230,12 @@ TEXTURES = [   # (file name, generator); the order fixes each texture's seed
 
 # ---------------------------------------------------------------- deterministic PNG writer
 
-def _huffman_lengths(freqs, limit):
+def _huffman_lengths(freqs: Iterable[int], limit: int) -> list[int]:
     """Code lengths of a Huffman code over ``freqs`` (zero frequency -> length 0), at most ``limit``.
     Ties are broken by symbol index, so the result is deterministic."""
     freqs = list(freqs)
     while True:
-        heap = [(f, i, (i,)) for i, f in enumerate(freqs) if f > 0]
+        heap: list[tuple[int, int, tuple[int, ...]]] = [(f, i, (i,)) for i, f in enumerate(freqs) if f > 0]
         lengths = [0] * len(freqs)
         if len(heap) == 1:
             lengths[heap[0][1]] = 1
@@ -244,7 +254,7 @@ def _huffman_lengths(freqs, limit):
         freqs = [(f + 1) // 2 if f else 0 for f in freqs]   # flatten and retry
 
 
-def _canonical(lengths):
+def _canonical(lengths: Sequence[int]) -> dict[int, str]:
     """Canonical deflate codes (RFC 1951 3.2.2): {symbol: bit string, most significant bit first}."""
     bl_count = [0] * 16
     for n in lengths:
@@ -262,7 +272,7 @@ def _canonical(lengths):
     return out
 
 
-def _lsb(value, nbits):
+def _lsb(value: int, nbits: int) -> str:
     """A header field in deflate stream order (least significant bit first)."""
     return format(value, f"0{nbits}b")[::-1]
 
@@ -270,7 +280,7 @@ def _lsb(value, nbits):
 CL_ORDER = (16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15)
 
 
-def deflate_literals(data):
+def deflate_literals(data: bytes) -> bytes:
     """One final dynamic-Huffman deflate block of literals only (no LZ77 matches), in a zlib wrapper.
     The stream is built as a string of bits in stream order, then packed in one step."""
     freqs = [0] * 257
@@ -298,7 +308,7 @@ def deflate_literals(data):
     return b"\x78\x01" + body + struct.pack(">I", zlib.adler32(data))
 
 
-def _paeth_rows(rows):
+def _paeth_rows(rows: Rows) -> bytes:
     """Filter type 4 (Paeth) on every scanline of 8-bit RGB rows."""
     out, prev = bytearray(), bytes(len(rows[0]) * 3)
     for row in rows:
@@ -316,9 +326,9 @@ def _paeth_rows(rows):
     return bytes(out)
 
 
-def png_bytes(rows):
+def png_bytes(rows: Rows) -> bytes:
     """An 8-bit RGB PNG from rows of (r, g, b) tuples (no ancillary chunks, no timestamps)."""
-    def chunk(tag, data):
+    def chunk(tag: bytes, data: bytes) -> bytes:
         body = tag + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
     h, w = len(rows), len(rows[0])
@@ -329,13 +339,13 @@ def png_bytes(rows):
 
 # ---------------------------------------------------------------- outputs
 
-def generate_one(index):
+def generate_one(index: int) -> tuple[str, bytes]:
     """(file name, PNG bytes) of texture ``index`` in :data:`TEXTURES`."""
     name, fn = TEXTURES[index]
     return name, png_bytes(fn(random.Random(SEED * 1000 + index)))
 
 
-def license_text(pngs):
+def license_text(pngs: dict[str, bytes]) -> bytes:
     """LICENSE-textures.txt for ``{file name: PNG bytes}``."""
     with open(CC0_TEXT, encoding="utf-8") as f:
         cc0 = f.read()
@@ -360,19 +370,19 @@ def license_text(pngs):
     return ("\n".join(lines) + "\n" + cc0).encode("utf-8")
 
 
-def _canon(name, data):
+def _canon(name: str, data: bytes) -> bytes:
     """Bytes for comparison: PNGs exactly; the licence text with CRLF folded to LF, because a Windows
     checkout with ``core.autocrlf`` may rewrite its line endings (git never converts the binary PNGs)."""
     return data.replace(b"\r\n", b"\n") if name.endswith(".txt") else data
 
 
-def generate():
+def generate() -> dict[str, bytes]:
     """All output files: {file name: bytes}, including LICENSE-textures.txt."""
     pngs = dict(generate_one(i) for i in range(len(TEXTURES)))
     return {**pngs, LICENSE_NAME: license_text(pngs)}
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default=OUT_DIR, help="output directory (default: the package assets)")
     ap.add_argument("--check", action="store_true", help="compare with --out instead of writing")

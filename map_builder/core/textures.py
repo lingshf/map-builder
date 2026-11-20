@@ -5,8 +5,15 @@ The PNGs in ``map_builder/assets/textures/`` are generated offline by
 run time. They are our own work, dedicated to CC0 1.0, with no third-party or map imagery (D2).
 """
 
+from __future__ import annotations
+
 import hashlib
+from collections.abc import Iterable
 from importlib import resources
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from importlib.resources.abc import Traversable
 
 from .errors import PackageError
 
@@ -16,7 +23,7 @@ _PKG = __name__.rsplit(".", 2)[0]
 LICENSE_FILE = "LICENSE-textures.txt"
 
 # material name: (png file, tile size in metres, roughness)
-TEXTURES = {
+TEXTURES: dict[str, tuple[str, float, float]] = {
     "MB Facade": ("facade_plaster.png", 3.0, 0.85),
     "MB Roof": ("roof_tiles.png", 2.0, 0.7),
     "MB Roof Flat": ("roof_gravel.png", 2.0, 0.9),
@@ -28,7 +35,7 @@ TEXTURES = {
 
 NOTICE_NAME = "map-builder procedural textures"
 NOTICE_ATTRIBUTION = "map-builder procedural textures (own work)"
-NOTICE_LICENSE = {
+NOTICE_LICENSE: dict[str, str] = {
     "id": "CC0-1.0",
     "name": "CC0 1.0 Universal (public domain dedication)",
     "url": "https://creativecommons.org/publicdomain/zero/1.0/",
@@ -37,39 +44,39 @@ NOTICE_LICENSE = {
 }
 
 
-def _entry(name):
+def _entry(name: str) -> tuple[str, float, float]:
     if name not in TEXTURES:
         raise PackageError(f"textures: no texture for material {name!r}")
     return TEXTURES[name]
 
 
-def _file(filename):
+def _file(filename: str) -> Traversable:
     return resources.files(_PKG).joinpath("assets").joinpath("textures").joinpath(filename)
 
 
-def load(name):
+def load(name: str) -> bytes:
     """PNG bytes of the texture for material ``name``."""
     return _file(_entry(name)[0]).read_bytes()
 
 
-def tile_size(name):
+def tile_size(name: str) -> float:
     """Metres covered by one repeat of the texture of material ``name``."""
     return _entry(name)[1]
 
 
-def roughness(name):
+def roughness(name: str) -> float:
     return _entry(name)[2]
 
 
-def sha256(name):
+def sha256(name: str) -> str:
     return hashlib.sha256(load(name)).hexdigest()
 
 
-def license_text():
+def license_text() -> str:
     return _file(LICENSE_FILE).read_text(encoding="utf-8")
 
 
-def asset_notice(names):
+def asset_notice(names: Iterable[str]) -> dict[str, object]:
     """The D65 ``asset_notices`` entry covering the textures of materials ``names`` (one SHA-256 per
     distinct image, sorted). This module only builds it; the export path passes it to the package writer."""
     hashes = sorted({sha256(n) for n in names})

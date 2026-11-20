@@ -4,11 +4,49 @@ Online via an Overpass API endpoint, or offline from a local ``.osm`` XML file
 (for reproducibility). OSM data is (c) OpenStreetMap contributors, ODbL 1.0.
 """
 
+from __future__ import annotations
+
 import collections
 import math
 import xml.parsers.expat
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from os import PathLike
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypedDict, overload
 
 from .errors import FormatError, LimitError
+
+if TYPE_CHECKING:
+    from .cache import CacheLike
+    from .geodesy import Area
+    from .http import HttpClient
+
+Pt = tuple[float, float]
+Ring = list[Pt]
+Extent = tuple[float, float, float, float]   # x0, y0, x1, y1
+Tags = Mapping[str, str]
+Report = dict[str, object]   # {id, reason[, tags]}
+_Attrs = dict[str, str]   # expat attribute values are always str; ``.get`` yields None for a missing one
+
+
+class _Element:
+    """A top-level node/way/relation being parsed: way ``<nd ref>`` strings in ``refs``, relation members
+    ``(type, ref, role)`` in ``members`` (all converted to ints in _finish)."""
+    __slots__ = ("kind", "attrs", "tags", "refs", "members")
+
+    def __init__(self, kind: str, attrs: _Attrs) -> None:
+        self.kind = kind
+        self.attrs = attrs
+        self.tags: dict[str, str] = {}
+        self.refs: list[str] = []
+        self.members: list[tuple[str, str, str]] = []
+
+
+class _ParseState(TypedDict):
+    depth: int
+    top: int
+    total: int
+    cur: _Element | None
+    remark: int | None
 
 OSM_ATTRIBUTION = "(c) OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0"
 OSM_LICENSE = {
@@ -49,7 +87,8 @@ ENCLOSING_FOREST_SELECTORS = (("way", "landuse", "forest"), ("rel", "landuse", "
                               ("way", "natural", "wood"), ("rel", "natural", "wood"))
 
 
-def overpass_query(s, w, n, e, timeout_s=90, enclosing_at=None):
+def overpass_query(s: float, w: float, n: float, e: float, timeout_s: int = 90,
+                   enclosing_at: Pt | None = None) -> str:
     """Overpass QL for everything :func:`classify` uses, so that an Overpass import and a local
     XML import of the same data classify alike.
 
@@ -80,7 +119,7 @@ def overpass_query(s, w, n, e, timeout_s=90, enclosing_at=None):
     )
 
 
-def _validated_overpass(body, description):
+def _validated_overpass(body: bytes | str, description: str) -> OsmData:
     """Parse an Overpass response; any <remark> (timeout/size/runtime error) means partial data."""
     data = parse_osm_xml(body, description=description)
     if data.remarks:
@@ -89,8 +128,9 @@ def _validated_overpass(body, description):
     return data
 
 
-def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cache_override=False,
-                   cache_dataset_id=None, margin_m=OSM_FETCH_MARGIN_M, enclosing_forests=False):
+def fetch_overpass(area: Area, client: HttpClient, url: str = DEFAULT_OVERPASS_URL, cache: CacheLike | None = None,
+                   allow_cache_override: bool = False, cache_dataset_id: str | None = None,
+                   margin_m: float = OSM_FETCH_MARGIN_M, enclosing_forests: bool = False) -> OsmData:
     """Fetches the area plus ``margin_m`` on each side (:data:`OSM_FETCH_MARGIN_M` for the content; a wider
     second request only supplies DSM mask candidates near the grid edge, see :func:`classify` ``mask_data``).
     ``cache`` is used only for the default public endpoint unless ``allow_cache_override`` is set
@@ -103,7 +143,7 @@ def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cac
     is_default = isinstance(url, str) and url.strip().rstrip("/") == DEFAULT_OVERPASS_URL.rstrip("/")
     if is_default:
         endpoint = DEFAULT_OVERPASS_URL  # fixed public label
-        cache_scope = DEFAULT_OVERPASS_URL
+        cache_scope: str | None = DEFAULT_OVERPASS_URL
     else:
         endpoint = redact(url)  # origin only
         cache_scope = None
@@ -117,7 +157,7 @@ def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cac
     q = overpass_query(s, w, n, e, enclosing_at=area.frame.to_geographic(0.0, 0.0) if enclosing_forests else None)
     description = f"overpass:{endpoint}"
     key = f"{OSM_DATASET_ID}|{cache_scope}\n{q}"
-    data = None
+    data: OsmData | None = None
     if cache:
         body = cache.get("osm", key)
         if body is not None:
@@ -137,22 +177,23 @@ def fetch_overpass(area, client, url=DEFAULT_OVERPASS_URL, cache=None, allow_cac
 
 
 class OsmData:
-    def __init__(self):
-        self.nodes = {}       # id -> (lat, lon, tags)
-        self.ways = {}        # id -> (node ids, tags)
-        self.relations = {}   # id -> (members [(type, ref, role)], tags)
-        self.timestamp = None
-        self.generator = None
-        self.remarks = []     # <remark> texts anywhere in the document (Overpass partial-result signal)
-        self.source = {}
+    def __init__(self) -> None:
+        self.nodes: dict[int, tuple[float, float, dict[str, str]]] = {}       # id -> (lat, lon, tags)
+        self.ways: dict[int, tuple[list[int], dict[str, str]]] = {}        # id -> (node ids, tags)
+        # id -> (members [(type, ref, role)], tags)
+        self.relations: dict[int, tuple[list[tuple[str, int, str]], dict[str, str]]] = {}
+        self.timestamp: str | None = None
+        self.generator: str | None = None
+        self.remarks: list[str] = []     # <remark> texts anywhere in the document (Overpass partial-result signal)
+        self.source: dict[str, object] = {}
 
 
-def _reject_dtd(*_args):
+def _reject_dtd(*_args: object) -> NoReturn:
     raise FormatError("DTD/entities are not allowed in OSM XML")
 
 
-def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_depth=MAX_DEPTH,
-                  max_total_elements=MAX_TOTAL_ELEMENTS):
+def parse_osm_xml(data: str | bytes, description: str = "<osm>", max_elements: int = MAX_ELEMENTS,
+                  max_depth: int = MAX_DEPTH, max_total_elements: int = MAX_TOTAL_ELEMENTS) -> OsmData:
     """Streaming, bounded OSM XML parser (expat).
 
     DTDs and entity declarations are rejected by the parser itself (whatever the
@@ -169,9 +210,9 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
     if len(data) > MAX_OSM_BYTES:
         raise LimitError(f"{description}: OSM data exceeds {MAX_OSM_BYTES} bytes")
     out = OsmData()
-    state = {"depth": 0, "top": 0, "total": 0, "cur": None, "remark": None}
+    state: _ParseState = {"depth": 0, "top": 0, "total": 0, "cur": None, "remark": None}
 
-    def start(name, attrs):
+    def start(name: str, attrs: _Attrs) -> None:
         depth = state["depth"] = state["depth"] + 1
         if depth > max_depth:
             raise LimitError(f"{description}: OSM XML nesting deeper than {max_depth}")
@@ -187,7 +228,7 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
             if state["top"] > max_elements:
                 raise LimitError(f"{description}: more than {max_elements} OSM elements")
             if name in ("node", "way", "relation"):
-                state["cur"] = (name, attrs, {}, [])
+                state["cur"] = _Element(name, attrs)
             elif name == "meta":
                 out.timestamp = attrs.get("osm_base")
         elif depth == 3 and state["cur"] is not None:
@@ -199,33 +240,33 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
                 if k is None or v is None:
                     raise FormatError(f"{description}: malformed <tag> in top-level OSM element #{state['top']} "
                                       "(k and v are required)")
-                cur[2][k] = v
-            elif name == "nd" and cur[0] == "way":
+                cur.tags[k] = v
+            elif name == "nd" and cur.kind == "way":
                 ref = attrs.get("ref")
                 if ref is None:
                     raise FormatError(f"{description}: malformed <nd> in top-level OSM element #{state['top']} "
                                       "(ref is required)")
-                cur[3].append(ref)
-            elif name == "member" and cur[0] == "relation":
+                cur.refs.append(ref)
+            elif name == "member" and cur.kind == "relation":
                 t, ref = attrs.get("type"), attrs.get("ref")
                 if t is None or ref is None:
                     raise FormatError(f"{description}: malformed <member> in top-level OSM element "
                                       f"#{state['top']} (type and ref are required)")
-                cur[3].append((t, ref, attrs.get("role") or ""))
+                cur.members.append((t, ref, attrs.get("role") or ""))
         if name == "remark":
             out.remarks.append("")
             state["remark"] = depth
 
-    def end(name):
+    def end(name: str) -> None:
         depth = state["depth"]
         state["depth"] = depth - 1
         if state["remark"] == depth and name == "remark":
             state["remark"] = None
-        if depth == 2 and state["cur"] is not None and state["cur"][0] == name:
+        if depth == 2 and state["cur"] is not None and state["cur"].kind == name:
             _finish(out, state["cur"], description, state["top"])
             state["cur"] = None
 
-    def text(s):
+    def text(s: str) -> None:
         if state["remark"] is not None and len(out.remarks[-1]) < _MAX_REMARK_CHARS:
             out.remarks[-1] = (out.remarks[-1] + s)[:_MAX_REMARK_CHARS]
 
@@ -261,25 +302,26 @@ def parse_osm_xml(data, description="<osm>", max_elements=MAX_ELEMENTS, max_dept
     return out
 
 
-def _finish(out, cur, description, index):
-    kind, attrs, tags, items = cur
+def _finish(out: OsmData, cur: _Element, description: str, index: int) -> None:
+    kind, attrs, tags = cur.kind, cur.attrs, cur.tags
     try:
+        # a missing attribute defaults to "" -> ValueError, reported like any other invalid number
         if kind == "node":
-            lat, lon = float(attrs.get("lat")), float(attrs.get("lon"))
+            lat, lon = float(attrs.get("lat", "")), float(attrs.get("lon", ""))
             if not (-90 <= lat <= 90 and -180 <= lon <= 180):
                 raise ValueError
-            out.nodes[int(attrs.get("id"))] = (lat, lon, tags)
+            out.nodes[int(attrs.get("id", ""))] = (lat, lon, tags)
         elif kind == "way":
-            out.ways[int(attrs.get("id"))] = ([int(r) for r in items], tags)
+            out.ways[int(attrs.get("id", ""))] = ([int(r) for r in cur.refs], tags)
         else:
-            out.relations[int(attrs.get("id"))] = ([(t, int(r), role) for t, r, role in items], tags)
+            out.relations[int(attrs.get("id", ""))] = ([(t, int(r), role) for t, r, role in cur.members], tags)
     except (TypeError, ValueError):
         # the element's position, never its attribute text (it may carry anything)
         raise FormatError(f"{description}: malformed <{kind}> (top-level OSM element #{index}: id, coordinates "
                           "or references are not valid numbers)") from None
 
 
-def load_osm_file(path):
+def load_osm_file(path: str | PathLike[str]) -> OsmData:
     import hashlib
     import os
     size = os.path.getsize(path)
@@ -295,7 +337,7 @@ def load_osm_file(path):
 
 # --- geometry helpers --------------------------------------------------------
 
-def ring_area(ring):
+def ring_area(ring: Sequence[Pt]) -> float:
     a = 0.0
     n = len(ring)
     for i in range(n):
@@ -305,7 +347,7 @@ def ring_area(ring):
     return a / 2.0
 
 
-def point_in_ring(x, y, ring):
+def point_in_ring(x: float, y: float, ring: Sequence[Pt]) -> bool:
     inside = False
     n = len(ring)
     j = n - 1
@@ -318,8 +360,8 @@ def point_in_ring(x, y, ring):
     return inside
 
 
-def _clean_ring(pts):
-    out = []
+def _clean_ring(pts: Iterable[Pt]) -> Ring:
+    out: Ring = []
     for p in pts:
         if not out or abs(p[0] - out[-1][0]) > 1e-4 or abs(p[1] - out[-1][1]) > 1e-4:
             out.append(p)
@@ -328,15 +370,15 @@ def _clean_ring(pts):
     return out
 
 
-def _segments_intersect(p1, p2, p3, p4):
-    def orient(a, b, c):
+def _segments_intersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt) -> bool:
+    def orient(a: Pt, b: Pt, c: Pt) -> float:
         return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
     d1, d2 = orient(p3, p4, p1), orient(p3, p4, p2)
     d3, d4 = orient(p1, p2, p3), orient(p1, p2, p4)
     return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0)) and d1 * d2 < 0 and d3 * d4 < 0
 
 
-def ring_self_intersects(ring):
+def ring_self_intersects(ring: Sequence[Pt]) -> bool:
     n = len(ring)
     if n > 3000:
         return False  # too expensive; triangulation will catch gross failures
@@ -353,50 +395,51 @@ def ring_self_intersects(ring):
 class Polygon:
     """One outer ring (CCW) with zero or more holes (CW), map-frame metres."""
 
-    def __init__(self, outer, holes=()):
+    def __init__(self, outer: Ring, holes: Iterable[Ring] = ()) -> None:
         self.outer = outer
-        self.holes = list(holes)
+        self.holes: list[Ring] = list(holes)
 
-    def area(self):
+    def area(self) -> float:
         return ring_area(self.outer) + sum(ring_area(h) for h in self.holes)
 
-    def centroid(self):
+    def centroid(self) -> Pt:
         xs = [p[0] for p in self.outer]
         ys = [p[1] for p in self.outer]
         return sum(xs) / len(xs), sum(ys) / len(ys)
 
-    def bbox(self):
+    def bbox(self) -> Extent:
         xs = [p[0] for p in self.outer]
         ys = [p[1] for p in self.outer]
         return min(xs), min(ys), max(xs), max(ys)
 
-    def contains(self, x, y):
+    def contains(self, x: float, y: float) -> bool:
         if not point_in_ring(x, y, self.outer):
             return False
         return not any(point_in_ring(x, y, h) for h in self.holes)
 
 
-def _assemble_rings(way_lists, work=None):
+def _assemble_rings(way_lists: Iterable[Sequence[int]], work: _MaskWork | None = None) -> tuple[list[list[int]], bool]:
     """Join open member ways into closed rings. Returns (rings, ok). Members are taken in order; an open one
     is extended by the first remaining member (in order) sharing one of its ends. ``work`` (optional, a
     :class:`_MaskWork`) is charged each member and its vertices before it is copied, and for every join the
     scan of the remaining members, the list shift removing the joined one and the vertices it adds. Closed
     members cost O(1) beyond their copy (no front removal), and prepending is O(added vertices) (a deque),
     so the uncharged work is linear in the input and every ring kept was charged its size."""
-    segs = []
+    segs: list[list[int] | None] = []   # consumed slots are set to None (never read again)
     for w in way_lists:
         if len(w) >= 2:
             if work is not None:
                 work.add(1 + len(w))
             segs.append(list(w))
-    rings = []
+    rings: list[list[int]] = []
     ok = True
     head = 0
 
-    def keep(ring):
+    def keep(ring: Iterable[int]) -> None:
         rings.append(ring if isinstance(ring, list) else list(ring))
     while head < len(segs):
         first = segs[head]
+        assert first is not None
         segs[head] = None
         head += 1
         if first[0] == first[-1]:
@@ -416,6 +459,7 @@ def _assemble_rings(way_lists, work=None):
                 work.add(1 + len(segs) - head)   # the scan of the remaining members, and the shift of pop(k)
             for k in range(head, len(segs)):
                 s = segs[k]
+                assert s is not None   # slots from head on are not consumed yet
                 if s[0] == cur[-1]:
                     cur.extend(s[1:])
                 elif s[-1] == cur[-1]:
@@ -441,38 +485,43 @@ def _assemble_rings(way_lists, work=None):
 
 
 class Feature:
-    def __init__(self, fid, kind, tags, geometry):
-        self.id = fid          # e.g. "osm:way/123"
-        self.kind = kind       # building | building_part | road | area | tree
-        self.tags = tags
-        self.geometry = geometry
-        self.node_ids = None   # roads / structure bridges: the OSM node id of each vertex (None where clipped)
+    report_pos: tuple[int, int]   # structure routes only: (index in ``unsupported`` before routing, route sequence)
+
+    # Any: geometry depends on ``kind`` (Polygon for building/building_part/area, list[Pt] for road/bridge/...,
+    # Pt for tree); a union would need every consumer to narrow by ``kind``, which the type system cannot see.
+    def __init__(self, fid: str, kind: str, tags: Tags, geometry: Any) -> None:
+        self.id: str = fid          # e.g. "osm:way/123"
+        self.kind: str = kind       # building | building_part | road | area | tree
+        self.tags: Tags = tags
+        self.geometry: Any = geometry
+        # roads / structure bridges: the OSM node id of each vertex (None where clipped)
+        self.node_ids: list[int | None] | None = None
 
 
 class Classified:
-    def __init__(self):
-        self.buildings = []
-        self.roads = []
-        self.areas = []
-        self.trees = []
-        self.unsupported = []   # dicts {id, reason, tags subset}
-        self.invalid = []       # dicts {id, reason}
-        self.warnings = []      # strings, copied into the report's ``warnings``
+    def __init__(self) -> None:
+        self.buildings: list[Feature] = []
+        self.roads: list[Feature] = []
+        self.areas: list[Feature] = []
+        self.trees: list[Feature] = []
+        self.unsupported: list[Report] = []   # dicts {id, reason, tags subset}
+        self.invalid: list[Report] = []       # dicts {id, reason}
+        self.warnings: list[str] = []      # strings, copied into the report's ``warnings``
         self.outside = 0
-        self.replaced_outlines = []  # building outlines superseded by their building:part features
+        self.replaced_outlines: list[str] = []  # building outlines superseded by their building:part features
         # The superseded outlines are kept (not discarded) so generation can fall back to them
         # when their parts are rejected: outline id -> Feature, outline id -> [part ids] and
         # part id -> [outline id] (at most one: the declared outline of a ``type=building``
         # relation, else the smallest outline containing the part).
-        self.outline_features = {}
-        self.outline_parts = {}
-        self.outline_for = {}
+        self.outline_features: dict[str, Feature] = {}
+        self.outline_parts: dict[str, list[str]] = {}
+        self.outline_for: dict[str, list[str]] = {}
         # Footprint overlaps that are kept as mapped: dicts {part, outline, kind} for a
         # building:part whose footprint overlaps a building outline it neither belongs to nor lies
         # within. Classification cannot know whether the generated solids intersect (that depends
         # on terrain and on the roof actually built), so generation checks the emitted meshes'
         # map-frame Z extents and warns only then. Bounded by the part/outline pair limit.
-        self.overlap_candidates = []
+        self.overlap_candidates: list[dict[str, str]] = []
         # Not generated, kept for the DSM terrain correction mask (core/dsm.py). Selected against the mask
         # extent (the DEM grid extent; default the area) expanded by each feature's mask buffer, so that
         # features just outside the area still mask the edge samples: highway/railway ways tagged bridge=*
@@ -487,29 +536,29 @@ class Classified:
         # (never used for terrain colouring, scatter or any generated content).
         # Margin-only candidates (``mask_areas`` and margin-only ``outside_buildings``) are not topology
         # checked here; generate.dsm_obstacles validates them under the mask validation work budget.
-        self.bridges = []
+        self.bridges: list[Feature] = []
         # Structure features inside the area (D18), routed here instead of ``unsupported``; the stage modules
         # (core/bridges.py, tunnels.py, passages.py) own them and report them as unsupported until they are
         # generated. ``structure_bridges`` holds the in-area highway bridge ways (the ``bridges`` list above
         # is the extent-clipped DSM mask candidate list: it also holds railways and exists only when the
         # mask is available). Features carry the whole way's polyline clipped to the area.
-        self.structure_bridges = []
-        self.tunnels = []
-        self.passages = []
+        self.structure_bridges: list[Feature] = []
+        self.tunnels: list[Feature] = []
+        self.passages: list[Feature] = []
         self.route_seq = 0
-        self.outside_buildings = []
-        self.mask_trees = []
-        self.mask_areas = []
+        self.outside_buildings: list[Feature] = []
+        self.mask_trees: list[Feature] = []
+        self.mask_areas: list[Feature] = []
         # Feature ids left out of the DSM mask: content ways that are outers of a margin-only multipolygon of
         # their area family, which supplies the footprint with its holes (classify mask_data).
-        self.mask_suppressed = set()
+        self.mask_suppressed: set[str] = set()
         # Margin-only candidate assembly work, charged to the mask validation budget (classify max_mask_work);
         # ``mask_work_exceeded``: the MaskWorkExceeded message once that budget ran out during assembly.
         self.mask_work = 0
-        self.mask_work_exceeded = None
+        self.mask_work_exceeded: str | None = None
         # The reason the DSM mask candidates are incomplete (e.g. the wider mask request failed), set by the
         # caller: the correction is then skipped with a warning (generate.build_plan).
-        self.mask_unavailable = None
+        self.mask_unavailable: str | None = None
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -518,14 +567,14 @@ ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "e
 MIN_HOLE_AREA_M2 = 0.01  # inner rings below this are degenerate: the feature is reported, never filled
 
 
-def is_bridge(tags):
+def is_bridge(tags: Tags) -> bool:
     """The one bridge-tag decision, shared by the DSM mask candidates, the generation routing
     (:func:`structure_kind`) and :func:`_unsupported_reason`: ``bridge`` set and not ``no``."""
     b = tags.get("bridge")
     return bool(b) and b != "no"
 
 
-def _unsupported_reason(tags):
+def _unsupported_reason(tags: Tags) -> str | None:
     """Shared v1 support check, applied before a way/relation enters any road, building or area list."""
     if is_bridge(tags):
         return "bridge (under-bridge flight and elevated decks are not supported in v1; omitted)"
@@ -552,7 +601,7 @@ def _unsupported_reason(tags):
     return None
 
 
-def structure_kind(tags):
+def structure_kind(tags: Tags) -> Literal["bridge", "tunnel", "passage"] | None:
     """Routing class of a highway way that :func:`_unsupported_reason` rejects: ``"bridge"``, ``"tunnel"``,
     ``"passage"`` (``tunnel=building_passage`` or ``covered=yes``) or None (still unsupported: culverts,
     ``layer<0``, ``location=underground`` ...). ``man_made`` and ``building=bridge`` never route (D25)."""
@@ -571,7 +620,7 @@ def structure_kind(tags):
     return None
 
 
-def surface_mask_eligible(tags):
+def surface_mask_eligible(tags: Tags) -> bool:
     """True if a building footprint or forest polygon with ``tags`` is a surface feature that may enter the
     DSM terrain correction mask. It is the same predicate (:func:`_unsupported_reason`) that keeps a feature
     in the area out of generation (underground, ``layer<0``, tunnels, covered, bridges...), applied to the
@@ -579,8 +628,9 @@ def surface_mask_eligible(tags):
     return _unsupported_reason(tags) is None
 
 
-def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_association_work=None,
-             mask_extent=None, mask_data=None, max_mask_work=None):
+def classify(data: OsmData, area: Area, max_features: int = 50_000, max_part_pair_checks: int | None = None,
+             max_association_work: int | None = None, mask_extent: Extent | None = None,
+             mask_data: OsmData | None = None, max_mask_work: int | None = None) -> Classified:
     """Classified features of ``data`` for ``area``. ``mask_extent`` (x0, y0, x1, y1 in the map frame,
     default the area rectangle) is the terrain grid extent used to select the DSM mask candidates
     (``bridges``, ``outside_buildings``, ``mask_trees``, ``mask_areas``); generated features are always
@@ -606,7 +656,8 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     if mask_data is None or out.mask_unavailable:
         return out
     if max_mask_work is None:
-        from .dsm import MASK_VALIDATION_WORK_BUDGET as max_mask_work
+        from .dsm import MASK_VALIDATION_WORK_BUDGET
+        max_mask_work = MASK_VALIDATION_WORK_BUDGET
     work = _MaskWork(max_mask_work)
     allowance = _FeatureAllowance(max_features - _mask_count(out))
     try:
@@ -629,6 +680,17 @@ def classify(data, area, max_features=50_000, max_part_pair_checks=None, max_ass
     return out
 
 
+class _Decl:
+    """Declaration record shared by every component of one declared part."""
+    __slots__ = ("ois", "oids", "rels", "smallest")
+
+    def __init__(self, ois: frozenset[int], oids: list[str], rels: list[str]) -> None:
+        self.ois = ois             # declared outline indices
+        self.oids = oids           # outline ids
+        self.rels = rels           # relation ids
+        self.smallest: int | None = None   # smallest outline, set lazily
+
+
 class _MaskWorkExhausted(Exception):
     """Internal: :class:`_MaskWork` ran out (caught by :func:`classify`)."""
 
@@ -642,10 +704,10 @@ class _FeatureAllowance:
     """The features ``max_features`` leaves for the margin-only DSM mask candidates: :meth:`take` raises
     :class:`_MaskFeatureLimit` before more than ``left`` features are kept."""
 
-    def __init__(self, left):
+    def __init__(self, left: float) -> None:
         self.left = left
 
-    def take(self, k=1):
+    def take(self, k: int = 1) -> None:
         if k > self.left:
             raise _MaskFeatureLimit()
         self.left -= k
@@ -655,16 +717,16 @@ class _MaskWork:
     """Counter of the geometric tests assembling margin-only DSM mask candidates, raising
     :class:`_MaskWorkExhausted` as soon as ``limit`` is exceeded."""
 
-    def __init__(self, limit):
+    def __init__(self, limit: int) -> None:
         self.limit, self.n = limit, 0
 
-    def add(self, k=1):
+    def add(self, k: int = 1) -> None:
         self.n += k
         if self.n > self.limit:
             raise _MaskWorkExhausted()
 
 
-def _bridge_rect(tags, mask_extent):
+def _bridge_rect(tags: Tags, mask_extent: Extent) -> Extent:
     """The grid extent expanded by this bridge's own mask reach (half its deck width plus the bridge buffer,
     exactly as :func:`generate.dsm_obstacles` keeps it), so a bridge that cannot reach the grid is not kept."""
     from .dsm import BRIDGE_BUFFER_M
@@ -672,15 +734,15 @@ def _bridge_rect(tags, mask_extent):
     return _expand(mask_extent, road_width(tags)[0] / 2.0 + BRIDGE_BUFFER_M)
 
 
-def _content_count(out):
+def _content_count(out: Classified) -> int:
     return (len(out.buildings) + len(out.roads) + len(out.areas) + len(out.trees) + len(out.outline_features))
 
 
-def _mask_count(out):
+def _mask_count(out: Classified) -> int:
     return len(out.bridges) + len(out.outside_buildings) + len(out.mask_trees) + len(out.mask_areas)
 
 
-def _drop_mask_candidates(out, max_features):
+def _drop_mask_candidates(out: Classified, max_features: int) -> None:
     """The DSM mask candidates exceed their own ``max_features`` allowance: they are dropped (never generated,
     so the scene is unaffected) and the correction is skipped with a warning instead of failing the build."""
     out.bridges, out.outside_buildings, out.mask_trees, out.mask_areas = [], [], [], []
@@ -688,7 +750,7 @@ def _drop_mask_candidates(out, max_features):
                             "counted separately from the scene content)")
 
 
-def _check_feature_count(out, max_features):
+def _check_feature_count(out: Classified, max_features: int) -> None:
     """``max_features`` bounds the scene content (a hard :class:`LimitError`) and, separately, the DSM mask
     candidates (dropped with the correction skipped), so mask-only features can never fail a build."""
     total = _content_count(out)
@@ -698,20 +760,22 @@ def _check_feature_count(out, max_features):
         _drop_mask_candidates(out, max_features)
 
 
-def _is_area_tagged(tags):
+def _is_area_tagged(tags: Tags) -> bool:
     return any(k in tags for k in ("building", "building:part", "landuse", "leisure")) or (
         tags.get("natural") in ("water", "wood", "scrub", "grassland", "heath", "wetland", "beach", "sand",
                                 "bare_rock"))
 
 
-def _mask_polygons(outers, inners, work):
+def _mask_polygons(outers: Iterable[Ring], inners: Sequence[Ring], work: _MaskWork) -> list[Polygon]:
     """Polygons for a margin-only DSM mask candidate, or [] when a ring is degenerate or a hole has no outer.
     Cheap on purpose: ring topology (self-intersections, crossing holes) is not checked here but by
     :func:`generate.dsm_obstacles`, which validates every mask polygon once per distinct geometry against the
     cumulative :data:`dsm.MASK_VALIDATION_WORK_BUDGET` (exhaustion skips the correction with a warning).
     Hole assignment is charged to ``work`` (a :class:`_MaskWork`): the outers are indexed by bbox in a
     uniform grid, so a hole is tested only against the outers whose bbox covers its cell."""
-    polys, boxes, areas = [], [], []
+    polys: list[Polygon] = []
+    boxes: list[Extent] = []
+    areas: list[float] = []
     for o in outers:
         work.add(1 + len(o))   # the cleaned ring and its polygon
         o = _clean_ring(o)
@@ -733,9 +797,10 @@ def _mask_polygons(outers, inners, work):
     g = max(1, min(_MASK_GRID_MAX_CELLS, math.isqrt(len(polys))))
     cw, ch = max(gx1 - gx0, 1e-9) / g, max(gy1 - gy0, 1e-9) / g
 
-    def cell(x, y):
+    def cell(x: float, y: float) -> tuple[int, int]:
         return min(g - 1, max(0, int((x - gx0) / cw))), min(g - 1, max(0, int((y - gy0) / ch)))
-    cells, big = {}, []
+    cells: dict[tuple[int, int], list[int]] = {}
+    big: list[int] = []
     for k, b in enumerate(boxes):
         (i0, j0), (i1, j1) = cell(b[0], b[1]), cell(b[2], b[3])
         n_cells = (i1 - i0 + 1) * (j1 - j0 + 1)
@@ -754,7 +819,9 @@ def _mask_polygons(outers, inners, work):
         if ring_area(h) > 0:
             h.reverse()
         x, y = h[0]
-        best, n, left = None, 0, work.limit - work.n
+        best: int | None = None
+        n = 0
+        left = work.limit - work.n
         if gx0 <= x <= gx1 and gy0 <= y <= gy1:
             for k in (cells.get(cell(x, y), []) + big) if big else cells.get(cell(x, y), ()):
                 n += _MASK_CANDIDATE_COST
@@ -782,7 +849,8 @@ _MASK_GRID_MAX_CELLS = 256   # per axis, the hole-to-outer index of _mask_polygo
 _MASK_GRID_MAX_SPAN = 16     # an outer covering more cells is tested against every hole instead
 
 
-def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, allowance=None):
+def _add_margin_mask_candidates(out: Classified, data: OsmData, content: OsmData, area: Area, mask_extent: Extent,
+                                work: _MaskWork, allowance: _FeatureAllowance | None = None) -> None:
     """Adds to ``out`` the DSM mask candidates among the elements of ``data`` (the wider DSM mask response)
     whose ids are not in ``content`` (the normal response): surface building footprints (``outside_buildings``)
     and forest/wood polygons
@@ -808,11 +876,11 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
     tree_rect = _expand(mask_extent, TREE_RADIUS_M)
     frame = area.frame
-    proj_cache = {}
+    proj_cache: dict[int, Pt] = {}
 
-    def way_points(nids):
+    def way_points(nids: Sequence[int]) -> list[Pt] | None:
         work.add(len(nids))   # the point list
-        pts = []
+        pts: list[Pt] = []
         for nid in nids:
             p = proj_cache.get(nid)
             if p is None:
@@ -823,7 +891,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
             pts.append(p)
         return pts
 
-    def add(fid, tags, polys):
+    def add(fid: str, tags: Tags, polys: Sequence[Polygon]) -> None:
         if not polys or not surface_mask_eligible(tags):
             return
         if "building" in tags or "building:part" in tags:
@@ -839,7 +907,7 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
                     allowance.take()
                     out.mask_areas.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", "area", ftags, p))
 
-    outer_of = {}  # margin-only way id -> area families (None: untagged with inners) of relations using it as outer
+    outer_of: dict[int, set[str | None]] = {}  # margin-only way id -> area families (None: untagged with inners) of relations using it as outer
     for rid, (members, tags) in data.relations.items():
         if rid in content.relations or tags.get("type") != "multipolygon":
             continue
@@ -868,7 +936,8 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
         o_pts, i_pts = [way_points(r) for r in orings], [way_points(r) for r in irings]
         if any(p is None for p in o_pts + i_pts):
             continue
-        add(f"osm:relation/{rid}", tags, _mask_polygons(o_pts, i_pts, work))
+        # the any(p is None) check above leaves no None in o_pts / i_pts (mypy cannot see it)
+        add(f"osm:relation/{rid}", tags, _mask_polygons(o_pts, i_pts, work))  # type: ignore[arg-type]
 
     for wid in content.ways:
         fams = outer_of.get(wid)
@@ -883,8 +952,8 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
         fid = f"osm:way/{wid}"
         as_area = (len(nids) >= 4 and nids[0] == nids[-1] and _is_area_tagged(tags) and tags.get("area") != "no")
         if as_area:
-            fams = outer_of.get(wid, ())
-            as_area = not (None in fams or _area_family(tags) in fams)
+            wfams = outer_of.get(wid, ())
+            as_area = not (None in wfams or _area_family(tags) in wfams)
         if as_area:
             pts = way_points(nids) if surface_mask_eligible(tags) else None
             if pts is not None:
@@ -908,7 +977,8 @@ def _add_margin_mask_candidates(out, data, content, area, mask_extent, work, all
                 out.mask_trees.append(Feature(f"osm:node/{nid}", "tree", tags, (x, y)))
 
 
-def _classify(data, area, max_features, max_part_pair_checks, max_association_work, mask_extent):
+def _classify(data: OsmData, area: Area, max_features: int, max_part_pair_checks: int | None,
+              max_association_work: int | None, mask_extent: Extent) -> Classified:
     """:func:`classify` of ``data`` taken as the whole input (everything is content)."""
     from .dsm import BUILDING_BUFFER_M, TREE_RADIUS_M
     building_rect = _expand(mask_extent, BUILDING_BUFFER_M)
@@ -918,9 +988,9 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
     if max_association_work is None:
         max_association_work = MAX_ASSOCIATION_WORK
     frame = area.frame
-    proj_cache = {}
+    proj_cache: dict[int, Pt] = {}
 
-    def proj(nid):
+    def proj(nid: int) -> Pt | None:
         p = proj_cache.get(nid)
         if p is None:
             nd = data.nodes.get(nid)
@@ -930,15 +1000,15 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             proj_cache[nid] = p
         return p
 
-    def way_points(nids):
+    def way_points(nids: Sequence[int]) -> list[Pt] | None:
         pts = [proj(n) for n in nids]
         if any(p is None for p in pts):
             return None
-        return pts
+        return pts  # type: ignore[return-value]  # no None remains after the any() check above
 
     out = Classified()
 
-    def keep_mask(lst, feats):
+    def keep_mask(lst: list[Feature], feats: Iterable[Feature]) -> None:
         # mask-only candidates are bounded as they are emitted (not only after classification), so an
         # oversized mask never holds more than ``max_features`` of them in memory, correction on or off
         for f in feats:
@@ -947,13 +1017,14 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                 return
             lst.append(f)
 
-    used_as_member = set()
-    polygons = {}  # feature id -> [Polygon]
-    rel_outer_ways = {}  # area family -> way ids that are outers of an area relation with geometry
-    suppressed_outers = {}  # way id -> (family or None for any, reason): outers of rejected multipolygons
+    used_as_member: set[int] = set()
+    polygons: dict[str, tuple[list[Polygon], dict[str, str]]] = {}  # feature id -> [Polygon]
+    # area family -> way ids that are outers of an area relation with geometry
+    rel_outer_ways: dict[str | None, set[int]] = {}
+    suppressed_outers: dict[int, tuple[str | None, str]] = {}  # way id -> (family or None for any, reason): outers of rejected multipolygons
 
-    def make_polygons(fid, outers, inners):
-        polys = []
+    def make_polygons(fid: str, outers: Iterable[Ring], inners: Iterable[Ring]) -> list[Polygon]:
+        polys: list[Polygon] = []
         for o in outers:
             o = _clean_ring(o)
             if len(o) >= 3 and ring_self_intersects(o):
@@ -994,7 +1065,7 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
     # Declared ownership from type=building relations: part id -> {(relation id, outline id or None)}.
     # Every stored (part, outline) pair is checked geometrically later, so the total counts against
     # the same pair budget as spatial candidates (LimitError before anything is stored).
-    declared = {}
+    declared: dict[str, set[tuple[str, str | None]]] = {}
     n_declared = 0
     # Relations (multipolygons)
     for rid, (members, tags) in data.relations.items():
@@ -1004,7 +1075,7 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
         if tags.get("type") == "building":
             # Simple 3D Buildings relation: groups an outline (way or building multipolygon)
             # with its building:part ways/relations. Geometry comes from the members themselves.
-            outl = sorted({f"osm:{t}/{r}" for t, r, role in members
+            outl: Sequence[str | None] = sorted({f"osm:{t}/{r}" for t, r, role in members
                            if role == "outline" and t in ("way", "relation")})
             prts = sorted({f"osm:{t}/{r}" for t, r, role in members
                            if role == "part" and t in ("way", "relation")})
@@ -1012,10 +1083,12 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             if n_declared > max_part_pair_checks:
                 raise LimitError(f"{fid}: type=building relations declare more than {max_part_pair_checks} "
                                  "building:part/outline pairs; choose a smaller area")
-            for p in prts:
-                declared.setdefault(p, set()).update((fid, o) for o in (outl or [None]))
+            for part_id in prts:
+                declared.setdefault(part_id, set()).update((fid, o) for o in (outl or [None]))
             continue
-        outer_ways, inner_ways, outer_ids = [], [], []
+        outer_ways: list[list[int]] = []
+        inner_ways: list[list[int]] = []
+        outer_ids: list[int] = []
         missing_outer = missing_inner = False
         # each (type, ref, role) once: a repeated member reference adds no geometry (only duplicate copies of a
         # ring, or a leftover that cannot close), so valid relations are unaffected
@@ -1039,7 +1112,7 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
         irings, ok2 = _assemble_rings(inner_ways)
         fam = _area_family(tags)
         has_inner = bool(inner_ways) or missing_inner
-        polys = []
+        polys: list[Polygon] = []
         if missing_inner or not ok2:
             # Emitting the outer without its hole would fill a courtyard: skip and report.
             out.invalid.append({"id": fid, "reason": "multipolygon has a missing or unclosed inner ring; "
@@ -1054,7 +1127,8 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             if any(p is None for p in o_pts + i_pts):
                 out.invalid.append({"id": fid, "reason": "multipolygon references missing nodes"})
             else:
-                polys = make_polygons(fid, o_pts, i_pts)
+                # the any(p is None) check above leaves no None in o_pts / i_pts (mypy cannot see it)
+                polys = make_polygons(fid, o_pts, i_pts)  # type: ignore[arg-type]
                 polygons[fid] = (polys, tags)
         if fam and polys:
             rel_outer_ways.setdefault(fam, set()).update(outer_ids)
@@ -1080,11 +1154,11 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             # solid copy would fill the courtyard. Other roles of the way (e.g. highway) still apply.
             as_area = False
         elif as_area and wid in suppressed_outers:
-            sfam, reason = suppressed_outers[wid]
+            sfam, sreason = suppressed_outers[wid]
             if sfam is None or sfam == _area_family(tags):
                 # Never fill a courtyard; report instead of silently dropping. Other roles still apply.
                 as_area = False
-                out.invalid.append({"id": fid, "reason": reason})
+                out.invalid.append({"id": fid, "reason": sreason})
         if as_area:
             pts = way_points(nids)
             if pts is None:
@@ -1101,17 +1175,17 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
                 bparts = _clip_polyline(pts, area, _bridge_rect(tags, mask_extent),
                                         max_parts=max_features - _mask_count(out))
                 if bparts is None:
-                    bparts = ()
+                    bparts = []
                     _drop_mask_candidates(out, max_features)
                 keep_mask(out.bridges, (Feature(fid if len(bparts) == 1 else f"{fid}#{k}", "bridge", tags, part)
                                         for k, part in enumerate(bparts)))
             if "highway" not in tags:
-                kind = "railway" if "railway" in tags else "waterway"
+                lkind = "railway" if "railway" in tags else "waterway"
                 if _clip_polyline(pts, area):
-                    out.unsupported.append({"id": fid, "reason": f"{kind} lines are not generated in v1",
+                    out.unsupported.append({"id": fid, "reason": f"{lkind} lines are not generated in v1",
                                             "tags": _subset(tags)})
                 continue
-            part_ids = []
+            part_ids: list[list[int | None]] = []
             parts = _clip_polyline(pts, area, nids=nids, ids_out=part_ids)
             if not parts:
                 continue
@@ -1160,9 +1234,9 @@ def _classify(data, area, max_features, max_part_pair_checks, max_association_wo
             if reason:
                 out.unsupported.append({"id": fid, "reason": reason, "tags": _subset(tags)})
                 continue
-            kind = "building_part" if "building:part" in tags and "building" not in tags else "building"
+            bkind = "building_part" if "building:part" in tags and "building" not in tags else "building"
             for k, p in enumerate(polys):
-                out.buildings.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", kind, tags, p))
+                out.buildings.append(Feature(fid if len(polys) == 1 else f"{fid}#{k}", bkind, tags, p))
         else:
             cls = area_class(tags)
             if cls:
@@ -1204,18 +1278,18 @@ _PART_GRID_MAX_CELLS = 256   # per axis
 
 
 class _AssocWork:
-    def __init__(self, limit):
+    def __init__(self, limit: int) -> None:
         self.limit = limit
         self.n = 0
 
-    def add(self, k=1):
+    def add(self, k: int = 1) -> None:
         self.n += k
         if self.n > self.limit:
             raise LimitError(f"building:part/outline association exceeds its work budget of {self.limit} "
                              "geometric tests; choose a smaller area")
 
 
-def _seg_dist2(p, a, b):
+def _seg_dist2(p: Pt, a: Pt, b: Pt) -> float:
     dx, dy = b[0] - a[0], b[1] - a[1]
     l2 = dx * dx + dy * dy
     t = 0.0 if l2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2))
@@ -1223,7 +1297,7 @@ def _seg_dist2(p, a, b):
     return ex * ex + ey * ey
 
 
-def _locate(pt, poly, tol, work):
+def _locate(pt: Pt, poly: Polygon, tol: float, work: _AssocWork) -> int:
     """1 strictly inside ``poly`` (farther than ``tol`` from its boundary), 0 on its boundary, -1 outside."""
     rings = [poly.outer] + poly.holes
     work.add(2 * sum(len(r) for r in rings))
@@ -1237,7 +1311,7 @@ def _locate(pt, poly, tol, work):
     return 1
 
 
-def _contact_params(a, b, edges, tol, work):
+def _contact_params(a: Pt, b: Pt, edges: Sequence[tuple[Pt, Pt]], tol: float, work: _AssocWork) -> list[float]:
     """Sorted parameters in [0, 1] splitting segment ab at every contact with ``edges`` (proper
     crossings, and the projections of edge vertices lying within ``tol`` of ab)."""
     dx, dy = b[0] - a[0], b[1] - a[1]
@@ -1266,7 +1340,8 @@ def _contact_params(a, b, edges, tol, work):
     return sorted(ts)
 
 
-def _boundary_locations(rings, poly, tol, work):
+def _boundary_locations(rings: Iterable[Sequence[Pt]], poly: Polygon, tol: float,
+                        work: _AssocWork) -> Iterator[int]:
     """Yield the location (see :func:`_locate`) w.r.t. ``poly`` of every vertex of ``rings`` and of the
     midpoint of every piece of their edges between consecutive contacts with ``poly``'s boundary.
     Each such piece lies entirely inside, on or outside ``poly``, so this decides where the whole
@@ -1283,7 +1358,7 @@ def _boundary_locations(rings, poly, tol, work):
                 yield _locate((a[0] + tm * (b[0] - a[0]), a[1] + tm * (b[1] - a[1])), poly, tol, work)
 
 
-def interior_point(rings):
+def interior_point(rings: Sequence[Sequence[Pt]]) -> Pt | None:
     """A point strictly inside the region bounded by ``rings`` (even-odd rule; an outer ring and its
     holes), or None if degenerate. Unlike the vertex centroid it never falls in a notch or a hole:
     it is the middle of the widest interior span on the horizontal line halfway across the
@@ -1293,7 +1368,7 @@ def interior_point(rings):
         return None
     k = max(range(len(ys) - 1), key=lambda i: ys[i + 1] - ys[i])
     y = (ys[k] + ys[k + 1]) / 2.0
-    xs = []
+    xs: list[float] = []
     for r in rings:
         for i in range(len(r)):
             (ax, ay), (bx, by) = r[i - 1], r[i]
@@ -1307,7 +1382,8 @@ def interior_point(rings):
     return (x0 + x1) / 2.0, y
 
 
-def part_within_outline(part, outline, tol=PART_TOL_M, work=None):
+def part_within_outline(part: Polygon, outline: Polygon, tol: float = PART_TOL_M,
+                        work: _AssocWork | None = None) -> bool:
     """True if footprint ``part`` (a Polygon) lies within ``outline`` (a Polygon): its boundary
     (outer ring and holes) lies inside or on the outline - within the outer ring, outside every
     hole, coincident/touching boundaries allowed within ``tol`` - and no outline hole (courtyard)
@@ -1329,7 +1405,7 @@ def part_within_outline(part, outline, tol=PART_TOL_M, work=None):
     return True
 
 
-def footprints_overlap(a, b, tol=PART_TOL_M, work=None):
+def footprints_overlap(a: Polygon, b: Polygon, tol: float = PART_TOL_M, work: _AssocWork | None = None) -> bool:
     """True if the interiors of Polygons ``a`` and ``b`` overlap by more than ``tol`` (touching or
     shared edges do not count)."""
     work = work or _AssocWork(MAX_ASSOCIATION_WORK)
@@ -1346,20 +1422,21 @@ def footprints_overlap(a, b, tol=PART_TOL_M, work=None):
     return False
 
 
-def _base_id(fid):
+def _base_id(fid: str) -> str:
     """Feature id without the ``#k`` suffix given to the polygons of a multi-polygon feature."""
     return fid.split("#", 1)[0]
 
 
-def _ids(ids, limit=10):
+def _ids(ids: Iterable[str], limit: int = 10) -> str:
     """Up to ``limit`` ids joined for a message; O(limit) for lists and tuples (no full copy)."""
     if not isinstance(ids, (list, tuple)):
         ids = list(ids)
     return ", ".join(ids[:limit]) + (f", ... ({len(ids) - limit} more)" if len(ids) > limit else "")
 
 
-def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=MAX_ASSOCIATION_WORK,
-                            declared=None):
+def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAIR_CHECKS,
+                            max_work: int = MAX_ASSOCIATION_WORK,
+                            declared: Mapping[str, set[tuple[str, str | None]]] | None = None) -> None:
     """Simple 3D Buildings: an outline is replaced by the building:part features that belong to it.
 
     ``declared`` maps part ids to ``{(type=building relation id, outline id or None)}``.
@@ -1394,14 +1471,14 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
     declared = declared or {}
     tol = PART_TOL_M
     work = _AssocWork(max_work)
-    by_base = {}
+    by_base: dict[str, list[int]] = {}
     for oi, o in enumerate(outlines):
         by_base.setdefault(_base_id(o.id), []).append(oi)
     # Per part: None (undeclared) or a declaration record shared by every component of the same
     # declared part, so multipolygon x multipolygon declarations are not expanded per component:
-    # [declared outline indices (frozenset), outline ids, relation ids, smallest outline (lazy)].
-    decl_of = []
-    decl_cache = {}
+    # a _Decl: declared outline indices, outline ids, relation ids, smallest outline (lazy).
+    decl_of: list[_Decl | None] = []
+    decl_cache: dict[str, _Decl] = {}
     for part in parts:
         base = _base_id(part.id)
         d = declared.get(base)
@@ -1413,9 +1490,9 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
             oids = sorted({o for _, o in d if o is not None})
             ois = frozenset(oi for o in oids for oi in by_base.get(o, ()))
             work.add(len(ois) + 1)
-            rec = decl_cache[base] = [ois, oids, sorted({r for r, _ in d}), None]
+            rec = decl_cache[base] = _Decl(ois, oids, sorted({r for r, _ in d}))
         decl_of.append(rec)
-    candidates = [[] for _ in parts]
+    candidates: list[list[int]] = [[] for _ in parts]
     n_pairs = 0
     if outlines:
         pboxes = [p.geometry.bbox() for p in parts]
@@ -1427,7 +1504,7 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
         cs = max(_PART_GRID_M, (gx1 - gx0) / _PART_GRID_MAX_CELLS, (gy1 - gy0) / _PART_GRID_MAX_CELLS)
         nmax = _PART_GRID_MAX_CELLS - 1
 
-        def cell_range(bb):
+        def cell_range(bb: Extent) -> tuple[int, int, int, int]:
             # Both parts and outlines are clamped to the parts' extent, which preserves overlaps.
             i0 = min(nmax, max(0, int((bb[0] - tol - gx0) // cs)))
             i1 = min(nmax, max(0, int((bb[2] + tol - gx0) // cs)))
@@ -1435,10 +1512,10 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
             j1 = min(nmax, max(0, int((bb[3] + tol - gy0) // cs)))
             return i0, i1, j0, j1
 
-        def overlap(a, b):
+        def overlap(a: Extent, b: Extent) -> bool:
             return a[0] <= b[2] + tol and b[0] <= a[2] + tol and a[1] <= b[3] + tol and b[1] <= a[3] + tol
 
-        grid = {}
+        grid: dict[tuple[int, int], list[int]] = {}
         for oi, bb in enumerate(oboxes):
             if bb[2] < gx0 or bb[0] > gx1 or bb[3] < gy0 or bb[1] > gy1:
                 continue  # cannot touch any part
@@ -1452,7 +1529,7 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
         # part cannot contain it, and phase 2 handles "declared but not within" from the record.
         for pi, bb in enumerate(pboxes):
             i0, i1, j0, j1 = cell_range(bb)
-            seen = set()
+            seen: set[int] = set()
             for i in range(i0, i1 + 1):
                 for j in range(j0, j1 + 1):
                     cell = grid.get((i, j), ())
@@ -1467,18 +1544,18 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                                     "check; choose a smaller area")
             candidates[pi] = sorted(seen)
 
-    def size(oi):
+    def size(oi: int) -> tuple[float, int]:
         return abs(outlines[oi].geometry.area()), oi
 
     # Phase 2: declared validation / containment, then conflicts with other outlines.
-    owner = {}       # part index -> outline index it belongs to (or is counted under, if rejected)
-    rejected = set()
+    owner: dict[int, int] = {}       # part index -> outline index it belongs to (or is counted under, if rejected)
+    rejected: set[int] = set()
     for pi, part in enumerate(parts):
         g = part.geometry
         dec = decl_of[pi]
-        within = set()
+        within: set[int] = set()
         if dec is not None:
-            ois, oids, rels = dec[0], dec[1], dec[2]
+            ois, oids, rels = dec.ois, dec.oids, dec.rels
             within = {oi for oi in candidates[pi]
                       if oi in ois and part_within_outline(g, outlines[oi].geometry, tol, work)}
             if within:
@@ -1486,11 +1563,11 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                 bases = {_base_id(outlines[oi].id) for oi in within}
                 n_missed = len(oids) - len(bases)  # bases is a subset of oids
                 if n_missed > 0:
-                    shown = []
-                    for o in oids:  # stops after at most len(bases) + 10 ids
+                    shown: list[str] = []
+                    for oid in oids:  # stops after at most len(bases) + 10 ids
                         work.add(1)
-                        if o not in bases:
-                            shown.append(o)
+                        if oid not in bases:
+                            shown.append(oid)
                             if len(shown) == 10:
                                 break
                     more = f", ... ({n_missed - len(shown)} more)" if n_missed > len(shown) else ""
@@ -1500,10 +1577,10 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                         f"{', '.join(shown)}{more} too but does not lie within them; it belongs to "
                         f"{outlines[owner[pi]].id} only")
             elif ois:
-                if dec[3] is None:
+                if dec.smallest is None:
                     work.add(len(ois))
-                    dec[3] = min(ois, key=size)
-                owner[pi] = dec[3]
+                    dec.smallest = min(ois, key=size)
+                owner[pi] = dec.smallest
                 rejected.add(pi)
                 out.invalid.append({"id": part.id, "reason": (
                     f"building:part does not lie within its declared outline {_ids(oids)} (building relation "
@@ -1515,7 +1592,7 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                     f"{part.id}: building:part of building relation {_ids(rels)} whose declared {what} not "
                     "available as a building outline (missing, outside the area, invalid or unsupported); "
                     "the part is generated standalone and not matched to any other outline")
-            exempt = ois
+            exempt: frozenset[int] | set[int] = ois
         else:
             within = {oi for oi in candidates[pi] if part_within_outline(g, outlines[oi].geometry, tol, work)}
             if within:
@@ -1533,12 +1610,12 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                 continue
             out.overlap_candidates.append({"part": part.id, "outline": o.id,
                                            "kind": "declared_part" if dec is not None else "part"})
-    members = {}
+    members: dict[int, list[int]] = {}
     for pi in sorted(owner):
         members.setdefault(owner[pi], []).append(pi)
     replaced = {oi for oi, pis in members.items() if any(pi not in rejected for pi in pis)}
     rejected_ids = {parts[pi].id for pi in rejected}
-    replaced_ids = set()
+    replaced_ids: set[int] = set()
     for oi in sorted(replaced):
         o = outlines[oi]
         replaced_ids.add(id(o))
@@ -1551,28 +1628,28 @@ def _resolve_building_parts(out, max_pair_checks=MAX_PART_PAIR_CHECKS, max_work=
                      and not (b.kind == "building_part" and b.id in rejected_ids)]
 
 
-def _area_family(tags):
+def _area_family(tags: Tags) -> str | None:
     """Class used to decide whether a way and a multipolygon describe the same area feature."""
     if "building" in tags or "building:part" in tags:
         return "building"
     return area_class(tags)
 
 
-def _bbox_overlaps(bbox, area):
+def _bbox_overlaps(bbox: Extent, area: Area) -> bool:
     hx, hy = area.half
     return _rect_overlaps(bbox, (-hx, -hy, hx, hy))
 
 
-def _rect_overlaps(bbox, rect):
+def _rect_overlaps(bbox: Extent, rect: Extent) -> bool:
     x0, y0, x1, y1 = bbox
     return x1 >= rect[0] and x0 <= rect[2] and y1 >= rect[1] and y0 <= rect[3]
 
 
-def _expand(rect, margin):
+def _expand(rect: Extent, margin: float) -> Extent:
     return rect[0] - margin, rect[1] - margin, rect[2] + margin, rect[3] + margin
 
 
-def area_class(tags):
+def area_class(tags: Tags) -> Literal["water", "forest", "grass", "sand"] | None:
     if tags.get("natural") == "water" or tags.get("landuse") in ("reservoir", "basin") or "water" in tags:
         return "water"
     if tags.get("landuse") == "forest" or tags.get("natural") == "wood":
@@ -1590,11 +1667,13 @@ _KEEP_TAGS = ("highway", "bridge", "tunnel", "layer", "covered", "building", "bu
               "building:min_level", "location", "railway", "waterway", "man_made")
 
 
-def _subset(tags):
+def _subset(tags: Tags) -> dict[str, str]:
     return {k: v for k, v in tags.items() if k in _KEEP_TAGS}
 
 
-def _clip_polyline(pts, area, rect=None, max_parts=None, nids=None, ids_out=None):
+def _clip_polyline(pts: Sequence[Pt], area: Area, rect: Extent | None = None, max_parts: float | None = None,
+                   nids: Sequence[int] | None = None,
+                   ids_out: list[list[int | None]] | None = None) -> list[list[Pt]] | None:
     """Clip a polyline to the area rectangle (or ``rect`` = (x0, y0, x1, y1)); returns list of parts (>=2 pts),
     or None as soon as it would hold more than ``max_parts`` parts (bounding the allocation, not only the result).
     With ``nids`` (one OSM node id per point) and ``ids_out``, the node id of every part vertex is appended to
@@ -1602,10 +1681,11 @@ def _clip_polyline(pts, area, rect=None, max_parts=None, nids=None, ids_out=None
     if rect is None:
         hx, hy = area.half
         rect = (-hx, -hy, hx, hy)
-    parts = []
-    cur, cur_ids = [], []
+    parts: list[list[Pt]] = []
+    cur: list[Pt] = []
+    cur_ids: list[int | None] = []
 
-    def flush():
+    def flush() -> None:
         parts.append(cur)
         if ids_out is not None:
             ids_out.append(cur_ids)
@@ -1640,7 +1720,18 @@ def _clip_polyline(pts, area, rect=None, max_parts=None, nids=None, ids_out=None
     return parts
 
 
-def _clip_segment(a, b, x0, y0, x1, y1, exact=False):
+@overload
+def _clip_segment(a: Pt, b: Pt, x0: float, y0: float, x1: float, y1: float,
+                  exact: Literal[True]) -> tuple[Pt, Pt, float, float] | None: ...
+
+
+@overload
+def _clip_segment(a: Pt, b: Pt, x0: float, y0: float, x1: float, y1: float,
+                  exact: Literal[False] = False) -> tuple[Pt, Pt] | None: ...
+
+
+def _clip_segment(a: Pt, b: Pt, x0: float, y0: float, x1: float, y1: float,
+                  exact: bool = False) -> tuple[Pt, Pt, float, float] | tuple[Pt, Pt] | None:
     """Clip a segment to a rectangle; ``exact`` also returns the parameters and keeps an unclipped end identical
     to the source vertex."""
     dx, dy = b[0] - a[0], b[1] - a[1]
@@ -1657,5 +1748,5 @@ def _clip_segment(a, b, x0, y0, x1, y1, exact=False):
             t1 = min(t1, r)
         if t0 > t1:
             return None
-    p, q = (a[0] + t0 * dx, a[1] + t0 * dy), (a[0] + t1 * dx, a[1] + t1 * dy)
-    return (p, q, t0, t1) if exact else (p, q)
+    pa, pb = (a[0] + t0 * dx, a[1] + t0 * dy), (a[0] + t1 * dx, a[1] + t1 * dy)
+    return (pa, pb, t0, t1) if exact else (pa, pb)

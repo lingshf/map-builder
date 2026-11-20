@@ -15,6 +15,8 @@
   the network.
 """
 
+from __future__ import annotations
+
 import http.client
 import re
 import socket
@@ -23,6 +25,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import urllib.response
+from collections.abc import Callable, Iterator, Mapping
+from typing import IO, TYPE_CHECKING, Any, Protocol, TypedDict
+
+if TYPE_CHECKING:
+    import ssl
 
 from . import GENERATOR_NAME, GENERATOR_VERSION
 from .errors import AuthError, CoverageError, LimitError, NetworkError
@@ -39,7 +47,7 @@ _WORKER_SLOTS = threading.BoundedSemaphore(MAX_OUTSTANDING_WORKERS)
 _CONTENT_RANGE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", re.IGNORECASE)
 
 
-def redact(url):
+def redact(url: object) -> str:
     """Origin only (``scheme://host[:port]``) so URLs are safe to log/persist.
 
     Userinfo, path, query and fragment are all dropped: a caller-supplied endpoint
@@ -60,13 +68,22 @@ def redact(url):
 
 
 class Response:
-    def __init__(self, status, body, headers=None):
-        self.status = status
-        self.body = body
-        self.headers = headers or {}
+    def __init__(self, status: int, body: bytes, headers: Mapping[str, str] | None = None) -> None:
+        self.status: int = status
+        self.body: bytes = body
+        self.headers: Mapping[str, str] = headers or {}
 
 
-def _origin(parts):
+class Transport(Protocol):
+    def request(self, method: str, url: str, headers: Mapping[str, str], data: bytes | None,
+                timeout: float, max_bytes: int) -> Response: ...
+
+
+class _Closeable(Protocol):
+    def close(self) -> object: ...
+
+
+def _origin(parts: urllib.parse.SplitResult) -> tuple[str, str, int | None]:
     scheme = (parts.scheme or "").lower()
     try:
         port = parts.port
@@ -77,12 +94,12 @@ def _origin(parts):
     return scheme, (parts.hostname or "").lower(), port
 
 
-def _exc_name(exc):
+def _exc_name(exc: BaseException) -> str:
     """Exception class name only (never its message, which may echo URLs or credentials)."""
     return re.sub(r"[^A-Za-z0-9_]", "", type(exc).__name__)[:64] or "Error"
 
 
-def _header(headers, name):
+def _header(headers: Mapping[str, str] | None, name: str) -> str | None:
     name = name.lower()
     for k, v in (headers or {}).items():
         if str(k).lower() == name:
@@ -98,23 +115,23 @@ class _DrainedBody:
     object instead guarantees no redirect body is ever downloaded.
     """
 
-    def read(self, *_args):
+    def read(self, *_args: object) -> bytes:
         return b""
 
-    def readline(self, *_args):
+    def readline(self, *_args: object) -> bytes:
         return b""
 
-    def readlines(self, *_args):
+    def readlines(self, *_args: object) -> list[bytes]:
         return []
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[bytes]:
         return iter(())
 
-    def close(self):
+    def close(self) -> None:
         pass
 
 
-def _close_quietly(fp):
+def _close_quietly(fp: _Closeable | None) -> None:
     try:
         if fp is not None:
             fp.close()
@@ -132,14 +149,16 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     bounded by the same absolute deadline (``remaining`` returns the seconds left).
     """
 
-    def __init__(self, max_redirects=MAX_REDIRECTS, check_deadline=None, remaining=None):
+    def __init__(self, max_redirects: int = MAX_REDIRECTS, check_deadline: Callable[[], None] | None = None,
+                 remaining: Callable[[], float] | None = None) -> None:
         super().__init__()
-        self.max_redirections = max_redirects
-        self.max_repeats = max_redirects
-        self._check_deadline = check_deadline
-        self._remaining = remaining
+        self.max_redirections = max_redirects  # type: ignore[misc]  # stdlib declares it as a class attribute
+        self.max_repeats = max_redirects  # type: ignore[misc]  # stdlib declares it as a class attribute
+        self._check_deadline: Callable[[], None] | None = check_deadline
+        self._remaining: Callable[[], float] | None = remaining
 
-    def http_error_302(self, req, fp, code, msg, headers):
+    def http_error_302(self, req: urllib.request.Request, fp: IO[bytes], code: int, msg: str,
+                       headers: http.client.HTTPMessage) -> urllib.response.addinfourl | None:
         _close_quietly(fp)  # never drain the redirect body
         if self._check_deadline:
             self._check_deadline()
@@ -147,17 +166,18 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             # OpenerDirector re-opens the next hop with req.timeout: clamp it to the time left.
             left = max(0.001, self._remaining())
             req.timeout = left if req.timeout is None else max(0.001, min(req.timeout, left))
-        return super().http_error_302(req, _DrainedBody(), code, msg, headers)
+        return super().http_error_302(req, _DrainedBody(), code, msg, headers)  # type: ignore[arg-type]  # duck-typed fp
 
     http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(self, req: urllib.request.Request, fp: IO[bytes], code: int, msg: str,
+                         headers: http.client.HTTPMessage, newurl: str) -> urllib.request.Request | None:
         safe = redact(req.full_url)
         if self._check_deadline:
             self._check_deadline()
         old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
         names = {k.lower() for k in list(req.headers) + list(req.unredirected_hdrs)}
-        reason = None
+        reason: str | None = None
         if new.scheme.lower() not in ("http", "https"):
             reason = "redirect to a non-HTTP scheme refused"
         elif names & SENSITIVE_HEADERS and (
@@ -169,7 +189,7 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _clamp_socket_timeout(resp, seconds):
+def _clamp_socket_timeout(resp: object, seconds: float) -> None:
     """Best effort: bound the next receive on the response's socket by the remaining deadline."""
     sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
     if sock is not None:
@@ -179,6 +199,12 @@ def _clamp_socket_timeout(resp, seconds):
             pass
 
 
+class _Mailbox(TypedDict, total=False):
+    """Worker-thread result handed to the caller: a Response or the exception that ended it."""
+    ok: Response
+    err: BaseException
+
+
 class _Watchdog:
     """Shuts down every socket of a request when its absolute deadline passes.
 
@@ -186,22 +212,22 @@ class _Watchdog:
     that performs many receives, so the deadline is enforced from a timer thread instead.
     """
 
-    def __init__(self, seconds):
+    def __init__(self, seconds: float) -> None:
         self._lock = threading.Lock()
-        self._socks = []
-        self.expired = False
+        self._socks: list[socket.socket] = []
+        self.expired: bool = False
         self._timer = threading.Timer(max(0.0, seconds), self._fire)
         self._timer.daemon = True
         self._timer.start()
 
-    def _fire(self):
+    def _fire(self) -> None:
         with self._lock:
             self.expired = True
             socks = list(self._socks)
         for s in socks:
             _shutdown_quietly(s)
 
-    def register(self, sock):
+    def register(self, sock: socket.socket) -> socket.socket:
         with self._lock:
             self._socks.append(sock)
             expired = self.expired
@@ -209,11 +235,11 @@ class _Watchdog:
             _shutdown_quietly(sock)
         return sock
 
-    def cancel(self):
+    def cancel(self) -> None:
         self._timer.cancel()
 
 
-def _shutdown_quietly(sock):
+def _shutdown_quietly(sock: socket.socket) -> None:
     try:
         sock.shutdown(socket.SHUT_RDWR)
     except OSError:
@@ -226,10 +252,12 @@ class _RegisteringContext:
     Wrapping detaches the raw TCP socket (its descriptor moves to the SSLSocket), so the raw
     registration alone could not interrupt a stalled handshake or TLS reads."""
 
-    def __init__(self, ctx, watchdog):
-        self._ctx, self._watchdog = ctx, watchdog
+    def __init__(self, ctx: ssl.SSLContext, watchdog: _Watchdog) -> None:
+        self._ctx: ssl.SSLContext = ctx
+        self._watchdog: _Watchdog = watchdog
 
-    def wrap_socket(self, sock, server_hostname=None, **kwargs):
+    def wrap_socket(self, sock: socket.socket, server_hostname: str | None = None,
+                    **kwargs: Any) -> ssl.SSLSocket:  # Any: forwarded verbatim to SSLContext.wrap_socket
         kwargs["do_handshake_on_connect"] = False
         ssock = self._ctx.wrap_socket(sock, server_hostname=server_hostname, **kwargs)
         self._watchdog.register(ssock)
@@ -240,37 +268,37 @@ class _RegisteringContext:
             raise
         return ssock
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:  # Any: transparent proxy to the wrapped SSLContext
         return getattr(self._ctx, name)
 
 
-def _watched(conn_class, watchdog):
+def _watched(conn_class: Any, watchdog: _Watchdog) -> type[http.client.HTTPConnection]:  # Any: conn_class is a dynamic base class
     class Watched(conn_class):
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:  # Any: forwarded verbatim to the base connection
             super().__init__(*args, **kwargs)
             create = self._create_connection
-            self._create_connection = lambda *a, **k: watchdog.register(create(*a, **k))
+            self._create_connection: Callable[..., socket.socket] = lambda *a, **k: watchdog.register(create(*a, **k))
             if getattr(self, "_context", None) is not None:
-                self._context = _RegisteringContext(self._context, watchdog)
+                self._context: Any = _RegisteringContext(self._context, watchdog)  # Any: stdlib private attribute
     return Watched
 
 
 class _WatchedHTTPHandler(urllib.request.HTTPHandler):
-    def __init__(self, watchdog):
+    def __init__(self, watchdog: _Watchdog) -> None:
         super().__init__()
-        self._watchdog = watchdog
+        self._watchdog: _Watchdog = watchdog
 
-    def http_open(self, req):
+    def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
         return self.do_open(_watched(http.client.HTTPConnection, self._watchdog), req)
 
 
 class _WatchedHTTPSHandler(urllib.request.HTTPSHandler):
-    def __init__(self, watchdog):
+    def __init__(self, watchdog: _Watchdog) -> None:
         super().__init__()
-        self._watchdog = watchdog
+        self._watchdog: _Watchdog = watchdog
 
-    def https_open(self, req):
-        return self.do_open(_watched(http.client.HTTPSConnection, self._watchdog), req, context=self._context)
+    def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+        return self.do_open(_watched(http.client.HTTPSConnection, self._watchdog), req, context=self._context)  # type: ignore[attr-defined]  # private stdlib attribute
 
 
 class UrllibTransport:
@@ -279,26 +307,29 @@ class UrllibTransport:
     ``opener`` and ``clock`` may be injected for tests.
     """
 
-    def __init__(self, total_timeout=None, max_redirects=MAX_REDIRECTS, opener=None, clock=time.monotonic):
-        self.total_timeout = total_timeout
-        self.max_redirects = max_redirects
-        self.opener = opener
-        self.clock = clock
+    def __init__(self, total_timeout: float | None = None, max_redirects: int = MAX_REDIRECTS,
+                 opener: urllib.request.OpenerDirector | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.total_timeout: float | None = total_timeout
+        self.max_redirects: int = max_redirects
+        self.opener: urllib.request.OpenerDirector | None = opener
+        self.clock: Callable[[], float] = clock
 
-    def request(self, method, url, headers, data, timeout, max_bytes):
+    def request(self, method: str, url: str, headers: Mapping[str, str], data: bytes | None,
+                timeout: float, max_bytes: int) -> Response:
         if self.opener is not None:  # injected (test) opener: no real sockets or resolver involved
             return self._request(method, url, headers, data, timeout, max_bytes)
         # DNS resolution ignores socket timeouts and cannot be interrupted, so the exchange runs in a
         # worker thread and the caller waits only until the absolute deadline. A worker still blocked
         # in the resolver is abandoned (its late sockets are shut down by the expired watchdog).
         total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
-        box = {}
+        box: _Mailbox = {}
         if not _WORKER_SLOTS.acquire(blocking=False):
             safe = redact(url)
             raise NetworkError(f"{safe}: too many earlier requests are still stalled (e.g. in DNS resolution); "
                                "retry later", url=safe)
 
-        def work():
+        def work() -> None:
             try:
                 box["ok"] = self._request(method, url, headers, data, timeout, max_bytes, total)
             except BaseException as e:  # noqa: BLE001 - re-raised in the caller's thread
@@ -319,20 +350,21 @@ class UrllibTransport:
             raise box["err"]
         return box["ok"]
 
-    def _request(self, method, url, headers, data, timeout, max_bytes, total=None):
+    def _request(self, method: str, url: str, headers: Mapping[str, str], data: bytes | None, timeout: float,
+                 max_bytes: int, total: float | None = None) -> Response:
         safe = redact(url)
         if total is None:
             total = self.total_timeout if self.total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
         deadline = self.clock() + total
 
-        def check_deadline():
+        def check_deadline() -> None:
             if self.clock() > deadline:
                 raise NetworkError(f"{safe}: request exceeded the total time limit of {total:g} s", url=safe)
 
-        watchdog = None if self.opener else _Watchdog(deadline - self.clock())
+        watchdog: _Watchdog | None = None if self.opener else _Watchdog(deadline - self.clock())
         opener = self.opener or urllib.request.build_opener(
             SafeRedirectHandler(self.max_redirects, check_deadline, lambda: deadline - self.clock()),
-            _WatchedHTTPHandler(watchdog), _WatchedHTTPSHandler(watchdog))
+            _WatchedHTTPHandler(watchdog), _WatchedHTTPSHandler(watchdog))  # type: ignore[arg-type]  # watchdog is set whenever no opener is injected
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             return self._exchange(opener, req, timeout, max_bytes, deadline, check_deadline)
@@ -355,11 +387,13 @@ class UrllibTransport:
             if watchdog is not None:
                 watchdog.cancel()
 
-    def _exchange(self, opener, req, timeout, max_bytes, deadline, check_deadline):
+    def _exchange(self, opener: urllib.request.OpenerDirector, req: urllib.request.Request, timeout: float,
+                  max_bytes: int, deadline: float, check_deadline: Callable[[], None]) -> Response:
         resp = opener.open(req, timeout=max(0.001, min(timeout, deadline - self.clock())))
         with resp:
             limit = max_bytes + 1
-            chunks, n = [], 0
+            chunks: list[bytes] = []
+            n = 0
             while n < limit:
                 check_deadline()
                 _clamp_socket_timeout(resp, max(0.001, min(timeout, deadline - self.clock())))
@@ -376,18 +410,20 @@ class UrllibTransport:
 
 
 class HttpClient:
-    def __init__(self, transport=None, timeout=DEFAULT_TIMEOUT_S, max_bytes=DEFAULT_MAX_BYTES, total_timeout=None):
-        self.timeout = timeout
-        self.total_timeout = total_timeout if total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
-        self.transport = transport or UrllibTransport(total_timeout=self.total_timeout)
-        self.max_bytes = max_bytes
-        self.bytes_downloaded = 0
-        self.clock = time.monotonic
+    def __init__(self, transport: Transport | None = None, timeout: float = DEFAULT_TIMEOUT_S,
+                 max_bytes: int = DEFAULT_MAX_BYTES, total_timeout: float | None = None) -> None:
+        self.timeout: float = timeout
+        self.total_timeout: float = total_timeout if total_timeout is not None else timeout * TOTAL_TIMEOUT_FACTOR
+        self.transport: Transport = transport or UrllibTransport(total_timeout=self.total_timeout)
+        self.max_bytes: int = max_bytes
+        self.bytes_downloaded: int = 0
+        self.clock: Callable[[], float] = time.monotonic
 
-    def fetch(self, url, method="GET", headers=None, data=None, byte_range=None, max_bytes=None,
-              not_found_is_coverage=False):
+    def fetch(self, url: str, method: str = "GET", headers: Mapping[str, str] | None = None,
+              data: bytes | None = None, byte_range: tuple[int, int] | None = None,
+              max_bytes: int | None = None, not_found_is_coverage: bool = False) -> bytes:
         max_bytes = self.max_bytes if max_bytes is None else max_bytes
-        h = {"User-Agent": USER_AGENT}
+        h: dict[str, str] = {"User-Agent": USER_AGENT}
         if headers:
             h.update(headers)
         if byte_range is not None:
@@ -421,7 +457,7 @@ class HttpClient:
         return self._check_partial(safe, resp, body, start, length)
 
     @staticmethod
-    def _check_partial(safe, resp, body, start, length):
+    def _check_partial(safe: str, resp: Response, body: bytes, start: int, length: int) -> bytes:
         m = _CONTENT_RANGE.match(str(_header(resp.headers, "Content-Range") or ""))
         if not m:
             raise NetworkError(f"{safe}: partial response without a valid Content-Range", 206, safe)
