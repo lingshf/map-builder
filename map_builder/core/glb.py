@@ -417,7 +417,8 @@ def _read_glb(data, max_triangles):
                 if budget["tris"] > max_triangles:
                     raise PackageError(f"glb: more than {max_triangles} visual triangles")
             else:
-                mesh_cache[mi] = _mesh_triangles(meshes[mi], read_acc, budget, max_triangles, textured)
+                mesh_cache[mi] = _mesh_triangles(meshes[mi], read_acc, budget, max_triangles, textured,
+                                                 len(gl.get("materials", ())))
             flip = det3(m) < 0  # glTF: negative determinant means clockwise front faces
             for a, b, c in mesh_cache[mi]:
                 wa, wb, wc = (tuple(m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3] for r in range(3))
@@ -509,7 +510,7 @@ def glb_image_sha256s(data):
     return out
 
 
-def _mesh_triangles(mesh, read_acc, budget, max_triangles, textured=frozenset()):
+def _mesh_triangles(mesh, read_acc, budget, max_triangles, textured=frozenset(), n_materials=0):
     """Local-space triangles of a mesh (mode 4 only; points/lines carry no triangles)."""
     if not isinstance(mesh, dict) or not isinstance(mesh.get("primitives"), list):
         raise PackageError("glb: mesh without primitives")
@@ -527,7 +528,10 @@ def _mesh_triangles(mesh, read_acc, budget, max_triangles, textured=frozenset())
         pos = read_acc(p["attributes"]["POSITION"], "position")
         if not all(math.isfinite(c) for q in pos for c in q):
             raise PackageError("glb: non-finite POSITION")
-        if p.get("material") in textured:
+        pm = p.get("material")
+        if pm is not None and (type(pm) is not int or not 0 <= pm < n_materials):
+            raise PackageError("glb: primitive material index out of range")
+        if pm in textured:
             if "TEXCOORD_0" not in p["attributes"]:
                 raise PackageError("glb: a textured primitive is missing TEXCOORD_0")
             uvs = read_acc(p["attributes"]["TEXCOORD_0"], "uv")

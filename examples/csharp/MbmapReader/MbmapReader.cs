@@ -516,8 +516,13 @@ namespace MapBuilder.Reference
                             }
                         posCache[pai] = pv;
                     }
-                    if (p.TryGetProperty("material", out var pmat) && pmat.ValueKind == JsonValueKind.Number && pmat.TryGetInt64(out long pmi)
-                        && texturedMaterials.Contains(pmi))
+                    long pmi = -1;
+                    if (p.TryGetProperty("material", out var pmat))
+                    {
+                        if (pmat.ValueKind != JsonValueKind.Number || !pmat.TryGetInt64(out pmi) || pmi < 0 || pmi >= materials.Count)
+                            throw new MbmapException("glb: primitive material index out of range");
+                    }
+                    if (texturedMaterials.Contains(pmi))
                     {
                         if (!attrs.TryGetProperty("TEXCOORD_0", out _)) throw new MbmapException("glb: a textured primitive is missing TEXCOORD_0");
                         int uai = Json.Index(attrs, "TEXCOORD_0", accessors.Count, $"{tag}.attributes");
