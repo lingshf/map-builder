@@ -50,7 +50,8 @@ class PresetTests(unittest.TestCase):
         self.assertLessEqual(max(p["area"]["width_m"], p["area"]["height_m"]), 1000)
 
     def test_pittsburgh_preset_matches_the_v0_1_0_cameras(self):
-        saved = json.load(open(os.path.join(REPO, "docs", "demo", "v0.1.0", "pittsburgh-cameras.json")))
+        with open(os.path.join(REPO, "docs", "demo", "v0.1.0", "pittsburgh-cameras.json")) as f:
+            saved = json.load(f)
         self.assertEqual(db.load_preset("pittsburgh"), saved)
 
     def test_rejects_bad_presets(self):
