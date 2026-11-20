@@ -6,6 +6,13 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+### Added
+
+- Textured export (S3-TEX-UV-CORE): the CLI writes world-scaled UVs (`core/uv.py`) and embeds the CC0 textures
+  by default; `--no-textures` restores the untextured GLB. The package schema is 2.1.0 and its `NOTICES.txt`
+  and `asset_notices` carry the CC0 asset entry. COLOR_0 on textured faces is divided by the texture mean
+  albedo so textures do not darken the map. `examples/synthetic_sample.mbmap` is regenerated textured.
+
 ### Fixed
 
 - Blender and the CLI now emit the same passage probes for the same input. The Blender centre latitude/longitude

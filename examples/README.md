@@ -7,7 +7,7 @@ This is a **synthetic** package. It is built with the CLI from the hand-written 
 400 × 300 m area, 80 objects, 5237 collision triangles, a 2 m heightfield, 3 orientation
 probes and 4 passage probes (one road tunnel bore, way/1072, one on the bridge deck, way/1069, and two beneath the
 elevated building part and through the split building passage). It uses
-package format 2.0.0. Regenerate it from the repository root:
+package format 2.1.0 and is **textured** (world-scaled UVs, five CC0 textures embedded in the GLB; build with \--no-textures\ for the untextured GLB). Regenerate it from the repository root:
 
 ```powershell
 py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc `
@@ -20,7 +20,7 @@ py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 
 The build is deterministic. With the fixed `--created-utc`, Python 3.12 on Windows x64
 (the platform the sample was generated on) reproduces it byte-identically and gives
-`package_id = sha256:2b560d046e116337c6106984c0b5370966dc71c5bf6131a90a8e69cce04d03e3`.
+`package_id = sha256:05d8ad89be7d0fed6882e704080167879a31e48e9649f26ac821ced4ef2cced9`.
 Validation reports `VALID: 0 error(s), 1 warning(s)`; the warning is two degenerate
 (zero-area) collision triangles, which is allowed. `tests/test_examples.py` checks that the
 committed file still validates and matches a fresh build; on other platforms, where the

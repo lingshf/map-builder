@@ -193,6 +193,11 @@ py -3.12 tools\mbmap_cli.py build --osm area.osm --dem dem.tif --datum EGM2008 -
 py -3.12 tools\mbmap_cli.py validate out.mbmap      # exit 0 if VALID
 ```
 
+`--textures` (default) embeds the CC0 textures and writes world-scaled UVs (package format 2.1.0, about
++23 % GLB on Pittsburgh plus fixed texture bytes); `--no-textures` writes the untextured GLB of earlier
+versions. Collision data is identical either way. The vertex colour of a textured face is divided by its
+texture's mean albedo, so the face keeps its palette colour on average and the texture adds only detail.
+
 `--created-utc 2026-01-01T00:00:00Z` fixes the timestamp. With the same inputs on the same
 platform, the package and its `package_id` are then byte-identical (other platforms' maths
 libraries may differ in the last float bit). [examples/README.md](examples/README.md) gives the command

@@ -49,6 +49,9 @@ def main(argv=None):
                    help="DSM terrain correction: lower the terrain under buildings, trees, forest and bridge decks "
                         "toward the surrounding ground (default: auto = off for a local elevation file, which "
                         "--dsm-correction opts in; use it for surface models such as Copernicus GLO-30)")
+    b.add_argument("--textures", action=argparse.BooleanOptionalAction, default=True,
+                   help="embed the procedural CC0 textures with world-scaled UVs (default on; --no-textures "
+                        "writes the untextured visual GLB)")
     b.add_argument("--name", default="map")
     b.add_argument("--created-utc", default=None, metavar="YYYY-MM-DDTHH:MM:SSZ",
                    help="fixed manifest created_utc (default: now); with the same inputs the package is "
@@ -70,7 +73,7 @@ def main(argv=None):
                          plan_options=PlanOptions(seed=a.seed))
             m, r = build_package(area, s, a.out, a.name,
                                  progress=lambda frac: print(f"terrain {frac:.0%}", file=sys.stderr, end="\r"),
-                                 created_utc=a.created_utc)
+                                 created_utc=a.created_utc, textures=a.textures)
             print(f"wrote {a.out}  package_id={r.package_id}  objects={len(m['objects'])}  "
                   f"probes={len(m['orientation_probes'])}")
     except (MapBuilderError, OSError, ValueError) as e:
