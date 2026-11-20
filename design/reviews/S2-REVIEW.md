@@ -104,7 +104,7 @@ Splitting them is a v3 refactor, not a v2 blocker (L3).
 If F2 turns up a defect in passages or roofs on real data, it becomes S2-F5 and is fixed before
 the RC.
 
-## 5. Decision needing the user (or the coordinator on the user's behalf)
+## 5. Real-data area decision (decided: D49, option (a))
 
 **Real-data evidence for elevated parts and passages (S2-F2).**
 

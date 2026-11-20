@@ -162,6 +162,7 @@ Who: **U** = user, **C** = coordinator, **De** = design, **Dev** = earlier dev p
 | D46 | （协调者）v0.2.0 发布前必须修复 C# 读取器：CapsuleCheck 线性扫描三角形，在匹兹堡包上耗尽 2M 查询预算，探针 9–12（含两条隧道孔）未检查；且端墙 mb_id 触发 6 个警告。新任务 FIX-CS-PROBE-PARITY（#27）：C# 计费与 Python 逐探针一致，加共享预算一致性测试，mb_id 正则只接受生成器实际产出的形式；RC 等它合并后重跑。 | C | done (#27) |
 | D47 | （协调者）所有 PR（包括设计和纯文档 PR）都必须经协调者合并门禁授权后才能合并（源自 #29 未经授权自合）；凡改动探针或工作量计费的任务，PR 里必须用真实数据（匹兹堡包）分别跑 Python 和 C# 并附结果。 | C | final |
 | D48 | v0.3.0 is not cut immediately, because v0.2.0 shipped today and the user wants infrequent releases. S2-REVIEW runs first; its findings define the remaining v0.3.0 scope; then a single REL-v0.3.0 closes v2. | C | final |
+| D49 | S2-F2 uses option (a): a second real-data preset of at most 1×1 km containing elevated parts, a building passage and `roof:shape` tags. The search is time-boxed to half a day; if no candidate turns up, fall back to (c) synthetic-only evidence, and the release notes must state that limit. | C | final |
 
 D30–D47 are copied verbatim from the team dashboard (coordinator, 2026-11-19); entries that
 name no decider were decided by the coordinator. The dashboard numbered the "two sprints, cheap
@@ -172,11 +173,7 @@ demo" decision D18; in this record it is D17, so "D18" in D38 refers to that bas
 1. **D13 licence.** Still deferred; nothing in v2 depends on it. Releases carry the provisional
    GPL-3.0-or-later notice.
 
-2. **Real-data area for elevated parts, passages and roofs** (S2-REVIEW §5, task S2-F2).
-   Pittsburgh (D26) has none. Recommended (a): a second small preset that has them; (b) enlarge
-   Pittsburgh; (c) accept synthetic-only evidence. The coordinator may decide on the user's behalf.
-
-D25 (scope) and D26 (demo area) were decided by the coordinator on the user's behalf; the user
+D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.
 
 ## Non-goals for v2
