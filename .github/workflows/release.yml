@@ -48,6 +48,9 @@ jobs:
           mkdir -p dist
           blender --command extension build --source-dir map_builder --output-dir dist
 
+      - name: The extension zip ships the texture set (S3-TEX-ASSETS AC4)
+        run: MB_EXTENSION_ZIP="$(ls dist/*.zip | head -n1)" python3 -m unittest tests.test_textures.ExtensionZipTest -v
+
       - name: Check manifest version matches the tag
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
