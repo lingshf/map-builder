@@ -14,7 +14,7 @@ import json
 import os
 import tempfile
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import bpy
 
@@ -23,7 +23,7 @@ from ..core import uv as core_uv
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.glb import node_scale
-from ..core.mesh import MeshData
+from ..core.mesh import UV, MeshData
 from .sources import JsonMapping, check_persistable
 
 if TYPE_CHECKING:
@@ -173,7 +173,7 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
     uvsrc = uv_source(md, origin)
     if uvsrc is not None:
         flat: list[float] = []
-        for face, fuv in zip(uvsrc.faces, uvsrc.face_uvs):
+        for face, fuv in zip(uvsrc.faces, cast("list[tuple[UV, ...] | None]", uvsrc.face_uvs)):  # uv_source only returns meshes with face_uvs
             for k in range(len(face)):
                 flat.extend(fuv[k] if fuv is not None else (0.0, 0.0))
         if len(flat) != 2 * len(me.loops):
