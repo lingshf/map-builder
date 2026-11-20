@@ -19,9 +19,11 @@ How it works (see bake.py for the GLB generation decision):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import struct
 from array import array
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import TYPE_CHECKING
@@ -192,15 +194,38 @@ def _canonical(tag: str) -> tuple[tuple[float, ...], float, float]:
     return MATERIALS.get(tag, ((0.8, 0.8, 0.8), tex.roughness(tag), 0.0))
 
 
-def _textured_export_name(tag: str, spec: MaterialSpec) -> str:
-    """Export name of a textured generated material: the tag itself for the CLI's exact factors, otherwise the
-    tag plus its parameters. It depends on the parameters only (never on object names or iteration order), and
-    datablocks with identical parameters share one glTF material."""
-    rgb, rough, metal = _canonical(tag)
-    if all(abs(a - b) < 1e-4 for a, b in zip((*spec[0], spec[1], spec[2]), (*rgb, rough, metal))):   # float32 noise
-        return tag
-    col = "".join(f"{round(min(max(c, 0.0), 1.0) * 255):02x}" for c in spec[0])
-    return f"{tag} [{col} r{spec[1]:.3f} m{spec[2]:.3f}]"
+def _material_key(base: str, spec: MaterialSpec) -> str:
+    """Export identity of a material (D88): a digest of its exact parameters (base name, PNG sha256, base colour
+    and the full float32 bits of roughness and metallic). Primitives share one glTF material iff their keys are
+    equal; the key never depends on object names, datablock pointers or iteration order."""
+    h = hashlib.sha256()
+    h.update(base.encode("utf-8") + b"\0")
+    png = bytes(spec[3]) if len(spec) > 3 else b""
+    h.update(hashlib.sha256(png).digest() if png else b"")
+    h.update(struct.pack(f"<{len(spec[0]) + 2}f", *spec[0], spec[1], spec[2]))   # Blender stores float32
+    return "mbkey:" + h.hexdigest()
+
+
+def _final_names(registry: dict[str, tuple[str, MaterialSpec]]) -> dict[str, str]:
+    """Unique display name per material key: the base name, plus an 8-hex suffix of the key when the base name is
+    used by another material of the export (user materials included) or is the reserved default name."""
+    count: dict[str, int] = {}
+    for base, _ in registry.values():
+        count[base] = count.get(base, 0) + 1
+    names: dict[str, str] = {}
+    taken = {DEFAULT_MATERIAL} | {b for b, n in count.items() if n == 1 and b != DEFAULT_MATERIAL}
+    for key in sorted(registry):
+        base = registry[key][0]
+        if count[base] == 1 and base != DEFAULT_MATERIAL:
+            names[key] = base
+            continue
+        digest = key[len("mbkey:"):]
+        n = 8
+        while f"{base} {digest[:n]}" in taken:
+            n += 4
+        names[key] = f"{base} {digest[:n]}"
+        taken.add(names[key])
+    return names
 
 
 def _is_plain_generated(mat: bpy.types.Material | None) -> bool:
@@ -282,23 +307,9 @@ def _label(ob: bpy.types.Object) -> str:
     return ob.name_full
 
 
-def _export_material_name(mat_names: dict[int, str], key: int, name: str) -> str:
-    """Unique, deterministic export name per material datablock (``key``): distinct datablocks whose display
-    names coincide (e.g. a linked 'X' from lib.blend and a local 'X [lib.blend]') get ' (2)', ' (3)', ... in
-    first-seen order, so one never silently takes the other's factors. The default material's name is
-    reserved."""
-    if key in mat_names:
-        return mat_names[key]
-    taken = set(mat_names.values()) | {DEFAULT_MATERIAL}
-    unique, k = name, 2
-    while unique in taken:
-        unique, k = f"{name} ({k})", k + 1
-    mat_names[key] = unique
-    return unique
-
-
 def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, materials: dict[str, MaterialSpec],
-                      warnings: list[str], mat_names: dict[int, str], textures: bool = True) -> BakedObject:
+                      warnings: list[str], registry: dict[str, tuple[str, MaterialSpec]],
+                      textures: bool = True) -> BakedObject:
     ev = ob.evaluated_get(depsgraph)
     me = ev.to_mesh()
     try:
@@ -319,25 +330,22 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
             layer.uv.foreach_get("vector", uvbuf)
         verts = [(co[3 * i], co[3 * i + 1], co[3 * i + 2]) for i in range(nv)]
         tris = [(tv[3 * t], tv[3 * t + 1], tv[3 * t + 2]) for t in range(nt)]
-        slot_specs: list[tuple[str, ColorReader | None, str | None]] = []
+        slot_specs: list[tuple[str, ColorReader | None, str | None]] = []   # (material key or default name, ...)
         if not len(ev.material_slots):
             warnings.append(f"{ob.name}: no material (exported with the default grey material)")
             slot_specs.append((DEFAULT_MATERIAL, None, None))
         for slot in ev.material_slots:
             mname, spec, attr, mwarn = material_spec(slot.material, textures)
             tname = mname if spec is not None and len(spec) > 3 else None   # texture lookup key (material name)
+            base = mname
             if spec is not None:
-                if tname is not None:
-                    mname = _textured_export_name(tname, spec)
-                    mat_names[slot.material.as_pointer()] = mname
-                else:
-                    mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
-                materials.setdefault(mname, spec)
+                mname = _material_key(base, spec)
+                registry.setdefault(mname, (base, spec))
             reader: ColorReader | None = None
             if attr is not None:
                 reader = _color_reader(me, attr)
                 if reader is None:
-                    mwarn = mwarn + [f"material {mname!r} reads colour attribute {attr or '(render)'!r}, which "
+                    mwarn = mwarn + [f"material {base!r} reads colour attribute {attr or '(render)'!r}, which "
                                      "this mesh lacks; exported white"]
             for w in mwarn:
                 warnings.append(f"{ob.name}: {w}")
@@ -430,7 +438,7 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
     baked: list[BakedObject] = []
     materials: dict[str, MaterialSpec] = {}
     names: list[tuple[str, str]] = []
-    mat_names: dict[int, str] = {}              # material datablock pointer -> unique export name
+    registry: dict[str, tuple[str, MaterialSpec]] = {}   # material key -> (base name, spec)
     for ob in objects:
         ptr = ob.as_pointer()
         reason: str | None = None
@@ -468,7 +476,7 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
                           "add a Realize Instances node")
             continue
         try:
-            b = _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names, textures)
+            b = _bake_mesh_object(ob, depsgraph, materials, warnings, registry, textures)
         except ExportError as e:
             errors.extend(e.errors)
             continue
@@ -484,6 +492,11 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
         baked.append(b)
         names.append((ob.name, _label(ob)))
     errors.extend(export_name_clashes(names))
+    final = _final_names(registry)
+    for b in baked:
+        b.tri_materials = [final.get(m, m) for m in b.tri_materials]
+    for key, (_, spec) in registry.items():
+        materials[final[key]] = spec
     if not baked and not errors:
         errors.append("nothing to export: no visible mesh objects with faces in the map collection"
                       + (f" ({len(excluded)} object(s) excluded: "

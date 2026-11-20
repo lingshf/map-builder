@@ -316,3 +316,42 @@ def run(out_dir):
           f"independent of object names ({fac})")
     check(json.loads(_members(p1)["manifest.json"]).get("asset_notices") is not None,
           "textures: the mixed package carries the notice")
+
+    # --- D88: export identity is a key (exact parameters), not a display name -----------------------------------
+    for o in (c1, c2, c3):
+        bpy.data.objects.remove(o, do_unlink=True)
+
+    def _tweak(rough):
+        m = tmat.copy()
+        next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED").inputs["Roughness"].default_value = rough
+        m["mb_material"], m["mb_textured"] = "MB Facade", True
+        return m
+
+    def _export_mats(tag):
+        pth = os.path.join(out_dir, f"tex_bl_{tag}.mbmap")
+        s.export_path = pth
+        r_, _ = run_op(bpy.ops.map_builder.export)
+        return _mats(pth) if r_ == {"FINISHED"} else None
+
+    # (1) a user material whose display name equals the generated one must not take its texture
+    tmat.name = "gen_textured_facade"
+    user = bpy.data.materials.new("MB Facade")
+    d1, d2 = _cube("d88_user", user, (60, 40, 1)), _cube("d88_gen", tmat, (70, 40, 1))
+    m_a = _export_mats("d88a")
+    fa = {n: v_ for n, v_ in (m_a or {}).items() if n.startswith("MB Facade")}
+    check(m_a is not None and sorted(fa.values()) == [(0.4, False), (0.85, True)]
+          and all(n.startswith("MB Facade ") for n in fa),
+          f"textures: a user material named like a generated one keeps its own params and the texture stays on "
+          f"the generated primitive ({m_a})")
+    for o in (d1, d2):
+        bpy.data.objects.remove(o, do_unlink=True)
+
+    # (2) variants whose roughness differ below the display precision stay distinct and order-independent
+    va, vb = _tweak(0.2101), _tweak(0.2104)
+    e1, e2 = _cube("d88_v1", va, (60, 60, 1)), _cube("d88_v2", vb, (70, 60, 1))
+    m_b = _export_mats("d88b")
+    e1.name, e2.name = "zz_v1", "aa_v2"
+    m_c = _export_mats("d88c")
+    pick = lambda mm: {n: v_ for n, v_ in (mm or {}).items() if n.startswith("MB Facade") and v_[0] == 0.21}
+    check(m_b is not None and m_b == m_c and len(pick(m_b)) == 2,
+          f"textures: roughness 0.2101 and 0.2104 export as two stable, distinct materials ({pick(m_b)})")
