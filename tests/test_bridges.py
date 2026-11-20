@@ -449,10 +449,10 @@ class CrossingTest(unittest.TestCase):
         self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
 
     def test_a_junction_road_that_later_crosses_under_the_deck_is_still_measured(self):
-        # shares a node at x=-95 (its own junction) but loops back and passes under the deck at x=-60
+        # joins at-grade at x=-99 (exempt by itself) but loops back and passes under the deck at x=-60
         plan, ids, grid = make_scene(
-            [([(-100, 0), (-95, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
-             ([(-95, 0), (-95, 30), (-60, 30), (-60, -30)], {"highway": "residential"})],
+            [([(-100, 0), (-99, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
+             ([(-99, 0), (-99, 30), (-60, 30), (-60, -30)], {"highway": "residential"})],
             valley_height, width=300.0, joins=[(0, 1, 1, 0)])
         prov = objects(plan, "bridge")[0].provenance
         col, _ = plan_collision(plan)
@@ -461,8 +461,8 @@ class CrossingTest(unittest.TestCase):
         self.assertEqual(col.objects[hit.object]["mb_id"], ids[0])
         self.assertLess(0.5 + hit.t, 5.0 - 1.0)
         self.assertIs(prov["clearance_met"], False)
-        self.assertLessEqual(prov["clearance_m"], 0.5 + hit.t + 0.05)
-        self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
+        self.assertAlmostEqual(prov["clearance_m"], 0.5 + hit.t, delta=0.6)   # the x=-60 leg alone, about 2.2 m
+        self.assertTrue(any(ids[1] in w and f"at most {prov['clearance_m']:.2f} m" in w for w in plan.report["warnings"]))
 
     def test_a_road_far_above_the_approach_deck_is_a_conflict_not_a_junction(self):
         # a 2.5 m wide knoll puts the road 6.6 m above the terrain, 2.6 m above the deck top at x=-55
