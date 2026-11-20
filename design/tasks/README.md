@@ -54,7 +54,7 @@ Scope D54; decisions D55–D88 in [../roadmap.md](../roadmap.md#v3-sprint-3-v040
 | [S3-TEX-BLENDER](S3-TEX-BLENDER.md) | S3 | dev | S3-TEX-UV-CORE | `blender/scene_build.py`, `bake.py`, `export.py`, `sources.py`, `ui.py`, `props.py`, `operators.py`, `tests/blender/checks_textures.py` (new); soft: `tests/blender/run_integration.py` (one line) | done | #53 (54fc028) |
 | [S3-PARITY](S3-PARITY.md) | S3 | dev | — (½ day, D62) | `tests/blender/checks_parity.py` (new); soft: `run_integration.py` (one line), optional VALIDATION note; only if fixing: `blender/bake.py` probe export (serialise with S3-TEX-BLENDER) | done (fix in S3-PARITY-FIX) | #45 (b3aaf63), #47 (9c99745) |
 | S3-TYPING | S3 | dev | — (D79, D83) | annotations only, avoiding the roof/#46 files; no behaviour change | done | #51 (aa2a979), #52 (cc1d653), #54 (872a536) |
-| [S3-REVIEW](S3-REVIEW.md) | S3 | design | all S3 dev tasks | `design/` only | in review (GO, no v0.4.0 blockers) | this PR |
+| [S3-REVIEW](S3-REVIEW.md) | S3 | design | all S3 dev tasks | `design/` only | in review (GO, no v0.4.0 blockers) | #55 |
 | [REL-v0.4.0](REL-v0.4.0.md) | S3 | release manager | S3-REVIEW and its blocker S3-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.4.0/`, `docs/releases/v0.4.0.md` | ready (no S3-Fn blockers) |  |
 | S3-F1 | later | dev | — | `core/roofs.py` | later — analytic near-rectangle gables: planar failure has no named reason (4 Munich roofs) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
 | S3-F2 | later | dev | — | `tests/test_demo_bundle.py` | later — ResourceWarning leak in a test (finalizer escapes `-W error`) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
