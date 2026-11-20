@@ -38,6 +38,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # the frozen-reader step needs the v0.3.0 tag for git archive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
