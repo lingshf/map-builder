@@ -236,12 +236,40 @@ The capsule is the set of points within `radius_m` of the polyline `path_map`. I
 comparison allows `radius_m + 1e-9` m, so exact contact is never lost to rounding. The
 validator treats a malformed probe or an unknown `feature` as an error. It re-checks every
 probe against the final collision and reports a blocked probe as a **warning**, naming the
-probe by index and the first blocking collision object by `#k`. The check has a fixed work
-budget of 2,000,000 object/triangle visits shared by all probes of the package (one unit per
-object per path segment, plus one per triangle tested); if it runs out, the remaining probes
-are reported as unchecked in a warning. Degenerate (collapsed or collinear) triangles are
-measured through their edges.
-Consumers should re-run the probes against their own imported collision as acceptance tests.
+probe by index and the first blocking collision object by `#k`. Degenerate (collapsed or
+collinear) triangles are measured through their edges.
+
+**Work accounting** (normative; the Python validator and the C# reader must report identical
+units for every probe). Let `reach = radius_m + 1e-9`, `pad = reach + 1e-3`. A path of one
+point is one zero-length segment; otherwise segment `s` joins points `s` and `s+1`. A segment
+box is its endpoints' min/max per axis; the whole-path box is the union of all segment boxes.
+"Overlap" means box A expanded by `pad` (objects) or `reach` (triangles) intersects box B
+on all three axes (closed intervals). For each collision object in table order:
+
+1. If the path has more than one segment and the whole-path box does not overlap the object's
+   `aabb` (with `pad`): spend **1** and go to the next object.
+2. Otherwise, for each segment in order: spend **1**. If the segment box misses the object's
+   `aabb` (with `pad`), continue with the next segment. Otherwise pick the candidate triangles:
+   * An object with more than 256 triangles has a grid of 8 m cells keyed by
+     `floor(x / 8), floor(y / 8)`. A triangle whose box covers more than 64 cells is kept in a
+     "big" list instead; the others are listed in every cell their box covers. The candidates
+     are the big list plus all triangles in the cells covered by the segment box expanded by
+     `reach`, de-duplicated and in ascending triangle order. Spend **the number of candidates**.
+     If that cell range covers more than 1024 cells, no grid is used for this segment.
+   * Without a grid (256 or fewer triangles, or the fallback above), every triangle of the
+     object is a candidate in order, and **1** is spent per triangle as it is visited.
+3. Each candidate is tested in order: skip it if its box expanded by `reach` misses the segment
+   box; skip it if both segment ends lie farther than `reach + 1e-6` from the triangle's plane
+   on the same side (nondegenerate normal, length >= 1e-12); otherwise it is a hit if the
+   exact segment-triangle distance is `<= reach`. These tests cost nothing. The first hit
+   marks the object blocked and stops the work on that object (no further segments or
+   candidates are visited or counted).
+
+Work is the total number of units spent. A probe is checked only if the shared running total
+stays within the budget: 2,000,000 units for all probes of the package, spent in probe order;
+the unit that would exceed it makes that probe and the remaining ones unchecked, reported in a
+warning. Consumers should re-run the probes against their own imported collision as acceptance
+tests.
 When an export drops a probe because its `feature` object was part of the generation plan
 (its `generated_ids`) but no longer exists, the probe id is listed in `report.json`
 `passage_probes_dropped`. The exporter refuses a malformed probe, or one whose `feature`
@@ -253,6 +281,8 @@ names neither an exported object nor a plan feature, with an error instead of dr
 |---|---|
 | `osm:way/123`, `osm:relation/45`, `osm:node/9` | Generated from that OSM element. Local `.osm` files may use negative ids for unsaved edits, e.g. `osm:way/-7`. |
 | `osm:relation/45#k` | Part `k` of an OSM element that was split into several objects (for example, a multipolygon with several outer rings). |
+| `osm:way/123:headwall0`, `:headwall1` | Tunnel portal headwall at the start (0) / end (1) of that way's tube. |
+| `osm:way/123:deck`, `:under`, `:bore` | Suffixes also recognised by the validator; these are the ids of the bridge deck / underpass probes and tunnel bore probe of that element. |
 | `terrain:grid` | The terrain. |
 | `scatter:<area id>#k` | A procedurally scattered tree. |
 | `<id>~<object name>` | A user duplicate of a generated object. The first object in name order keeps the plain id. |

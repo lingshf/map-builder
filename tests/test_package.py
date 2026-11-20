@@ -1729,6 +1729,17 @@ class SplitPartIdentityTest(TempDirCase):
         r = self.check(["osm:way/1#", "osm:way/2#-1"])
         self.assertEqual(sum("unrecognised mb_id form" in w for w in r.warnings), 2, r.warnings)
 
+    def test_structure_suffix_ids_are_recognised(self):
+        r = self.check(["osm:way/7:headwall0", "osm:way/7:headwall1"])
+        self.assertTrue(r.ok, r.summary())
+        self.assertFalse(any("mb_id" in w for w in r.warnings), r.warnings)
+        r = self.check(["osm:way/7:deck", "osm:way/7:under"])
+        self.assertFalse(any("mb_id" in w for w in r.warnings), r.warnings)
+
+    def test_malformed_suffix_ids_still_warn(self):
+        r = self.check(["osm:way/7:headwall", "osm:way/7:headwallx"])
+        self.assertEqual(sum("unrecognised mb_id form" in w for w in r.warnings), 2, r.warnings)
+
 
 # --- format 2.0.0: class kinds, tube rule, passage probes -----------------------------------------------------
 
