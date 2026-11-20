@@ -999,8 +999,10 @@ class DeadlineProbe:
     the timeout each request worker is joined with, each watchdog timer interval, and every socket
     shutdown the watchdog performs. A late return or a missing shutdown shows up as a wrong count/value."""
 
-    def __init__(self):
+    def __init__(self, manual_timer=False):
+        """With ``manual_timer`` the watchdog timer never fires by itself; ``fire()`` runs it on demand."""
         self.joins, self.timers, self.shutdowns = [], [], []
+        self.manual_timer, self._manual = manual_timer, []
 
     def __enter__(self):
         import threading
@@ -1019,6 +1021,12 @@ class DeadlineProbe:
                 probe.timers.append(interval)
                 real_timer.__init__(self, interval, *a, **k)
 
+            def start(self):
+                if probe.manual_timer:
+                    probe._manual.append(self)
+                else:
+                    real_timer.start(self)
+
         def shutdown(sock):
             probe.shutdowns.append(sock)
             real_shutdown(sock)
@@ -1032,6 +1040,10 @@ class DeadlineProbe:
     def __exit__(self, *exc):
         for p in reversed(self._patches):
             p.stop()
+
+    def fire(self):
+        for timer in list(self._manual):
+            timer.function(*timer.args, **timer.kwargs)
 
     def assert_armed(self, case, total):
         case.assertEqual(len(self.joins), 1)
@@ -1160,32 +1172,29 @@ class RoundFourTest(unittest.TestCase):
     def test_stalled_tls_handshake_hits_deadline(self):
         import socket as socket_mod
         import threading
-        import time as time_mod
         srv = socket_mod.socket()
         srv.bind(("127.0.0.1", 0))
         srv.listen(1)
         self.addCleanup(srv.close)
         stop = threading.Event()
         self.addCleanup(stop.set)
+        probe = DeadlineProbe(manual_timer=True)  # the watchdog fires only when the test says so
 
-        def serve():  # TLS handshake record header announcing 16 KiB, then one byte per 50 ms
+        def serve():  # TLS handshake record header announcing 16 KiB, then a few bytes: never completes
             conn, _ = srv.accept()
             with conn:
-                conn.recv(4096)
+                conn.recv(4096)  # ClientHello received: the client socket is already registered
                 try:
-                    conn.sendall(b"\x16\x03\x03\x40\x00")
-                    for _ in range(DRIBBLE_BYTES):
-                        if stop.is_set():
-                            return
-                        conn.sendall(b"\x00")
-                        time_mod.sleep(0.05)
+                    conn.sendall(b"\x16\x03\x03\x40\x00\x00\x00\x00")
+                    probe.fire()  # the deadline passes mid-handshake
+                    stop.wait(30.0)  # keep the peer open: only the watchdog's shutdown can end the handshake
                 except OSError:
                     return
         threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
-        with DeadlineProbe() as probe, self.assertRaises(NetworkError) as cm:  # only the watchdog stops it
-            UrllibTransport(total_timeout=0.6).request("GET", f"https://127.0.0.1:{port}/", {}, None, 10.0, 1000)
-        probe.assert_armed(self, 0.6)
+        with probe, self.assertRaises(NetworkError) as cm:
+            UrllibTransport(total_timeout=30.0).request("GET", f"https://127.0.0.1:{port}/",             {}, None, 1.0, 1000)  # Windows ignores shutdown on a blocked TLS read, so this bounds it
+        probe.assert_armed(self, 30.0)
         self.assertIn("time limit", str(cm.exception))
 
 
