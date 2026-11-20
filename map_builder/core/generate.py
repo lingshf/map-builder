@@ -1444,7 +1444,8 @@ class PlanOptions:
     def __init__(self, buildings=True, roads=True, trees=True, scatter=True, max_trees=2000, seed=0,
                  max_objects=20_000, max_vertices=MAX_SCENE_VERTICES, max_triangles=MAX_SCENE_TRIANGLES,
                  max_ring_vertices=MAX_RING_VERTICES, max_triangulation_work=DEFAULT_MAX_WORK,
-                 max_mask_validation_work=None):
+                 max_mask_validation_work=None, bridge_piers=True):
+        self.bridge_piers = bridge_piers
         self.buildings = buildings
         self.roads = roads
         self.trees = trees

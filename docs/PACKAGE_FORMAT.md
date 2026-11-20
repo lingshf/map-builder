@@ -98,7 +98,7 @@ All coordinates are in metres.
 | 9 | `structure` | solid | closed, positive volume |
 
 The generator emits `tunnel` (road tunnels: `highway=*` with `tunnel=yes`, see `report.json`), the
-portal-headwall `structure` objects that belong to them, and `bridge` for highway bridges (`bridge=*`, not `no`; deck solid with
+portal-headwall `structure` objects that belong to them, and `bridge` for highway bridges (`bridge=*`, not `no`; deck solid (with parapets on both edges and, over more than 6 m of clearance, pier shells: all closed shells of the one object) with
 a `deck` passage probe and, only where the clearance over the ground or crossing road is at least 4 m, an `under` probe).
 Deck grade is limited to 8 %; where the requested clearance (`max(1, layer)` x 5 m) cannot be reached the report warns and the
 provenance says so. The format, the validator and the reference
