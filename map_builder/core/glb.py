@@ -523,14 +523,14 @@ def _mesh_triangles(mesh, read_acc, budget, max_triangles, textured=frozenset(),
             raise PackageError("glb: invalid primitive mode (expected an integer 0-6)")
         if p.get("targets"):
             raise PackageError("glb: morph targets are not allowed in static maps")
+        pm = p.get("material")
+        if "material" in p and (type(pm) is not int or not 0 <= pm < n_materials):
+            raise PackageError("glb: primitive material index out of range")
         if mode != 4:
             continue
         pos = read_acc(p["attributes"]["POSITION"], "position")
         if not all(math.isfinite(c) for q in pos for c in q):
             raise PackageError("glb: non-finite POSITION")
-        pm = p.get("material")
-        if pm is not None and (type(pm) is not int or not 0 <= pm < n_materials):
-            raise PackageError("glb: primitive material index out of range")
         if pm in textured:
             if "TEXCOORD_0" not in p["attributes"]:
                 raise PackageError("glb: a textured primitive is missing TEXCOORD_0")

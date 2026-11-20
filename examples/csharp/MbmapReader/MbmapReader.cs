@@ -483,6 +483,12 @@ namespace MapBuilder.Reference
                     if (mode < 0 || mode > 6) throw new MbmapException("glb: invalid primitive mode");
                     if (p.TryGetProperty("targets", out var tg) && !(tg.ValueKind == JsonValueKind.Array && tg.GetArrayLength() == 0))
                         throw new MbmapException("glb: morph targets are not allowed");
+                    long pmi = -1;
+                    if (p.TryGetProperty("material", out var pmat))
+                    {
+                        if (pmat.ValueKind != JsonValueKind.Number || !pmat.TryGetInt64(out pmi) || pmi < 0 || pmi >= materials.Count)
+                            throw new MbmapException("glb: primitive material index out of range");
+                    }
                     if (mode != 4) continue;
                     var attrs = Json.Obj(p, "attributes", tag);
                     int pai = Json.Index(attrs, "POSITION", accessors.Count, $"{tag}.attributes");
@@ -515,12 +521,6 @@ namespace MapBuilder.Reference
                                 pv[3 * k + c] = x;
                             }
                         posCache[pai] = pv;
-                    }
-                    long pmi = -1;
-                    if (p.TryGetProperty("material", out var pmat))
-                    {
-                        if (pmat.ValueKind != JsonValueKind.Number || !pmat.TryGetInt64(out pmi) || pmi < 0 || pmi >= materials.Count)
-                            throw new MbmapException("glb: primitive material index out of range");
                     }
                     if (texturedMaterials.Contains(pmi))
                     {

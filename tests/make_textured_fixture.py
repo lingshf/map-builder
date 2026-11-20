@@ -187,6 +187,17 @@ def _fx_prim_material(gl, binb):
     _textured_primitive(gl)["material"] = len(gl["materials"])
 
 
+def _fx_prim_material_null(gl, binb):
+    _textured_primitive(gl)["material"] = None
+
+
+def _fx_points_material(gl, binb):
+    p = dict(_textured_primitive(gl))
+    p["mode"] = 0
+    p["material"] = len(gl["materials"])
+    next(m for m in gl["meshes"] if any(q is _textured_primitive(gl) for q in m["primitives"]))["primitives"].append(p)
+
+
 def _fx_texcoord(gl, binb):
     next(m for m in gl["materials"] if "baseColorTexture" in m["pbrMetallicRoughness"])[
         "pbrMetallicRoughness"]["baseColorTexture"]["texCoord"] = 1
@@ -244,6 +255,8 @@ _FIXTURES = {
     "texture_sampler": (_glb_edit(_fx_tex_sampler), "sampler is out of range", "error"),
     "material_index": (_glb_edit(_fx_mat_index), "baseColorTexture.index is missing or out of range", "error"),
     "primitive_material": (_glb_edit(_fx_prim_material), "primitive material index out of range", "error"),
+    "primitive_material_null": (_glb_edit(_fx_prim_material_null), "primitive material index out of range", "error"),
+    "points_material": (_glb_edit(_fx_points_material), "primitive material index out of range", "error"),
     "material_texcoord": (_glb_edit(_fx_texcoord), "texCoord must be 0", "error"),
     "uv_missing": (_glb_edit(_fx_uv_missing), "is missing TEXCOORD_0", "error"),
     "uv_count": (_glb_edit(_fx_uv_count), "TEXCOORD_0 count differs", "error"),
