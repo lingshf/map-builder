@@ -401,6 +401,20 @@ class RoofCheckerTests(unittest.TestCase):
             self.assertEqual(len(rc.roof_slopes(tris)), 2, dz)         # slope membership does not depend on dz
             self.assertIn("planar", self.fails(tris), dz)
 
+    def test_large_warp_with_moved_walls_is_not_a_gabled_roof(self):
+        """Closed, horizontal ridge, projection intact: only the slope topology can reject it (D71)."""
+        tris = [(m, tuple((p[0], p[1], p[2] + 1.3) if p[:2] == (10, 0) and p[2] == 3.0 else p for p in t))
+                for m, t in self.tris]
+        self.assertEqual(len(rc.ridge_slopes(tris, self.top)), 2)
+        problems = rc.signature_problems("gabled", tris, self.outer, self.eave, self.top)
+        self.assertTrue(any("not coplanar" in p for p in problems), problems)
+        self.assertFalse(rc.built_as_tagged("gabled", tris, self.outer, [], self.eave, self.top)[0])
+
+    def test_extra_or_singleton_slopes_fail_the_signature(self):
+        tris, outer = self._shape_box("hipped")
+        warped = [(m, tuple((p[0], p[1], p[2] + 1.3) if p[:2] == (10, 0) else p for p in t)) for m, t in tris]
+        self.assertTrue(any("roof slope" in p for p in rc.signature_problems("hipped", warped, outer, 3.0, 5.0)))
+
     def test_the_planarity_rule_does_not_depend_on_the_tolerance(self):
         self.assertEqual(len(rc.roof_slopes(self.tris)), 2)
         self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self._warp(0.0005))), {})
@@ -456,7 +470,9 @@ class RealRoofShapeControlTests(unittest.TestCase):
 
     def test_real_gabled_roof_is_gabled_only(self):
         tris, outer, eave, top = self._mesh()
-        self.assertEqual(rc.signature_problems("gabled", tris, outer, eave, top), [])
+        # its two slopes are not planar (1.12 m): that is the only gabled-signature problem
+        self.assertEqual([p for p in rc.signature_problems("gabled", tris, outer, eave, top)
+                          if "not coplanar" not in p], [])
         self.assertTrue(rc.signature_problems("pyramidal", tris, outer, eave, top))
         self.assertTrue(rc.signature_problems("hipped", tris, outer, eave, top))
 
