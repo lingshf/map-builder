@@ -53,7 +53,12 @@ Splitting them is a v3 refactor, not a v2 blocker (L3).
 
 * **Suite:** 586 unit tests, 104 s locally (Python 3.12). The slowest are 3.51 s
   (`test_dsm_correction … test_large_fine_grid_is_bounded`), 3.22 s and 3.14 s (bridge 45°
-  clearance). No test exceeds the 5 s DoD limit.
+  clearance). No test exceeded 5 s **in that run** (Windows, Python 3.12, this review's machine).
+  The reviewer's independent run (Windows, Python 3.12, 586 passed) measured three tests above
+  5 s: 7.07 s (harmonic fill), 6.05 s (bridge clearance) and 5.16 s (fine grid). Timings vary
+  with machine and load, so the 5 s conclusion is specific to the original measurement. This
+  is recorded as measurement evidence only: it is **not** a new wall-clock gate, and it is not
+  a v0.3.0 blocker (later: L5).
 * **Wall-clock gates:** none left. A grep for `assertLess/Greater` on
   `perf_counter|monotonic|elapsed|time.time|duration` under `tests/` finds no matches. S1-F2 is
   closed. `DeadlineProbe.assert_armed` checks *configured* timer intervals, not measured time,
@@ -72,6 +77,9 @@ Splitting them is a v3 refactor, not a v2 blocker (L3).
 
   The change is **≈ 0 %**, within the D35 +20 % budget. The main output is byte-identical to the
   committed `examples/synthetic_sample.mbmap` (sha256 prefix `9463B7BEFF16`).
+  **Re-measurement (reviewer, PR #33):** six alternating builds per ref, v0.2.0 1.352 s vs
+  this head 1.309 s (**−3.2 %**); the packages matched byte for byte (`9463b7beff16…`). Both
+  measurements agree: no fixture-build regression.
 * **Coverage gaps:**
   * Blender harness has no roof checks (S2-F3).
   * No real-data passage or elevated-part probe (S2-F2).
@@ -90,6 +98,7 @@ Splitting them is a v3 refactor, not a v2 blocker (L3).
 | L2 | Unsplit through-way approach road: possible extra clearance warning (S1 follow-up) | — | closed by S1-F1 #32 |
 | L3 | `generate.py` / `osm.py` size | low | later (v3) |
 | L4 | v3 items: railway / culvert / `man_made=bridge` (D25), LOD/streaming, textures, licence (D13) | — | later |
+| L5 | Three tests ran 5–7 s on the reviewer's machine (§2); shrink inputs if they keep growing. Measurement only, no gate | low | later |
 
 ## 4. Proposed v0.3.0 task list (D48)
 

@@ -31,7 +31,7 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 | FIX-CS-PROBE-PARITY | S1 | dev | — | `examples/csharp/MbmapReader/`, `core/package.py` (`mb_id` regex), `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` | done (D46) | #27 |
 | [S1-F2](S1-F2.md) | S2 | dev | — | `tests/test_terrain_sources.py` | done (`c9fd1aa`) | #31 |
 | [S1-F1](S1-F1.md) | S2 | dev | — | `core/bridges.py` (approach detection) | done (`2de9024`) | #32 |
-| [S2-REVIEW](S2-REVIEW.md) | S2 | design | S1-F1, S1-F2; runs **before** REL-v0.3.0 (D48) | `design/` only | review | [report](../reviews/S2-REVIEW.md) |
+| [S2-REVIEW](S2-REVIEW.md) | S2 | design | S1-F1, S1-F2; runs **before** REL-v0.3.0 (D48) | `design/` only | done | #33, [report](../reviews/S2-REVIEW.md) |
 | [S2-F1](S2-F1.md) | S2 | dev | S2-REVIEW | `tests/test_terrain_sources.py` | ready | |
 | [S2-F2](S2-F2.md) | S2 | dev | S2-REVIEW; area per D49 | `tools/demo/presets/<area>.json` (new), `tests/test_demo_bundle.py` (preset rows), new excerpt tests/fixtures | ready | |
 | [S2-F3](S2-F3.md) | S2 | dev | S2-REVIEW | `tests/blender/checks_roofs.py` (new); soft: fixture OSM, sample, VALIDATION | ready | |

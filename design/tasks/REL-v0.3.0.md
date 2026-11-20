@@ -19,13 +19,22 @@ RC PR: version 0.3.0, CHANGELOG, `docs/user/` (elevated parts, building passages
 
 ## Acceptance criteria
 
-Common release criteria, plus: each demo package (Pittsburgh and the S2-F2 preset) built with live Copernicus GLO-30 + Overpass via the CLI
-and in headless Blender, `VALID`; a drone capsule (r = 1 m) passes under a real bridge, through
-the real tunnel and beneath an elevated part (validator + C#). If the S2-F2 area decision fell back to option (c),
-the elevated-part case uses the synthetic sample and the release notes say so.
+Common release criteria, plus the branch matching the S2-F2 outcome (D49):
 
-**Assets (S2-F4):** besides the extension zip, the release attaches the real-data demo
-`.mbmap` (GLB inside) for each preset, with ODbL attribution in the notes and the package.
+* **S2-F2 outcome A (second area found):** both real-data packages (Pittsburgh and the S2-F2
+  preset) are built with live Copernicus GLO-30 + Overpass via the CLI and in headless Blender,
+  `VALID`. A drone capsule (r = 1 m) passes under a real bridge and through the real tunnel
+  (Pittsburgh) and beneath a real elevated part or passage (S2-F2 preset), in the validator and
+  in C#. **Assets (S2-F4):** besides the extension zip, both real-data `.mbmap` files (GLB
+  inside) are attached.
+* **S2-F2 outcome B (fallback (c)):** only Pittsburgh is required as real data: built as above,
+  `VALID`, bridge and tunnel probes PASS in the validator and in C#. The elevated-part/passage
+  case uses the committed synthetic sample (`1048:under`, `1098:passage` PASS in Python and C#).
+  **Assets (S2-F4):** the extension zip and the Pittsburgh `.mbmap` only. The release notes and
+  `docs/DEMO.md` state plainly that elevated parts, building passages and roof shapes are
+  evidenced on synthetic data only, and link the S2-F2 search record.
+
+Either way, real-data packages carry ODbL attribution in the notes and the package.
 
 ## Performance considerations
 
