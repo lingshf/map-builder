@@ -9,7 +9,11 @@ Reviewer: design (product owner).
 **GO for REL-v0.4.0, with no v0.4.0 blockers.**
 
 * The roof target is met against the D82 re-baseline (29/67, floor 29), not against the original ≥ 40.
-  That shortfall is a disclosed limitation, as the 5/67 roof result was for v0.3.0 (D52).
+  That shortfall is a disclosed limitation (D82), as the 5/67 roof result was for v0.3.0 (D52).
+* There are two v0.3.0 baselines, and they are not comparable:
+  * **5/67** is the historical v0.3.0 release metric (D52). It was computed with the pre-S3 checker.
+  * **1/67** is the frozen v0.3.0 replay under the current geometric checker (D70; 63 skeleton-eligible).
+  * The like-for-like increase is therefore **1/67 → 29/67**, not 5/67 → 29/67.
 * Textures, the 2.1 format and the consumer checks all pass on real data through both the CLI and headless
   Blender paths.
 * The gaps below are tagged *later* (S3-F1…S3-F12). REL-v0.4.0 carries four release-note items
@@ -39,7 +43,8 @@ Reviewer: design (product owner).
 ### 1.1 Roofs (D61, D82, D64)
 
 The count comes from `tests.test_roofs_munich` over all 67 tagged non-flat roofs of the frozen Munich snapshot.
-It is geometry-based on the emitted triangles.
+It is geometry-based on the emitted triangles. Under this checker the frozen v0.3.0 replay counts **1/67** (D70).
+The historical v0.3.0 release figure of 5/67 (D52) used the pre-S3 checker and is not comparable.
 
 | Shape | Tagged | Counted |
 |---|---|---|
@@ -62,8 +67,9 @@ The 38 roofs that are not counted, by recorded reason:
 | 1 | gabled → flat | roof height 0 |
 | 1 | pyramidal → flat | concave footprint (S3-F10) |
 
-* The roof checks (overlap, gap, slopes, ridges, vertical ends) pass on every built case, as part of the
-  700-test suite.
+* The roof checks (overlap, gap, slopes, ridges, vertical ends) pass on the 29 counted roofs and on every
+  skeleton-built case (hipped, gabled and the 30 gable-to-hipped fallbacks), as part of the 700-test suite.
+  They do **not** pass on the 4 analytic near-rectangle gables, which explicitly fail `planar` (S3-F1).
 * The frozen v0.3.0 replay does not inflate (D76).
 * The 30 gable-to-hipped fallbacks pass the hipped checks (D82).
 
@@ -188,15 +194,19 @@ Slowest tests:
 
 * **Skeleton isolation (D55).** `core/skeleton.py` imports only `math`, `dataclasses`, `errors` and
   `triangulate`, so it has no OSM or Blender dependency.
-* **The roof track stayed in its lane.** Since v0.3.0, `generate.py` was changed only by #48 and #50, in the
-  roof section. The preflight `plan_roof` runs before reservation and the skeleton faces are triangulated
+* **The roof track stayed in its lane.** Since v0.3.0, the behaviour changes to `generate.py` came only from
+  #48 and #50, in the roof section. #54 (S3-TYPING 3/4) also edited `generate.py`, with annotations only and no
+  byte change (D79). The preflight `plan_roof` runs before reservation and the skeleton faces are triangulated
   explicitly (D64).
 * **UVs are post-hoc (D59).** `core/uv.py` (`assign_uvs`, `textured_copy`, `textured_materials`; about
-  250 lines) runs after generation. The texture track did not touch `generate.py` or `roofs.py`.
+  250 lines) runs after generation. The texture track (#42, #46, #49, #53) did not touch `generate.py` or
+  `roofs.py`.
 * **No over-engineering.**
   * `core/textures.py` is a fixed table.
   * Export material identity is the D88 parameter digest (`blender/export.py` `_material_key`).
-  * There is no material registry, no plug-in system and no speculative extension handling.
+  * There is no speculative material system: no plug-in system and no speculative extension handling.
+    The only registry is the export-local one keyed by the D88 parameter digest, which deduplicates
+    materials within one export.
   * SOLID is satisfied at the module level: one responsibility per new module, and the dependencies point
     inward (core ← blender).
 * **Harness ownership (D64).** Only #49 regenerated the sample. The roof tasks kept it byte-identical.
@@ -210,7 +220,7 @@ None of these is a v0.4.0 blocker.
 | S3-F1 | 4 analytic near-rectangle gables fail the checker's `planar` test and carry no named reason in provenance, so the "every fallback named" check is only partially met. Fix the warp (see S3-F7) or record the reason. | low | later (disclose in REL) | `core/roofs.py` |
 | S3-F2 | ResourceWarning leak in `test_demo_bundle.py:51`; finalizer warnings escape `-W error`. | low | later | `tests/test_demo_bundle.py` |
 | S3-F3 | `test_bridges` 45° crossing takes 5.5 s (pre-existing). Shrink its input. | low | later | `tests/test_bridges.py` |
-| S3-F4 | `assign_uvs` is pure Python: `build_scene` is +62 % (0.97 → 1.70 s, Pittsburgh, D87). | medium | later | `core/uv.py` |
+| S3-F4 | `assign_uvs` is pure Python. The Pittsburgh `build_scene` stage grew +62 % textured (1.17 → 1.89 s, D85) and +75 % untextured (0.97 → 1.70 s, D87). Neither stage measurement gates the release. | medium | later | `core/uv.py` |
 | S3-F5 | Store PNGs with ZIP_STORED in the package (they are already compressed). | low | later | `core/package.py` |
 | S3-F6 | bbox float32 precision (D74). | low | later | `blender/` centre/bbox |
 | S3-F7 | Largest-triangle reference-plane warp in the planarity handling. | low | later | `core/roofs.py`, `tests/roof_checks.py` |
@@ -226,7 +236,9 @@ None of these is a v0.4.0 blocker.
 1. Bump `GENERATOR_VERSION` to 0.4.0 through the D50 drift guard. Main still says 0.3.0, and the built zip
    is `map_builder-0.3.0.zip`.
 2. Release notes:
-   * State the roofs as **29/67 built as tagged** (from 5/67), per shape, against the original ≥ 40 (D82).
+   * State the roofs as **29/67 built as tagged**, per shape, against the original ≥ 40 (D82). The
+     like-for-like v0.3.0 baseline under the same checker is 1/67 (D70). If the historical 5/67 is quoted,
+     say that it was computed with the earlier checker.
      Name the 4 unreasoned analytic gables (S3-F1).
    * Give the texture size numbers from §1.2.
    * State that `.mbcol` is unaffected by textures.
@@ -243,9 +255,13 @@ None of these is a v0.4.0 blocker.
   This is D39 again, applied to roofs.
 * **Re-baselining honestly beat chasing the number.** D82 re-baselined to the exact measured 29, with the
   rest named and deferred. That is better than relaxing the checker to reach 40.
-* **Fixed costs distort tiny fixtures.** The PNG embedding cost is constant, so +20 % on the fixture is
-  +6.6 % whole-Generate on Pittsburgh (D87). Performance gates should be measured on the whole Generate
-  (D85) and on real data.
+* **Fixed costs distort tiny fixtures.** These are separate measurements and should not be mixed:
+  * In the CLI fixture build (G6, this review), the constant PNG embedding cost makes the textured build
+    +20 % against v0.3.0. `--no-textures` is +5.2 %.
+  * In Blender (#53, D87), Pittsburgh whole-Generate **untextured** is +6.6 % (12.79 → 13.64 s).
+  * D85's whole-Generate gate result in #53 is +8.8 %.
+  * Stage-level growth (`build_scene`, S3-F4) does not gate.
+  Performance gates should be measured on the whole Generate (D85) and on real data.
 * **Identity by parameters (D88).** Keying export materials by a digest of their exact parameters, not a
   display name, makes material identity independent of naming. This pairs with D86: textures, materials and
   NOTICES must agree.
