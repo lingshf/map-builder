@@ -12,6 +12,8 @@ import json
 import math
 
 from . import dsm
+from . import textures as tex
+from . import uv
 from .cache import DiskCache, NullCache
 from .collision import (CLASSES, ColObject, heightfield_layout, is_degenerate, rasterize_heightfield,
                         read_collision, write_collision, write_heightfield)
@@ -370,7 +372,8 @@ def merge_dropped(report, deleted_ids):
 
 
 def export_package(path, name, area, sources, glb_bytes, col_objects, report, edits=None, blender_version=None,
-                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=(), plan_ids=()):
+                   heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=(), plan_ids=(),
+                   asset_notices=()):
     """Write a validated package atomically. ``col_objects`` must come from the same final meshes and world
     transforms as ``glb_bytes``; ``object_info[name]['provenance']`` is copied to the manifest.
     ``passage_probes`` (plan probes) are filtered by :func:`filter_passage_probes` against ``plan_ids`` (the
@@ -393,14 +396,20 @@ def export_package(path, name, area, sources, glb_bytes, col_objects, report, ed
     report["passage_probes_dropped"] = merge_dropped(report, deleted)
     members, manifest, probes = assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=hf,
                                          report=report, edits=edits, blender_version=blender_version,
-                                         created_utc=created_utc, passage_probes=probes_kept)
+                                         created_utc=created_utc, passage_probes=probes_kept,
+                                                                                  **({"asset_notices": asset_notices} if asset_notices else {}))
     result = write_package(path, members, manifest)
     return manifest, result
 
 
-def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generated_ids=None, created_utc=None):
+def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generated_ids=None, created_utc=None,
+                    textures=False):
     """Headless reference exporter (no Blender): plan geometry -> package. Visual nodes and collision
-    objects are built from the same final meshes and the same transforms."""
+    objects are built from the same final meshes and the same transforms.
+
+    ``textures=True`` assigns world-scaled UVs (:mod:`core.uv`), embeds the procedural textures and adds the
+    D65 ``asset_notices`` entry; the collision and the heightfield are unaffected. Textured meshes are
+    copies, so the plan itself is not modified."""
     entries = [(o.name, o.mb_id, o.mb_class) for o in plan.objects]
     if generated_ids is None:
         generated_ids = [o.mb_id for o in plan.objects]
@@ -410,16 +419,30 @@ def plan_to_package(plan, path, name, sources, heightfield_spacing=None, generat
     for o in plan.objects:
         md = o.mesh if o.mesh is not None else plan.shared_meshes[o.mesh_key]
         mb_id, cls = ident[o.name]
-        nodes.append({"name": o.name, "mesh": md, "location": o.location, "rotation_z": o.rotation_z,
+        vis = md
+        if textures:
+            if o.mesh is None and uv.textured_materials([md]):
+                raise PackageError("a shared mesh cannot use a textured material (it has no single origin)")
+            vis = uv.textured_copy(md, o.location) if o.mesh is not None else md
+        nodes.append({"name": o.name, "mesh": vis, "location": o.location, "rotation_z": o.rotation_z,
                       "scale": o.scale, "extras": {"mb_id": mb_id, "mb_class": cls}})
         col_objects.append(collision_object(o.name, mb_id, cls, md, o.location, o.rotation_z, o.scale))
         info[o.name] = {"provenance": o.provenance}
     if plan.report.get("z_offset_m", plan.area.frame.z_offset) != plan.area.frame.z_offset:
         raise PackageError("plan z_offset_m differs from the area frame; regenerate the plan")
-    glb_bytes = write_glb(nodes, MATERIALS, generator="map-builder headless")
+    materials, notices = MATERIALS, ()
+    if textures:
+        used = uv.textured_materials(n["mesh"] for n in nodes)
+        materials = dict(MATERIALS)
+        for m in used:
+            rgb, rough, metal = MATERIALS.get(m, ((0.8, 0.8, 0.8), tex.roughness(m), 0.0))
+            materials[m] = (rgb, rough, metal, tex.load(m))
+        notices = [tex.asset_notice(used)] if used else ()
+    glb_bytes = write_glb(nodes, materials, generator="map-builder headless")
     return export_package(path, name, plan.area, sources, glb_bytes, col_objects, plan.report, edits=edits,
                           heightfield_spacing=heightfield_spacing, object_info=info, created_utc=created_utc,
-                          passage_probes=getattr(plan, "passage_probes", []), plan_ids=generated_ids)
+                          passage_probes=getattr(plan, "passage_probes", []), plan_ids=generated_ids,
+                          asset_notices=notices)
 
 
 def elevation_correction_note(correction):
@@ -451,11 +474,11 @@ def generate_plan(area, settings, client=None, progress=None):
     return plan, sources
 
 
-def build_package(area, settings, path, name, client=None, progress=None, created_utc=None):
+def build_package(area, settings, path, name, client=None, progress=None, created_utc=None, textures=False):
     """acquire -> plan -> validated package. Returns (manifest, ValidationResult).
     The heightfield layout (size limit and 2x2 minimum) is checked before any file or network access."""
     if settings.heightfield_spacing:
         heightfield_layout(area.half, settings.heightfield_spacing)
     plan, sources = generate_plan(area, settings, client, progress)
     return plan_to_package(plan, path, name, sources, heightfield_spacing=settings.heightfield_spacing,
-                           created_utc=created_utc)
+                           created_utc=created_utc, textures=textures)
