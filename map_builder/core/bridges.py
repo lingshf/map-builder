@@ -315,21 +315,22 @@ def _road_nodes(roads):
 
 
 def _deck_profile_2d(half, parapets):
-    """The deck section (lateral right, up), CCW: the slab, plus with ``parapets`` one on each edge as part of
-    the same outline. Returns ``(points, index of the first deck-surface point)``; the surface edge is from
-    that point to the next one."""
-    slab = [(-half, -DECK_THICKNESS_M), (half, -DECK_THICKNESS_M), (half, 0.0)]
+    """The deck section (lateral right, up), CCW. Without ``parapets`` the slab; with them one outline in which
+    each outer side is one wall from the underside to the parapet top, so a parapet adds only its top and inner
+    faces (4 triangles per sweep interval). Returns ``(points, index of the first deck-surface point)``; the
+    surface edge is from that point to the next one."""
     if not parapets:
-        return slab + [(-half, 0.0)], 2
+        return [(-half, -DECK_THICKNESS_M), (half, -DECK_THICKNESS_M), (half, 0.0), (-half, 0.0)], 2
     inner = half - PARAPET_WIDTH_M
-    return slab + [(half, PARAPET_HEIGHT_M), (inner, PARAPET_HEIGHT_M), (inner, 0.0), (-inner, 0.0),
-                   (-inner, PARAPET_HEIGHT_M), (-half, PARAPET_HEIGHT_M), (-half, 0.0)], 5
+    return [(-half, -DECK_THICKNESS_M), (half, -DECK_THICKNESS_M), (half, PARAPET_HEIGHT_M),
+            (inner, PARAPET_HEIGHT_M), (inner, 0.0), (-inner, 0.0), (-inner, PARAPET_HEIGHT_M),
+            (-half, PARAPET_HEIGHT_M)], 4
 
 
 def _split_caps(mesh):
     """Replace the two end caps of a parapeted deck (one concave polygon each: a fan triangulation would cover the
-    notch between the parapets) by convex pieces: the slab and one parapet on each side."""
-    pieces = ((0, 1, 2, 5, 6, 9), (2, 3, 4, 5), (6, 7, 8, 9))
+    notch between the parapets) by three convex quads: the slab and one parapet on each side."""
+    pieces = ((0, 1, 4, 5), (1, 2, 3, 4), (5, 6, 7, 0))
     caps = [mesh.faces.pop(), mesh.faces.pop()]   # the end cap, then the start cap
     mat, col = mesh.face_materials[-2:], mesh.face_colors[-2:]
     del mesh.face_materials[-2:], mesh.face_colors[-2:]
@@ -337,12 +338,11 @@ def _split_caps(mesh):
         order = cap if cap == tuple(sorted(cap)) else tuple(reversed(cap))   # ring order, ascending
         for piece in pieces:
             face = tuple(order[i] for i in piece)
-            if cap != order:   # reversed, still starting at the piece's first point (the fan apex is never collinear)
+            if cap != order:   # the end cap faces the other way
                 face = (face[0],) + face[:0:-1]
             mesh.faces.append(face)
             mesh.face_materials.append(m)
             mesh.face_colors.append(c)
-
 
 def _assign_materials(mesh, road_color, n, surface):
     """The deck surface faces (the sweep quads on the profile edge ``surface`` -> ``surface + 1``) get the road
@@ -449,8 +449,8 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     prof, surface = _deck_profile_2d(half, parapets)
     np_ = len(prof)
     piers_max = max(0, math.ceil(total / PIER_SPACING_M) - 1) if ctx.options.bridge_piers else 0
-    budget.reserve(f.id, np_ * n_path + PIER_VERTICES * piers_max,
-                   (2 * np_ + 2) * (n_path - 1) + 2 * np_ + PIER_TRIANGLES * piers_max)
+    tris = 16 * (n_path - 1) + 12 if parapets else 8 * (n_path - 1) + 4   # side quads + end caps
+    budget.reserve(f.id, np_ * n_path + PIER_VERTICES * piers_max, tris + PIER_TRIANGLES * piers_max)
     mesh = sweep(prof, [(x, y, 0.0) for x, y in path_xy], True, name=f"bridge_{g.short_name(f.id)}")
     if parapets:
         _split_caps(mesh)
@@ -623,12 +623,12 @@ def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
     for k in range(1, count + 1):
         for sh in shifts:
             t = total * k / (count + 1) + sh
-            if t - a < 0.0 or t + a > total or (last is not None and t - last < 2 * a):
+            if t - a < 0.0 or t + a > total or (last is not None and not 2 * a <= t - last <= PIER_SPACING_M):
                 continue
             # the underside is linear over the pier only if no sample kink lies within it
             z_lo = _interp(s, top, t - a) - DECK_THICKNESS_M
             z_hi = _interp(s, top, t + a) - DECK_THICKNESS_M
-            if abs(_interp(s, top, t) - DECK_THICKNESS_M - (z_lo + z_hi) / 2.0) > 0.004:
+            if abs(_interp(s, top, t) - DECK_THICKNESS_M - (z_lo + z_hi) / 2.0) > 0.001:
                 continue
             i = min(range(len(s)), key=lambda m: abs(s[m] - t))
             d = dirs[i]
@@ -657,8 +657,8 @@ def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
 def _add_pier(mesh, corners, zs, z_bottom, z_off, oz, cx, cy):
     """Append a closed box shell (8 vertices, 6 quads = 12 triangles) to ``mesh`` in its local frame: bottom at
     ``z_bottom``, top at the deck underside ``zs`` = (z at the first pair of corners, z at the second); corners
-    CCW in plan, the first two at the low end of the deck."""
-    zt = (zs[0], zs[0], zs[1], zs[1])
+    CCW in plan, the first and last at the low end of the deck."""
+    zt = (zs[0], zs[1], zs[1], zs[0])
     lo = [mesh.add_vertex(x - cx, y - cy, z_bottom - z_off - oz) for x, y in corners]
     hi = [mesh.add_vertex(x - cx, y - cy, z - z_off - oz) for (x, y), z in zip(corners, zt)]
     color = (0.6, 0.6, 0.6)

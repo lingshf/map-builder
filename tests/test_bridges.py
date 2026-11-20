@@ -248,7 +248,36 @@ class PierTest(unittest.TestCase):
         for p in piers:
             xs = [q[0] for q in p]
             self.assertTrue(min(xs) > 20.0 + hw - 1e-6 or max(xs) < 20.0 - hw + 1e-6, (min(xs), max(xs)))
+        centers = [(min(q[0] for q in p) + max(q[0] for q in p)) / 2 for p in piers]
+        self.assertLessEqual(centers[1] - centers[0], 40.0 + 1e-6)
         self.assertNotIn("passage_probes_blocked", plan.report)
+
+    def test_graded_deck_pier_tops_follow_the_underside_at_every_corner(self):
+        slope = lambda x, y: 0.06 * x + valley_height(x, y) - 15.0   # noqa: E731
+        plan, ids, grid = make_scene([([(-100, 0), (-60, 0)], {"highway": "secondary"}),
+                                      ([(60, 0), (100, 0)], {"highway": "secondary"}),
+                                      ([(-60, 0), (0, 0), (60, 0)], {"highway": "secondary", "bridge": "yes"})],
+                                     slope, joins=[(2, 0, 0, 1), (2, 2, 1, 0)])
+        obj = objects(plan, "bridge")[0]
+        piers = self.pier_shells(obj, shells(obj))
+        self.assertEqual(len(piers), 2)
+        col, _ = plan_collision(plan)
+        zo = plan.frame.z_offset
+        for p in piers:
+            tops = sorted(p, key=lambda q: q[2])[-4:]
+            self.assertGreater(max(q[2] for q in tops) - min(q[2] for q in tops), 0.05)   # a real grade
+            for q in tops:
+                hit = ray_cast(col, (q[0], 3.9, q[2] - 6.0), (0.0, 0.0, 1.0), 20.0)   # the deck beside the pier
+                self.assertAlmostEqual(q[2], q[2] - 6.0 + hit.t, delta=0.001)
+
+    def test_parapets_cost_at_most_4_triangles_per_sample_each(self):
+        plan, _, _ = valley_scene_long(opts=PlanOptions(trees=False, scatter=False, bridge_piers=False))
+        obj = objects(plan, "bridge")[0]
+        tri = sum(1 for _ in obj.mesh.triangles())
+        nodes = (len(obj.mesh.faces) - 6) // 8 + 1   # 8 side quads per interval + 3 quads per end cap
+        slab = 8 * (nodes - 1) + 4   # the same deck without parapets
+        self.assertEqual(tri, 16 * (nodes - 1) + 12)
+        self.assertLessEqual(tri - slab, 2 * 4 * nodes)
 
     def test_pier_keeps_3_m_from_the_under_probe(self):
         plan, ids, _ = valley_scene_long(half_len=40.0)   # 80 m: one pier, nominally right under the probe
