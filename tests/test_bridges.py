@@ -387,17 +387,66 @@ class CrossingTest(unittest.TestCase):
         self.assertLess(prov["clearance_m"], 0.0)
 
     @staticmethod
-    def _valley_bridge(side_x):
-        return make_scene([([(-100, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
-                           ([(side_x, -45), (side_x, 45)], {"highway": "residential"})],
-                          valley_height, width=300.0)
+    @staticmethod
+    def _valley_bridge(side_x, joined=False):
+        # the way runs onto the plateau at both ends (an unsplit approach); the side road is on the plateau
+        ways = [([(-100, 0), (side_x, 0), (100, 0)] if joined else [(-100, 0), (100, 0)],
+                 {"highway": "secondary", "bridge": "yes"}),
+                ([(side_x, 0 if joined else -45), (side_x, 45)], {"highway": "residential"})]
+        return make_scene(ways, valley_height, width=300.0, joins=[(0, 1, 1, 0)] if joined else ())
 
-    def test_a_road_meeting_an_unsplit_approach_gives_no_clearance_warning(self):
-        plan, ids, _ = self._valley_bridge(-60)   # on the plateau, short of the valley: the approach run
+    def test_an_unrelated_road_on_the_approach_is_still_measured(self):
+        # D39: no shared node, so it is not the approach's own junction; the emitted geometry decides
+        for x in (-60, -45):
+            plan, ids, grid = self._valley_bridge(x)
+            prov = objects(plan, "bridge")[0].provenance
+            col, _ = plan_collision(plan)
+            z0 = terrain_height(grid, x, 0.0) + ROAD_LIFT_M - plan.frame.z_offset
+            hit = ray_cast(col, (float(x), 0.0, z0 + 0.5), (0.0, 0.0, 1.0), 30.0)
+            self.assertEqual(col.objects[hit.object]["mb_id"], ids[0])
+            self.assertLess(0.5 + hit.t, 5.0 - 1.0)   # really below the wanted clearance
+            self.assertIs(prov["clearance_met"], False)
+            self.assertAlmostEqual(prov["clearance_m"], 0.5 + hit.t, delta=0.6)
+            self.assertTrue(any(ids[1] in w and "crossing road" in w and "clearance" in w
+                                for w in plan.report["warnings"]))
+
+    def test_the_approachs_own_junction_gives_no_clearance_warning(self):
+        plan, ids, _ = self._valley_bridge(-60, joined=True)   # shares an OSM node with the bridge way
         prov = objects(plan, "bridge")[0].provenance
         self.assertEqual([w for w in plan.report["warnings"] if "clearance" in w], [])
         self.assertIsNot(prov["clearance_met"], False)
         self.assertIn(f"{ids[0]}:under", [p["id"] for p in plan.passage_probes])
+
+    def test_real_pittsburgh_cycleway_bridge_keeps_its_unrelated_crossing(self):
+        # excerpt (ENU shifted by (-430, -270)) of osm:way/173225719 (bridge, layer 2) and the path
+        # osm:way/550018194, which shares no node with it, on the DSM-corrected 20 m terrain of the D26 area
+        way = [(45.3, 2.6), (61.5, 13.7), (71.8, 21.6), (79.5, 29.1), (89.5, 43.4), (94.2, 49.8), (97.7, 56.3),
+               (104.4, 66.3), (110.7, 79.2), (115.4, 88.5), (121.9, 107.2), (123.7, 113.9), (125.2, 120.6)]
+        road = [(144.3, 109.2), (118.7, 107.9), (97.9, 84.5), (92.6, 81.0)]
+        rows = [[213.0] * 16 for _ in range(16)]
+        rows[0][:4], rows[1][:4], rows[2][:4] = (234.9, 228.5, 220.5, 214.3), (229.2, 230.1, 215.5, 213.4), \
+            (221.5, 223.9, 213.3, 213.0)
+        for j, tail in ((7, (214.3, 221.4)), (8, (213.2, 213.9, 216.6, 224.8)), (9, (213.7, 216.1, 220.1, 221.3)),
+                        (10, (213.7, 215.5, 217.4, 218.6, 220.1)), (11, (214.9, 217.6, 218.7, 217.7, 220.1)),
+                        (12, (216.7, 220.1, 220.5, 219.4, 221.7)),
+                        (13, (213.2, 215.2, 216.1, 219.0, 221.9, 223.1, 222.4, 222.4)),
+                        (14, (213.4, 215.3, 218.3, 219.5, 220.8, 223.0, 225.0, 224.9, 223.0)),
+                        (15, (215.2, 222.7, 222.8, 221.3, 220.8, 222.3, 224.3, 224.8, 223.6))):
+            rows[j][16 - len(tail):] = tail
+
+        def height(x, y):
+            u, v = min(max((x + 150) / 20, 0), 14.999), min(max((y + 150) / 20, 0), 14.999)
+            i, j = int(u), int(v)
+            a, b = u - i, v - j
+            return (rows[j][i] * (1 - a) * (1 - b) + rows[j][i + 1] * a * (1 - b)
+                    + rows[j + 1][i] * (1 - a) * b + rows[j + 1][i + 1] * a * b)
+
+        plan, ids, _ = make_scene([(way, {"highway": "cycleway", "bridge": "yes", "layer": "2"}),
+                                   (road, {"highway": "path"})], height, width=400.0, height=400.0)
+        prov = objects(plan, "bridge")[0].provenance
+        self.assertIs(prov["clearance_met"], False)
+        self.assertLess(prov["clearance_m"], 1.0)
+        self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
 
     def test_a_low_middle_span_still_warns(self):
         plan, ids, _ = make_scene(
