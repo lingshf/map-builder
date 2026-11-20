@@ -24,8 +24,8 @@ results under `counts.bridges`, `counts.tunnels` and `counts.tunnel_headwalls`.
 ## Blocked probes are reported, not exported
 
 After the whole scene is built, the generator re-checks every probe against
-the finished collision (D21). A probe that collision blocks is **not
-exported**: an exported probe would fail validation. It is listed in
+the finished collision (D21). A probe that collision blocks at generation is
+**not exported** (a generator omission, not a validation result). It is listed in
 `report.json` under `passage_probes_blocked`, together with the blocking
 `mb_id`. On real data this is common and expected:
 
@@ -45,19 +45,28 @@ py -3.12 tools\mbmap_cli.py validate my_map.mbmap
 dotnet run -c Release --project examples\csharp\MbmapReader -- my_map.mbmap
 ```
 
-The Python validator tests every exported probe and fails the package if one
-is blocked. The C# reference reader prints one `passage N ... PASS` line per
-probe. A `query budget ... exhausted; probes A..B were not checked` warning
-means those probes were **not tested**, which is different from PASS. Both
-checkers count query work the same way, so a package the Python validator
-accepts is fully checked by the C# reader too (the Pittsburgh demo: 13 of 13).
+The Python validator tests every exported probe. A blocked or unchecked probe
+is a **warning, not an error**, so the package can still be `VALID`:
+
+- `passage probe N is blocked by collision object #M`: probe N is obstructed.
+- `passage_probes: query budget ... exhausted; probes A..B were not checked`:
+  those probes were **not tested**, which is different from PASS.
+
+The C# reference reader prints one `passage N ... PASS` line per probe and
+reports the same two cases. Both checkers count query work the same way (the
+Pittsburgh demo: 13 of 13 checked and PASS in each).
+
+**Before flying, stop on any blocked or unchecked probe, even if the package
+is `VALID`.** `VALID` alone does not mean that every probe was checked and clear.
 
 ## If you edit structures
 
 Edited decks, tubes and piers export like any other mesh. **Probes are kept
 from generation, not recalculated from your edits.** If you lower a deck or move
-a pier into a probe path, validation fails and the previous package is kept.
-Regenerate the map, or undo the edit. If you delete a structure, its probes are
+a pier into a probe path, the export **still succeeds and replaces the previous
+package**. Validation reports `passage probe N is blocked ...` as a warning, not
+an error. Read the export's validation warnings. If a probe is blocked, undo
+the edit or regenerate the map, and do not fly that passage. If you delete a structure, its probes are
 not exported and are listed in `report.json` `passage_probes_dropped`.
 
 ## Limits (D25)

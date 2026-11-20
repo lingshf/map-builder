@@ -53,7 +53,8 @@ ends lie beyond this 1200 x 1000 m area, so only the north portals are shown.
 Pittsburgh has no elevated building parts or building passages in this area,
 so the S2-ELEV examples use the invented **SYNTHETIC** fixture (not a real
 place). Cameras: [synthetic-cameras.json](synthetic-cameras.json). The CLI
-one-liner below rebuilt `examples\synthetic_sample.mbmap` byte-identically
+command below, with `--created-utc 2026-01-01T00:00:00Z`, rebuilt
+`examples\synthetic_sample.mbmap` byte-identically
 (`sha256:d1e98213052911657a5092365a8b99a0bb20e9e903bfb5eea22ebfd3141ebaea`):
 `VALID: 0 error(s), 1 warning(s)` (two zero-area fixture triangles). C# reader:
 `OK`, all 4 probes PASS: `1048:under` and `1098:passage` (elevated),
@@ -170,7 +171,8 @@ The synthetic sample and its two S2-ELEV renders:
 py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc `
     --datum SYNTHETIC --dem-license "SYNTHETIC test data (no licence required)" `
     --osm-license "SYNTHETIC test fixture (hand-written OSM-format XML, not OpenStreetMap data; no licence required)" `
-    --lat 47.0 --lon 8.0 --width 400 --height 300 --name synthetic_sample --out "$env:MB_DEMO_ROOT\synthetic.mbmap"
+    --lat 47.0 --lon 8.0 --width 400 --height 300 --name synthetic_sample --created-utc 2026-01-01T00:00:00Z `
+    --out "$env:MB_DEMO_ROOT\synthetic.mbmap"
 py -3.12 tools\mbmap_cli.py validate "$env:MB_DEMO_ROOT\synthetic.mbmap"
 & $blender --background --factory-startup --python-exit-code 1 `
     --python tools\demo\run_demo.py -- --preset docs\demo\v0.2.0\synthetic-cameras.json `

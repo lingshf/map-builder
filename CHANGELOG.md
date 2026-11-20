@@ -28,7 +28,10 @@ Package schema stays **2.0.0**.
   part with a flyable `passage` probe (#24).
 - The generator re-checks every probe against the finished scene. Blocked
   probes are not exported; they are listed in `report.json`
-  `passage_probes_blocked` with the blocking `mb_id` (#21, #22, #24).
+  `passage_probes_blocked` with the blocking `mb_id` (#21, #22, #24). At
+  export, edits are not re-probed: a probe that an edit blocks, or that is not
+  checked within the query budget, is a validation **warning**, and the
+  package is still `VALID` ([check a package](docs/user/structures.md#check-a-package)).
 - Pittsburgh demo preset with fixed cameras; fast tests without wall-clock
   gates (#23).
 - User guide [bridges, tunnels and passages](docs/user/structures.md),
