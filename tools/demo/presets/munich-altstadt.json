@@ -1,0 +1,12 @@
+{
+  "name": "munich-altstadt",
+  "description": "S2-F2 Munich Altstadt, 400 x 400 m: elevated building part (min_level), building passage (Rid Passage) and roof:shape on real OSM data",
+  "area": {"lat": 48.1395, "lon": 11.5764, "width_m": 400, "height_m": 400},
+  "cameras": [
+    {"name": "overview", "eye": [380, -420, 300], "target": [0, -20, 10], "lens_mm": 28},
+    {"name": "elevated-under", "eye": [120.6, -160.1, 11.5], "target": [116.3, -171.7, 11.5], "lens_mm": 18},
+    {"name": "passage", "eye": [-4.2, 4.5, 8.0], "target": [-2, 16.2, 7.9], "lens_mm": 18},
+    {"name": "roofs", "eye": [-60, -20, 70], "target": [-125, -80, 20], "lens_mm": 35}
+  ]
+}
+

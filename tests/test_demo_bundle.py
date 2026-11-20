@@ -37,10 +37,15 @@ def good_preset():
 
 class PresetTests(unittest.TestCase):
     def test_committed_presets_load(self):
-        for n in ("synthetic", "sf-fidi", "pittsburgh"):
+        for n in ("synthetic", "sf-fidi", "pittsburgh", "munich-altstadt"):
             p = db.load_preset(n)
             self.assertEqual(p["name"], n)
             self.assertIn("overview", [c["name"] for c in p["cameras"]])
+
+    def test_munich_preset_has_the_s2_f2_views(self):
+        p = db.load_preset("munich-altstadt")
+        self.assertEqual([c["name"] for c in p["cameras"]], ["overview", "elevated-under", "passage", "roofs"])
+        self.assertLessEqual(max(p["area"]["width_m"], p["area"]["height_m"]), 1000)
 
     def test_pittsburgh_preset_matches_the_v0_1_0_cameras(self):
         saved = json.load(open(os.path.join(REPO, "docs", "demo", "v0.1.0", "pittsburgh-cameras.json")))
