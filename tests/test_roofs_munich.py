@@ -327,7 +327,7 @@ class RoofCheckerTests(unittest.TestCase):
 
     def fails(self, tris, top=None, eave=None):
         return rc.check_building(tris, self.outer, [], self.eave if eave is None else eave,
-                                 self.top if top is None else top)
+                                 self.top if top is None else top, shape="gabled")
 
     def test_clean_gabled_house_passes_everything(self):
         self.assertEqual(self.fails(self.tris), {})
@@ -365,7 +365,7 @@ class RoofCheckerTests(unittest.TestCase):
         tris = [(m, tuple((p[0], p[1], p[2] + 0.004) if (m == rc.ROOF and p[:2] == (10, 0) and p[2] == 3.0) else p
                           for p in t)) for m, t in self.tris]
         self.assertIn("planar", self.fails(tris))
-        self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self.tris)), {})
+        self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self.tris, "gabled", self.outer, self.top)), {})
     def test_fan_triangulated_concave_face_overlaps(self):
         outer = [(0, 0), (10, 0), (10, 10), (5, 10), (5, 5), (0, 5)]          # L shape
         fan = [(rc.ROOF, ((0, 0, 3), (outer[i][0], outer[i][1], 3), (outer[i + 1][0], outer[i + 1][1], 3)))
@@ -398,7 +398,7 @@ class RoofCheckerTests(unittest.TestCase):
     def test_warped_slope_fails_planar_at_4_mm_and_at_200_mm(self):
         for dz in (0.004, 0.2):
             tris = self._warp(dz)
-            self.assertEqual(len(rc.roof_slopes(tris)), 2, dz)         # slope membership does not depend on dz
+            self.assertEqual(len(rc.roof_slopes(tris, "gabled", self.outer, self.top)), 2, dz)         # slope membership does not depend on dz
             self.assertIn("planar", self.fails(tris), dz)
 
     def test_large_warp_with_moved_walls_is_not_a_gabled_roof(self):
@@ -410,14 +410,35 @@ class RoofCheckerTests(unittest.TestCase):
         self.assertTrue(any("not coplanar" in p for p in problems), problems)
         self.assertFalse(rc.built_as_tagged("gabled", tris, self.outer, [], self.eave, self.top)[0])
 
+    def test_gabled_roof_with_a_collinear_vertex_at_the_ridge_midpoint_is_valid(self):
+        R, F = rc.ROOF, rc.FACADE
+        tris, outer = gabled_box()
+        a, b, c, e = outer
+        r0, r1, m = (0, 3, 5.0), (10, 3, 5.0), (5, 3, 5.0)
+        P = lambda p: (p[0], p[1], 3.0)
+        roof = [(R, (P(a), P(b), m)), (R, (P(b), r1, m)), (R, (P(a), m, r0)),
+                (R, (P(c), P(e), m)), (R, (P(e), r0, m)), (R, (P(c), m, r1))]
+        tris = _oriented([x for x in tris if x[0] != R] + roof, outer)
+        self.assertEqual(rc.check_building(tris, outer, [], 3.0, 5.0, shape="gabled"), {})
+        self.assertEqual(rc.signature_problems("gabled", tris, outer, 3.0, 5.0), [])
+        self.assertTrue(rc.built_as_tagged("gabled", tris, outer, [], 3.0, 5.0)[0])
+
+    def test_shallow_rectangular_hip_keeps_its_four_slopes(self):
+        tris, outer = self._shape_box("hipped", rise=0.2)
+        self.assertEqual(len(rc.roof_slopes(tris, "hipped", outer, 3.2)), 4)
+        self.assertEqual(rc.signature_problems("hipped", tris, outer, 3.0, 3.2), [])
+        for dz in (0.004, 0.2):
+            warped = [(m, tuple((p[0], p[1], p[2] + dz) if p[:2] == (10, 0) else p for p in t)) for m, t in tris]
+            self.assertTrue(rc.signature_problems("hipped", warped, outer, 3.0, 3.2), dz)
+
     def test_extra_or_singleton_slopes_fail_the_signature(self):
         tris, outer = self._shape_box("hipped")
         warped = [(m, tuple((p[0], p[1], p[2] + 1.3) if p[:2] == (10, 0) else p for p in t)) for m, t in tris]
         self.assertTrue(any("roof slope" in p for p in rc.signature_problems("hipped", warped, outer, 3.0, 5.0)))
 
     def test_the_planarity_rule_does_not_depend_on_the_tolerance(self):
-        self.assertEqual(len(rc.roof_slopes(self.tris)), 2)
-        self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self._warp(0.0005))), {})
+        self.assertEqual(len(rc.roof_slopes(self.tris, "gabled", self.outer, self.top)), 2)
+        self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self._warp(0.0005), "gabled", self.outer, self.top)), {})
 
     @staticmethod
     def _shape_box(kind, w=10.0, d=6.0, eave=3.0, rise=2.0):

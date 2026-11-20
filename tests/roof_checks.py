@@ -330,7 +330,6 @@ def roof_coverage(roof, ftris, budget=None):
 
 
 PLANAR_TOL = MM
-SLOPE_ANGLE = 0.3      # rad: adjacent roof triangles tilted less than this apart belong to one slope
 
 
 def plane_deviation(tris):
@@ -358,36 +357,6 @@ def check_planar_faces(faces, tol=PLANAR_TOL):
     return bad
 
 
-def roof_slopes(tris):
-    """Sloped roof triangles grouped into slopes: edge-adjacent triangles whose normals differ by less than
-    SLOPE_ANGLE. A smoothly warped slope stays one group, so check_planar_faces reports it."""
-    items = [(t, unit_normal(t)) for m, t in tris if m == ROOF]
-    items = [(t, n) for t, n in items if n is not None and n[2] < 1.0 - 1e-9]
-    key = lambda p: tuple(round(c / WELD_M) for c in p)
-    by_edge = {}
-    for i, (t, _) in enumerate(items):
-        for k in range(3):
-            by_edge.setdefault(frozenset((key(t[k]), key(t[(k + 1) % 3]))), []).append(i)
-    seen, groups = set(), []
-    for s in range(len(items)):
-        if s in seen:
-            continue
-        seen.add(s)
-        stack, grp = [s], []
-        while stack:
-            i = stack.pop()
-            grp.append(items[i][0])
-            t = items[i][0]
-            for k in range(3):
-                for j in by_edge[frozenset((key(t[k]), key(t[(k + 1) % 3])))]:
-                    if abs(t[k][2] - t[(k + 1) % 3][2]) > MM and j not in seen and sum(
-                            a * b for a, b in zip(items[i][1], items[j][1])) > math.cos(SLOPE_ANGLE):
-                        seen.add(j)
-                        stack.append(j)
-        groups.append(grp)
-    return groups
-
-
 def skeleton_tiling(sk):
     """Independent tiling checks of a ``Skeleton`` (S3-SKELETON AC7) on its explicitly triangulated faces.
     -> (relative gap, relative overlap, relative area outside the footprint, lifted faces)."""
@@ -402,10 +371,11 @@ def skeleton_tiling(sk):
     return gap / total, overlap / total, outside / total, lifted
 
 
-def check_building(tris, outer, holes, eave_z, top_z):
-    """{check name: detail} of the failed checks of one building. ``eave_z``/``top_z`` are absolute map z."""
+def check_building(tris, outer, holes, eave_z, top_z, shape=None):
+    """{check name: detail} of the failed checks of one building. ``eave_z``/``top_z`` are absolute map z.
+    ``shape`` (the tagged shape) selects the slope model of the planarity check; without it there is none."""
     fails = {}
-    planar = check_planar_faces(roof_slopes(tris))
+    planar = check_planar_faces(roof_slopes(tris, shape, outer, top_z))
     if planar:
         fails["planar"] = f"{len(planar)} roof slope(s) not coplanar within {PLANAR_TOL * 1000:g} mm (max " \
                           f"{max(planar.values()) * 1000:.3g} mm)"
@@ -472,19 +442,29 @@ def _distinct(points):
     return out
 
 
-def _collinear(points):
-    a = points[0]
-    b = max(points, key=lambda p: math.dist(a, p))
-    return math.dist(a, b) > MM and all(
-        _dist_to_segment((p[0], p[1]), (a[0], a[1]), (b[0], b[1])) <= MM for p in points)
+def _chain(tops):
+    """The top points ordered along one straight line, or None if they are fewer than two or not collinear."""
+    if len(tops) < 2:
+        return None
+    a = max(tops, key=lambda p: math.dist(tops[0], p))
+    b = max(tops, key=lambda p: math.dist(a, p))
+    if math.dist(a, b) <= MM or any(
+            _dist_to_segment((p[0], p[1]), (a[0], a[1]), (b[0], b[1])) > MM for p in tops):
+        return None
+    return sorted(tops, key=lambda p: (p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1]))
 
 
-def _joined(two, roof_tris):
-    """Some roof triangle has the edge between the two points, which are at least 0.1 m apart."""
-    a, b = two
-    return math.dist(a, b) >= 0.1 and any(
-        sum(_same(p, a) for p in t) and sum(_same(p, b) for p in t) for t in roof_tris)
-
+def _ridge_problem(tops, roof_tris):
+    """The ridge is a straight, connected chain of horizontal top edges (collinear vertices are merged into it)."""
+    chain = _chain(tops)
+    if chain is None:
+        return f"no straight ridge line at the top height ({len(tops)} top point(s))"
+    if math.dist(chain[0], chain[-1]) < 0.1:
+        return "the ridge is shorter than 0.1 m"
+    for a, b in zip(chain, chain[1:]):
+        if not any(sum(_same(p, a) for p in t) and sum(_same(p, b) for p in t) for t in roof_tris):
+            return "the top points are not joined by horizontal roof edges"
+    return None
 
 def _is_square(ring, tol=0.01):
     """A 4-vertex ring with equal sides and right angles (the only footprint whose hipped roof is a pyramid)."""
@@ -529,24 +509,71 @@ def ridge_slopes(tris, top_z):
     return groups
 
 
-def _corner_count(outer):
-    """Footprint edges after merging collinear consecutive ones: one roof slope each on a hipped/pyramidal roof."""
+def _sides(outer):
+    """Footprint sides with collinear consecutive edges merged: one hipped/pyramidal slope each."""
     n = len(outer)
-    count = 0
-    for i in range(n):
-        a, b, c = outer[i - 1], outer[i], outer[(i + 1) % n]
-        if _dist_to_segment(b, a, c) > MM:
-            count += 1
-    return count
+    corners = [outer[i] for i in range(n) if _dist_to_segment(outer[i], outer[i - 1], outer[(i + 1) % n]) > MM]
+    return [(corners[i], corners[(i + 1) % len(corners)]) for i in range(len(corners))]
+
+
+def edge_slopes(tris, outer, top_z):
+    """Hipped/pyramidal slopes by footprint side: the triangles whose eave edge lies on side k, plus the
+    triangles reached across shared edges that are not horizontal ridge edges. A triangle reachable from
+    several sides (across a hip) joins the side whose seed plane it lies closest to. Triangles never reached
+    are singleton slopes. No normal-angle cutoff is involved."""
+    sides = _sides(outer)
+    items = [t for m, t in tris if m == ROOF and (unit_normal(t) or (0, 0, 1))[2] < 1.0 - 1e-6]
+    key = lambda p: tuple(round(c / WELD_M) for c in p)
+    by_edge = {}
+    for i, t in enumerate(items):
+        for k in range(3):
+            a, b = t[k], t[(k + 1) % 3]
+            if abs(a[2] - top_z) > MM or abs(b[2] - top_z) > MM:
+                by_edge.setdefault(frozenset((key(a), key(b))), []).append(i)
+    side_of, seed = [None] * len(items), {}
+    for i, t in enumerate(items):
+        for s, seg in enumerate(sides):
+            if any(_edge_overlap(((t[k][0], t[k][1]), (t[(k + 1) % 3][0], t[(k + 1) % 3][1])), seg) > MM
+                   for k in range(3)):
+                side_of[i] = s
+                seed.setdefault(s, i)
+                break
+
+    def dev(i, j):
+        n, o = unit_normal(items[j]), items[j][0]
+        return max(abs(sum(n[c] * (p[c] - o[c]) for c in range(3))) for p in items[i])
+
+    progress = True
+    while progress:
+        progress = False
+        for i, t in enumerate(items):
+            if side_of[i] is not None:
+                continue
+            near = {side_of[j] for k in range(3) for j in by_edge.get(frozenset((key(t[k]), key(t[(k + 1) % 3]))), [])
+                    if j != i and side_of[j] is not None}
+            if near:
+                side_of[i] = min(near, key=lambda s: dev(i, seed[s]))
+                progress = True
+    groups = {}
+    for i, t in enumerate(items):
+        groups.setdefault(side_of[i] if side_of[i] is not None else ("lone", i), []).append(t)
+    return list(groups.values())
+
+
+def roof_slopes(tris, shape, outer, top_z):
+    """The slopes of a roof of the tagged ``shape``, from the expected roof topology (none for other shapes)."""
+    if shape == "gabled":
+        return ridge_slopes(tris, top_z)
+    if shape in ("hipped", "pyramidal"):
+        return edge_slopes(tris, outer, top_z)
+    if shape == "skillion":
+        return [[t for m, t in tris if m == ROOF]]
+    return []
 
 
 def _slope_topology_problems(shape, tris, outer, top_z):
-    if shape == "gabled":
-        slopes = ridge_slopes(tris, top_z)
-        expected = 2
-    else:
-        slopes = roof_slopes(tris)
-        expected = _corner_count(outer)
+    expected = 2 if shape == "gabled" else len(_sides(outer))
+    slopes = roof_slopes(tris, shape, outer, top_z)
     problems = []
     if len(slopes) != expected:
         problems.append(f"{len(slopes)} roof slope(s), a {shape} roof has exactly {expected}")
@@ -554,7 +581,6 @@ def _slope_topology_problems(shape, tris, outer, top_z):
     if bad:
         problems.append(f"{len(bad)} roof slope(s) not coplanar within {PLANAR_TOL * 1000:g} mm")
     return problems
-
 
 def signature_problems(shape, tris, outer, eave_z, top_z):
     """Why the emitted geometry does not look like ``shape`` (an empty list if it does)."""
@@ -568,10 +594,8 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
     if shape == "hipped":
         if len(tops) == 1 and not _is_square(outer):
             problems.append("the roof ends in a single apex on a non-square footprint (pyramidal, not hipped)")
-        if len(tops) >= 2 and not _collinear(tops):
-            problems.append("the top points do not lie on one ridge line")
-        if len(tops) == 2 and not _joined(tops, roof_tris):
-            problems.append("the two top points are not joined by a roof edge")
+        if len(tops) >= 2 and _ridge_problem(tops, roof_tris):
+            problems.append(_ridge_problem(tops, roof_tris))
         if ends:
             problems.append(f"{len(ends)} gable-end triangle(s) on a hipped roof")
         if _carried(segs, [], roof_tris):
@@ -580,10 +604,14 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
     elif shape == "gabled":
         if len(ends) < 2:
             problems.append(f"{len(ends)} vertical gable-end triangle(s), need >= 2")
-        if len(tops) != 2 or not _joined(tops, roof_tris):
-            problems.append(f"no horizontal top ridge edge at the top height ({len(tops)} top point(s))")
-        elif not all(any(_same(a, p) for p in tops) for e in ends for a in e if abs(a[2] - top_z) <= MM):
-            problems.append("a gable end does not reach a ridge end")
+        ridge = _ridge_problem(tops, roof_tris)
+        if ridge:
+            problems.append(ridge)
+        else:
+            chain = _chain(tops)
+            if not all(_same(a, chain[0]) or _same(a, chain[-1])
+                       for e in ends for a in e if abs(a[2] - top_z) <= MM):
+                problems.append("a gable end does not reach a ridge end")
         if _carried(segs, ends, roof_tris):
             problems.append("a footprint edge outside the gable ends carries no sloped roof triangle")
         problems += _slope_topology_problems(shape, tris, outer, top_z)
@@ -615,7 +643,7 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
 def built_as_tagged(shape, tris, outer, holes, eave_z, top_z):
     """The D61 metric for one building: the geometry checks pass and the signature of ``shape`` holds.
     -> (counted, {check: detail}, [signature problems])."""
-    fails = check_building(tris, outer, holes, eave_z, top_z)
+    fails = check_building(tris, outer, holes, eave_z, top_z, shape)
     sig = signature_problems(shape, tris, outer, eave_z, top_z)
     return (not fails and not sig), fails, sig
 

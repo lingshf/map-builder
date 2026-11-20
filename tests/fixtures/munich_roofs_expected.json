@@ -594,9 +594,7 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 4.5477,
-   "failed_checks": [
-    "planar"
-   ],
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 7,
@@ -652,9 +650,7 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 12.0,
-   "failed_checks": [
-    "planar"
-   ],
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 8,
