@@ -6,36 +6,77 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-20
+
+"Real roofs and textures" (sprint 3). **Release candidate**: tagging requires release review and coordinator
+authorization. Package schema is **2.1.0** (additive; v0.3.0 readers accept it).
+
 ### Added
 
-- Textured export (S3-TEX-UV-CORE): the CLI writes world-scaled UVs (`core/uv.py`) and embeds the CC0 textures
-  by default; `--no-textures` restores the untextured GLB. The package schema is 2.1.0 and its `NOTICES.txt`
-  and `asset_notices` carry the CC0 asset entry. COLOR_0 on textured faces is divided by the texture mean
-  albedo so textures do not darken the map. `examples/synthetic_sample.mbmap` is regenerated textured.
-
-- Textures in Blender (S3-TEX-BLENDER): a **Textures** checkbox (default on) generates the textured materials with
-  UV maps and packed CC0 images in the scene (Image Texture x vertex colour divided by the mean albedo) and exports
-  the same UVs, texture bindings and asset notice as the CLI (schema 2.1.0). Meshes without UVs get fallback UVs and
-  one warning per object. The panel lists the CC0 attribution when Textures is on.
-
-### Fixed
-
-- Blender and the CLI now emit the same passage probes for the same input. The Blender centre latitude/longitude
-  is stored as text at full double precision (a float32 property moved the area by centimetres, which changed the
-  DSM mask and a probe on Pittsburgh), and the Blender seed default is 1, as in the CLI. A `.blend` saved with
-  an earlier version keeps its centre: the old float value is migrated once into the text fields on load
-  (it can only be as exact as float32 stored it, about 6 decimals).
-- `report.json` `passage_probes_dropped` keeps the generation-time `{id, reason}` entries on export; probes of
-  deleted features are appended as `{id, reason: "feature_deleted"}` (before: replaced by bare ids).
+- **Gabled and hipped roofs on non-rectangular footprints** (#41, #48, #50). Eligible L, T, U, trapezoid and other
+  simple footprints up to 64 vertices (no courtyard) can get a straight-skeleton roof: a sloped face on every footprint edge
+  for hipped, and vertical gable walls on the representable ends for gabled. This is not every non-rectangular
+  roof; a valid simple footprint can still fall back. Before, these roofs fell back to flat
+  or to a pyramid. Where a gable end cannot be represented (the ridge would meet the gable edge outside it, or the
+  gable end would be a sliver), the roof falls back to **hipped** with that reason in `provenance.roof_shape`.
+  `provenance.roof_construction` says how each roof was built. Skillion roofs were already built on any footprint
+  and are unchanged. Half-hipped, gambrel, mansard, round and saltbox stay rectangle-only.
+- **Textures in the CLI and in Blender** (#42, #46, #49, #53). Facades, roofs (tiles, flat-roof gravel), roads,
+  terrain and structures get CC0 base-colour textures with world-scaled UVs. They are on by default: CLI
+  `--textures` / `--no-textures`, Blender **Content > Textures**. The vertex colour is divided by each texture's
+  mean albedo, so a textured face keeps its palette colour on average. The Textures setting at export decides the
+  whole package (materials, UVs, images, notices), whatever it was at Generate (D86). In Blender the scene gets
+  packed images and UV maps. When exporting with Textures on, a mesh you added that uses a generated textured
+  material but has no UV map gets world-XY fallback UVs and one warning per object. Textures off gives the
+  plain-colour look for the same v0.4.0 geometry, not the v0.3.0 roofs.
+- **Package schema 2.1.0**: optional UVs and embedded PNGs in the GLB, a top-level `asset_notices` list (name,
+  attribution, licence, SHA-256 per image) and an "Assets" section in `NOTICES.txt`. The v0.3.0 Python validator
+  and C# reader accept 2.1 packages and ignore both. `.mbcol` (format 2) and the heightfield (format 1) are
+  unchanged, and byte-identical with textures on or off. The toggle changes the GLB, `manifest.json`
+  (`asset_notices`) and `NOTICES.txt`, and therefore the `package_id`.
+- **Texture licence**: the six textures are our own procedural work (`python -m tools.textures.make_textures`),
+  dedicated to the public domain under CC0 1.0; see `map_builder/assets/textures/LICENSE-textures.txt`, which
+  ships in the extension zip.
+- **Full type annotations** (#51, #52, #54): `map_builder` and `tools` pass `mypy` (`disallow_untyped_defs`,
+  41 files). No behaviour change.
+- [v0.4.0 demo](docs/demo/v0.4.0/README.md): before/after roof renders, textures on/off and the three.js viewer
+  for Munich and Pittsburgh.
 
 ### Changed
 
-- Hipped roofs on non-rectangular footprints (L, T, U, trapezoid, any simple polygon up to 64 vertices) are now built
-  from the straight skeleton: a sloped face on every footprint edge, with a sloped or multi-height ridge where the
-  footprint needs one. Before, they fell back to flat or to a pyramid. Rectangles and the sample are unchanged.
-- `roof:levels=0` with `roof:shape=hipped` or `pyramidal` and no `roof:height` no longer builds flat: the
-  default roof height is used (an explicit `roof:height` or a non-zero `roof:levels` still wins).
-- On the frozen Munich snapshot the built-as-tagged roofs go from 1 to 12 of 67 (all 11 eligible hipped roofs).
+- On the frozen Munich snapshot, **29 of 67** tagged non-flat roofs are built as tagged (17/52 gabled, 11/12
+  hipped, 1/1 skillion), against **1/67** for v0.3.0 under the same geometric checker. This meets the D82 floor of
+  29, not the original target of 40 or more. The 5/67 published for v0.3.0 used an earlier checker and is not
+  comparable.
+- `roof:levels=0` with `roof:shape=hipped` or `pyramidal` and no `roof:height` no longer builds flat: the default
+  roof height is used.
+- `roof:direction` follows OSM: it is the direction the slope faces, and a gabled ridge perpendicular to it is the
+  target, not a guarantee (D84). On a skeleton gable the ridge bearing follows from the footprint; if no emitted
+  ridge is within 10° of perpendicular, `provenance.roof_direction` reports `approximate: ridge NNN° vs tagged DDD°`.
+- Packages report `generator.version` **0.4.0**, so the same inputs give a new `package_id`. With
+  `--no-textures`, the Pittsburgh GLB, `.mbcol`, heightfield and report are byte-identical to v0.3.0. The
+  committed synthetic sample was regenerated.
+- Typical size cost of textures: GLB +18.6 % (Pittsburgh) and +19.5 % (Munich) excluding the 511,404 bytes of
+  embedded images. Same-RC packages, untextured -> textured: Pittsburgh 4,258,810 -> 5,346,074 bytes, Munich
+  912,870 -> 1,587,709 bytes.
+
+### Fixed
+
+- Blender and the CLI emit the same passage probes for the same input (#47). The Blender centre latitude and
+  longitude are stored as text at full double precision (a float32 property moved the area by centimetres), and
+  the Blender seed default is 1, as in the CLI. A `.blend` saved with an earlier version keeps its centre: the old
+  value is migrated once on load (only as exact as float32 stored it, about 6 decimals).
+- `report.json` `passage_probes_dropped` keeps the generation-time `{id, reason}` entries on export; probes of
+  deleted features are appended as `{id, reason: "feature_deleted"}`.
+
+### Known limitations
+
+- 38 of the 67 tagged Munich roofs are still not built as tagged: 30 gabled -> hipped (named reason), 4 -> flat
+  (courtyard, roof height 0, quadruple_saltbox, concave pyramidal), and **4 near-rectangle gables built
+  analytically that fail the planarity check with no named fallback reason** (S3-F1).
+- Follow-ups S3-F1 to S3-F12 are listed in the [release notes](docs/releases/v0.4.0.md#known-limitations-and-follow-ups).
+- Unchanged: degenerate collision triangles warn (Pittsburgh 76, Munich 59; S3-F12); the C# parity test can race
+  with `CS2012` when suites run in parallel; no simulator map loader.
 
 ## [0.3.0] - 2026-11-20
 
@@ -228,7 +269,8 @@ release review and coordinator authorization.
 - Code licence is provisionally GPL-3.0-or-later; owner confirmation and a root
   licence file are still outstanding. Source-data licences apply separately.
 
-[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lingshf/map-builder/releases/tag/v0.4.0
 [0.3.0]: https://github.com/lingshf/map-builder/releases/tag/v0.3.0
 [0.2.0]: https://github.com/lingshf/map-builder/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lingshf/map-builder/releases/tag/v0.1.0

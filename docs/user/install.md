@@ -3,7 +3,7 @@
 Use Blender **4.2 LTS** (release tooling uses 4.2.23). Later versions have not been
 qualified by this release.
 
-1. Download `map_builder-0.3.0.zip` from the [v0.3.0 release](https://github.com/lingshf/map-builder/releases/tag/v0.3.0),
+1. Download `map_builder-0.4.0.zip` from the [v0.4.0 release](https://github.com/lingshf/map-builder/releases/tag/v0.4.0),
    or build an extension from the source checkout as described below.
 2. In Blender, open **Edit > Preferences > Get Extensions**, open the dropdown menu,
    choose **Install from Disk...**, and select the zip **without unpacking it**.

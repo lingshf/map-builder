@@ -1,6 +1,6 @@
 # Simulator use: integration preview
 
-**v0.3.0 does not add a playable map loader to
+**v0.4.0 does not add a playable map loader to
 lingshf/drone-flight-simulator.** This release delivers a package contract, a
 sample and a reference reader. No simulator files are changed by installing the
 Blender extension.
@@ -29,4 +29,11 @@ matching heightfield hole (NaN cells). Highway bridges are generated (a bridge's
 its clearance is at least 4 m). Elevated building parts and `tunnel=building_passage`
 ways through buildings are generated as flyable passages, each with a passage probe
 (a probe that collision blocks is left out and listed in the report). Older schema 1.x packages must be regenerated for the current reader.
+Packages from v0.4.0 are schema 2.1.0. The only addition is optional
+textures: UVs and embedded CC0 images in the GLB, and an `asset_notices` list
+in the manifest. A 2.0 reader (such as the v0.3.0 C# reader) accepts them and
+ignores both. The collision and heightfield do not depend on textures, so
+`--no-textures` changes only the visuals. A Unity glTF importer that reads
+embedded PNGs shows the textures; ship the textures' CC0 notice from
+`NOTICES.txt` along with the map data notices.
 Check every probe before flight: see [bridges, tunnels and passages](structures.md).
