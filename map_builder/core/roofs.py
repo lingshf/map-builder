@@ -231,14 +231,22 @@ def _record_ridge_bearing(sk, ends, direction, prov, tolerance=10.0):
     """``prov["roof_ridge_bearing"]`` lists the emitted ridge bearings; ``roof_direction`` is measured only when
     one of them is within ``tolerance`` degrees of perpendicular to the tagged direction, else approximate."""
     want = (direction + 90.0) % 180.0
-    bearings = sorted({round(_ridge_bearing(sk, i), 1) % 180.0 for i in ends})
+    bearings = sorted({_ridge_bearing(sk, i) % 180.0 for i in ends})
     off = lambda b: min(abs(b - want), 180.0 - abs(b - want))
     best = min(bearings, key=off)
-    prov["roof_ridge_bearing"] = ", ".join(f"{b:g}" for b in bearings)
+    shown = lambda b: f"{round(b, 1) % 180.0:g}"      # the tolerance is judged on the unrounded bearing
+    prov["roof_ridge_bearing"] = ", ".join(shown(b) for b in bearings)
     if off(best) <= tolerance:
-        prov["roof_direction"] = f"measured:osm roof:direction={direction:g} (ridge {best:g}° perpendicular within {tolerance:g}°)"
+        prov["roof_direction"] = f"measured:osm roof:direction={direction:g} (ridge {shown(best)}° perpendicular within {tolerance:g}°)"
     else:
-        prov["roof_direction"] = f"approximate: ridge {best:g}° vs tagged {direction:g}°"
+        prov["roof_direction"] = f"approximate: ridge {shown(best)}° vs tagged {direction:g}°"
+
+
+def drop_ridge_claims(prov):
+    """Remove the gable ridge/direction provenance when the planned roof is not the one emitted (a flat or
+    zero-height downgrade): a roof without a ridge makes no bearing or ``roof:direction`` claim."""
+    for key in ("roof_ridge_bearing", "roof_direction", "roof_orientation"):
+        prov.pop(key, None)
 
 
 def _gable_node(sk, i):

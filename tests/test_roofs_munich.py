@@ -711,6 +711,35 @@ class HippedSignatureTests(unittest.TestCase):
         self.assertEqual(prov["roof_direction"], "approximate: ridge 90° vs tagged 35°")
         self.assertEqual(prov["roof_ridge_bearing"], "90")      # the gable ends' ridge; the stem ridge stays hipped
 
+    def test_direction_provenance_comes_from_the_emitted_roof(self):
+        from map_builder.core import generate
+        from tests.test_scene_generation import building, flat_grid
+
+        def built(**tags):
+            f = building(self.T, roof__shape="gabled", roof__direction="0", building__levels="2", **tags)
+            return generate.build_building(f, flat_grid(), 0.0)[2]
+
+        ok = built()
+        self.assertEqual(ok["roof_shape_built"], "gabled")
+        self.assertIn("roof_ridge_bearing", ok)
+        flat = built(roof__height="0")                       # downgraded to flat: no ridge, no direction claim
+        self.assertEqual(flat["roof_shape_built"], "flat")
+        for key in ("roof_ridge_bearing", "roof_direction", "roof_orientation"):
+            self.assertNotIn(key, flat)
+
+    def test_ridge_tolerance_uses_the_unrounded_bearing(self):
+        from unittest import mock
+        from map_builder.core import roofs
+
+        class Sk:
+            ring = [(0, 0)] * 3
+        for bearing, label in ((89.951, "measured"), (90.049, "approximate")):    # tag 170 wants a ridge at 80
+            with mock.patch.object(roofs, "_ridge_bearing", return_value=bearing):
+                prov = {}
+                roofs._record_ridge_bearing(Sk(), (0,), 170.0, prov)
+            self.assertTrue(prov["roof_direction"].startswith(label), prov)
+            self.assertEqual(prov["roof_ridge_bearing"], "90")
+
     def test_planted_extra_apex_fails(self):
         tris, outer = self.skeleton_house(self.L)
         victim = next(p for m, t in tris if m == rc.ROOF for p in t if p[2] > self.EAVE + 1e-9)

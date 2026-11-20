@@ -472,6 +472,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
             roof_h = roof_src
             if roof_h <= 1e-6:
                 prov["roof_shape"] = f"fallback:flat (roof height 0 leaves no {roof_shape} roof)"
+                roofs.drop_ridge_claims(prov)
                 roof_shape, roof_h, plan = "flat", 0.0, roofs.flat_plan()
     elif roof_src is None:
         roof_h = min(max(1.0, min(0.3 * short_side, 6.0)), 0.6 * wall_span)
@@ -485,6 +486,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
                       f"(building height {height:g} m, min_height {min_h:g} m)")
         if roof_h <= 1e-6:
             prov["roof_shape"] = f"fallback:flat (no room for a {roof_shape} roof)"
+            roofs.drop_ridge_claims(prov)
             roof_shape, roof_h, plan = "flat", 0.0, roofs.flat_plan()
     if roof_src is not None and abs(roof_h - roof_src) > 1e-9:
         prov["roof_height_source"] = f"{roof_src_label} = {roof_src:g} m"
