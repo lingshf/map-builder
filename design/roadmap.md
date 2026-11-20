@@ -276,10 +276,161 @@ graph LR
 | D86 | Textures, materials and NOTICES in a package must always agree. Operative rule: the export-time Textures setting alone controls materials, UVs, embedded images, `asset_notices` and NOTICES, irrespective of the setting Generate ran with. | C | final |
 | D87 | Tiny-fixture overshoot does not gate; Pittsburgh measures it (#53 Pittsburgh untextured whole Generate 12.79 → 13.64 s, +6.6 %; untextured `build_scene` stage 0.97 → 1.70 s, +75 %; the textured stage under D85 was 1.17 → 1.89 s, +62 %; stage results do not gate; follow-up S3-F4). | C | final |
 | D88 | Export material identity is a parameter key (a digest of the exact material parameters), not a display name. | C | final |
+| D89 | Review rounds are capped at 3 per PR. After round 3 the coordinator rules, and the remaining non-blocking findings become follow-up tasks. A task spec lists its acceptance cases and checker up front, so review measures against them instead of discovering new criteria (retro v0.4.0: #53, #43/#46). | De (proposed), C | final |
+| D90 | A numeric acceptance target is set only after a same-checker baseline has been measured (spike or frozen replay under the final checker). It is stated as a **floor** (must) plus a **stretch** (aim), and the task doc records the baseline and how it was measured (retro v0.4.0: roof target ≥ 40 was set before measurement and against a 5/67 from a different checker). | De (proposed), C | final |
+| D91 | The performance gate is the whole Generate (CLI and headless Blender) on the real-data presets against the previous release. Stage-level growth is reported as information and turned into follow-ups, never a gate (generalises D85, D87). | De (proposed), C | final |
+| D92 | The C# parity tests are hermetic: a repo-local `NuGet.config` (`<clear/>` + nuget.org), one prebuild per test run under a lock, and restore audit warnings such as NU1900 not treated as errors in test builds. Removes the CS2012 parallel-run race and the host-feed dependency. | De (proposed), C | final |
+| D93 | Sprint 4 (`v0.5.0`) theme: **quality closeout + publishing readiness**. | C | final |
+
+## v4: sprint 4 (v0.5.0) — quality closeout and publishing readiness
+
+Theme chosen by the coordinator (D93). Sprint 4 closes the S3 follow-ups that affect output quality, makes
+the build and the tests reproducible, and prepares, without doing, the two publishing steps the user owns:
+a Blender Extensions platform submission and a v1.0 commitment. No new feature class. LOD and railway stay
+later.
+
+### Approach
+
+* **Measure first (D90).** Every numeric target below comes from a baseline measured on f8bedf6 with the
+  checker that will judge it (table below). Where no baseline exists yet (the roof stretch), a time-boxed
+  spike measures it before the implementation starts.
+* **Roofs: name every fallback, then build more.** First make the 38 uncounted Munich roofs all carry a
+  named reason and fix the reference-plane warp (S3-F1, F7, F8, F9). Then add the S4 construction for
+  chamfered and angled gable ends, mixed gable + hip ends and concave pyramidal roofs (S3-F10). Floor 29/67;
+  stretch from the spike.
+* **Output quality.** Zero degenerate collision triangles from both paths (S3-F12). A river that reads as
+  water with textures on (S3-F13).
+* **Performance that does not change bytes.** Strict validation is 9.45 s of the about 20 s Pittsburgh build.
+  `_zinfo` deflates every member once only to test the ratio, and `zipfile` then deflates it again. The
+  `assign_uvs` cost is S3-F4. Performance tasks must keep every package byte-identical (D97), so they are
+  safe to run in parallel with anything that does not touch their files.
+* **Hermetic tests (D92) and a reproducible extension zip.** Today the zip is byte-identical only when the
+  file mtimes match.
+* **Publishing readiness.** A manifest that passes `blender --command extension validate` and the platform
+  rules, a submission checklist for the user, a written `.mbmap` format-stability policy, and a draft of the
+  v1.0 exit criteria for the user to confirm.
+
+### Measured baselines (main f8bedf6, this host, Python 3.12)
+
+| Item | Baseline | How measured |
+|---|---|---|
+| Munich roofs built as tagged | **29/67**. Of the 38 uncounted, **34** carry a named reason; the 4 analytic near-rectangle gables carry none (S3-F1) | `tests.test_roofs_munich`, frozen snapshot (S3-REVIEW §1.1) |
+| Uncounted roofs by reason | 21 ridge meets the gable edge outside it · 9 sliver gable end · 4 analytic `planar` failure (unnamed) · 1 courtyard · 1 quadruple_saltbox · 1 roof height 0 · 1 concave pyramidal | same |
+| `.mbcol` degenerate triangles (validator warning) | sample 2 · Munich CLI 59 / Blender 58 · Pittsburgh CLI 76 / Blender 78 | RC #56 evidence, `tools/mbmap_cli.py validate` |
+| River colour, Pittsburgh overview (mean RGB of pixels x 600–700, y 500–540) | textured **(124, 162, 144)**, G > B · untextured (132, 166, 198) | `docs/demo/v0.4.0/pittsburgh-overview-v040{,-notex}.png` |
+| Root cause of the green river | one `MB Terrain` material with `terrain_grass.png` for every landcover class, including water | `core/textures.py:33`, `core/uv.py:68` |
+| Pittsburgh CLI build, textured, median of 3 | 20.0 s (Munich 4.3 s) | `docs/releases/v0.4.0.md`, reproduced 4.19 s for Munich |
+| Strict validation of the Pittsburgh package, median of 3 | **9.45 s**; top costs `_correspondence`, `match_one_to_one`, `match_winding`, `_dist`, `find_secrets` | `validate_package(strict=True)`, cProfile |
+| `build_plan` Pittsburgh | 5.31 s | unprofiled |
+| Deflate passes per package member | **2** (`_zinfo` ratio test, then `zipfile`) | `core/package.py:1130–1141` |
+| PNG storage | PNGs are embedded in `visual/map.glb`, not separate ZIP members, so ZIP_STORED for PNGs (S3-F5) is not possible without a format change (D96) | package listing |
+| Extension zip | `extension validate` passes; two builds from the same tree are byte-identical (892,653 B); after touching mtimes the SHA-256 changes | Blender 4.2.23 |
+| Manifest gaps for the platform | no `website`; `maintainer` is "map-builder contributors" with no contact | `map_builder/blender_manifest.toml` |
+| C# parity tests on this host | 2 `setUpClass` errors (NU1900 from a private user-level feed); CS2012 when two suites run in parallel | full suite, PO review of #56 |
+| Slowest test | 3.31 s locally; the 45° bridge crossing 2.82–5.47 s depending on the host (S3-F3) | `--durations`, S3-REVIEW §2 |
+| Finalizer ResourceWarning | 1 (`tests/test_demo_bundle.py:53`) | S3-F2 |
+| Suite | 698 run, 1 skipped (+2 host errors above), 126–135 s locally; PR CI 36 s / 1m01 / 1m32 | local, CI on #56 |
+
+### Tasks and waves (max 3 devs)
+
+Task docs: [tasks/README.md](tasks/README.md#sprint-4-v050).
+
+| Lane | Tasks in order |
+|---|---|
+| A: roofs | **S4-ROOF-SPIKE** (½ day) → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** |
+| B: package and collision | **S4-PERF-PKG** → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** |
+| C: textures, tests, publishing | **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** → **S4-FORMAT-POLICY** → **S4-EXT-READY** |
+| Close (D104) | **S4-REVIEW** → S4-Fn blockers → **REL-v0.5.0** → close check → retro → tag `v0.5.0` |
+
+Hard dependencies are only the arrows in the graph; the lane order otherwise just balances three devs.
+The lane-A dev runs the spike first (it merges nothing), so the stretch is recorded before S4-ROOF-ENDS. S4-TEST-HYGIENE and
+S4-EXT-READY have no dependencies and can fill any free lane.
+
+```mermaid
+graph LR
+  SP[S4-ROOF-SPIKE] --> EN[S4-ROOF-ENDS]
+  NA[S4-ROOF-NAMED] --> EN
+  PK[S4-PERF-PKG] --> FP[S4-FORMAT-POLICY]
+  TW[S4-TEX-WATER] --> UV[S4-PERF-UV]
+  BH[S4-BLENDER-HYGIENE] --> CD[S4-COL-DEGEN]
+  TH[S4-TEST-HYGIENE]
+  EX[S4-EXT-READY]
+  EN --> REV[S4-REVIEW]
+  CD --> REV
+  FP --> REV
+  UV --> REV
+  TH --> REV
+  EX --> REV
+  REV --> REL[REL-v0.5.0]
+```
+
+Why the edges: ROOF-NAMED and ROOF-ENDS share `core/roofs.py`. TEX-WATER and PERF-UV share `core/uv.py`
+(the mean-albedo table). BLENDER-HYGIENE and COL-DEGEN share `blender/bake.py` and `blender/export.py`.
+FORMAT-POLICY may need a `core/package.py` edit, which PERF-PKG owns first.
+
+### Performance and test budgets
+
+| Item | Floor (must) | Stretch (aim) |
+|---|---|---|
+| Whole Generate, Pittsburgh CLI textured, median of 3 (D91) | ≤ 20.0 s (no regression vs v0.4.0) | ≤ 15.0 s (strict validation ≥ 2× faster, single deflate pass) |
+| Whole Generate, headless Blender, both presets (D91) | ≤ +5 % vs v0.4.0 | lower than v0.4.0 |
+| Byte identity of perf tasks (D97) | sample, Munich and Pittsburgh frozen builds byte-identical before/after | — |
+| Munich roofs counted | ≥ 29/67, and **38/38** uncounted roofs with a named reason | set by S4-ROOF-SPIKE (provisional 40/67, D95) |
+| Degenerate `.mbcol` triangles | 0 in the sample and both presets, both paths | — |
+| River colour (textured) | B ≥ G, and each channel within 30 of the untextured render | within 15 |
+| New tests | ≤ 5 s each, no wall-clock gates (DoD) | — |
+| PR CI | ≤ 10 min (today about 1m32 for the slowest job); a C# prebuild may add ≤ 30 s | — |
+| Local suite | 0 host-dependent errors with a private user-level NuGet feed configured (D92) | — |
+
+### Consumer impact (drone-flight-simulator, read-only)
+
+* **Collision (`.mbcol` format 2, unchanged).** S4-COL-DEGEN removes zero-area triangles. They never
+  produced a hit under the two-sided watertight test, so Core query results are unchanged; only triangle
+  counts and offsets change. Roof changes keep class `building`. No simulator code change.
+* **Visual (GLB).** S4-TEX-WATER replaces the terrain image (same name slot, new SHA-256 in
+  `asset_notices`). Roofs change shape. glTFast imports as before.
+* **Format.** Schema stays **2.1.0**. S4-FORMAT-POLICY publishes what a 2.x reader may rely on (D101), so
+  the simulator can pin "major 2, any minor".
+* `package_id` changes for every package (generator 0.5.0 and the output changes above).
+
+### Draft v1.0 exit criteria (D102, for the user to confirm)
+
+1. **Format frozen per the stability policy** (D101): 2.x published, the previous-minor frozen reader in CI.
+2. **Real data:** both presets VALID through the CLI and headless Blender, probe parity, 0 validator
+   warnings.
+3. **Roofs:** every tagged roof is built as tagged or carries a named reason; the v0.5.0 floor holds.
+4. **Consumer:** glTF-Validator clean; the simulator owner confirms one import of the released packages
+   (a user action, outside this repo).
+5. **Extension:** `extension validate` passes, the zip is reproducible from the tag, the platform checklist
+   is complete, and the user has either submitted or deliberately deferred submission.
+6. **Licence final** (D13, done).
+7. **Docs:** install, generate, export, validate and the CLI are documented with known limitations.
+8. **No open gap of medium or higher severity.**
+9. **Performance:** a 1.2 × 1 km area builds in ≤ 120 s through each path (met today).
+
+### Sprint 4 decisions
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D94 | Sprint 4 = `v0.5.0`, scope as above. Excluded: LOD, railway, new structure classes. S3-F1–F13 are either scheduled here or closed with a reason (D96). | De (proposed; C confirms at gate) | proposed |
+| D95 | Roof target per D90: floor **29/67** counted and **38/38** uncounted roofs named (baseline 34/38). The stretch comes from S4-ROOF-SPIKE: a ½-day prototype on the frozen snapshot that counts how many of the 30 gable-end fallbacks and the 4 analytic gables the S4 construction would build under the unchanged checker. The coordinator records that number as a D-number before S4-ROOF-ENDS starts. Until then the stretch is provisionally 40/67. The checker is not loosened. | De (proposed; C confirms at gate) | proposed |
+| D96 | S3-F5 (ZIP_STORED for PNGs) is closed as stated: the PNGs live inside `visual/map.glb`. It is replaced by single-pass deflate in `_zinfo` (S4-PERF-PKG), which keeps the archive bytes identical. | De (proposed; C confirms at gate) | proposed |
+| D97 | Performance tasks (S4-PERF-PKG, S4-PERF-UV) must keep the committed sample and the frozen Munich and Pittsburgh builds byte-identical, and the validator verdicts and messages identical on every positive and negative fixture. A speed-up that changes bytes is a separate, reviewed behaviour change. | De (proposed; C confirms at gate) | proposed |
+| D98 | Degenerate triangles are dropped at collision bake in both the CLI and Blender paths, and the generator's own export check asserts zero. The validator keeps the degenerate-triangle **warning** (not an error), because third-party packages may still contain them. | De (proposed; C confirms at gate) | proposed |
+| D99 | The green river is fixed by replacing the grass pattern with a neutral, luminance-only terrain-detail texture (our own procedural CC0 image) so the landcover vertex colours carry the hue. The terrain is not split by landcover, and the geometry does not change. | De (proposed; C confirms at gate) | proposed |
+| D100 | Extension reproducibility: the release workflow sets every source file's mtime to the tag commit time before `extension build`, so two clean builds from the tag are byte-identical. The platform submission itself is a user action; Dev only prepares `docs/PLATFORM_SUBMISSION.md`. The maintainer contact and the website are user-owned fields (no personal data is invented). | De (proposed; C confirms at gate) | proposed |
+| D101 | Draft `.mbmap` format-stability policy (for user confirmation at v1.0): **patch** = clarifications, no file change; **minor** = additive optional fields, members or glTF content, and a reader of the same major must load the package and may ignore what it does not know (frozen previous-minor reader in CI, as D57); **major** = any removal, rename or semantic change of an existing field, collision class or kind, coordinate frame, units, the open-tube rule, or a `.mbcol`/`.mbhf` format number the current readers cannot read. Readers accept the same major with any minor and reject another major with a clear error (current behaviour, `core/package.py:1436`). A field is deprecated for at least one minor before removal in the next major. | De (proposed; U confirms at v1.0) | draft |
+| D102 | Draft v1.0 exit criteria as listed above, for the user to confirm. | De (proposed; U confirms) | draft |
+| D103 | Sample ownership: output-changing tasks (S4-ROOF-NAMED and S4-ROOF-ENDS only if the fixture's roofs change, S4-TEX-WATER, S4-COL-DEGEN) regenerate `examples/synthetic_sample.mbmap` on rebase (D20) and list the byte change in the PR. Perf tasks never change it (D97). Comparisons against v0.4.0 use frozen inputs: the committed Munich roof snapshot, the RC #56 caches by acquisition SHA-256, and the unchanged sample input. | De (proposed; C confirms at gate) | proposed |
+| D104 | Sprint 4 close order follows D48 and D63: S4-REVIEW on main first; its findings define the remaining v0.5.0 scope; then REL-v0.5.0 (version 0.5.0 via the D50 guard), the close check, the retro and the tag. | De (proposed; C confirms at gate) | proposed |
 
 ## Decisions that need the user
 
 1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
+2. **Blender Extensions platform submission (D100).** Whether and when to submit, the maintainer contact
+   and the website URL shown on the platform. Dev only prepares the checklist.
+3. **`.mbmap` format-stability policy (D101)** and **v1.0 exit criteria (D102).** Drafts here; the user
+   confirms or edits them before v1.0 is planned.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.

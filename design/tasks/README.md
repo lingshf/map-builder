@@ -55,19 +55,20 @@ Scope D54; decisions D55–D88 in [../roadmap.md](../roadmap.md#v3-sprint-3-v040
 | [S3-PARITY](S3-PARITY.md) | S3 | dev | — (½ day, D62) | `tests/blender/checks_parity.py` (new); soft: `run_integration.py` (one line), optional VALIDATION note; only if fixing: `blender/bake.py` probe export (serialise with S3-TEX-BLENDER) | done (fix in S3-PARITY-FIX) | #45 (b3aaf63), #47 (9c99745) |
 | S3-TYPING | S3 | dev | — (D79, D83) | annotations only; no behaviour change. The roof/#46 files were avoided only temporarily, while those PRs were open (D79); #54 annotated them afterwards | done | #51 (aa2a979), #52 (cc1d653), #54 (872a536) |
 | [S3-REVIEW](S3-REVIEW.md) | S3 | design | all S3 dev tasks | `design/` only | done (GO, no v0.4.0 blockers) | #55 (e266a1b) |
-| [REL-v0.4.0](REL-v0.4.0.md) | S3 | release manager | S3-REVIEW and its blocker S3-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.4.0/`, `docs/releases/v0.4.0.md` | RC in review (S3-REVIEW GO #55; no S3-Fn blockers) | #56 |
-| S3-F1 | later | dev | — | `core/roofs.py` | later — analytic near-rectangle gables: planar failure has no named reason (4 Munich roofs) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F2 | later | dev | — | `tests/test_demo_bundle.py` | later — ResourceWarning leak in a test (finalizer escapes `-W error`) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F3 | later | dev | — | `tests/test_bridges.py` | later — shrink the 5.5 s 45° bridge-crossing test ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F4 | later | dev | — | `core/uv.py` | later — `assign_uvs` pure-Python cost (Pittsburgh `build_scene` stage +62 % textured, D85; +75 % untextured, D87) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F5 | later | dev | — | `core/package.py` | later — ZIP_STORED for PNGs in the package ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F6 | later | dev | — | `blender/` centre/bbox | later — bbox float32 precision (D74) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F7 | later | dev | — | `core/roofs.py`, `tests/roof_checks.py` | later — largest-triangle reference-plane warp ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F8 | later | dev | — | roof fixtures/tests | later — 9007 near-axis fixture sensitivity ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F9 | later | dev | — | `core/generate.py` (roof section) | later — loose legacy reservation bounds ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F10 | later | dev | — | `core/roofs.py`, `core/skeleton.py` | later — S4 roofs: chamfered/angled and mixed gable ends; pyramidal on concave footprints ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F11 | later | dev | — | `blender/export.py` | later — "MB Default" material digest suffix ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
-| S3-F12 | later | dev | — | `core/collision.py`, `blender/bake.py` | later — `.mbcol` degenerate-triangle warnings (pre-existing) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| [REL-v0.4.0](REL-v0.4.0.md) | S3 | release manager | S3-REVIEW and its blocker S3-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.4.0/`, `docs/releases/v0.4.0.md` | done (released `v0.4.0` on `18f0822`; PO ACCEPT) | #56 |
+| S3-F1 | later | dev | — | `core/roofs.py` | → S4-ROOF-NAMED — analytic near-rectangle gables: planar failure has no named reason (4 Munich roofs) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F2 | later | dev | — | `tests/test_demo_bundle.py` | → S4-TEST-HYGIENE — ResourceWarning leak in a test (finalizer escapes `-W error`) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F3 | later | dev | — | `tests/test_bridges.py` | → S4-TEST-HYGIENE — shrink the 5.5 s 45° bridge-crossing test ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F4 | later | dev | — | `core/uv.py` | → S4-PERF-UV — `assign_uvs` pure-Python cost (Pittsburgh `build_scene` stage +62 % textured, D85; +75 % untextured, D87) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F5 | later | dev | — | `core/package.py` | closed (D96: PNGs are inside the GLB) → S4-PERF-PKG single-pass deflate — ZIP_STORED for PNGs in the package ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F6 | later | dev | — | `blender/` centre/bbox | → S4-BLENDER-HYGIENE — bbox float32 precision (D74) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F7 | later | dev | — | `core/roofs.py`, `tests/roof_checks.py` | → S4-ROOF-NAMED — largest-triangle reference-plane warp ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F8 | later | dev | — | roof fixtures/tests | → S4-ROOF-NAMED — 9007 near-axis fixture sensitivity ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F9 | later | dev | — | `core/generate.py` (roof section) | → S4-ROOF-NAMED — loose legacy reservation bounds ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F10 | later | dev | — | `core/roofs.py`, `core/skeleton.py` | → S4-ROOF-ENDS — S4 roofs: chamfered/angled and mixed gable ends; pyramidal on concave footprints ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F11 | later | dev | — | `blender/export.py` | → S4-BLENDER-HYGIENE — "MB Default" material digest suffix ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F12 | later | dev | — | `core/collision.py`, `blender/bake.py` | → S4-COL-DEGEN — `.mbcol` degenerate-triangle warnings (pre-existing) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F13 | later | dev | — | textures | → S4-TEX-WATER — the river looks green with textures on (PO review of #56) | |
 
 Sample and harness ownership (D64): only S3-TEX-UV-CORE changes `examples/synthetic_sample.mbmap`
 and the default schema version; roof tasks keep the sample byte-identical and add their synthetic cases as
@@ -78,6 +79,32 @@ Parallel safety: the roof track owns `core/roofs.py` and the building roof secti
 `generate.py` (D59); `core/glb.py` is only in S3-TEX-FORMAT; `blender/bake.py` only in
 S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touching probes
 (S3-PARITY) runs the Pittsburgh check in Python and C# in its PR (D47).
+
+## Sprint 4 (v0.5.0)
+
+Theme D93; decisions D94–D104, measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+
+| id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
+|---|---|---|---|---|---|---|
+| [S4-ROOF-SPIKE](S4-ROOF-SPIKE.md) | S4 | dev | — (½ day, D95) | none merged (scratch branch) | ready | |
+| [S4-ROOF-NAMED](S4-ROOF-NAMED.md) | S4 | dev | — | `core/roofs.py`, `core/generate.py` (roof section, reservation), `tests/roof_checks.py` (reference plane), `tests/test_roofs*.py`, `munich_roofs_expected.json`; soft: sample (D103), VALIDATION | ready | |
+| [S4-ROOF-ENDS](S4-ROOF-ENDS.md) | S4 | dev | S4-ROOF-SPIKE, S4-ROOF-NAMED | `core/roofs.py`, `core/skeleton.py`, `core/generate.py` (roof section), `tests/test_roofs*.py`, `tests/test_skeleton.py`, `tests/blender/checks_roofs.py`; soft: sample, VALIDATION | blocked | |
+| [S4-PERF-PKG](S4-PERF-PKG.md) | S4 | dev | — | `core/package.py` (writer, validator internals; byte- and message-identical, D97) | ready | |
+| [S4-TEX-WATER](S4-TEX-WATER.md) | S4 | dev | — | `tools/textures/**`, `map_builder/assets/textures/terrain_*` + `LICENSE-textures.txt`, `core/textures.py`, `core/uv.py` (mean-albedo entry), `tests/test_textures.py`; soft: sample | ready | |
+| [S4-PERF-UV](S4-PERF-UV.md) | S4 | dev | S4-TEX-WATER | `core/uv.py` (byte-identical, D97) | blocked | |
+| [S4-BLENDER-HYGIENE](S4-BLENDER-HYGIENE.md) | S4 | dev | — | `blender/export.py` (material naming), `blender/bake.py` (default material, bbox), bbox code in `blender/sources.py`/`props.py`, new Blender checks; soft: `run_integration.py` | ready | |
+| [S4-COL-DEGEN](S4-COL-DEGEN.md) | S4 | dev | S4-BLENDER-HYGIENE | `core/collision.py`, `blender/bake.py`, `blender/export.py` (degenerate handling), collision tests; soft: sample, VALIDATION | blocked | |
+| [S4-TEST-HYGIENE](S4-TEST-HYGIENE.md) | S4 | dev | — | `tests/test_csharp_parity.py`, `tests/test_demo_bundle.py`, `tests/test_bridges.py` (45° test), `NuGet.config` (new), MbmapReader `.csproj` (build props), `ci.yml` (C# job), test bootstrap | ready | |
+| [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | S4-PERF-PKG (only for a `package.py` edit) | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections), `tests/test_format_policy.py` (new) | ready (docs/tests); blocked for any `package.py` edit | |
+| [S4-EXT-READY](S4-EXT-READY.md) | S4 | dev | — | `.github/workflows/release.yml`, `tests/test_manifest.py` (new), `docs/PLATFORM_SUBMISSION.md` (new), `blender_manifest.toml` (non-version fields) | ready | |
+| [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | blocked | |
+| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW and its blocker S4-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | blocked | |
+
+Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
+(then FORMAT-POLICY if needed); `core/uv.py` to TEX-WATER, then PERF-UV; `blender/bake.py` and `export.py` to
+BLENDER-HYGIENE, then COL-DEGEN. Perf tasks keep every package byte-identical (D97). Output-changing tasks
+regenerate the sample on rebase (D103). Tasks that touch probes or collision (S4-COL-DEGEN) attach the
+Pittsburgh Python and C# runs (D47).
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
@@ -94,7 +121,10 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
    tag `v0.3.0` (end of v2, **released**)
 5. Wave 5 (sprint 3, D54): **S3-SKELETON** ∥ **S3-TEX-FORMAT** ∥ (**S3-ROOF-CASES** → **S3-TEX-ASSETS**)
    → **S3-ROOF-HIPPED** ∥ **S3-TEX-UV-CORE** ∥ **S3-PARITY** → **S3-ROOF-GABLED** ∥ **S3-TEX-BLENDER**
-   → **S3-REVIEW** → **REL-v0.4.0** → close check → retro → tag `v0.4.0` (D63)
+   → **S3-REVIEW** → **REL-v0.4.0** → close check → retro → tag `v0.4.0` (D63, **released**)
+6. Wave 6 (sprint 4, D93): lanes **S4-ROOF-SPIKE** → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** ∥ **S4-PERF-PKG**
+   → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** ∥ **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** →
+   **S4-FORMAT-POLICY** → **S4-EXT-READY** → **S4-REVIEW** → **REL-v0.5.0** → close check → retro → tag 0.5.0 (D104)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks
 (roof section, building loop, bridge hook, tunnel hook). The pairs listed as parallel above
