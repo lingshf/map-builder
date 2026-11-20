@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Scene settings of the Map Builder panel.
 
 Nothing here may hold a credential: these properties are saved into the .blend file. There is

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S3-TEX-BLENDER: textures in the Blender scene and in the Blender export.
 
 On the synthetic scene (local fixtures, no network): every textured object has a UV map and the images are

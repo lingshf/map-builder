@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Bounded HTTP client (stdlib urllib) with explicit failure mapping.
 
 * Every request has a per-operation timeout, a total monotonic deadline

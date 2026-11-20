@@ -87,3 +87,7 @@ over an unnecessary feature registry (D18). Preserve deterministic behavior,
 fail clearly on required data errors, and do not persist credentials. The
 core must remain usable without Blender. Tests should be bounded by work rather
 than wall-clock gates; see the DoD for the full conventions.
+
+## Licence
+
+Split licence (D13): `map_builder/blender/` and `map_builder/__init__.py` are GPL-3.0-or-later; everything else we wrote is Apache-2.0. New `.py`/`.cs` files need an SPDX header (`# SPDX-License-Identifier: ...` plus `# Copyright 2026 lingshf`); `tests/test_licence.py` enforces it. Keep `map_builder/LICENSE-*.txt` and `map_builder/NOTICE` identical to the root copies, because the extension zip ships only `map_builder/`.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Offline release evidence. Run in factory-startup Blender; see README.md."""
 
 import argparse

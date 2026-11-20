@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Start-up script for a NON-background Blender (software OpenGL via Mesa llvmpipe): shows the Map Builder
 sidebar panel next to the package's map and saves a real screenshot of the Blender window.
 

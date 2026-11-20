@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Bridge checks of the headless Blender integration test (S1-BRIDGE).
 
 Run by ``run_integration.py`` after the core checks. Part 1 generates the SYNTHETIC fixture and expects its

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Complete textured schema-2.1.0 ``.mbmap`` fixtures (S3-TEX-FORMAT).
 
 ``python -m tests.make_textured_fixture OUT.mbmap`` writes one package built from the synthetic test input

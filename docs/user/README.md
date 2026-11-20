@@ -21,3 +21,7 @@ the [v0.1.0 editing demo](../demo/v0.1.0/README.md) and the
 [workflow overview](../flows/overview.md) and [fly-through check](../flows/flythrough.md).
 The [package contract](../PACKAGE_FORMAT.md)
 is normative when implementing a reader.
+
+## Licence
+
+The add-on is GPL-3.0-or-later; the core library, CLI and docs are Apache-2.0 (see the root README). Packages you generate are not covered by the code licence; they carry data attribution in `NOTICES.txt` (OpenStreetMap ODbL, Copernicus GLO-30, CC0 textures).

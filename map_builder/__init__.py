@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """map-builder: generate editable georeferenced maps in Blender and export validated map packages.
 
 The pure-Python core (``map_builder.core``) never imports ``bpy`` so it can be

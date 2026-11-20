@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Deterministic generator of the map-builder procedural texture set (S3-TEX-ASSETS, D56).
 
     python -m tools.textures.make_textures            # rewrite map_builder/assets/textures/

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Minimal GeoTIFF *writer* used only by tests to build SYNTHETIC rasters in memory."""
 
 import struct

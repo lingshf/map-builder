@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Minimal GeoTIFF reader (stdlib only).
 
 Supported: classic (non-Big) TIFF, little/big endian, single-band rasters in

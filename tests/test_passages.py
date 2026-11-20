@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Building passages (core/passages.py, D24) and the probe under elevated parts (D21)."""
 
 import unittest

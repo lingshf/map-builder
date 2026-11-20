@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """DSM terrain correction (map_builder/core/dsm.py). All grids, footprints and OSM data here are SYNTHETIC."""
 
 import contextlib

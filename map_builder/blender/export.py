@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Export the user's FINAL edited map: depsgraph-evaluated meshes + world matrices -> validated package.
 
 How it works (see bake.py for the GLB generation decision):

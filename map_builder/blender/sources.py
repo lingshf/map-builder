@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Pure (bpy-free) helpers for the Generate operator: settings from UI values, credential policy and the
 human-readable report. Unit-tested without Blender (tests/test_blender_bake.py).
 

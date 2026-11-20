@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Headless map-builder CLI (no Blender): build a package from local files, or validate a package.
 
   py -3.12 tools/mbmap_cli.py validate examples/synthetic_sample.mbmap

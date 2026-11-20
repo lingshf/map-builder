@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """One-command demo kit: renders, viewer bundle and summary for a Map Builder package.
 
     blender -b --factory-startup --python-exit-code 1 --python tools/demo/run_demo.py -- \

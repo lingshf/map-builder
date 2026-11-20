@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S2-ELEV checks: elevated building parts and building passages survive Blender edits (D21, D24).
 
 Generates the synthetic fixture, then checks that (1) the split passage building exports lower parts and an upper

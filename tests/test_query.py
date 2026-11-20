@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Bounded collision queries (map_builder/core/query.py)."""
 
 import math

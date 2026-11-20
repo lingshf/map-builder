@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Pure (bpy-free) baking of evaluated Blender geometry into package geometry.
 
 The Blender layer (``export.py``) reads each exported object's depsgraph-evaluated mesh (modifiers

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Derive a small probe-bearing demo package from the committed synthetic sample (viewer smoke test).
 
     py -3.12 tools/demo/make_probe_sample.py out/probe_sample.mbmap

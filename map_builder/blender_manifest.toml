@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 schema_version = "1.0.0"
 
 id = "map_builder"
@@ -9,8 +11,8 @@ type = "add-on"
 
 blender_version_min = "4.2.0"
 
-# Licence of the add-on code. Assumed GPL-3.0-or-later (required for Blender
-# add-ons that import bpy); confirm before publishing.
+# Licence of the add-on code: GPL-3.0-or-later (decision D13, option B); core/ is Apache-2.0.
+# The licence texts and NOTICE next to this file ship in the extension zip.
 license = ["SPDX:GPL-3.0-or-later"]
 
 tags = ["Import-Export", "Scene"]

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """The committed examples/synthetic_sample.mbmap must stay valid and reproducible (see examples/README.md)."""
 
 import contextlib

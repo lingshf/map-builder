@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Pure (bpy-free) tests of the Blender layer's export baking and settings helpers
 (map_builder/blender/bake.py and sources.py). The Blender side itself is covered by the headless
 integration test tests/blender/run_integration.py, which needs Blender and is not run here."""

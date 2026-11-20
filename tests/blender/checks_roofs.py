@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S2-F3 roof checks: every roof:shape in the synthetic fixture (gabled, hipped, pyramidal, skillion, dome) is
 generated through the Generate operator and compared with the Python pipeline (core generate_plan, same settings):
 mb_id, shape provenance, vertex positions within 1 mm, closed manifold mesh, and shape-specific invariants (apex

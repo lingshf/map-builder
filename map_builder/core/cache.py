@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Content cache for permitted sources (OSM ODbL data, Copernicus DEM tiles).
 
 Entries are keyed by a caller-provided string that must not contain secrets

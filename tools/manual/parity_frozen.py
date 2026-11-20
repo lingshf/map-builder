@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Manual harness (not in CI): CLI path versus Blender path on frozen real acquisitions, Pittsburgh with DSM on.
 
 Needs ``pittsburgh.osm`` and ``pittsburgh.tif`` (Copernicus GLO-30) in a folder, frozen once from Overpass and

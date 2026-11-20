@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Polygon triangulation with holes (validated rings, hole bridging, ear clipping).
 
 Works on indices into a shared 2-D point list so callers keep vertex identity.

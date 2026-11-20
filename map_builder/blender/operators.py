@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Operators: Generate (new collection, report Text), Export (validated package), Validate.
 
 Failure policy (all three operators): a cancelled operator changes nothing in the scene. The problem is

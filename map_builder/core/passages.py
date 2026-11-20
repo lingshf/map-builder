@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Building passage stage of ``build_plan`` (D18, D21, D24) and the probe of elevated building parts.
 
 * :func:`split` replaces a building crossed by a ``tunnel=building_passage`` / ``covered=yes`` highway with

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Roof shapes of extruded building footprints.
 
 ``generate.build_building`` computes the eave and total heights (OSM semantics) and the wall

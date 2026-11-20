@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """SYNTHETIC test data generator.
 
 Everything produced here is invented geometry placed at an arbitrary
