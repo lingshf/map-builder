@@ -315,8 +315,7 @@ the unit that would exceed it makes that probe and the remaining ones unchecked,
 warning. Consumers should re-run the probes against their own imported collision as acceptance
 tests.
 When an export drops a probe because its `feature` object was part of the generation plan
-(its `generated_ids`) but no longer exists, the probe id is listed in `report.json`
-`passage_probes_dropped`. The exporter refuses a malformed probe, or one whose `feature`
+(its `generated_ids`) but no longer exists, the probe is appended to `report.json` `passage_probes_dropped` as `{id, reason: "feature_deleted"}`, after the generation-time entries. The exporter refuses a malformed probe, or one whose `feature`
 names neither an exported object nor a plan feature, with an error instead of dropping it.
 
 ### Object identity (`mb_id`)

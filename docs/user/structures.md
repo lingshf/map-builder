@@ -89,11 +89,7 @@ a pier into a probe path, the export **still succeeds and replaces the previous
 package**. Validation reports `passage probe N is blocked ...` as a warning, not
 an error. Read the export's validation warnings. If a probe is blocked, undo
 the edit or regenerate the map, and do not fly that passage. If you delete a structure, its probes are not exported and their IDs are listed
-in the exported `report.json` `passage_probes_dropped`. **Known discrepancy:**
-export replaces the generation-time dropped-probe list, so it may lose entries
-about missing passage roads or the probe cap; the package contract describes
-those entries. Inspect or save the Blender generation report before export,
-which replaces the report text.
+in the exported `report.json` `passage_probes_dropped`. The list also keeps the generation-time entries (missing passage road, probe cap) as `{id, reason}`; a deleted structure's probes are added with `reason: "feature_deleted"`.
 
 ## Limits (D25)
 

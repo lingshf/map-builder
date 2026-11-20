@@ -17,8 +17,8 @@ from ..core.package import validate_package
 from ..core.pipeline import Settings, generate_plan
 from . import export as mb_export
 from .scene_build import build_scene, write_report_text
-from .sources import (SettingsInputError, format_report, needs_network, redact_diagnostics, reject_credentials,
-                      settings_kwargs)
+from .sources import (SettingsInputError, format_report, migrate_legacy_centre, needs_network, parse_degrees,
+                      redact_diagnostics, reject_credentials, settings_kwargs)
 
 REPORT_TEXT = "MapBuilder Report"
 
@@ -57,7 +57,8 @@ def make_settings(s):
 def make_area(s):
     if s.area_mode == "BBOX":
         return Area.from_bbox(s.bbox_south, s.bbox_west, s.bbox_north, s.bbox_east)
-    return Area(s.lat, s.lon, s.width, s.height)
+    migrate_legacy_centre(s)
+    return Area(parse_degrees(s.centre_lat, "Latitude"), parse_degrees(s.centre_lon, "Longitude"), s.width, s.height)
 
 
 def online_access_problem(values):

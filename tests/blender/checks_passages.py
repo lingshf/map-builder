@@ -19,7 +19,8 @@ ELEVATED = "osm:way/1048"
 def _configure(pkg):
     s = bpy.context.scene.map_builder
     s.area_mode = "CENTER"
-    s.lat, s.lon, s.width, s.height = checks_core.LAT, checks_core.LON, checks_core.WIDTH, checks_core.HEIGHT
+    s.centre_lat, s.centre_lon, s.width, s.height = (str(checks_core.LAT), str(checks_core.LON), checks_core.WIDTH,
+                                                     checks_core.HEIGHT)
     s.elevation_source, s.elevation_file = "file", os.path.join(FIXTURES, "synthetic_dem.asc")
     s.elevation_crs, s.elevation_vertical_datum = "EPSG:4326", "SYNTHETIC"
     s.elevation_license = "SYNTHETIC test data (no licence required)"

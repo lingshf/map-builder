@@ -32,8 +32,8 @@ class MB_PT_main(bpy.types.Panel):
             col.prop(s, "bbox_north")
             col.prop(s, "bbox_east")
         else:
-            col.prop(s, "lat")
-            col.prop(s, "lon")
+            col.prop(s, "centre_lat")
+            col.prop(s, "centre_lon")
             col.prop(s, "width")
             col.prop(s, "height")
 

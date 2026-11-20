@@ -198,12 +198,27 @@ class BakeExportTest(unittest.TestCase):
         self.assertTrue(result.ok, result.summary())
         self.assertEqual(manifest["passage_probes"], [keep])
         with zipfile.ZipFile(path) as z:
-            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"], ["p-gone"])
+            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"],
+                             [{"id": "p-gone", "reason": "feature_deleted"}])
         stray = dict(keep, id="p-stray", feature="osm:way/999999")      # never part of the plan: refused
         with self.assertRaises(PackageError):
             export_baked(f"{self.tmp}/stray.mbmap", "probes", self.area, self.sources, baked, self.generated,
                          MATERIALS, {}, created_utc=UTC, passage_probes=[keep, stray])
         self.assertFalse(os.path.exists(f"{self.tmp}/stray.mbmap"))
+
+    def test_generation_time_drops_survive_the_export(self):
+        baked, moved, deleted, *_ = self.edited_scene()
+        path = f"{self.tmp}/probes-gen.mbmap"
+        hi = 400.0
+        keep = {"id": "p-keep", "kind": "bridge", "feature": moved.mb_id, "path_map": [[0, 0, hi], [10, 0, hi]],
+                "radius_m": 1.0}
+        gone = dict(keep, id="p-gone", feature=deleted.mb_id)
+        gen = {"id": "osm:way/7:passage", "reason": "the passage road was not generated"}
+        export_baked(path, "probes", self.area, self.sources, baked, self.generated, MATERIALS,
+                     {"passage_probes_dropped": [gen]}, created_utc=UTC, passage_probes=[keep, gone])
+        with zipfile.ZipFile(path) as z:
+            self.assertEqual(json.loads(z.read("report.json"))["passage_probes_dropped"],
+                             [gen, {"id": "p-gone", "reason": "feature_deleted"}])
 
     def test_malformed_probe_metadata_fails_export_cleanly(self):
         """Review round 2: a JSON null is malformed (not "no probes"), and oversized integers give a
@@ -310,6 +325,44 @@ class ExportPolicyTest(unittest.TestCase):
 
 
 class SourcesTest(unittest.TestCase):
+    def test_legacy_float_centre_migrates_into_the_text_centre(self):
+        from types import SimpleNamespace
+        from map_builder.blender.sources import migrate_legacy_centre, parse_degrees
+
+        def scene(lat=0.0, lon=0.0, text=("", ""), is_set=()):
+            return SimpleNamespace(centre_lat=text[0], centre_lon=text[1], lat=lat, lon=lon, centre_migrated=False,
+                                   is_property_set=lambda name: name in is_set)
+
+        old = scene(40.4370002746582, -80.01599884033203, is_set=("lat", "lon"))
+        self.assertTrue(migrate_legacy_centre(old))
+        self.assertEqual((old.centre_lat, old.centre_lon), ("40.437", "-80.015999"))   # all float32 holds
+        self.assertEqual(parse_degrees(old.centre_lat, "Latitude"), 40.437)
+        self.assertFalse(migrate_legacy_centre(old))                      # once
+        for lat, lon, want in ((0.0, 0.0, ("0", "0")), (47.0, 0.0, ("47", "0")), (0.0, 8.0, ("0", "8"))):
+            with self.subTest(lat=lat, lon=lon):
+                s = scene(lat, lon, is_set=("lat", "lon"))
+                self.assertTrue(migrate_legacy_centre(s))
+                self.assertEqual((s.centre_lat, s.centre_lon), want)
+                self.assertEqual((parse_degrees(s.centre_lat, "Latitude"), parse_degrees(s.centre_lon, "Longitude")),
+                                 (lat, lon))
+        one_axis = scene(47.0, 0.0, is_set=("lat",))                      # only one axis was ever saved
+        migrate_legacy_centre(one_axis)
+        self.assertEqual((one_axis.centre_lat, one_axis.centre_lon), ("47", "0"))
+        cleared = scene(40.437, -80.016, is_set=("lat", "lon"))
+        migrate_legacy_centre(cleared)
+        cleared.centre_lat = ""                                           # the user clears it: not revived
+        self.assertFalse(migrate_legacy_centre(cleared))
+        self.assertEqual(cleared.centre_lat, "")
+        typed = scene(1.0, 2.0, ("48.1395", "11.5764"), is_set=("lat", "lon"))
+        migrate_legacy_centre(typed)
+        self.assertEqual((typed.centre_lat, typed.centre_lon), ("48.1395", "11.5764"))
+        fresh = scene()                                                   # a new scene: nothing legacy was saved
+        self.assertFalse(migrate_legacy_centre(fresh))
+        self.assertEqual((fresh.centre_lat, fresh.centre_lon), ("", ""))
+        for bad in ("", "abc", "nan", "inf"):
+            with self.assertRaises(SettingsInputError):
+                parse_degrees(bad, "Latitude")
+
     def test_redact_diagnostics_withholds_credential_like_names(self):
         out = redact_diagnostics(["'curve token=FAKE_REVIEW_ONLY': CURVE objects cannot be exported",
                                   "'bld_1': zero scale", "collection 'token=FAKE_REVIEW_ONLY' is disabled",

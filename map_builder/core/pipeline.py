@@ -362,6 +362,13 @@ def filter_passage_probes(probes, mb_ids, plan_ids=()):
     return kept, dropped
 
 
+def merge_dropped(report, deleted_ids):
+    """``report['passage_probes_dropped']`` after an export: the generation-time ``{id, reason}`` entries stay and
+    each probe whose feature was deleted since is appended as ``{id, reason: "feature_deleted"}``."""
+    kept = [dict(e) for e in report.get("passage_probes_dropped") or []]
+    return kept + [{"id": i, "reason": "feature_deleted"} for i in deleted_ids]
+
+
 def export_package(path, name, area, sources, glb_bytes, col_objects, report, edits=None, blender_version=None,
                    heightfield_spacing=None, object_info=None, created_utc=None, passage_probes=(), plan_ids=()):
     """Write a validated package atomically. ``col_objects`` must come from the same final meshes and world
@@ -382,8 +389,8 @@ def export_package(path, name, area, sources, glb_bytes, col_objects, report, ed
                         "degenerate_triangles": sum(1 for t in range(col.triangle_count)
                                                     if is_degenerate(*col.triangle(t))),
                         "heightfield_nan_cells": hf[1]["nan_cells"] if hf else None}
-    probes_kept, report["passage_probes_dropped"] = filter_passage_probes(passage_probes,
-                                                                          (o.mb_id for o in col_objects), plan_ids)
+    probes_kept, deleted = filter_passage_probes(passage_probes, (o.mb_id for o in col_objects), plan_ids)
+    report["passage_probes_dropped"] = merge_dropped(report, deleted)
     members, manifest, probes = assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=hf,
                                          report=report, edits=edits, blender_version=blender_version,
                                          created_utc=created_utc, passage_probes=probes_kept)

@@ -18,6 +18,7 @@ before creating any datablock.
 """
 
 import json
+import math
 import urllib.parse
 
 from ..core.osm import DEFAULT_OVERPASS_URL
@@ -38,6 +39,31 @@ CREDENTIAL_HINT = ("credential-like value (URL user-info, key/token/password/sig
 
 class SettingsInputError(ValueError):
     """The UI values cannot form valid generation settings (message is safe to show and persist)."""
+
+
+def parse_degrees(text, label):
+    """The centre coordinate typed in the UI as a double (``Area`` validates the range)."""
+    try:
+        value = float(text.strip().replace(",", "."))
+    except ValueError:
+        raise SettingsInputError(f"{label} must be a number in degrees, e.g. 40.437") from None
+    if not math.isfinite(value):
+        raise SettingsInputError(f"{label} must be a finite number")
+    return value
+
+
+def migrate_legacy_centre(s):
+    """Copy the legacy float32 ``lat``/``lon`` of a .blend saved before the text centre into empty
+    ``centre_lat``/``centre_lon``, once: both axes together whenever either legacy property is set (a zero axis
+    becomes "0"), rounded to the 6 decimals the old panel showed. ``centre_migrated`` then stops any later
+    migration, so a centre the user clears is never revived from the stale float. Returns True if migrated."""
+    if s.centre_migrated or not (s.is_property_set("lat") or s.is_property_set("lon")):
+        return False
+    for text_prop, legacy_prop in (("centre_lat", "lat"), ("centre_lon", "lon")):
+        if not getattr(s, text_prop).strip():
+            setattr(s, text_prop, f"{getattr(s, legacy_prop):.6f}".rstrip("0").rstrip("."))
+    s.centre_migrated = True
+    return True
 
 
 def has_credential(value):
