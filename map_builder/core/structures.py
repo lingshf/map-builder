@@ -8,14 +8,36 @@ Also the stage context handed to the stage modules (:class:`StageContext`) and
 :func:`report_unsupported`, the stubs' reporting of features that are not generated yet.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from .collision import Collision, ColObject, f32, read_collision, write_collision
 from .glb import node_scale
 from .mesh import MeshData
 from .query import DEFAULT_MAX_WORK, capsule_hits
 
-def _invalid(msg):
+if TYPE_CHECKING:
+    from .dem import ElevationGrid
+    from .generate import InvalidFeature, ObjectSpec, PlanOptions, SceneBudget, ScenePlan
+    from .geodesy import Area
+    from .osm import Classified, Feature
+
+Vec3 = tuple[float, float, float]
+Vec2 = tuple[float, float]
+Color = tuple[float, float, float]
+Segment = tuple[Vec2, Vec2, float]
+Region = tuple[float, float, float, float]
+Probe = dict[str, Any]          # Any: probe entries are free-form manifest dicts ({id, feature, path_map, radius_m, ...})
+Frame = tuple[Vec3, Vec3, float]
+Tri = tuple[Vec3, Vec3, Vec3]
+RoadTri = tuple[Tri, Region, str]     # CCW plan triangle with absolute z, its plan bbox, the road id
+Triangles = list[tuple[int, int, int]]
+PlacedGeometry = tuple[Sequence[Vec3], Triangles, dict[tuple[int, int], list[int]]]
+
+def _invalid(msg: str) -> InvalidFeature:
     from .generate import InvalidFeature   # generate imports the stage modules, which import this one
     return InvalidFeature(msg)
 
@@ -31,7 +53,14 @@ class StageContext:
     (appends an ObjectSpec to the plan), road segments ``(a, b, radius)`` that block trees (stages append),
     the classified features and the area."""
 
-    def __init__(self, area, terrain, z_offset, budget, options, add, classified, road_segments):
+    # set by the bridge stage on first use (see bridges._road_triangles / bridges.build)
+    road_objects: dict[str, list[ObjectSpec]]
+    road_triangles: dict[str, list[RoadTri]]
+    deck_segments: list[Segment]
+
+    def __init__(self, area: Area, terrain: ElevationGrid, z_offset: float, budget: SceneBudget,
+                 options: PlanOptions, add: Callable[[ObjectSpec], None], classified: Classified,
+                 road_segments: list[Segment]) -> None:
         self.area = area
         self.terrain = terrain
         self.z_offset = z_offset
@@ -40,11 +69,11 @@ class StageContext:
         self.add = add
         self.classified = classified
         self.road_segments = road_segments
-        self.probes = []        # passage probes queued by the stages, checked by finalize_probes
-        self.keepout = []       # (a, b, radius) plan segments where no tree is placed
-        self.pending = []
+        self.probes: list[Probe] = []        # passage probes queued by the stages, checked by finalize_probes
+        self.keepout: list[Segment] = []       # (a, b, radius) plan segments where no tree is placed
+        self.pending: list[tuple[int, int, dict[str, Any]]] = []
 
-    def flush_unsupported(self, plan):
+    def flush_unsupported(self, plan: ScenePlan) -> None:
         n = len(self.classified.unsupported)
         entries = plan.report["unsupported_features"]
         keyed = [((i, 0, 0), e) for i, e in enumerate(entries[:n])]
@@ -54,7 +83,7 @@ class StageContext:
         self.pending = []
 
 
-def report_unsupported(ctx, features, reason_of):
+def report_unsupported(ctx: StageContext, features: Iterable[Feature], reason_of: Callable[[Mapping[str, str]], str | None]) -> None:
     """Queue one ``unsupported_features`` entry per way (parts ``id#k`` share their way's entry) with the
     wording the classifier used before the features were routed; :meth:`StageContext.flush_unsupported` puts
     them back at the position the classifier gave them, so the report order is unchanged."""
@@ -67,38 +96,38 @@ def report_unsupported(ctx, features, reason_of):
         pos = getattr(f, "report_pos", (len(ctx.classified.unsupported), 0))
         ctx.pending.append((pos[0], pos[1], {"id": way, "reason": reason_of(f.tags), "tags": _subset(f.tags)}))
 
-def _subset(tags):
+def _subset(tags: Mapping[str, str]) -> dict[str, str]:
     from .osm import _subset as subset
     return subset(tags)
 
 
 # --- geometry -----------------------------------------------------------------------------------------------
 
-def _sub(a, b):
+def _sub(a: Vec3, b: Vec3) -> Vec3:
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
-def _cross(a, b):
+def _cross(a: Vec3, b: Vec3) -> Vec3:
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-def _norm(a):
+def _norm(a: Vec3) -> tuple[Vec3, float]:
     n = math.sqrt(a[0] ** 2 + a[1] ** 2 + a[2] ** 2)
     if n < _EPS:
         return (0.0, 0.0, 0.0), 0.0
     return (a[0] / n, a[1] / n, a[2] / n), n
 
 
-def _frames(path, half_width=0.0):
+def _frames(path: Sequence[Vec3], half_width: float = 0.0) -> list[Frame]:
     """Per path point (tangent, side, up) with a horizontal side vector (the path never rolls); the tangent at
     a joint is the mitre direction and the returned scale lengthens the side offset to keep the section width."""
-    dirs = []
+    dirs: list[Vec3] = []
     for a, b in zip(path, path[1:]):
         d, n = _norm(_sub(b, a))
         if n < _EPS:
             raise _invalid("structure path has a zero-length segment")
         dirs.append(d)
-    out = []
+    out: list[Frame] = []
     shift = [0.0] * len(path)   # how far the inner mitre corner moves along the path at each joint
     for i, p in enumerate(path):
         if i == 0:
@@ -131,7 +160,8 @@ def _frames(path, half_width=0.0):
     return out
 
 
-def sweep(profile_2d, path_3d, closed_ends, name="sweep", material="MB Concrete", color=(0.6, 0.6, 0.6)):
+def sweep(profile_2d: Sequence[Vec2], path_3d: Iterable[Sequence[float]], closed_ends: bool, name: str = "sweep",
+          material: str = "MB Concrete", color: Color = (0.6, 0.6, 0.6)) -> MeshData:
     """Mesh of ``profile_2d`` ((lateral, up) points, CCW seen along the direction of travel, lateral to the
     right, up +Z) swept along ``path_3d`` with mitred joints.
 
@@ -142,13 +172,13 @@ def sweep(profile_2d, path_3d, closed_ends, name="sweep", material="MB Concrete"
     too short for the profile width at its mitred joints (the inner corner would fold back)."""
     if len(profile_2d) < 3:
         raise _invalid("structure profile needs at least 3 points")
-    path = [tuple(float(c) for c in p) for p in path_3d]
+    path: list[Vec3] = [(float(p[0]), float(p[1]), float(p[2])) for p in path_3d]
     if len(path) < 2:
         raise _invalid("structure path needs at least 2 points")
     frames = _frames(path, max(abs(u) for u, _ in profile_2d))
     mesh = MeshData(name)
     n = len(profile_2d)
-    rings = []
+    rings: list[list[int]] = []
     for p, (t, side, miter) in zip(path, frames):
         rings.append([mesh.add_vertex(p[0] + side[0] * u * miter, p[1] + side[1] * u * miter, p[2] + v)
                       for u, v in profile_2d])
@@ -165,13 +195,15 @@ def sweep(profile_2d, path_3d, closed_ends, name="sweep", material="MB Concrete"
     return mesh
 
 
-def polyline_z_profile(points_xy, z_func, max_step=None):
+def polyline_z_profile(points_xy: Iterable[Sequence[float]], z_func: Callable[[float, float], float],
+                       max_step: float | None = None) -> list[tuple[float, float, float, float]]:
     """Samples of a polyline: ``[(s, x, y, z)]`` with ``s`` the arc length from the first point, the original
     vertices kept and, with ``max_step``, extra samples so no step exceeds it; ``z = z_func(x, y)``."""
     pts = [(float(x), float(y)) for x, y in points_xy]
     if len(pts) < 2:
         raise _invalid("polyline needs at least 2 points")
-    out, s = [], 0.0
+    out: list[tuple[float, float, float, float]] = []
+    s = 0.0
     for i, (x, y) in enumerate(pts):
         if i:
             px, py = pts[i - 1]
@@ -189,7 +221,7 @@ def polyline_z_profile(points_xy, z_func, max_step=None):
 
 # --- probes ---------------------------------------------------------------------------------------------------
 
-def _world_mesh(spec, md):
+def _world_mesh(spec: ObjectSpec, md: MeshData) -> tuple[Sequence[Vec3], Triangles]:
     """World-space ``(vertices, triangles)`` of a plan object (its transform applied, winding kept)."""
     sx, sy, sz = node_scale(spec.scale)
     c, s_ = math.cos(spec.rotation_z), math.sin(spec.rotation_z)
@@ -205,10 +237,11 @@ def _world_mesh(spec, md):
     return verts, tris
 
 
-def plan_collision(plan, exclude=()):
+def plan_collision(plan: ScenePlan, exclude: Iterable[str] = ()) -> tuple[Collision, list[str]]:
     """Collision of the plan's mesh objects (world transforms applied), as ``(Collision, mb_ids)``; objects
     with ``exclude`` ids are left out."""
-    objs, ids = [], []
+    objs: list[ColObject] = []
+    ids: list[str] = []
     for spec in plan.objects:
         if spec.mb_id in exclude:
             continue
@@ -226,12 +259,12 @@ class _CollisionIndex:
     triangles near it (a superset of what a capsule inside the region can touch, so the hits are the same as
     on the whole scene). Objects are placed in world space lazily, the first time a query reaches them."""
 
-    def __init__(self, plan):
+    def __init__(self, plan: ScenePlan) -> None:
         self.plan = plan
-        self.specs = []
-        self.tiles = {}
-        self.geometry = {}
-        radius = {}     # local plan radius per mesh (shared meshes are measured once)
+        self.specs: list[tuple[ObjectSpec, MeshData]] = []
+        self.tiles: dict[tuple[int, int], list[int]] = {}
+        self.geometry: dict[int, PlacedGeometry] = {}
+        radius: dict[int, float] = {}     # local plan radius per mesh (shared meshes are measured once)
         for spec in plan.objects:
             md = spec.mesh if spec.mesh is not None else plan.shared_meshes.get(spec.mesh_key)
             if md is None or not md.faces:
@@ -248,16 +281,16 @@ class _CollisionIndex:
                 self.tiles.setdefault(key, []).append(k)
 
     @staticmethod
-    def _keys(x0, y0, x1, y1):
+    def _keys(x0: float, y0: float, x1: float, y1: float) -> list[tuple[int, int]]:
         return [(i, j) for i in range(math.floor(x0 / TILE_M), math.floor(x1 / TILE_M) + 1)
                 for j in range(math.floor(y0 / TILE_M), math.floor(y1 / TILE_M) + 1)]
 
-    def _placed(self, k):
+    def _placed(self, k: int) -> PlacedGeometry:
         g = self.geometry.get(k)
         if g is None:
             spec, md = self.specs[k]
             verts, tris = _world_mesh(spec, md)
-            by_tile = {}
+            by_tile: dict[tuple[int, int], list[int]] = {}
             vi = [math.floor(v[0] / TILE_M) for v in verts]
             vj = [math.floor(v[1] / TILE_M) for v in verts]
             for n, (a, b, c) in enumerate(tris):
@@ -271,18 +304,22 @@ class _CollisionIndex:
             g = self.geometry[k] = (verts, tris, by_tile)
         return g
 
-    def collision(self, region):
+    def collision(self, region: Region) -> Collision:
         """Collision of the triangles whose plan bounding box shares a tile with ``region=(x0, y0, x1, y1)``
         (built directly, with the float32 vertices a serialised collision would hold)."""
         keys = self._keys(*region)
-        flat, idx, tri_obj, table = [], [], [], []
+        flat: list[Vec3] = []
+        idx: list[int] = []
+        tri_obj: list[int] = []
+        table: list[dict[str, Any]] = []
         for k in sorted({k for key in keys for k in self.tiles.get(key, ())}):
             verts, tris, by_tile = self._placed(k)
             pick = sorted({n for key in keys for n in by_tile.get(key, ())})
             if not pick:
                 continue
             spec = self.specs[k][0]
-            remap, start = {}, len(tri_obj)
+            remap: dict[int, int] = {}
+            start = len(tri_obj)
             lo, hi = [math.inf] * 3, [-math.inf] * 3
             for n in pick:
                 for v in tris[n]:
@@ -297,16 +334,17 @@ class _CollisionIndex:
                 tri_obj.append(len(table))
             table.append({"index": len(table), "name": spec.name, "mb_id": spec.mb_id, "class": spec.mb_class,
                           "tri_start": start, "tri_count": len(tri_obj) - start, "aabb": lo + hi})
-        return Collision(flat, tuple(idx), tri_obj, bytes(len(tri_obj)), table, None, 1)
+        return Collision(flat, tuple(idx), tri_obj, bytes(len(tri_obj)), table, None, 1)  # type: ignore[arg-type]  # duck-typed lightweight Collision: list tri_object, no bounds
 
 class WorkBudget:
     """One collision-work allowance shared by every probe check of a finalisation."""
 
-    def __init__(self, left=DEFAULT_MAX_WORK):
+    def __init__(self, left: int = DEFAULT_MAX_WORK) -> None:
         self.left = left
 
 
-def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
+def check_probes(plan: ScenePlan, probes: Sequence[Probe] | None, max_work: int = DEFAULT_MAX_WORK,
+                 budget: WorkBudget | None = None) -> tuple[list[Probe], list[dict[str, Any]]]:
     """Passage probes ``{id, feature, path_map, radius_m, ...}`` against the plan meshes (D21).
 
     Returns ``(kept, blocked)``: ``blocked`` entries are ``{id, blocker}`` (the blocking object's ``mb_id``;
@@ -314,11 +352,12 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
     as the package validator does). Each probe is tested against the triangles around its own path only. The
     work budget is shared: when it runs out the remaining probes are returned in ``blocked`` with
     ``blocker=None`` and ``reason="budget_exhausted"``, never silently kept."""
-    kept, blocked = [], []
+    kept: list[Probe] = []
+    blocked: list[dict[str, Any]] = []
     if not probes:
         return kept, blocked
     index = _CollisionIndex(plan)
-    rank = {}
+    rank: dict[str, int] = {}
     for k, (spec, _md) in enumerate(index.specs):
         rank.setdefault(spec.mb_id, k)
     budget = budget if budget is not None else WorkBudget(max_work)
@@ -330,7 +369,8 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
         pad = pr["radius_m"] + 0.5
         # The query's work grows with segments x triangles of every object it reaches, so a long path is tested
         # in chunks of ~CHUNK_M, each against the triangles around it (the union of the hits is the same).
-        chunks, cur, length = [], [pts[0]], 0.0
+        chunks: list[list[Vec2]] = []
+        cur, length = [pts[0]], 0.0
         for a, b in zip(pts, pts[1:]):
             cur.append(b)
             length += math.hypot(b[0] - a[0], b[1] - a[1])
@@ -339,7 +379,7 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
                 cur, length = [b], 0.0
         if len(cur) > 1 or not chunks:
             chunks.append(cur)
-        found = set()
+        found: set[str] = set()
         try:
             for ch in chunks:
                 xs, ys = [p[0] for p in ch], [p[1] for p in ch]
@@ -361,7 +401,7 @@ def check_probes(plan, probes, max_work=DEFAULT_MAX_WORK, budget=None):
     return kept, blocked
 
 
-def finalize_probes(plan, ctx):
+def finalize_probes(plan: ScenePlan, ctx: StageContext) -> None:
     """The single place where passage probes are finished (after the vegetation). Every staged probe is first
     checked on the finished scene by its own kind's check: the elevated / building-passage ones through
     ``passages.finish`` and the ones queued on ``ctx.probes`` (tunnels, later bridges) through ``check_probes``.

@@ -4,19 +4,33 @@ Entries are keyed by a caller-provided string that must not contain secrets
 (dataset ids and fixed provider labels, never endpoint paths). Writes are atomic.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import re
 import tempfile
 import time
+from collections.abc import Mapping
+from typing import Protocol
+
+
+class CacheLike(Protocol):
+    """Structural type shared by :class:`DiskCache` and :class:`NullCache`."""
+
+    def get(self, namespace: str, key: str) -> bytes | None: ...
+
+    def put(self, namespace: str, key: str, body: bytes, meta: Mapping[str, object] | None = None) -> None: ...
+
+    def delete(self, namespace: str, key: str) -> None: ...
 
 
 MAX_META_BYTES = 64 * 1024
 _DATASET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
-def check_cache_dataset_id(value, endpoint_url=""):
+def check_cache_dataset_id(value: object, endpoint_url: object = "") -> str:
     """Validate a caller-supplied, credential-free identity for caching a non-default endpoint.
 
     Endpoint URLs are never used as cache identity (their path/query may embed a
@@ -37,7 +51,7 @@ def check_cache_dataset_id(value, endpoint_url=""):
     return value
 
 
-def _read_capped(path, limit):
+def _read_capped(path: str, limit: int) -> bytes | None:
     """Read a file only if it is at most ``limit`` bytes; otherwise None."""
     with open(path, "rb") as f:
         if os.fstat(f.fileno()).st_size > limit:
@@ -47,15 +61,15 @@ def _read_capped(path, limit):
 
 
 class DiskCache:
-    def __init__(self, root, max_entry_bytes=128 * 1024 * 1024):
-        self.root = os.path.abspath(root)
-        self.max_entry_bytes = max_entry_bytes
+    def __init__(self, root: str | os.PathLike[str], max_entry_bytes: int = 128 * 1024 * 1024) -> None:
+        self.root: str = os.path.abspath(root)
+        self.max_entry_bytes: int = max_entry_bytes
 
-    def _path(self, namespace, key):
+    def _path(self, namespace: str, key: str) -> str:
         h = hashlib.sha256(f"{namespace}\n{key}".encode("utf-8")).hexdigest()
         return os.path.join(self.root, namespace, h[:2], h)
 
-    def get(self, namespace, key):
+    def get(self, namespace: str, key: str) -> bytes | None:
         p = self._path(namespace, key)
         try:
             raw_meta = _read_capped(p + ".json", MAX_META_BYTES)
@@ -71,11 +85,11 @@ class DiskCache:
             return None  # corrupt entry: ignore, it will be refetched
         return body
 
-    def put(self, namespace, key, body, meta=None):
+    def put(self, namespace: str, key: str, body: bytes, meta: Mapping[str, object] | None = None) -> None:
         if len(body) > self.max_entry_bytes:
             return
         p = self._path(namespace, key)
-        info = dict(meta or {})
+        info: dict[str, object] = dict(meta or {})
         info.update({"key": key, "sha256": hashlib.sha256(body).hexdigest(), "stored_unix": int(time.time())})
         meta_bytes = json.dumps(info, indent=1).encode("utf-8")
         if len(meta_bytes) > MAX_META_BYTES:
@@ -92,7 +106,7 @@ class DiskCache:
                     os.unlink(tmp)
                 raise
 
-    def delete(self, namespace, key):
+    def delete(self, namespace: str, key: str) -> None:
         """Remove an entry (e.g. one that later failed validation); missing entries are ignored."""
         p = self._path(namespace, key)
         for suffix in (".json", ".bin"):
@@ -103,11 +117,11 @@ class DiskCache:
 
 
 class NullCache:
-    def get(self, namespace, key):
+    def get(self, namespace: str, key: str) -> bytes | None:
         return None
 
-    def put(self, namespace, key, body, meta=None):
+    def put(self, namespace: str, key: str, body: bytes, meta: Mapping[str, object] | None = None) -> None:
         pass
 
-    def delete(self, namespace, key):
+    def delete(self, namespace: str, key: str) -> None:
         pass

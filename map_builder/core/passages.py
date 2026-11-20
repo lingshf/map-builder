@@ -10,11 +10,42 @@
   this module emitted against the finished plan.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypedDict
 
 from .osm import Feature, Polygon, _subset, point_in_ring, ring_area
 from .structures import check_probes, polyline_z_profile
 from .triangulate import dedupe_ring
+
+if TYPE_CHECKING:
+    from types import ModuleType, SimpleNamespace
+
+    from .dem import ElevationGrid
+    from .generate import ObjectSpec, ScenePlan
+    from .mesh import MeshData
+    from .structures import Probe, StageContext, WorkBudget
+
+Pt: TypeAlias = "Sequence[float]"
+Ring: TypeAlias = "Sequence[tuple[float, ...]]"
+Box4: TypeAlias = "tuple[float, float, float, float]"
+Box6: TypeAlias = "tuple[float, float, float, float, float, float]"
+Crossing: TypeAlias = ("tuple[Literal['reason'], str]"
+                       " | tuple[Literal['cross'], Pt, Pt, float, float]")
+# build_building result: (MeshData in object-local coords, location, provenance)
+Built: TypeAlias = "tuple[MeshData, tuple[float, float, float], dict[str, Any]]"  # Any: provenance values are free-form
+
+
+class _Handled(TypedDict):
+    a: Pt
+    b: Pt
+    t0: float
+    t1: float
+    height: float
+    feature: Feature
+    note: str
 
 MIN_CLEARANCE_M = 2.5            # lowest passage height (also the lowest maxheight taken as measured)
 MAX_CLEARANCE_M = 10.0
@@ -30,34 +61,34 @@ _EPS = 1e-9
 
 
 class _State:
-    def __init__(self):
-        self.handled = {}     # passage feature id -> dict(a, b, t0, t1, height)
-        self.reasons = {}     # passage feature id -> why no building was cut
-        self.probes = []      # ids of the probes this module emitted
-        self.boxes = None     # passage feature id -> bbox, computed once
-        self.dropped = []     # probes not exported: {id, reason}
-        self.prebuilt = {}    # piece id -> build_building result computed while checking the split
+    def __init__(self) -> None:
+        self.handled: dict[str, _Handled] = {}     # passage feature id -> dict(a, b, t0, t1, height)
+        self.reasons: dict[str, str] = {}     # passage feature id -> why no building was cut
+        self.probes: list[str] = []      # ids of the probes this module emitted
+        self.boxes: dict[str, Box4] | None = None     # passage feature id -> bbox, computed once
+        self.dropped: list[dict[str, str]] = []     # probes not exported: {id, reason}
+        self.prebuilt: dict[str, Built] = {}    # piece id -> build_building result computed while checking the split
 
 
-def _state(ctx):
-    st = getattr(ctx, "passage_state", None)
+def _state(ctx: StageContext) -> _State:
+    st: _State | None = getattr(ctx, "passage_state", None)
     if st is None:
-        st = ctx.passage_state = _State()
+        st = ctx.passage_state = _State()  # type: ignore[attr-defined]  # attribute added dynamically by this module
     return st
 
 
-def _probe_radius(clearance):
+def _probe_radius(clearance: float) -> float:
     return min(1.0, (clearance - 0.6) / 2.0)
 
 
-def _gen():
+def _gen() -> ModuleType:
     from . import generate   # generate imports this module
     return generate
 
 
 # --- geometry -----------------------------------------------------------------------------------------------
 
-def _seg_param(a, b, c, d):
+def _seg_param(a: Pt, b: Pt, c: Pt, d: Pt) -> float | None:
     """Parameter along a->b where it meets segment c->d, or None (parallel or no meeting)."""
     ex, ey = b[0] - a[0], b[1] - a[1]
     fx, fy = d[0] - c[0], d[1] - c[1]
@@ -72,25 +103,25 @@ def _seg_param(a, b, c, d):
     return None
 
 
-def _crossings(a, b, ring, lo=0.0, hi=1.0):
+def _crossings(a: Pt, b: Pt, ring: Ring, lo: float = 0.0, hi: float = 1.0) -> list[float]:
     """Sorted, de-duplicated parameters in (lo, hi) where a->b meets the ring."""
-    ts = []
+    ts: list[float] = []
     n = len(ring)
     for k in range(n):
         t = _seg_param(a, b, ring[k], ring[(k + 1) % n])
         if t is not None and lo < t < hi:
             ts.append(t)
     ts.sort()
-    out = []
+    out: list[float] = []
     for t in ts:
         if not out or t - out[-1] > 1e-9:
             out.append(t)
     return out
 
 
-def _clip_side(ring, a, nrm, off):
+def _clip_side(ring: Ring, a: Pt, nrm: Pt, off: float) -> list[tuple[float, ...]]:
     """Part of ``ring`` with ``nrm . (p - a) >= off`` (Sutherland-Hodgman against one line)."""
-    out = []
+    out: list[tuple[float, ...]] = []
     n = len(ring)
     for k in range(n):
         p, q = ring[k], ring[(k + 1) % n]
@@ -104,17 +135,17 @@ def _clip_side(ring, a, nrm, off):
     return out
 
 
-def _bbox_overlap(a, b):
+def _bbox_overlap(a: Pt, b: Pt) -> bool:
     return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
 
 
-def _tag_label(tags):
+def _tag_label(tags: Mapping[str, str]) -> str:
     return "tunnel=building_passage" if tags.get("tunnel") == "building_passage" else "covered=yes"
 
 
 # --- the split ----------------------------------------------------------------------------------------------
 
-def _eave(tags, height, eave_based):
+def _eave(tags: Mapping[str, str], height: float, eave_based: bool) -> float:
     """Estimated eave height: ``height`` minus the roof (source roof:height, else 1 m) of a non-flat roof."""
     if eave_based or tags.get("roof:shape") in (None, "flat"):
         return height
@@ -122,7 +153,7 @@ def _eave(tags, height, eave_based):
     return height - (1.0 if roof is None else roof)
 
 
-def _crossing_of(passage, poly):
+def _crossing_of(passage: Feature, poly: Polygon) -> Crossing | None:
     """``("cross", a, b, t0, t1)``, ``("reason", text)`` or None (the passage does not meet the footprint)."""
     pts = passage.geometry
     inside = [i for i, p in enumerate(pts) if poly.contains(p[0], p[1])]
@@ -130,7 +161,7 @@ def _crossing_of(passage, poly):
         if 0 in inside or len(pts) - 1 in inside:
             return ("reason", "passage ends inside the building footprint (dead end)")
         return ("reason", "passage bends inside the building footprint")
-    found = []
+    found: list[tuple[int, list[float]]] = []
     for i in range(len(pts) - 1):
         ts = _crossings(pts[i], pts[i + 1], poly.outer)
         if ts:
@@ -147,7 +178,7 @@ def _crossing_of(passage, poly):
     return ("cross", a, b, t0, t1)
 
 
-def split(plan, ctx, feature):
+def split(plan: ScenePlan, ctx: StageContext, feature: Feature) -> list[Feature]:
     """The footprints to generate for building ``feature``: the building itself, or the lower parts and the upper
     part of a building a passage crosses (see the module docstring)."""
     passages = getattr(ctx.classified, "passages", ())
@@ -159,7 +190,7 @@ def split(plan, ctx, feature):
     if st.boxes is None:
         st.boxes = {p.id: (min(q[0] for q in p.geometry), min(q[1] for q in p.geometry),
                            max(q[0] for q in p.geometry), max(q[1] for q in p.geometry)) for p in passages}
-    cands = []
+    cands: list[tuple[Feature, Crossing]] = []
     for p in passages:
         if p.id in st.handled:
             continue
@@ -177,7 +208,7 @@ def split(plan, ctx, feature):
     if not crossing:
         return [feature]
 
-    def refuse(reason):
+    def refuse(reason: str) -> list[Feature]:
         for p, _ in crossing:
             st.reasons.setdefault(p.id, reason)
         return [feature]
@@ -210,16 +241,16 @@ def split(plan, ctx, feature):
     length = math.hypot(b[0] - a[0], b[1] - a[1])
     nrm = ((b[1] - a[1]) / length, -(b[0] - a[0]) / length)
     half = gen.road_width(passage.tags)[0] / 2 + CORRIDOR_MARGIN_M
-    pieces = []
+    pieces: list[list[tuple[float, ...]]] = []
     for sign in (1.0, -1.0):
         ring = _clip_side(outer, a, (nrm[0] * sign, nrm[1] * sign), half)
         ring = [tuple(p) for p in dedupe_ring(ring)]
-        if len(ring) >= 3 and ring_area(ring) >= MIN_PIECE_AREA_M2:
+        if len(ring) >= 3 and ring_area(ring) >= MIN_PIECE_AREA_M2:  # type: ignore[arg-type]  # points are always 2-tuples
             pieces.append(ring)
     if not pieces:
         return refuse("the corridor leaves no building footprint beside it")
     for ring in pieces:
-        problem = gen.ring_topology_problem(Polygon(ring), ctx.options.max_triangulation_work)
+        problem = gen.ring_topology_problem(Polygon(ring), ctx.options.max_triangulation_work)  # type: ignore[arg-type]  # 2-tuples
         if problem:
             return refuse(f"the corridor cut produced an invalid lower part ({problem})")
     ground = min(z for _, _, z in gen.footprint_terrain_samples(terrain, [outer]))
@@ -228,22 +259,22 @@ def split(plan, ctx, feature):
                  and not k.startswith("roof:")}
     height_prov = f"{prov}; {clearance:.2f} m above the footprint's lowest ground"
     way = passage.id.split("#")[0]
-    lows = []
+    lows: list[Feature] = []
     for k, ring in enumerate(pieces, 1):
         g = min(z for _, _, z in gen.footprint_terrain_samples(terrain, [ring]))
         h_low = clearance + ground - g   # its flat top lands on the passage height measured from the footprint
         if h_low < 1.0:
             return refuse("terrain under the building is too steep to keep the lower parts at the passage height")
-        piece = Feature(f"{feature.id}#{k}", feature.kind, dict(base_tags, height=f"{h_low:.6f}"), Polygon(ring))
-        piece.extra_prov = {"passage": f"lower part {k} of {len(pieces)}: footprint minus the corridor of "
+        piece = Feature(f"{feature.id}#{k}", feature.kind, dict(base_tags, height=f"{h_low:.6f}"), Polygon(ring))  # type: ignore[arg-type]  # 2-tuples
+        piece.extra_prov = {"passage": f"lower part {k} of {len(pieces)}: footprint minus the corridor of "  # type: ignore[attr-defined]  # dynamic attribute
                                        f"{way}, flat top at the passage height",
                             "passage_height": height_prov}
         lows.append(piece)
     utags = {k: v for k, v in feature.tags.items() if k not in ("min_height", "building:min_level")}
     utags["min_height"] = f"{clearance:.6f}"
     upper = Feature(f"{feature.id}#{len(lows) + 1}", feature.kind, utags, Polygon([tuple(p) for p in poly.outer]))
-    upper.passage_upper = True
-    upper.extra_prov = {"passage": f"upper part over the corridor of {way}, built as an elevated volume from the "
+    upper.passage_upper = True  # type: ignore[attr-defined]  # attribute added dynamically for build_plan
+    upper.extra_prov = {"passage": f"upper part over the corridor of {way}, built as an elevated volume from the "  # type: ignore[attr-defined]  # dynamic attribute
                                    "passage height",
                         "passage_height": height_prov}
     # The replacement is all-or-nothing: every part must be buildable (terrain humps can make a part fail), else
@@ -257,7 +288,7 @@ def split(plan, ctx, feature):
     if real._pending:
         local.vertices -= real._pending[1]
         local.triangles -= real._pending[2]
-    built = {}
+    built: dict[str, Built] = {}
     for piece in lows + [upper]:
         try:
             built[piece.id] = gen.build_building(piece, terrain, ctx.z_offset, opts.seed,
@@ -279,7 +310,8 @@ def split(plan, ctx, feature):
 
 # --- the passage road and probes ---------------------------------------------------------------------------
 
-def _probe(ctx, pid, feature_id, points_xy, clearance, base):
+def _probe(ctx: StageContext, pid: str, feature_id: str, points_xy: Sequence[Pt], clearance: float,
+           base: Callable[[float, float], float]) -> Probe | None:
     """Probe at ``base(x, y) + r + 0.3`` along ``points_xy``, or None if it leaves the terrain."""
     gen = _gen()
     r = _probe_radius(clearance)
@@ -292,28 +324,28 @@ def _probe(ctx, pid, feature_id, points_xy, clearance, base):
             "path_map": [[x, y, z] for _, x, y, z in prof], "radius_m": r}
 
 
-def _emit(plan, ctx, probe):
+def _emit(plan: ScenePlan, ctx: StageContext, probe: Probe | None) -> None:
     if probe:
         plan.passage_probes.append(probe)
         _state(ctx).probes.append(probe["id"])
 
 
-def take_prebuilt(ctx, piece_id):
+def take_prebuilt(ctx: StageContext, piece_id: str) -> Built | None:
     """The ``build_building`` result computed for a replacement part while the split was checked, or None."""
     return _state(ctx).prebuilt.pop(piece_id, None)
 
 
-def handled_roads(ctx):
+def handled_roads(ctx: StageContext) -> list[tuple[Feature, str]]:
     """``[(passage feature, provenance note)]``: the passage ways whose building was cut. ``build_plan`` builds
     them with the ordinary roads, so road ownership and the budget treat them like any other road."""
     st = _state(ctx)
     return [(info["feature"], info["note"]) for info in st.handled.values()]
 
 
-def build(plan, ctx):
+def build(plan: ScenePlan, ctx: StageContext) -> None:
     gen = _gen()
     st = _state(ctx)
-    unsupported = []
+    unsupported: list[Feature] = []
     roads = {o.mb_id for o in plan.objects if o.mb_class == "road"}
     for f in getattr(ctx.classified, "passages", ()):
         info = st.handled.get(f.id)
@@ -333,7 +365,7 @@ def build(plan, ctx):
         lift = gen.ROAD_LIFT_M - ctx.z_offset
         _emit(plan, ctx, _probe(ctx, f"{f.id}:passage", f.id, pts, info["height"],
                                 lambda x, y: gen.terrain_height(ctx.terrain, x, y) + lift))
-    seen = set()
+    seen: set[str] = set()
     for f in unsupported:
         way = f.id.split("#")[0]
         if way in seen:
@@ -347,7 +379,7 @@ def build(plan, ctx):
                                              "tags": _subset(f.tags)}))
 
 
-def elevated_probe(plan, ctx, feature):
+def elevated_probe(plan: ScenePlan, ctx: StageContext, feature: Feature) -> None:
     """Emit the ``<mb_id>:under`` probe of an elevated building part (clearance >= 2.6 m), if it has one."""
     gen = _gen()
     poly = feature.geometry
@@ -383,25 +415,25 @@ def elevated_probe(plan, ctx, feature):
     _emit(plan, ctx, _probe(ctx, f"{feature.id}:under", feature.id, pts, clearance, lambda x, y: zmax))
 
 
-def _local_plan(plan, probes, grid=None):
+def _local_plan(plan: ScenePlan, probes: Sequence[Probe], grid: ElevationGrid | None = None) -> SimpleNamespace:
     """A view of ``plan`` holding only what a probe capsule can touch: objects whose bounding box meets a probe's
     padded box, and for the terrain and road surfaces only the faces whose plan-view box meets a probe's box.
     A capsule cannot hit anything else, so the result of the check is the same as on the
     whole scene, at a fraction of the collision-preparation cost. Other objects are kept whole."""
     from types import SimpleNamespace
     gen = _gen()
-    boxes = []
+    boxes: list[Box6] = []
     for p in probes:
         pad = p["radius_m"] + 0.05
         xs, ys, zs = [q[0] for q in p["path_map"]], [q[1] for q in p["path_map"]], [q[2] for q in p["path_map"]]
         boxes.append((min(xs) - pad, min(ys) - pad, min(zs) - pad, max(xs) + pad, max(ys) + pad, max(zs) + pad))
 
-    def hit(lo, hi):
+    def hit(lo: Pt, hi: Pt) -> bool:
         return any(lo[0] <= b[3] and hi[0] >= b[0] and lo[1] <= b[4] and hi[1] >= b[1]
                    and lo[2] <= b[5] and hi[2] >= b[2] for b in boxes)
 
-    shared_r = {}
-    objs = []
+    shared_r: dict[str, tuple[float, float, float]] = {}
+    objs: list[ObjectSpec] = []
     for spec in plan.objects:
         if spec.mesh is None:
             md = plan.shared_meshes.get(spec.mesh_key)
@@ -430,7 +462,7 @@ def _local_plan(plan, probes, grid=None):
             # the same Cohen-Sutherland test as the generic path (plan view and height) on the faces of those
             # cells, so both paths hand the same candidates to the work-budgeted check
             verts = md.vertices
-            keep = []
+            keep_idx: list[int] = []
             for bi, (lx, ly, lz, hx, hy, hz) in enumerate(boxes):
                 i0 = max(0, int(math.floor((lx - grid.x0) / grid.spacing - 1e-9)))
                 i1 = min(grid.nx - 2, int(math.floor((hx - grid.x0) / grid.spacing + 1e-9)))
@@ -446,10 +478,10 @@ def _local_plan(plan, probes, grid=None):
                                 acc &= ((x < lx) | ((x > hx) << 1) | ((y < ly) << 2) | ((y > hy) << 3)
                                         | ((z < lz) << 4) | ((z > hz) << 5))
                             if not acc:
-                                keep.append(fi)
-            keep = [md.faces[fi] for fi in sorted(set(keep))]
-            if keep:
-                objs.append(_sub_object(gen, spec, md, keep))
+                                keep_idx.append(fi)
+            keep_faces = [md.faces[fi] for fi in sorted(set(keep_idx))]
+            if keep_faces:
+                objs.append(_sub_object(gen, spec, md, keep_faces))
             continue
         vx, vy, vz = zip(*md.vertices)
         if not hit((min(vx) + x0, min(vy) + y0, min(vz) + z0), (max(vx) + x0, max(vy) + y0, max(vz) + z0)):
@@ -458,7 +490,7 @@ def _local_plan(plan, probes, grid=None):
             objs.append(spec)    # solids must stay closed; other classes are small or may span the scene
             continue
         # Cohen-Sutherland style: a face is dropped for a box when all its vertices lie beyond the same side of it
-        codes = []
+        codes: list[list[int]] = []
         for b in boxes:
             lx, ly, lz, hx, hy, hz = b[0] - x0, b[1] - y0, b[2] - z0, b[3] - x0, b[4] - y0, b[5] - z0
             codes.append([(x < lx) | ((x > hx) << 1) | ((y < ly) << 2) | ((y > hy) << 3) | ((z < lz) << 4)
@@ -473,7 +505,7 @@ def _local_plan(plan, probes, grid=None):
                         alive[k] = True
             keep = [f for f, ok in zip(faces, alive) if ok]
         else:
-            def kept(f):
+            def kept(f: Sequence[int]) -> bool:
                 for c in codes:
                     acc = 63
                     for i in f:
@@ -486,10 +518,11 @@ def _local_plan(plan, probes, grid=None):
             objs.append(spec)
         elif keep:
             objs.append(_sub_object(gen, spec, md, keep))
+    from types import SimpleNamespace
     return SimpleNamespace(objects=objs, shared_meshes=plan.shared_meshes)
 
 
-def _sub_object(gen, spec, md, keep):
+def _sub_object(gen: ModuleType, spec: ObjectSpec, md: MeshData, keep: Sequence[Sequence[int]]) -> ObjectSpec:
     """``spec`` reduced to the faces ``keep`` (vertex indices compacted) for the probe check."""
     used = sorted({i for f in keep for i in f})
     remap = {v: k for k, v in enumerate(used)}
@@ -502,7 +535,7 @@ def _sub_object(gen, spec, md, keep):
     return gen.ObjectSpec(spec.name, spec.mb_id, spec.mb_class, spec.collection, mesh=sub, location=spec.location)
 
 
-def finish(plan, ctx, budget=None):
+def finish(plan: ScenePlan, ctx: StageContext, budget: WorkBudget | None = None) -> None:
     """D21: probes this module emitted are checked against the finished plan; a blocked one is not exported and
     is listed in ``report['passage_probes_blocked']`` with the blocking object's ``mb_id``. The manifest cap is not
     applied here: ``structures.finalize_probes`` applies one global cap to the probes of every kind that survive.
@@ -512,7 +545,7 @@ def finish(plan, ctx, budget=None):
     dropped = list(st.dropped)
     st.probes, st.dropped = [], []
     if mine:
-        _, blocked = check_probes(_local_plan(plan, mine, ctx.terrain), mine, budget=budget)
+        _, blocked = check_probes(_local_plan(plan, mine, ctx.terrain), mine, budget=budget)  # type: ignore[arg-type]  # duck-typed plan view
         gone = {b["id"] for b in blocked}
         if gone:
             plan.passage_probes[:] = [p for p in plan.passage_probes if p["id"] not in gone]

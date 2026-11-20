@@ -14,12 +14,29 @@ Readers bounds-check every count, index and size before allocating anything that
 depends on it, and reject non-finite vertices.
 """
 
+from __future__ import annotations
+
 import json
 import math
 import struct
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, NoReturn, TypeAlias, TypedDict
 
 from . import COLLISION_FORMAT_VERSION, HEIGHTFIELD_FORMAT_VERSION
 from .errors import LimitError, PackageError
+
+Vec3: TypeAlias = "tuple[float, float, float]"
+Triangle: TypeAlias = "tuple[Vec3, Vec3, Vec3]"
+Pt3: TypeAlias = "Sequence[float]"
+
+
+class Heightfield(TypedDict):
+    nx: int
+    ny: int
+    x0: float
+    y0: float
+    spacing: float
+    z: list[list[float]]
 
 COL_MAGIC = b"MBCOL\0\0\0"
 HF_MAGIC = b"MBHF\0\0\0\0"
@@ -30,7 +47,7 @@ HF_HEADER = struct.Struct("<8sIIIIddd")
 FLAG_CCW_OUTWARD = 1
 KNOWN_FLAGS = FLAG_CCW_OUTWARD
 
-CLASSES = {"user": 0, "terrain": 1, "building": 2, "road": 3, "vegetation": 4, "water": 5, "prop": 6,
+CLASSES: dict[str, int] = {"user": 0, "terrain": 1, "building": 2, "road": 3, "vegetation": 4, "water": 5, "prop": 6,
            "bridge": 7, "tunnel": 8, "structure": 9}
 CLASS_NAMES = {v: k for k, v in CLASSES.items()}
 # Collision kind per class (docs/PACKAGE_FORMAT.md "Classes and kinds"); the one place it is defined.
@@ -39,7 +56,7 @@ CLASS_NAMES = {v: k for k, v in CLASSES.items()}
 #   tube:    open at its portals, faces inward (every portal-capped shell has negative signed volume)
 #   None:    no orientation rule
 KIND_SOLID, KIND_SURFACE, KIND_TUBE = "solid", "surface", "tube"
-CLASS_KINDS = {"user": None, "terrain": KIND_SURFACE, "building": KIND_SOLID, "road": KIND_SURFACE,
+CLASS_KINDS: dict[str, str | None] = {"user": None, "terrain": KIND_SURFACE, "building": KIND_SOLID, "road": KIND_SURFACE,
                "vegetation": None, "water": KIND_SURFACE, "prop": None, "bridge": KIND_SOLID, "tunnel": KIND_TUBE,
                "structure": KIND_SOLID}
 assert set(CLASS_KINDS) == set(CLASSES)
@@ -56,17 +73,17 @@ AABB_TABLE_TOL_M = 1e-3
 _F32 = struct.Struct("<f")
 
 
-def f32(v):
+def f32(v: float) -> float:
     """Round a Python float to the nearest float32 (the stored precision)."""
     return _F32.unpack(_F32.pack(v))[0]
 
 
-def strict_json(data, what):
-    def no_constant(c):
+def strict_json(data: bytes, what: str) -> Any:  # Any: parsed JSON of unknown shape
+    def no_constant(c: str) -> NoReturn:
         raise ValueError(f"non-finite number {c}")
 
-    def no_dupes(pairs):
-        out = {}
+    def no_dupes(pairs: Iterable[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
         for i, (k, v) in enumerate(pairs):
             if k in out:
                 raise ValueError(f"duplicate key (member #{i} of an object)")   # never echo the key text
@@ -78,35 +95,40 @@ def strict_json(data, what):
         raise PackageError(f"{what} is not valid strict UTF-8 JSON: {e}") from None
 
 
-def _is_int(v):
+def _is_int(v: object) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _is_num(v):
+def _is_num(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 class ColObject:
     """One collision object: world-space map-frame vertices and CCW triangles (index triples)."""
 
-    def __init__(self, name, mb_id, cls, vertices, triangles, extra=None):
-        self.name = name
-        self.mb_id = mb_id
-        self.cls = cls
-        self.vertices = vertices
-        self.triangles = triangles
-        self.extra = extra or {}
+    def __init__(self, name: str, mb_id: str, cls: str, vertices: Sequence[Pt3],
+                 triangles: Iterable[Sequence[int]], extra: Mapping[str, object] | None = None) -> None:
+        self.name: str = name
+        self.mb_id: str = mb_id
+        self.cls: str = cls
+        self.vertices: Sequence[Pt3] = vertices
+        self.triangles: Iterable[Sequence[int]] = triangles
+        self.extra: Mapping[str, object] = extra or {}
 
 
-def _pad4(b, fill=b"\0"):
+def _pad4(b: bytes, fill: bytes = b"\0") -> bytes:
     return b + fill * (-len(b) % 4)
 
 
-def write_collision(objects):
+def write_collision(objects: Sequence[ColObject]) -> bytes:
     """Serialise ``ColObject``s. Only vertices referenced by triangles are stored (as float32);
     header bounds and per-object AABBs are computed from the stored float32 values."""
-    names = set()
-    flat, idx, tri_obj, tri_cls, table = [], [], [], [], []
+    names: set[str] = set()
+    flat: list[float] = []
+    idx: list[int] = []
+    tri_obj: list[int] = []
+    tri_cls: list[int] = []
+    table: list[dict[str, object]] = []
     nv = 0
     for oi, o in enumerate(objects):
         tag = f"collision object #{oi}"           # names are caller strings: never echoed in diagnostics
@@ -122,7 +144,7 @@ def write_collision(objects):
         tris = [tuple(t) for t in o.triangles]
         if not tris:
             raise PackageError(f"{tag} has no triangles")
-        remap = {}
+        remap: dict[int, int] = {}
         start = len(tri_obj)
         lo = [math.inf] * 3
         hi = [-math.inf] * 3
@@ -147,11 +169,11 @@ def write_collision(objects):
             idx.extend((remap[t[0]], remap[t[1]], remap[t[2]]))
             tri_obj.append(oi)
             tri_cls.append(CLASSES[o.cls])
-        entry = {"index": oi, "name": o.name, "mb_id": o.mb_id, "class": o.cls, "tri_start": start,
+        entry: dict[str, object] = {"index": oi, "name": o.name, "mb_id": o.mb_id, "class": o.cls, "tri_start": start,
                  "tri_count": len(tri_obj) - start, "aabb": lo + hi}
-        for k, v in o.extra.items():
-            if k not in entry:
-                entry[k] = v
+        for ek, v in o.extra.items():
+            if ek not in entry:
+                entry[ek] = v
         table.append(entry)
     nt = len(tri_obj)
     if nt > MAX_TRIANGLES or nv > MAX_VERTICES or len(objects) > MAX_OBJECTS:
@@ -180,38 +202,40 @@ def write_collision(objects):
 
 
 class Collision:
-    def __init__(self, vertices, indices, tri_object, tri_class, objects, bounds, flags):
-        self.vertices = vertices      # [(x, y, z)] float32 values
-        self.indices = indices        # flat tuple, 3 per triangle
-        self.tri_object = tri_object
-        self.tri_class = tri_class    # bytes
-        self.objects = objects        # parsed object table
-        self.bounds = bounds
-        self.flags = flags
+    def __init__(self, vertices: list[Vec3], indices: tuple[int, ...], tri_object: tuple[int, ...],
+                 tri_class: bytes, objects: list[dict[str, Any]],  # Any: parsed JSON object table
+                 bounds: tuple[Vec3, Vec3], flags: int) -> None:
+        self.vertices: list[Vec3] = vertices      # float32 values
+        self.indices: tuple[int, ...] = indices   # flat tuple, 3 per triangle
+        self.tri_object: tuple[int, ...] = tri_object
+        self.tri_class: bytes = tri_class
+        self.objects: list[dict[str, Any]] = objects  # parsed object table
+        self.bounds: tuple[Vec3, Vec3] = bounds
+        self.flags: int = flags
 
     @property
-    def triangle_count(self):
+    def triangle_count(self) -> int:
         return len(self.indices) // 3
 
-    def triangle(self, t):
+    def triangle(self, t: int) -> Triangle:
         v = self.vertices
         i = self.indices
         return v[i[3 * t]], v[i[3 * t + 1]], v[i[3 * t + 2]]
 
-    def object_triangles(self, entry):
+    def object_triangles(self, entry: Mapping[str, Any]) -> list[Triangle]:  # Any: parsed JSON entry
         s = entry["tri_start"]
         return [self.triangle(t) for t in range(s, s + entry["tri_count"])]
 
-    def class_triangles(self, cls):
+    def class_triangles(self, cls: str) -> list[Triangle]:
         cid = CLASSES[cls]
         return [self.triangle(t) for t in range(self.triangle_count) if self.tri_class[t] == cid]
 
 
-def collision_size(nv, nt, tlen):
+def collision_size(nv: int, nt: int, tlen: int) -> int:
     return COL_HEADER.size + 12 * nv + 12 * nt + 4 * nt + nt + (-nt % 4) + tlen
 
 
-def read_collision(data, max_triangles=MAX_TRIANGLES, max_vertices=MAX_VERTICES):
+def read_collision(data: bytes, max_triangles: int = MAX_TRIANGLES, max_vertices: int = MAX_VERTICES) -> Collision:
     """Parse and fully bounds-check an ``.mbcol`` file; raises PackageError."""
     if len(data) < COL_HEADER.size:
         raise PackageError("collision: file too short for the 64-byte header")
@@ -244,6 +268,7 @@ def read_collision(data, max_triangles=MAX_TRIANGLES, max_vertices=MAX_VERTICES)
     o += 12 * nv
     if not all(math.isfinite(c) for c in flat):
         raise PackageError("collision: non-finite vertex")
+    actual: tuple[tuple[float, ...], tuple[float, ...]]
     if nv:
         actual = (tuple(min(flat[k::3]) for k in range(3)), tuple(max(flat[k::3]) for k in range(3)))
     else:
@@ -273,7 +298,7 @@ def read_collision(data, max_triangles=MAX_TRIANGLES, max_vertices=MAX_VERTICES)
     if not isinstance(table, list) or len(table) != no:
         raise PackageError("collision: object table count does not match the header")
     # Diagnostics name entries by table index only: names and other strings from the file are never echoed.
-    names = set()
+    names: set[str] = set()
     total = 0
     for k, e in enumerate(table):
         tag = f"collision: object entry {k}"
@@ -310,19 +335,19 @@ def read_collision(data, max_triangles=MAX_TRIANGLES, max_vertices=MAX_VERTICES)
     return Collision(verts, idx, tri_obj, tri_cls, table, bounds, flags)
 
 
-def is_degenerate(a, b, c, eps=DEGENERATE_EPS):
+def is_degenerate(a: Pt3, b: Pt3, c: Pt3, eps: float = DEGENERATE_EPS) -> bool:
     ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
     vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
     cx, cy, cz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
     return cx * cx + cy * cy + cz * cz <= eps
 
 
-def count_degenerate(triangles, eps=DEGENERATE_EPS):
+def count_degenerate(triangles: Iterable[tuple[Pt3, Pt3, Pt3]], eps: float = DEGENERATE_EPS) -> int:
     """triangles: iterable of (a, b, c) points; counts near-zero-area triangles."""
     return sum(1 for a, b, c in triangles if is_degenerate(a, b, c, eps))
 
 
-def degenerate_triangle_count(col, eps=DEGENERATE_EPS):
+def degenerate_triangle_count(col: Collision, eps: float = DEGENERATE_EPS) -> int:
     return count_degenerate((col.triangle(t) for t in range(col.triangle_count)), eps)
 
 
@@ -341,11 +366,11 @@ HF_VISITS_PER_POINT = 16
 HF_VISIT_SLACK = 4096
 
 
-def heightfield_visit_budget(nx, ny):
+def heightfield_visit_budget(nx: int, ny: int) -> int:
     return HF_VISITS_PER_POINT * nx * ny + HF_VISIT_SLACK
 
 
-def heightfield_layout(area_half, spacing):
+def heightfield_layout(area_half: tuple[float, float], spacing: float) -> tuple[float, float, int, int]:
     """(x0, y0, nx, ny) of the grid covering the area rectangle; raises LimitError if it is too large or
     below the .mbhf minimum of 2 x 2 points."""
     if not (_is_num(spacing) and spacing > 0):
@@ -364,7 +389,8 @@ def heightfield_layout(area_half, spacing):
     return -hx, -hy, nx, ny
 
 
-def rasterize_heightfield(triangles, x0, y0, spacing, nx, ny):
+def rasterize_heightfield(triangles: Iterable[tuple[Pt3, Pt3, Pt3]], x0: float, y0: float, spacing: float,
+                          nx: int, ny: int) -> list[list[float]]:
     """Maximum z of the triangles at each grid point (row j: y = y0 + j*spacing; column i: x = x0 + i*spacing)."""
     if nx * ny > MAX_HF_POINTS:
         raise LimitError("heightfield too large")
@@ -402,7 +428,7 @@ def rasterize_heightfield(triangles, x0, y0, spacing, nx, ny):
     return z
 
 
-def write_heightfield(z, x0, y0, spacing):
+def write_heightfield(z: Sequence[Sequence[float]], x0: float, y0: float, spacing: float) -> bytes:
     ny = len(z)
     nx = len(z[0]) if ny else 0
     if nx < 2 or ny < 2 or nx * ny > MAX_HF_POINTS or any(len(row) != nx for row in z):
@@ -417,7 +443,7 @@ def write_heightfield(z, x0, y0, spacing):
     return bytes(out)
 
 
-def read_heightfield(data):
+def read_heightfield(data: bytes) -> Heightfield:
     if len(data) < HF_HEADER.size:
         raise PackageError("heightfield: file too short for the 48-byte header")
     magic, ver, nx, ny, reserved, x0, y0, spacing = HF_HEADER.unpack_from(data, 0)

@@ -6,10 +6,29 @@ follows a profile that is linear between the at-grade end heights and raised, wi
 ground under the deck needs more clearance.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING, TypeVar
 
 from .errors import LimitError
-from .structures import polyline_z_profile, sweep
+from .structures import (Color, Frame, Probe, Region, RoadTri, Segment, Tri, Vec2, Vec3, polyline_z_profile,
+                         sweep)
+
+if TYPE_CHECKING:
+    from .generate import ScenePlan
+    from .mesh import MeshData
+    from .osm import Feature
+    from .structures import StageContext
+
+_P = TypeVar("_P", bound=Sequence[float])
+DeckTri = tuple[tuple[float, float, int], tuple[float, float, int], tuple[float, float, int]]  # (x, y, path node)
+# (deck path nodes, barycentric deck weights, road z, road id)
+Crossing = tuple[list[int], tuple[float, float, float], float, str]
+# (plan corners CCW, underside z at the two ends along the deck, bottom z)
+Pier = tuple[list[Vec2], Vec2, float]
 
 DECK_THICKNESS_M = 1.0
 DECK_SIDE_MARGIN_M = 0.5
@@ -43,28 +62,29 @@ PIER_TRIANGLES = 12
 PIER_VERTICES = 8
 
 
-def _layer(tags):
+def _layer(tags: Mapping[str, str]) -> int:
     try:
         return max(1, int(tags.get("layer", "1")))
     except (TypeError, ValueError):
         return 1
 
 
-def _unit(dx, dy):
+def _unit(dx: float, dy: float) -> Vec2:
     n = math.hypot(dx, dy)
     return (dx / n, dy / n) if n > 1e-12 else (1.0, 0.0)
 
 
-def _directions(pts):
+def _directions(pts: Sequence[Sequence[float]]) -> list[Vec2]:
     """Horizontal unit direction of travel at each sample (central difference)."""
-    out = []
+    out: list[Vec2] = []
     for i in range(len(pts)):
         a, b = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
         out.append(_unit(b[0] - a[0], b[1] - a[1]))
     return out
 
 
-def deck_profile(s, lower, z_a, z_b, max_grade=MAX_GRADE):
+def deck_profile(s: Sequence[float], lower: Sequence[float], z_a: float, z_b: float,
+                 max_grade: float = MAX_GRADE) -> list[float]:
     """Deck top heights at the arc lengths ``s`` (D22): the straight line between the end heights ``z_a`` and
     ``z_b``, raised where ``lower`` (the wanted minimum top) is higher, so that the deck's own grade never
     exceeds ``max_grade``. It is the smallest such profile: the maximum of the line and the ``max_grade`` cones
@@ -85,7 +105,8 @@ def deck_profile(s, lower, z_a, z_b, max_grade=MAX_GRADE):
     return top
 
 
-def _ground_max(terrain_z, x, y, d, half, step=None):
+def _ground_max(terrain_z: Callable[[float, float], float], x: float, y: float, d: Vec2, half: float,
+                step: float | None = None) -> float:
     """Highest terrain over the section through (x, y) perpendicular to ``d``, between ``-half`` and ``half``
     (centre, both edges and, with ``step``, every ``step`` metres)."""
     nx, ny = -d[1], d[0]
@@ -96,7 +117,7 @@ def _ground_max(terrain_z, x, y, d, half, step=None):
     return max(terrain_z(x + nx * t, y + ny * t) for t in ts)
 
 
-def _clip(subject, clip):
+def _clip(subject: list[Vec2], clip: Sequence[Vec2]) -> list[Vec2]:
     """Sutherland-Hodgman: the convex polygon ``subject`` clipped to the convex counter-clockwise ``clip``."""
     out = subject
     for k in range(len(clip)):
@@ -105,7 +126,7 @@ def _clip(subject, clip):
         a, b = clip[k], clip[(k + 1) % len(clip)]
         ex, ey = b[0] - a[0], b[1] - a[1]
         side = [ex * (p[1] - a[1]) - ey * (p[0] - a[0]) for p in out]
-        nxt = []
+        nxt: list[Vec2] = []
         for i, p in enumerate(out):
             j = (i + 1) % len(out)
             q = out[j]
@@ -122,13 +143,13 @@ MAX_TRIANGLE_PAIRS = 20000   # plan-overlapping (road, deck) triangle pairs per 
 ROAD_CELL_M = 16.0
 
 
-def _poly_area(poly):
+def _poly_area(poly: list[Vec2]) -> float:
     return 0.5 * sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(poly, poly[1:] + poly[:1]))
 
 
-def _cut(poly, ux, uy, c):
+def _cut(poly: Sequence[Vec2], ux: float, uy: float, c: float) -> list[Vec2]:
     """``poly`` clipped to the half-plane ``ux * x + uy * y >= c``."""
-    out = []
+    out: list[Vec2] = []
     for i, p in enumerate(poly):
         q = poly[(i + 1) % len(poly)]
         fp, fq = ux * p[0] + uy * p[1] - c, ux * q[0] + uy * q[1] - c
@@ -140,7 +161,8 @@ def _cut(poly, ux, uy, c):
     return out
 
 
-def _bary(p, a, b, c):
+def _bary(p: Sequence[float], a: Sequence[float], b: Sequence[float],
+          c: Sequence[float]) -> tuple[float, float, float]:
     """Barycentric weights of the plan point ``p`` in the triangle ``a, b, c`` (non-degenerate)."""
     d = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
     l1 = ((p[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (p[1] - a[1])) / d
@@ -148,7 +170,7 @@ def _bary(p, a, b, c):
     return 1.0 - l1 - l2, l1, l2
 
 
-def _ccw(a, b, c):
+def _ccw(a: _P, b: _P, c: _P) -> tuple[_P, _P, _P] | None:
     """``(a, b, c)`` counter-clockwise in plan, or None when degenerate."""
     d = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
     if abs(d) < 1e-12:
@@ -156,7 +178,7 @@ def _ccw(a, b, c):
     return (a, b, c) if d > 0 else (a, c, b)
 
 
-def _road_triangles(plan, ctx, ids):
+def _road_triangles(plan: ScenePlan, ctx: StageContext, ids: Iterable[str]) -> list[RoadTri]:
     """The exported triangles of the road meshes ``ids`` as ``(CCW vertices (x, y, absolute z), bbox, road id)``,
     cached on ``ctx``."""
     objs = getattr(ctx, "road_objects", None)
@@ -166,10 +188,10 @@ def _road_triangles(plan, ctx, ids):
             if o.mb_class == "road" and o.mesh is not None:
                 objs.setdefault(o.mb_id, []).append(o)
         ctx.road_triangles = {}
-    out = []
+    out: list[RoadTri] = []
     for rid in ids:
         if rid not in ctx.road_triangles:
-            tris = []
+            tris: list[RoadTri] = []
             for o in objs.get(rid, ()):
                 lx, ly, lz = o.location
                 vs = [(x + lx, y + ly, z + lz + ctx.z_offset) for x, y, z in o.mesh.vertices]
@@ -183,38 +205,41 @@ def _road_triangles(plan, ctx, ids):
     return out
 
 
-def _deck_triangles(mesh, count, n):
+def _deck_triangles(mesh: MeshData, count: int, n: int) -> list[tuple[int, DeckTri]]:
     """The underside triangles of the swept deck: ``(path segment, ((x, y, path node) x 3) CCW in plan)``. The
     underside quad of segment ``i`` is face ``n i`` of the sweep (``n`` profile points), split as the collision
     split it."""
-    out = []
+    out: list[tuple[int, DeckTri]] = []
     for i in range(count):
-        q = [(mesh.vertices[v][0], mesh.vertices[v][1], v // n) for v in mesh.faces[n * i]]
+        q: list[tuple[float, float, int]] = [(mesh.vertices[v][0], mesh.vertices[v][1], v // n) for v in mesh.faces[n * i]]
         for tri in ((q[0], q[1], q[2]), (q[0], q[2], q[3])):
-            tri = _ccw(*tri)
-            if tri:
-                out.append((i, tri))
+            placed = _ccw(*tri)
+            if placed:
+                out.append((i, placed))
     return out
 
 
-def _end_nodes(node_ids):
+def _end_nodes(node_ids: Sequence[int | None] | None) -> tuple[int | None, int | None]:
     """The OSM ids of a way's own first and last node as they reach clearance (None where clipping made the end)."""
     return (node_ids[0], node_ids[-1]) if node_ids else (None, None)
 
 
-def _approach_segments(roads, ids, ends, g):
+def _approach_segments(roads: Iterable[Feature], ids: Iterable[str], ends: Sequence[tuple[int | None, Vec2, Vec2]],
+                       g: ModuleType) -> dict[str, list[Segment]]:
     """Per road id, the ``(a, b, half width)`` segment that is the approach road at each deck end. ``ends`` is
     ``[(OSM node id or None, end point, next point of the swept path)]``: the directions are those of the
     deduplicated path the sweep uses. Among all the segments leaving the end's OSM node (a node shared with the
     deck, never a nearby one), the single outward continuation closest to straight is exempt, if within
     ``APPROACH_MAX_DEVIATION_DEG``; when the two best are within ``APPROACH_TIE_DEG`` of each other it is
     ambiguous and nothing is exempt. Every other segment still counts."""
-    wanted, out = set(ids), {}
+    wanted = set(ids)
+    out: dict[str, list[Segment]] = {}
     for en, e, i in ends:
         if en is None or math.dist(e, i) <= g.POLYLINE_DEDUP_TOL_M:
             continue
         straight = math.atan2(e[1] - i[1], e[0] - i[0])   # the direction continuing outward from the deck
-        cands, seen = [], set()
+        cands: list[tuple[float, str, int, int, Feature]] = []
+        seen: set[tuple[str, int]] = set()
         for r in roads:
             if r.id not in wanted or not r.node_ids:
                 continue
@@ -240,7 +265,7 @@ def _approach_segments(roads, ids, ends, g):
     return out
 
 
-def _in_approach(tri, segs):
+def _in_approach(tri: RoadTri, segs: Iterable[Segment]) -> bool:
     """The triangle's centroid lies on one of the segments' ribbons."""
     cx = sum(p[0] for p in tri[0]) / 3.0
     cy = sum(p[1] for p in tri[0]) / 3.0
@@ -253,12 +278,13 @@ def _in_approach(tri, segs):
     return False
 
 
-def _triangle_pairs(deck_tris, road_tris):
+def _triangle_pairs(deck_tris: Sequence[tuple[int, DeckTri]], road_tris: Sequence[RoadTri]) -> list[tuple[int, int]]:
     """Index pairs ``(deck, road)`` of the triangles whose plan bounding boxes overlap, found through a grid over
     the deck triangles. Counted as they are found: more than ``MAX_TRIANGLE_PAIRS`` pairs (or grid cells visited)
     raises LimitError, so at most ``MAX_TRIANGLE_PAIRS + 1`` are ever held and nothing is clipped before."""
     cap, cell = MAX_TRIANGLE_PAIRS, ROAD_CELL_M
-    grid, boxes = {}, []
+    grid: dict[tuple[int, int], list[int]] = {}
+    boxes: list[Region] = []
     for di, (_, tri) in enumerate(deck_tris):
         xs, ys = [p[0] for p in tri], [p[1] for p in tri]
         box = (min(xs), min(ys), max(xs), max(ys))
@@ -268,11 +294,12 @@ def _triangle_pairs(deck_tris, road_tris):
                 grid.setdefault((cx, cy), []).append(di)
     x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
     x1, y1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
-    pairs, visits = [], 0
+    pairs: list[tuple[int, int]] = []
+    visits = 0
     for ri, (_, rb, _rid) in enumerate(road_tris):
         if rb[2] < x0 or rb[0] > x1 or rb[3] < y0 or rb[1] > y1:
             continue
-        seen = set()
+        seen: set[int] = set()
         for cx in range(math.floor(max(rb[0], x0) / cell), math.floor(min(rb[2], x1) / cell) + 1):
             for cy in range(math.floor(max(rb[1], y0) / cell), math.floor(min(rb[3], y1) / cell) + 1):
                 visits += 1
@@ -288,11 +315,12 @@ def _triangle_pairs(deck_tris, road_tris):
     return pairs
 
 
-def _crossing_points(pairs, deck_tris, road_tris):
+def _crossing_points(pairs: Iterable[tuple[int, int]], deck_tris: Sequence[tuple[int, DeckTri]],
+                     road_tris: Sequence[RoadTri]) -> list[Crossing]:
     """For each overlapping (deck, road) triangle pair, the vertices of the convex intersection of the two
     triangles in plan: ``(deck nodes, deck weights, road z, road id)``. Both surfaces are planar on a triangle,
     so their difference is linear on the intersection and its minimum is at one of these vertices."""
-    out = []
+    out: list[Crossing] = []
     for di, ri in pairs:
         i, dtri = deck_tris[di]
         rtri, _, rid = road_tris[ri]
@@ -305,9 +333,9 @@ def _crossing_points(pairs, deck_tris, road_tris):
     return out
 
 
-def _road_nodes(roads):
+def _road_nodes(roads: Iterable[Feature]) -> dict[int, list[str]]:
     """OSM node id -> ids of the roads that END at it (a road's own first or last node)."""
-    table = {}
+    table: dict[int, list[str]] = {}
     for f in roads:
         for nid in _end_nodes(f.node_ids):
             if nid is not None:
@@ -315,7 +343,7 @@ def _road_nodes(roads):
     return table
 
 
-def _deck_profile_2d(half, parapets):
+def _deck_profile_2d(half: float, parapets: bool) -> tuple[list[Vec2], int]:
     """The deck section (lateral right, up), CCW. Without ``parapets`` the slab; with them one outline in which
     each outer side is one wall from the underside to the parapet top, so a parapet adds only its top and inner
     faces (4 triangles per sweep interval). Returns ``(points, index of the first deck-surface point)``; the
@@ -328,7 +356,7 @@ def _deck_profile_2d(half, parapets):
             (-half, PARAPET_HEIGHT_M)], 4
 
 
-def _split_caps(mesh):
+def _split_caps(mesh: MeshData) -> None:
     """Replace the two end caps of a parapeted deck (one concave polygon each: a fan triangulation would cover the
     notch between the parapets) by three convex quads: the slab and one parapet on each side."""
     pieces = ((0, 1, 4, 5), (1, 2, 3, 4), (5, 6, 7, 0))
@@ -345,7 +373,7 @@ def _split_caps(mesh):
             mesh.face_materials.append(m)
             mesh.face_colors.append(c)
 
-def _assign_materials(mesh, road_color, n, surface):
+def _assign_materials(mesh: MeshData, road_color: Color, n: int, surface: int) -> None:
     """The deck surface faces (the sweep quads on the profile edge ``surface`` -> ``surface + 1``) get the road
     material."""
     top = mesh.material_index("MB Road")
@@ -356,17 +384,17 @@ def _assign_materials(mesh, road_color, n, surface):
             mesh.face_colors[k] = road_color
 
 
-def build(plan, ctx):
+def build(plan: ScenePlan, ctx: StageContext) -> None:
     from . import generate as g
-    features = list(getattr(ctx.classified, "structure_bridges", ()))
+    features: list[Feature] = list(getattr(ctx.classified, "structure_bridges", ()))
     if not features or not ctx.options.roads:
         return
     invalid = plan.report["invalid_features"]
-    tz = lambda x, y: g.terrain_height(ctx.terrain, x, y)   # noqa: E731
+    tz: Callable[[float, float], float] = lambda x, y: g.terrain_height(ctx.terrain, x, y)   # noqa: E731
     roads = _road_nodes(ctx.classified.roads)
     road_boxes = _road_boxes(ctx.classified.roads)
     ctx.deck_segments = []
-    results = []   # (length, probes)
+    results: list[tuple[float, list[Probe]]] = []   # (length, probes)
     for f in features:
         try:
             pts = g._dedupe_polyline(list(f.geometry))
@@ -382,7 +410,7 @@ def build(plan, ctx):
         ctx.probes.extend(probes)
 
 
-def tree_blocker(ctx):
+def tree_blocker(ctx: StageContext) -> Callable[[float, float], bool]:
     """``blocked(x, y)``: a point within a bridge deck's footprint (half width + 1 m), where no mapped tree is
     placed."""
     from . import generate as g
@@ -394,7 +422,7 @@ def tree_blocker(ctx):
                                        max(p[1], q[1]) + r)) for p, q, r in segs],
                          cell=25.0, bounds=(-a.width / 2, -a.height / 2, a.width / 2, a.height / 2))
 
-    def blocked(x, y):
+    def blocked(x: float, y: float) -> bool:
         for p, q, r in buckets.query(x, y):
             dx, dy = q[0] - p[0], q[1] - p[1]
             n2 = dx * dx + dy * dy
@@ -405,8 +433,8 @@ def tree_blocker(ctx):
     return blocked
 
 
-def _road_boxes(roads):
-    out = []
+def _road_boxes(roads: Iterable[Feature]) -> list[tuple[Region, Feature]]:
+    out: list[tuple[Region, Feature]] = []
     for r in roads:
         g_ = r.geometry
         if len(g_) >= 2:
@@ -415,7 +443,9 @@ def _road_boxes(roads):
     return out
 
 
-def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
+def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2], tz: Callable[[float, float], float],
+                roads: Mapping[int, list[str]], g: ModuleType,
+                road_boxes: Sequence[tuple[Region, Feature]]) -> tuple[float, list[Probe]]:
     kept = g._dedupe_indices(f.geometry)   # ``pts`` is the deduplicated path: the node ids follow its indices
     deck_nodes = _end_nodes(f.node_ids)
     terrain, z_off, budget = ctx.terrain, ctx.z_offset, ctx.budget
@@ -455,13 +485,13 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     mesh = sweep(prof, [(x, y, 0.0) for x, y in path_xy], True, name=f"bridge_{g.short_name(f.id)}")
     if parapets:
         _split_caps(mesh)
-    node = lambda m: min(max(m - front, 0), len(s) - 1)   # noqa: E731  path node -> deck sample
+    node: Callable[[int], int] = lambda m: min(max(m - front, 0), len(s) - 1)   # noqa: E731  path node -> deck sample
 
     # clearance over the crossing roads is judged on the exported triangles: the road meshes as built and the
     # deck underside, clipped pairwise; the difference is linear on each clipped polygon
     pts_box = (min(p[0] for p in path_xy) - half, min(p[1] for p in path_xy) - half,
                max(p[0] for p in path_xy) + half, max(p[1] for p in path_xy) + half)
-    ids = []
+    ids: list[str] = []
     for (bx0, by0, bx1, by1), r in road_boxes:
         m = 3.0 * g.road_width(r.tags)[0] + 2.0
         if r.id != f.id and bx1 + m >= pts_box[0] and bx0 - m <= pts_box[2] \
@@ -472,7 +502,7 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     approach = _approach_segments(ctx.classified.roads, ids, ends, g)
     if approach:
         road_tris = [t for t in road_tris if not _in_approach(t, approach.get(t[2], ()))]
-    records = []
+    records: list[Crossing] = []
     if road_tris:
         deck_tris = _deck_triangles(mesh, n_path - 1, np_)
         pairs = _triangle_pairs(deck_tris, road_tris)
@@ -499,7 +529,8 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     max_raise = max(t - ln for t, ln in zip(top, line))
     grade = max(abs(top[i + 1] - top[i]) / (s[i + 1] - s[i]) for i in range(len(s) - 1))
 
-    checked, where = None, ""
+    checked: float | None = None
+    where = ""
     for nodes, wd, rz, rid in records:
         c = sum(w * (top[node(m)] - DECK_THICKNESS_M) for m, w in zip(nodes, wd)) - rz
         if checked is None or c < checked:
@@ -510,7 +541,7 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
         checked = max(top[i] - DECK_THICKNESS_M - ground[i] for i in range(1, len(s) - 1))
         where = " under the deck"
     clear_met = None if checked is None else checked >= clearance - 1e-6
-    warns = []
+    warns: list[str] = []
     if clear_met is False:
         warns.append(f"{f.id}: bridge clearance{where} is at most {checked:.2f} m, below "
                      f"the {clearance:g} m wanted: the span is too short to rise that high at a "
@@ -556,8 +587,8 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     if checked is not None:
         prov["clearance_m"] = round(checked, 2)
     for key, nid in (("start", deck_nodes[0]), ("end", deck_nodes[1])):
-        rid = next((r for r in roads.get(nid, ()) if r != f.id), None) if nid is not None else None
-        prov[f"{key}_joint"] = f"joins at-grade road {rid}" if rid else "free end: terrain + road lift"
+        joined = next((r for r in roads.get(nid, ()) if r != f.id), None) if nid is not None else None
+        prov[f"{key}_joint"] = f"joins at-grade road {joined}" if joined else "free end: terrain + road lift"
     if not measured:
         plan.inferred("bridge.width")
     plan.inferred("bridge.thickness")
@@ -579,7 +610,7 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
     return total, [deck] + ([under] if under else [])
 
 
-def _interp(s, vals, t):
+def _interp(s: Sequence[float], vals: Sequence[float], t: float) -> float:
     """Linear interpolation of ``vals`` at arc length ``t`` (clamped) over the sorted arc lengths ``s``."""
     if t <= s[0]:
         return vals[0]
@@ -590,7 +621,7 @@ def _interp(s, vals, t):
     return vals[-1]
 
 
-def _on_road(x, y, roads_near):
+def _on_road(x: float, y: float, roads_near: Iterable[Segment]) -> bool:
     for a, b, hw in roads_near:
         dx, dy = b[0] - a[0], b[1] - a[1]
         n2 = dx * dx + dy * dy
@@ -600,14 +631,16 @@ def _on_road(x, y, roads_near):
     return False
 
 
-def _seg_dist(p, a, b):
+def _seg_dist(p: Sequence[float], a: Sequence[float], b: Sequence[float]) -> float:
     dx, dy = b[0] - a[0], b[1] - a[1]
     n2 = dx * dx + dy * dy
     u = 0.0 if n2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / n2))
     return math.hypot(p[0] - a[0] - u * dx, p[1] - a[1] - u * dy)
 
 
-def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
+def _piers(xy: Sequence[Vec2], s: Sequence[float], dirs: Sequence[Vec2], top: Sequence[float], deck_w: float,
+           tz: Callable[[float, float], float], g: ModuleType, ctx: StageContext, f: Feature,
+           under_probe: Probe | None, road_boxes: Sequence[tuple[Region, Feature]]) -> list[Pier]:
     """Pier shells ``(plan corners CCW, underside z at the two ends along the deck, bottom z)`` for the deck
     sampled at ``xy`` / arc length ``s`` with top heights ``top``. Evenly spaced at most ``PIER_SPACING_M``
     apart; each is shifted along the deck by at most ``PIER_MAX_SHIFT_M`` (else skipped) until it stands where the
@@ -627,13 +660,14 @@ def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
             if r.id != f.id and bx1 + pad >= min(xs) and bx0 - pad <= max(xs)
             and by1 + pad >= min(ys) and by0 - pad <= max(ys)
             for i in range(len(r.geometry) - 1)]
-    probe = None
+    probe: tuple[Vec2, ...] | None = None
     if under_probe:   # back to plan metres: the probe path is in map frame, the same frame as xy
         probe = tuple((p[0], p[1]) for p in under_probe["path_map"])
-    shifts = [0.0]
+    shifts: list[float] = [0.0]
     for k in range(1, int(PIER_MAX_SHIFT_M / PIER_SHIFT_STEP_M) + 1):
         shifts += [k * PIER_SHIFT_STEP_M, -k * PIER_SHIFT_STEP_M]
-    out, last = [], None
+    out: list[Pier] = []
+    last: float | None = None
     for k in range(1, count + 1):
         for sh in shifts:
             t = total * k / (count + 1) + sh
@@ -649,7 +683,7 @@ def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
             cx, cy = _interp(s, xs, t), _interp(s, ys, t)
             nx, ny = -d[1], d[0]
             corners = [(cx + d[0] * u + nx * v, cy + d[1] * u + ny * v) for u, v in ((-a, -b), (a, -b), (a, b), (-a, b))]
-            pts = []
+            pts: list[Vec2] = []
             for ui in range(5):
                 for vi in range(int(2 * b / 0.5) + 2):
                     u = -a + 2 * a * ui / 4
@@ -668,7 +702,8 @@ def _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under_probe, road_boxes):
     return out
 
 
-def _add_pier(mesh, corners, zs, z_bottom, z_off, oz, cx, cy):
+def _add_pier(mesh: MeshData, corners: Sequence[Vec2], zs: Vec2, z_bottom: float, z_off: float, oz: float,
+              cx: float, cy: float) -> None:
     """Append a closed box shell (8 vertices, 6 quads = 12 triangles) to ``mesh`` in its local frame: bottom at
     ``z_bottom``, top at the deck underside ``zs`` = (z at the first pair of corners, z at the second); corners
     CCW in plan, the first and last at the low end of the deck."""
@@ -683,18 +718,20 @@ def _add_pier(mesh, corners, zs, z_bottom, z_off, oz, cx, cy):
         mesh.add_face((lo[i], lo[j], hi[j], hi[i]), "MB Concrete", color)
 
 
-def _approach_runs(top, ground, clearance):
+def _approach_runs(top: Sequence[float], ground: Sequence[float], clearance: float) -> tuple[int, int]:
     """(first, last) deck sample whose clearance over the ground reaches ``clearance``; samples outside are the
     approach end runs. No such sample: (0, last), i.e. no approach (a low bridge is not an approach)."""
     ok = [i for i in range(len(top)) if top[i] - DECK_THICKNESS_M - ground[i] >= clearance - 1e-6]
     return (ok[0], ok[-1]) if ok else (0, len(top) - 1)
 
 
-def _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, span=None):
+def _under_probe(f: Feature, xy: Sequence[Vec2], s: Sequence[float], dirs: Sequence[Vec2], top: Sequence[float],
+                 half: float, tz: Callable[[float, float], float], g: ModuleType, z_off: float,
+                 span: tuple[int, int] | None = None) -> Probe | None:
     """The straight segment across the span at the interior sample with the most clearance under the deck
     (None below ``UNDER_PROBE_MIN_CLEARANCE_M``), level at the highest ground along it + 1.5 m."""
     reach = half + 3.0
-    best = None
+    best: tuple[tuple[float, float], int, float, float] | None = None
     lo, hi = span or (1, len(xy) - 2)
     for i in range(max(lo, 1), min(hi, len(xy) - 2) + 1):
         g_max = _ground_max(tz, xy[i][0], xy[i][1], dirs[i], reach, SEGMENT_SAMPLE_M) + g.ROAD_LIFT_M

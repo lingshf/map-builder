@@ -22,16 +22,20 @@ Axis conventions (all exact, no scaling)
   Consumers must verify with the manifest's orientation probes.
 """
 
+from __future__ import annotations
+
 import math
 
 from .errors import AreaError
+
+Vec3 = tuple[float, float, float]
 
 WGS84_A = 6378137.0
 WGS84_F = 1.0 / 298.257223563
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 
 
-def geodetic_to_ecef(lat_deg, lon_deg, h=0.0):
+def geodetic_to_ecef(lat_deg: float, lon_deg: float, h: float = 0.0) -> Vec3:
     lat = math.radians(lat_deg)
     lon = math.radians(lon_deg)
     s, c = math.sin(lat), math.cos(lat)
@@ -42,7 +46,7 @@ def geodetic_to_ecef(lat_deg, lon_deg, h=0.0):
 class LocalFrame:
     """Planar map frame anchored at a WGS84 origin."""
 
-    def __init__(self, lat0, lon0, z_offset=0.0):
+    def __init__(self, lat0: float, lon0: float, z_offset: float = 0.0) -> None:
         if not (-85.0 <= lat0 <= 85.0) or not (-180.0 <= lon0 <= 180.0):
             raise AreaError("origin latitude must be within +-85 deg and longitude within +-180 deg")
         self.lat0 = float(lat0)
@@ -52,14 +56,14 @@ class LocalFrame:
         p, l = math.radians(lat0), math.radians(lon0)
         self._sp, self._cp, self._sl, self._cl = math.sin(p), math.cos(p), math.sin(l), math.cos(l)
 
-    def to_local(self, lat, lon):
+    def to_local(self, lat: float, lon: float) -> tuple[float, float]:
         x, y, z = geodetic_to_ecef(lat, lon, 0.0)
         dx, dy, dz = x - self._o[0], y - self._o[1], z - self._o[2]
         e = -self._sl * dx + self._cl * dy
         n = -self._sp * self._cl * dx - self._sp * self._sl * dy + self._cp * dz
         return e, n
 
-    def to_geographic(self, x, y):
+    def to_geographic(self, x: float, y: float) -> tuple[float, float]:
         """Inverse of :meth:`to_local` (Newton iteration, sub-mm converged)."""
         m_lat = 111132.954  # rough metres/deg, only for the initial guess
         lat = self.lat0 + y / m_lat
@@ -81,13 +85,13 @@ class LocalFrame:
                 break
         return lat, lon
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, float]:
         return {"lat": self.lat0, "lon": self.lon0, "z_offset_m": self.z_offset}
 
 
 # --- UTM (WGS84) forward projection, Krueger n-series (mm accuracy in zone) --
 
-def utm_forward(lat_deg, lon_deg, zone, south):
+def utm_forward(lat_deg: float, lon_deg: float, zone: int, south: bool) -> tuple[float, float]:
     a, f = WGS84_A, WGS84_F
     k0 = 0.9996
     n = f / (2.0 - f)
@@ -114,22 +118,22 @@ def utm_forward(lat_deg, lon_deg, zone, south):
 
 # --- Axis conversions ------------------------------------------------------
 
-def map_to_gltf(p):
+def map_to_gltf(p: Vec3) -> Vec3:
     x, y, z = p
     return (x, z, -y)
 
 
-def gltf_to_map(p):
+def gltf_to_map(p: Vec3) -> Vec3:
     gx, gy, gz = p
     return (gx, -gz, gy)
 
 
-def map_to_unity_x_negated(p):
+def map_to_unity_x_negated(p: Vec3) -> Vec3:
     x, y, z = p
     return (-x, z, -y)
 
 
-def unity_x_negated_to_map(p):
+def unity_x_negated_to_map(p: Vec3) -> Vec3:
     ux, uy, uz = p
     return (-ux, -uz, uy)
 
@@ -147,7 +151,8 @@ ANTIMERIDIAN_GUARD_M = 1000.0  # covers every acquisition margin used by the dat
 class Area:
     """Axis-aligned rectangle in the map frame centred on the origin."""
 
-    def __init__(self, lat, lon, width_m, height_m, max_side_m=DEFAULT_MAX_SIDE_M):
+    def __init__(self, lat: float, lon: float, width_m: float, height_m: float,
+                 max_side_m: float = DEFAULT_MAX_SIDE_M) -> None:
         try:
             max_side_m = float(max_side_m)
         except (TypeError, ValueError):
@@ -176,7 +181,8 @@ class Area:
             raise AreaError(f"area footprint must stay within |lat| <= {MAX_ABS_LAT}")
 
     @classmethod
-    def from_bbox(cls, south, west, north, east, max_side_m=DEFAULT_MAX_SIDE_M):
+    def from_bbox(cls, south: float, west: float, north: float, east: float,
+                  max_side_m: float = DEFAULT_MAX_SIDE_M) -> Area:
         if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (south, west, north, east)):
             raise AreaError("bbox values must be finite numbers")
         if not (south < north and west < east):
@@ -196,14 +202,14 @@ class Area:
         return cls(lat, lon, 2.0 * half_w, 2.0 * half_h, max_side_m)
 
     @property
-    def half(self):
+    def half(self) -> tuple[float, float]:
         return self.width / 2.0, self.height / 2.0
 
-    def contains(self, x, y):
+    def contains(self, x: float, y: float) -> bool:
         hx, hy = self.half
         return -hx <= x <= hx and -hy <= y <= hy
 
-    def geographic_bbox(self, margin_m=0.0):
+    def geographic_bbox(self, margin_m: float = 0.0) -> tuple[float, float, float, float]:
         """(south, west, north, east) enclosing the rectangle plus margin."""
         hx, hy = self.half
         hx += margin_m
@@ -216,7 +222,7 @@ class Area:
             raise AreaError("area (plus acquisition margin) crosses the antimeridian or a pole; unsupported")
         return s, w, n, e
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         s, w, n, e = self.geographic_bbox()
         return {
             "width_m": self.width,

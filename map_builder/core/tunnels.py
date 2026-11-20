@@ -14,12 +14,29 @@
   finished scene by :func:`structures.finalize_probes` (D21), after the vegetation.
 """
 
+from __future__ import annotations
+
 import bisect
 import math
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from .mesh import MeshData
 from .osm import _unsupported_reason
-from .structures import polyline_z_profile, report_unsupported, sweep
+from .structures import Probe, Segment, Vec2, Vec3, polyline_z_profile, report_unsupported, sweep
+
+if TYPE_CHECKING:
+    from .dem import ElevationGrid
+    from .generate import ObjectSpec, ScenePlan
+    from .geodesy import Area
+    from .osm import Feature
+    from .structures import StageContext
+
+Plane = tuple[float, float, float]      # z = A x + B y + C, or a half-plane a x + b y + c >= 0
+Bounds = tuple[float, float, float, float]      # (min x, max x, min y, max y)
+# (xy polygon CCW, roof plane, floor plane, bbox, edges, fz, rz)
+Tile = tuple[list[Vec2], Plane, Plane | None, Bounds, list[Plane], float, float]
+Poly = list[Vec2]
 
 FLOOR_MARGIN_M = 1.0        # floor width = road width + 2 x this
 WALL_HEIGHT_M = 4.5
@@ -49,7 +66,7 @@ _WELD_M = 1e-4
 FLOOR_EDGE = 0
 
 
-def cross_section(width, clearance):
+def cross_section(width: float, clearance: float) -> list[Vec2]:
     """Closed tube cross-section ``[(lateral, up)]`` (CCW, floor at up = 0): edge 0 is the floor, 1 the right
     wall, 2..6 the arch panels (the roof) and 7 the left wall. The arch rises ``ARCH_RISE_M`` above the wall
     top; its highest vertices reach exactly ``clearance``."""
@@ -63,7 +80,7 @@ def cross_section(width, clearance):
     return pts
 
 
-def clearance_of(tags):
+def clearance_of(tags: Mapping[str, str]) -> tuple[float, str]:
     """``(clearance_m, provenance)``: ``maxheight`` within 2.5-10 m (measured), else the 5.5 m default."""
     from .generate import parse_length
     h = parse_length(tags.get("maxheight"))
@@ -72,7 +89,7 @@ def clearance_of(tags):
     return DEFAULT_CLEARANCE_M, f"inferred:default {DEFAULT_CLEARANCE_M:g} m"
 
 
-def _simplify(pts, tol):
+def _simplify(pts: Sequence[Vec2], tol: float) -> list[Vec2]:
     """Douglas-Peucker in plan."""
     if len(pts) < 3:
         return list(pts)
@@ -93,7 +110,8 @@ def _simplify(pts, tol):
 class _Tube:
     """One generated tube; ``path`` is one world point per ring (z already minus ``z_offset``)."""
 
-    def __init__(self, feature, mesh, origin, profile, path, spec, clearance, half):
+    def __init__(self, feature: Feature, mesh: MeshData, origin: Vec3, profile: Sequence[Vec2], path: Sequence[Vec3],
+                 spec: ObjectSpec, clearance: float, half: float) -> None:
         self.feature = feature
         self.mesh = mesh
         self.origin = origin
@@ -104,13 +122,13 @@ class _Tube:
         self.clearance = clearance
         self.half = half
 
-    def ring(self, k):
+    def ring(self, k: int) -> list[Vec3]:
         n = len(self.profile)
         ox, oy, oz = self.origin
         return [(x + ox, y + oy, z + oz) for x, y, z in self.mesh.vertices[k * n:(k + 1) * n]]
 
 
-def _tube_mesh(profile, path, name):
+def _tube_mesh(profile: Sequence[Vec2], path: Sequence[Vec3], name: str) -> MeshData:
     mesh = sweep(profile, path, False, name, "MB Tunnel", TUBE_COLOR)
     n = len(profile)
     floor = mesh.material_index("MB Road")
@@ -123,14 +141,14 @@ def _tube_mesh(profile, path, name):
 class _Arc:
     """Plan arc-length lookup on ``path`` in O(log n) per query (cumulative lengths are built once)."""
 
-    def __init__(self, path):
+    def __init__(self, path: Sequence[Vec3]) -> None:
         self.path = path
-        self.start = [0.0]
+        self.start: list[float] = [0.0]
         for a, b in zip(path, path[1:]):
             self.start.append(self.start[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
         self.length = self.start[-1]
 
-    def at(self, s):
+    def at(self, s: float) -> tuple[float, float, float, Vec2, int, float]:
         """``(x, y, z, direction_xy, segment_index, segment_start_s)`` at plan arc length ``s``."""
         k = min(max(bisect.bisect_left(self.start, s) - 1, 0), len(self.path) - 2)
         a, b = self.path[k], self.path[k + 1]
@@ -140,20 +158,20 @@ class _Arc:
         return (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, d, k, self.start[k])
 
 
-def _plan_length(path):
+def _plan_length(path: Sequence[Sequence[float]]) -> float:
     return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(path, path[1:]))
 
 
 # --- headwall -------------------------------------------------------------------------------------------------
 
-def _annulus(outer, inner):
+def _annulus(outer: Sequence[Sequence[float]], inner: Sequence[Sequence[float]]) -> list[tuple[int, int, int]]:
     """Triangles ``(kind, i, j)`` filling the ring between nested convex CCW polygons, merging the vertices by
     angle around the inner centroid; kind 0 = outer edge i->i+1 with inner vertex j, kind 1 = inner edge
     j->j+1 with outer vertex i."""
     cx = sum(p[0] for p in inner) / len(inner)
     cy = sum(p[1] for p in inner) / len(inner)
 
-    def order(poly):
+    def order(poly: Sequence[Sequence[float]]) -> tuple[int, list[float]]:
         ang = [math.atan2(p[1] - cy, p[0] - cx) for p in poly]
         start = min(range(len(poly)), key=lambda i: ang[i])
         return start, [(ang[(start + k) % len(poly)] - ang[start]) % (2 * math.pi) for k in range(len(poly))]
@@ -162,7 +180,7 @@ def _annulus(outer, inner):
     si, ai = order(inner)
     no, ni = len(outer), len(inner)
     i = j = 0
-    out = []
+    out: list[tuple[int, int, int]] = []
     while i < no or j < ni:
         o_next = ao[i + 1] if i + 1 < no else 2 * math.pi
         i_next = ai[j + 1] if j + 1 < ni else 2 * math.pi
@@ -175,13 +193,14 @@ def _annulus(outer, inner):
     return out
 
 
-def headwall_mesh(name, c0, c1, side, profile, half_width, z_top):
+def headwall_mesh(name: str, c0: Vec3, c1: Vec3, side: Vec2, profile: Sequence[Vec2], half_width: float,
+                  z_top: float) -> MeshData:
     """Genus-1 closed solid (outward faces): a vertical slab from ``c0`` to ``c1`` (3D tube centreline points,
     ``side`` the horizontal unit vector to the right), ``half_width`` wide from ``HEADWALL_BELOW_FLOOR_M``
     below the floor to ``z_top``, with a through-hole equal to ``profile``."""
     mesh = MeshData(name)
     n = len(profile)
-    rings = []
+    rings: list[tuple[list[int], list[int], list[Vec2], list[Vec2]]] = []
     for c in (c0, c1):
         outer = [(-half_width, c[2] - HEADWALL_BELOW_FLOOR_M), (half_width, c[2] - HEADWALL_BELOW_FLOOR_M),
                  (half_width, z_top), (-half_width, z_top)]
@@ -210,9 +229,9 @@ def headwall_mesh(name, c0, c1, side, profile, half_width, z_top):
 
 # --- terrain cut ------------------------------------------------------------------------------------------------
 
-def _clip_linear(poly, a, b, c):
+def _clip_linear(poly: Sequence[Vec2], a: float, b: float, c: float) -> list[Vec2]:
     """Part of convex ``poly`` with ``a x + b y + c >= 0``."""
-    out = []
+    out: list[Vec2] = []
     n = len(poly)
     for k in range(n):
         p, q = poly[k], poly[(k + 1) % n]
@@ -226,7 +245,7 @@ def _clip_linear(poly, a, b, c):
     return out
 
 
-def _plane(p, q, r):
+def _plane(p: Sequence[float], q: Sequence[float], r: Sequence[float]) -> Plane | None:
     """``(A, B, C)`` with ``z = A x + B y + C`` through three points, or None if vertical."""
     det = (q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1])
     if abs(det) < 1e-12:
@@ -236,7 +255,7 @@ def _plane(p, q, r):
     return A, B, p[2] - A * p[0] - B * p[1]
 
 
-def _poly_area2(poly):
+def _poly_area2(poly: Sequence[Sequence[float]]) -> float:
     a = 0.0
     n = len(poly)
     for k in range(n):
@@ -244,14 +263,14 @@ def _poly_area2(poly):
     return a
 
 
-def _hull(points):
+def _hull(points: Iterable[Vec2]) -> list[Vec2]:
     pts = sorted(set(points))
     if len(pts) < 3:
         return pts
-    cr = lambda o, a, b: (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])   # noqa: E731
-    half = []
+    cr: Callable[[Vec2, Vec2, Vec2], float] = lambda o, a, b: (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])   # noqa: E731
+    half: list[Vec2] = []
     for seq in (pts, pts[::-1]):
-        h = []
+        h: list[Vec2] = []
         for p in seq:
             while len(h) >= 2 and cr(h[-2], h[-1], p) <= 0:
                 h.pop()
@@ -266,14 +285,25 @@ class _Group:
     and ``fmax`` the highest floor-band bound, ``rz`` / ``fz`` the highest roof and lowest floor-band bound (all
     over the tile vertices); a terrain between ``fmax`` and ``rmin`` is cut whole. The tiles are built on demand."""
     __slots__ = ("r0", "r1", "floor", "tiles", "hull", "edges", "bbox", "fz", "rz", "rmin", "fmax")
+    r0: list[tuple[float, ...]]
+    r1: list[tuple[float, ...]]
+    floor: Plane | None
+    tiles: list[Tile] | None
+    hull: list[Vec2] | None
+    edges: list[Plane] | None
+    bbox: Bounds
+    fz: float
+    rz: float
+    rmin: float
+    fmax: float
 
 
-def _tiles_of(g):
+def _tiles_of(g: _Group) -> list[Tile]:
     """Tiles ``(xy polygon CCW, roof plane, floor plane, bbox, edges, fz, rz)`` of a group: the arch panels, split
     exactly as the collision fan splits the (reversed) quads, so their plan projections tile the tube footprint."""
     if g.tiles is not None:
         return g.tiles
-    seg = []
+    seg: list[Tile] = []
     r0, r1, floor = g.r0, g.r1, g.floor
     for j in range(len(r0) - 1):
         nxt = j + 1
@@ -286,7 +316,7 @@ def _tiles_of(g):
             if area2 < 0:
                 poly.reverse()
             xs, ys = [p[0] for p in poly], [p[1] for p in poly]
-            edges = []      # inside-positive half-planes of the (CCW) tile, for a quick disjointness test
+            edges: list[Plane] = []      # inside-positive half-planes of the (CCW) tile, for a quick disjointness test
             for e in range(3):
                 p0, p1 = poly[e], poly[(e + 1) % 3]
                 ea, eb = p0[1] - p1[1], p1[0] - p0[0]
@@ -299,11 +329,11 @@ def _tiles_of(g):
     return seg
 
 
-def _roof_triangles(tubes):
+def _roof_triangles(tubes: Iterable[_Tube]) -> list[_Group]:
     """The cut groups, one per ring segment of every tube, in the terrain frame (see ``_tiles_of``). The floor
     plane of a segment is that of its floor ring edge (None if degenerate)."""
-    out = []
-    q = lambda p: tuple(round(c, 6) for c in p)   # noqa: E731  (stable across libm differences)
+    out: list[_Group] = []
+    q: Callable[[Sequence[float]], tuple[float, ...]] = lambda p: tuple(round(c, 6) for c in p)   # noqa: E731  (stable across libm differences)
     for t in tubes:
         n = len(t.profile)
         for k in range(len(t.path) - 1):
@@ -345,7 +375,7 @@ def _roof_triangles(tubes):
     return out
 
 
-def _altitude2(a, b, c):
+def _altitude2(a: Sequence[float], b: Sequence[float], c: Sequence[float]) -> tuple[float, float]:
     """``(2 x signed plan area, shortest altitude)`` of the plan triangle ``abc``."""
     area2 = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
     longest = max(math.hypot(b[0] - a[0], b[1] - a[1]), math.hypot(c[0] - b[0], c[1] - b[1]),
@@ -353,7 +383,7 @@ def _altitude2(a, b, c):
     return area2, (area2 / longest if longest else 0.0)
 
 
-def cut_terrain(mesh, grid, tubes):
+def cut_terrain(mesh: MeshData, grid: ElevationGrid, tubes: Iterable[_Tube]) -> tuple[int, list[Poly]]:
     """Remove from the terrain ``mesh`` the part inside the bore volume: within a tube's footprint, the terrain
     between ``CUT_BELOW_FLOOR_M`` under the floor and the roof.
 
@@ -367,7 +397,7 @@ def cut_terrain(mesh, grid, tubes):
     groups = _roof_triangles(tubes)
     if not groups:
         return 0, []
-    per_cell = {}
+    per_cell: dict[tuple[int, int], list[_Group]] = {}
     for g in groups:
         x0, x1, y0, y1 = g.bbox
         i0, i1, j0, j1 = _cell_range(grid, x0, x1, y0, y1)
@@ -378,7 +408,8 @@ def cut_terrain(mesh, grid, tubes):
     if len(mesh.faces) != 2 * (nx - 1) * (grid.ny - 1):
         raise AssertionError("terrain mesh is not the plain grid triangulation")
     V, F = mesh.vertices, mesh.faces
-    removed, regions = {}, []
+    removed: dict[int, tuple[Plane, list[Poly]]] = {}
+    regions: list[Poly] = []
     cells = 0
     for (i, j) in sorted(per_cell, key=lambda c: (c[1], c[0])):
         touched = False
@@ -391,10 +422,10 @@ def cut_terrain(mesh, grid, tubes):
             poly = [(p[0], p[1]) for p in tri]
             tx0, tx1 = min(p[0] for p in poly), max(p[0] for p in poly)
             ty0, ty1 = min(p[1] for p in poly), max(p[1] for p in poly)
-            cuts = []
+            cuts: list[Poly] = []
             tzlo, tzhi = min(p[2] for p in tri), max(p[2] for p in tri)
             sgn = 1.0 if _poly_area2(poly) > 0 else -1.0
-            tedges = []
+            tedges: list[Plane] = []
             for e in range(3):
                 p0, p1 = poly[e], poly[(e + 1) % 3]
                 ea, eb = (p0[1] - p1[1]) * sgn, (p1[0] - p0[0]) * sgn
@@ -405,14 +436,16 @@ def cut_terrain(mesh, grid, tubes):
                     continue
                 if tzlo > g.rz + 1e-9 or tzhi < g.fz - 1e-9:
                     continue
-                frag = None
+                frag: Poly | None = None
                 if g.hull is not None:
-                    if any(all(ea * x + eb * y + ec < 0 for x, y in poly) for ea, eb, ec in g.edges):
+                    if any(all(ea * x + eb * y + ec < 0 for x, y in poly)
+                           for ea, eb, ec in g.edges):  # type: ignore[union-attr]  # edges is set whenever hull is
                         continue
                     if any(all(ea * x + eb * y + ec < 0 for x, y in g.hull) for ea, eb, ec in tedges):
                         continue
                     frag = poly
-                    for k in range(0 if all(ea * x + eb * y + ec >= 0 for ea, eb, ec in g.edges for x, y in poly)
+                    for k in range(0 if all(ea * x + eb * y + ec >= 0 for ea, eb, ec in g.edges  # type: ignore[union-attr]
+                                            for x, y in poly)
                                    else len(g.hull)):
                         frag = _clip_halfplane(frag, g.hull[k], g.hull[(k + 1) % len(g.hull)])
                         if len(frag) < 3:
@@ -423,7 +456,7 @@ def cut_terrain(mesh, grid, tubes):
                         if _poly_area2(frag) > _MIN_AREA2:
                             cuts.append(frag)       # the whole piece is inside the bore: one cut, not one per tile
                         continue
-                gcuts = []
+                gcuts: list[Poly] = []
                 for rpoly, rplane, fplane, bb, edges, fz, rz in _tiles_of(g):
                     if bb[0] > tx1 or bb[1] < tx0 or bb[2] > ty1 or bb[3] < ty0:
                         continue
@@ -469,18 +502,18 @@ def cut_terrain(mesh, grid, tubes):
         return 0, []
 
     candidates = sorted({v for fi in removed for v in F[fi]})
-    buckets = {}
+    buckets: dict[tuple[int, int], list[int]] = {}
 
-    def bucket(x, y):
+    def bucket(x: float, y: float) -> tuple[int, int]:
         return (math.floor(x / _WELD_M), math.floor(y / _WELD_M))
 
     for v in candidates:
         buckets.setdefault(bucket(V[v][0], V[v][1]), []).append(v)
     base = len(V)
-    fresh = []          # new vertices, provisional ids base + k
-    used_old = set()
+    fresh: list[Vec3] = []          # new vertices, provisional ids base + k
+    used_old: set[int] = set()
 
-    def weld(x, y, z, slope):
+    def weld(x: float, y: float, z: float, slope: float) -> int:
         bx, by = bucket(x, y)
         tol_z = _WELD_M * (1.0 + slope)
         for dx in (-1, 0, 1):
@@ -495,27 +528,27 @@ def cut_terrain(mesh, grid, tubes):
         buckets.setdefault((bx, by), []).append(base + len(fresh) - 1)
         return base + len(fresh) - 1
 
-    new_tris = []       # (ids, material, colour)
+    new_tris: list[tuple[tuple[int, int, int], int, tuple[float, ...]]] = []       # (ids, material, colour)
     for fi in sorted(removed):
         plane, pieces = removed[fi]
         slope = math.hypot(plane[0], plane[1])
         for p in pieces:
             ids = [weld(x, y, plane[0] * x + plane[1] * y + plane[2], slope) for x, y in p]
             for k in range(1, len(ids) - 1):
-                tri = (ids[0], ids[k], ids[k + 1])
-                if len(set(tri)) < 3:
+                corner = (ids[0], ids[k], ids[k + 1])
+                if len(set(corner)) < 3:
                     continue
-                pts = [(V[v] if v < base else fresh[v - base]) for v in tri]
+                pts = [(V[v] if v < base else fresh[v - base]) for v in corner]
                 area2, altitude = _altitude2(*pts)
                 if abs(altitude) <= 2.0 * _WELD_M:
                     continue
                 if area2 < 0:
                     raise AssertionError("terrain cut produced an inverted face")
-                new_tris.append((tri, mesh.face_materials[fi], mesh.face_colors[fi]))
+                new_tris.append((corner, mesh.face_materials[fi], mesh.face_colors[fi]))
 
     # Vertices of the cut cells that no face uses any more (ids are j * nx + i, see generate.build_terrain).
     kept_new = {v for tri, _m, _c in new_tris for v in tri}
-    dead = []
+    dead: list[int] = []
     for v in candidates:
         if v in kept_new:
             continue
@@ -525,28 +558,28 @@ def cut_terrain(mesh, grid, tubes):
                for ii in (i - 1, i) if 0 <= ii < nx - 1 for u in (0, 1)):
             continue
         dead.append(v)
-    remap = {}
+    remap: dict[int, int] = {}
     spare = list(dead)
-    for k, p in enumerate(fresh):
+    for k, fv in enumerate(fresh):
         if base + k not in kept_new:
             continue
         if spare:
             slot = spare.pop(0)
-            V[slot] = p
+            V[slot] = fv
             remap[base + k] = slot
         else:
-            V.append(p)
+            V.append(fv)
             remap[base + k] = len(V) - 1
     leftover = spare
     slots = sorted(removed)
     for n, fi in enumerate(slots):
         if n < len(new_tris):
-            tri, mat, col = new_tris[n]
-            F[fi] = tuple(remap.get(v, v) for v in tri)
+            ntri, mat, col = new_tris[n]
+            F[fi] = tuple(remap.get(v, v) for v in ntri)
             mesh.face_materials[fi] = mat
             mesh.face_colors[fi] = col
-    for tri, mat, col in new_tris[len(slots):]:
-        F.append(tuple(remap.get(v, v) for v in tri))
+    for ntri, mat, col in new_tris[len(slots):]:
+        F.append(tuple(remap.get(v, v) for v in ntri))
         mesh.face_materials.append(mat)
         mesh.face_colors.append(col)
     for fi in sorted(slots[len(new_tris):], reverse=True):
@@ -567,14 +600,15 @@ def cut_terrain(mesh, grid, tubes):
 
 # --- the stage --------------------------------------------------------------------------------------------------
 
-def build(plan, ctx):
+def build(plan: ScenePlan, ctx: StageContext) -> None:
     from .generate import InvalidFeature
-    features = list(getattr(ctx.classified, "tunnels", ()))
+    features: list[Feature] = list(getattr(ctx.classified, "tunnels", ()))
     if not ctx.options.roads:
         report_unsupported(ctx, features, _unsupported_reason)
         return
     invalid = plan.report["invalid_features"]
-    tubes, walls = [], []
+    tubes: list[_Tube] = []
+    walls: list[ObjectSpec] = []
     for f in features:
         try:
             tube = _build_tube(ctx, f)
@@ -608,7 +642,7 @@ def build(plan, ctx):
         plan.count("tunnel_headwalls")
 
 
-def _build_tube(ctx, f):
+def _build_tube(ctx: StageContext, f: Feature) -> _Tube:
     from .generate import (InvalidFeature, ObjectSpec, ROAD_LIFT_M, _dedupe_polyline, inside_terrain,
                            mesh_triangle_count, road_width, short_name, terrain_height)
     grid, z_off = ctx.terrain, ctx.z_offset
@@ -622,14 +656,14 @@ def _build_tube(ctx, f):
     if not all(inside_terrain(grid, x, y) for x, y in pts):
         raise InvalidFeature("tunnel lies outside the terrain extent; not generated")
 
-    def path_of(points):
+    def path_of(points: Sequence[Vec2]) -> list[Vec3]:
         z0 = terrain_height(grid, *points[0]) + ROAD_LIFT_M
         z1 = terrain_height(grid, *points[-1]) + ROAD_LIFT_M
         samples = polyline_z_profile(points, lambda x, y: 0.0, MAX_STEP_M)
         total = samples[-1][0]
         return [(x, y, z0 + (z1 - z0) * (s / total) - z_off) for s, x, y, _ in samples]
 
-    def mesh_of(path, origin):
+    def mesh_of(path: Sequence[Vec3], origin: Vec3) -> MeshData:
         # Reserve the upper bound (quads as 2 triangles, plus the headwalls) before allocating the mesh.
         n = len(profile)
         ctx.budget.reserve(f.id, n * len(path) + 2 * HEADWALL_TRIANGLE_RESERVE,
@@ -657,19 +691,19 @@ def _build_tube(ctx, f):
     return _Tube(f, mesh, origin, profile, path, spec, clearance, floor_w / 2.0)
 
 
-def _cover(plan, ctx, tube):
+def _cover(plan: ScenePlan, ctx: StageContext, tube: _Tube) -> None:
     """Cover warning and tree blocking along the tube."""
     from .generate import terrain_height
     grid, z_off = ctx.terrain, ctx.z_offset
     path = tube.path
     arc = tube.arc
 
-    def cover(x, y, z):
+    def cover(x: float, y: float, z: float) -> float:
         return terrain_height(grid, x, y) - z_off - (z + tube.clearance)
 
     L = arc.length
     n = max(2, min(int(math.ceil(L)) + 1, MAX_SAMPLES))
-    covers = []
+    covers: list[float] = []
     for k in range(n):
         x, y, z, *_ = arc.at(L * k / (n - 1))
         covers.append(cover(x, y, z))
@@ -685,7 +719,7 @@ def _cover(plan, ctx, tube):
         ctx.keepout.append(((p[0], p[1]), (p[0], p[1]), PORTAL_KEEPOUT_M))
 
 
-def _build_headwalls(plan, ctx, tube):
+def _build_headwalls(plan: ScenePlan, ctx: StageContext, tube: _Tube) -> list[ObjectSpec]:
     from .generate import ObjectSpec, mesh_triangle_count, terrain_height
     grid, z_off = ctx.terrain, ctx.z_offset
     path = tube.path
@@ -693,9 +727,10 @@ def _build_headwalls(plan, ctx, tube):
     L = arc.length
     T = HEADWALL_THICKNESS_M
     step = max(1.0, L / MAX_SAMPLES)
-    out, taken = [], []
+    out: list[ObjectSpec] = []
+    taken: list[float] = []
     for end in (0, 1):
-        s_h = None
+        s_h: float | None = None
         k = 0
         while k * step <= L - T:
             s = k * step if end == 0 else L - k * step
@@ -719,7 +754,7 @@ def _build_headwalls(plan, ctx, tube):
         if any(abs((seg_s + t0) - o) < T for o in taken):
             continue
         taken.append(seg_s + t0)
-        c = []
+        c: list[Vec3] = []
         for t in (t0, t0 + T):
             f = t / seg_len
             c.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f))
@@ -739,7 +774,7 @@ def _build_headwalls(plan, ctx, tube):
     return out
 
 
-def _terrain_max(grid, c, side, w, d):
+def _terrain_max(grid: ElevationGrid, c: Sequence[Vec3], side: Vec2, w: float, d: Vec2) -> float:
     """Highest terrain (map z) over the slab footprint: edges sampled every 0.5 m plus the grid vertices inside."""
     from .generate import terrain_height
     corners = [(c[0][0] - side[0] * w, c[0][1] - side[1] * w), (c[0][0] + side[0] * w, c[0][1] + side[1] * w),
@@ -765,7 +800,7 @@ def _terrain_max(grid, c, side, w, d):
     return best
 
 
-def _make_probe(tube, area):
+def _make_probe(tube: _Tube, area: Area) -> Probe:
     """Probe through the tube, extended 3 m beyond a portal unless that would leave the area."""
     r = min(PROBE_MAX_RADIUS_M, (tube.clearance - 1.0) / 2.0, tube.half - 0.2)
     pts = _thin([(x, y, z + r + 0.5) for x, y, z in tube.path], 62)
@@ -786,7 +821,7 @@ def _make_probe(tube, area):
             "path_map": [[round(v, 4) for v in p] for p in pts], "radius_m": round(r, 4)}
 
 
-def _thin(pts, limit):
+def _thin(pts: list[Vec3], limit: int) -> list[Vec3]:
     """At most ``limit`` points keeping the ends: 3D Douglas-Peucker with a growing tolerance."""
     tol = 0.01
     while len(pts) > limit:
@@ -795,7 +830,7 @@ def _thin(pts, limit):
     return pts
 
 
-def _dp3(pts, tol):
+def _dp3(pts: Sequence[Vec3], tol: float) -> list[Vec3]:
     a, b = pts[0], pts[-1]
     ab = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
     L2 = sum(v * v for v in ab)

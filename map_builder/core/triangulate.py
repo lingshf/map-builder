@@ -17,10 +17,19 @@ Orientation tests are exact (float filter with a ``Fraction`` fallback) and all
 geometric work is counted against ``max_work`` so pathological input is bounded.
 """
 
+from __future__ import annotations
+
 from collections import Counter
+from collections.abc import Iterable, Sequence
 from fractions import Fraction
+from typing import TypeAlias, TypeVar
 
 from .errors import MapBuilderError
+
+Pt: TypeAlias = "Sequence[float]"
+# (min x, max x, min y, max y, ring, edge index, ring length, start point, end point)
+_EdgeRec: TypeAlias = "tuple[float, float, float, float, int, int, int, Pt, Pt]"
+_P = TypeVar("_P", bound=Sequence[float])
 
 DEFAULT_MAX_WORK = 5_000_000
 _ERRBOUND = 1e-14
@@ -33,17 +42,17 @@ class TriangulationError(MapBuilderError):
 class _Work:
     """Counts primitive geometric tests (orientation/segment/point tests)."""
 
-    def __init__(self, limit):
-        self.limit = limit
-        self.n = 0
+    def __init__(self, limit: int) -> None:
+        self.limit: int = limit
+        self.n: int = 0
 
-    def add(self, k=1):
+    def add(self, k: int = 1) -> None:
         self.n += k
         if self.n > self.limit:
             raise TriangulationError(f"triangulation work budget exceeded ({self.limit} geometric tests)")
 
 
-def orient(a, b, c):
+def orient(a: Pt, b: Pt, c: Pt) -> int:
     """Exact sign of the doubled signed area of (a, b, c): 1 CCW, -1 CW, 0 collinear."""
     left = (b[0] - a[0]) * (c[1] - a[1])
     right = (b[1] - a[1]) * (c[0] - a[0])
@@ -58,7 +67,7 @@ def orient(a, b, c):
     return (d > 0) - (d < 0)
 
 
-def _collinear_span(p, q, a, b):
+def _collinear_span(p: Pt, q: Pt, a: Pt, b: Pt) -> tuple[float, float, float, float]:
     """For collinear segments pq and ab: (lo, hi, s0, s1) along the dominant axis of pq."""
     ax = 0 if abs(q[0] - p[0]) >= abs(q[1] - p[1]) else 1
     s0, s1 = sorted((p[ax], q[ax]))
@@ -66,7 +75,7 @@ def _collinear_span(p, q, a, b):
     return max(s0, e0), min(s1, e1), s0, s1
 
 
-def segments_meet(p, q, a, b):
+def segments_meet(p: Pt, q: Pt, a: Pt, b: Pt) -> bool:
     """True if the closed segments pq and ab share at least one point."""
     o1, o2 = orient(p, q, a), orient(p, q, b)
     if o1 == 0 and o2 == 0:
@@ -78,7 +87,7 @@ def segments_meet(p, q, a, b):
     return o3 * o4 <= 0
 
 
-def blocks_segment(m, p, a, b):
+def blocks_segment(m: Pt, p: Pt, a: Pt, b: Pt) -> bool:
     """True if closed segment ab meets closed segment mp anywhere except exactly at m or p.
 
     Covers proper crossings, an edge passing through m-p at one of its own
@@ -101,14 +110,14 @@ def blocks_segment(m, p, a, b):
     return not (o3 == 0 or o4 == 0)
 
 
-def _in_cone(prev, v, nxt, q):
+def _in_cone(prev: Pt, v: Pt, nxt: Pt, q: Pt) -> bool:
     """True if direction v->q points strictly into the region left of prev->v->nxt (the polygon interior)."""
     if orient(prev, v, nxt) > 0:
         return orient(prev, v, q) > 0 and orient(v, nxt, q) > 0
     return orient(prev, v, q) > 0 or orient(v, nxt, q) > 0
 
 
-def ring_area(points):
+def ring_area(points: Sequence[Pt]) -> float:
     a = 0.0
     n = len(points)
     for i in range(n):
@@ -118,7 +127,7 @@ def ring_area(points):
     return a / 2.0
 
 
-def _point_in_ring(pt, ring_pts):
+def _point_in_ring(pt: Pt, ring_pts: Sequence[Pt]) -> bool:
     x, y = pt
     inside = False
     j = len(ring_pts) - 1
@@ -131,9 +140,9 @@ def _point_in_ring(pt, ring_pts):
     return inside
 
 
-def dedupe_ring(points, tol=1e-6):
+def dedupe_ring(points: Iterable[_P], tol: float = 1e-6) -> list[_P]:
     """Drop consecutive duplicate points (and a closing duplicate) within ``tol`` metres."""
-    out = []
+    out: list[_P] = []
     for p in points:
         if not out or abs(p[0] - out[-1][0]) > tol or abs(p[1] - out[-1][1]) > tol:
             out.append(p)
@@ -142,11 +151,12 @@ def dedupe_ring(points, tol=1e-6):
     return out
 
 
-def _label(r):
+def _label(r: int) -> str:
     return "outer ring" if r == 0 else f"hole {r}"
 
 
-def validate_rings(pts, outer, holes=(), max_work=DEFAULT_MAX_WORK, _work=None):
+def validate_rings(pts: Sequence[Pt], outer: Sequence[int], holes: Sequence[Sequence[int]] = (),
+                   max_work: int = DEFAULT_MAX_WORK, _work: _Work | None = None) -> _Work:
     """Raise TriangulationError unless outer/holes describe a valid polygon with holes."""
     work = _work or _Work(max_work)
     rings = [list(outer)] + [list(h) for h in holes]
@@ -162,14 +172,14 @@ def validate_rings(pts, outer, holes=(), max_work=DEFAULT_MAX_WORK, _work=None):
         if r > 0 and not area < 0:
             raise TriangulationError(f"{_label(r)} must be clockwise with non-zero area")
     # All edges of all rings; sweep in x so only edges with overlapping x ranges are compared.
-    edges = []
+    edges: list[_EdgeRec] = []
     for r, ring in enumerate(rings):
         n = len(ring)
         for k in range(n):
             a, b = pts[ring[k]], pts[ring[(k + 1) % n]]
             edges.append((min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), r, k, n, a, b))
     edges.sort(key=lambda e: e[0])
-    active = []
+    active: list[_EdgeRec] = []
     for e in edges:
         x0, _, y0, y1, r, k, n, a, b = e
         active = [f for f in active if f[1] >= x0]
@@ -210,7 +220,8 @@ def validate_rings(pts, outer, holes=(), max_work=DEFAULT_MAX_WORK, _work=None):
     return work
 
 
-def _bridge_hole(poly, hole, pts, other_edges, work):
+def _bridge_hole(poly: list[int], hole: list[int], pts: Sequence[Pt], other_edges: list[tuple[Pt, Pt]],
+                 work: _Work) -> list[int] | None:
     """Splice ``hole`` into ``poly`` with the shortest valid bridge from its rightmost vertices.
 
     Hole vertices are tried right to left; for each, polygon vertices in order of
@@ -251,7 +262,8 @@ def _bridge_hole(poly, hole, pts, other_edges, work):
     return None
 
 
-def _ear_blocked(poly, pts, a, b, c, check_diagonal, work):
+def _ear_blocked(poly: Sequence[int], pts: Sequence[Pt], a: Pt, b: Pt, c: Pt, check_diagonal: bool,
+                 work: _Work) -> bool:
     x0, x1 = min(a[0], b[0], c[0]), max(a[0], b[0], c[0])
     y0, y1 = min(a[1], b[1], c[1]), max(a[1], b[1], c[1])
     work.add(len(poly))
@@ -279,14 +291,14 @@ def _ear_blocked(poly, pts, a, b, c, check_diagonal, work):
     return False
 
 
-def _ear_clip(poly, pts, work):
+def _ear_clip(poly: list[int], pts: Sequence[Pt], work: _Work) -> list[tuple[int, int, int]]:
     poly = list(poly)
     check_diagonal = len({pts[i] for i in poly}) < len(poly)
-    tris = []
+    tris: list[tuple[int, int, int]] = []
     start = 0
     while len(poly) > 3:
         n = len(poly)
-        ear = None
+        ear: int | None = None
         for t in range(n):
             k = (start + t) % n
             ia, ib, ic = poly[k - 1], poly[k], poly[(k + 1) % n]
@@ -305,13 +317,14 @@ def _ear_clip(poly, pts, work):
         start = max(ear - 1, 0)
     if orient(*(pts[i] for i in poly)) <= 0:
         raise TriangulationError("final triangle is degenerate")
-    tris.append(tuple(poly))
+    tris.append(tuple(poly))  # type: ignore[arg-type]  # exactly three vertices remain
     return tris
 
 
-def verify_triangulation(tris, pts, outer, holes=()):
+def verify_triangulation(tris: Iterable[tuple[int, int, int]], pts: Sequence[Pt], outer: Sequence[int],
+                         holes: Sequence[Sequence[int]] = ()) -> None:
     """Raise TriangulationError unless ``tris`` exactly tiles the polygon (see module docstring)."""
-    directed = Counter()
+    directed: Counter[tuple[int, int]] = Counter()
     area = 0.0
     for i, j, k in tris:
         a, b, c = pts[i], pts[j], pts[k]
@@ -321,7 +334,7 @@ def verify_triangulation(tris, pts, outer, holes=()):
         directed[(i, j)] += 1
         directed[(j, k)] += 1
         directed[(k, i)] += 1
-    ring_edges = set()
+    ring_edges: set[tuple[int, int]] = set()
     for ring in [list(outer)] + [list(h) for h in holes]:
         n = len(ring)
         for k in range(n):
@@ -342,7 +355,8 @@ def verify_triangulation(tris, pts, outer, holes=()):
         raise TriangulationError(f"triangulated area {area:.6f} differs from polygon area {expected:.6f}")
 
 
-def triangulate(pts, outer, holes=(), max_work=DEFAULT_MAX_WORK):
+def triangulate(pts: Sequence[Pt], outer: Sequence[int], holes: Sequence[Sequence[int]] = (),
+                max_work: int = DEFAULT_MAX_WORK) -> list[tuple[int, int, int]]:
     """pts: list of (x, y); outer/holes: lists of indices. Returns [(i, j, k)] (CCW).
 
     Raises TriangulationError for invalid rings, when the geometric work exceeds
@@ -350,13 +364,13 @@ def triangulate(pts, outer, holes=(), max_work=DEFAULT_MAX_WORK):
     """
     pts = [(float(p[0]), float(p[1])) for p in pts]
     outer = list(outer)
-    holes = [list(h) for h in holes]
-    work = validate_rings(pts, outer, holes, max_work)
+    hole_lists = [list(h) for h in holes]
+    work = validate_rings(pts, outer, hole_lists, max_work)
     poly = list(outer)
-    pending = sorted(holes, key=lambda h: -max(pts[i][0] for i in h))
+    pending = sorted(hole_lists, key=lambda h: -max(pts[i][0] for i in h))
     while pending:
         for idx, hole in enumerate(pending):
-            other = []
+            other: list[tuple[Pt, Pt]] = []
             for o, h in enumerate(pending):
                 if o != idx:
                     other += [(pts[h[k]], pts[h[(k + 1) % len(h)]]) for k in range(len(h))]
@@ -368,5 +382,5 @@ def triangulate(pts, outer, holes=(), max_work=DEFAULT_MAX_WORK):
         else:
             raise TriangulationError("could not find a valid bridge from a hole to the outer ring")
     tris = _ear_clip(poly, pts, work)
-    verify_triangulation(tris, pts, outer, holes)
+    verify_triangulation(tris, pts, outer, hole_lists)
     return tris

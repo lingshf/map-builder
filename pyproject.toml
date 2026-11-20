@@ -1,0 +1,33 @@
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+files = ["map_builder", "tools"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# Not annotated yet: typed by the later PRs of this stack; each PR removes its entries.
+[[tool.mypy.overrides]]
+module = [
+    "map_builder.core.generate",
+    "map_builder.core.roofs",
+    "map_builder.core.skeleton",
+    "map_builder.core.pipeline",
+    "map_builder.core.glb",
+    "map_builder.core.package",
+    "map_builder.core.mesh",
+    "map_builder.core.uv",
+    "mbmap_cli",
+    "map_builder.blender.*",
+    "map_builder",
+    "demo_bundle",
+    "make_probe_sample",
+    "panel_shot",
+    "run_demo",
+    "parity_frozen",
+]
+ignore_errors = true
+
+# bpy.props.*Property(...) calls used as class annotations (Blender registration idiom) are not valid types
+[[tool.mypy.overrides]]
+module = "map_builder.blender.props"
+disable_error_code = ["valid-type"]

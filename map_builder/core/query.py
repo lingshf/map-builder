@@ -7,37 +7,51 @@ every object and triangle visit as one work unit; exceeding ``max_work`` raises
 :class:`errors.LimitError`, so the cost is bounded whatever the input.
 """
 
+from __future__ import annotations
+
 import math
 import sys
-from collections import namedtuple
+from collections.abc import Iterable, Sequence
 from fractions import Fraction
+from typing import Literal, NamedTuple, TypeAlias, TypeVar, overload
 
-from .collision import AABB_TABLE_TOL_M
+from .collision import AABB_TABLE_TOL_M, Collision, Vec3
 from .errors import LimitError
+
+Box6: TypeAlias = "tuple[float, float, float, float, float, float]"
+TriGrid: TypeAlias = "tuple[dict[tuple[int, int], list[int]], float, list[Box6], list[int]]"
+_Num = TypeVar("_Num", float, Fraction)
 
 DEFAULT_MAX_WORK = 2_000_000
 
-RayHit = namedtuple("RayHit", "t triangle object")
-CapsuleResult = namedtuple("CapsuleResult", "objects work")
+class RayHit(NamedTuple):
+    t: float
+    triangle: int
+    object: int
 
 
-def _sub(a, b):
+class CapsuleResult(NamedTuple):
+    objects: list[int]
+    work: int
+
+
+def _sub(a: Sequence[float], b: Sequence[float]) -> Vec3:
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
-def _dot(a, b):
+def _dot(a: Sequence[float], b: Sequence[float]) -> float:
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
-def _cross(a, b):
+def _cross(a: Sequence[float], b: Sequence[float]) -> Vec3:
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-def _lerp(a, d, t):
+def _lerp(a: Sequence[float], d: Sequence[float], t: float) -> Vec3:
     return (a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t)
 
 
-def _dist2(a, b):
+def _dist2(a: Sequence[float], b: Sequence[float]) -> float:
     d = _sub(a, b)
     return _dot(d, d)
 
@@ -56,7 +70,7 @@ CONTACT_TOL_M = 1e-9
 RAY_EDGE_TOL = 1e-9
 
 
-def triangle_is_degenerate(a, b, c):
+def triangle_is_degenerate(a: Sequence[float], b: Sequence[float], c: Sequence[float]) -> bool:
     """True for a collapsed (two or three equal vertices) or (nearly) collinear triangle, see DEGENERATE_SIN."""
     ab, ac, bc = _sub(b, a), _sub(c, a), _sub(c, b)
     longest = max(_dot(ab, ab), _dot(ac, ac), _dot(bc, bc))
@@ -64,12 +78,12 @@ def triangle_is_degenerate(a, b, c):
     return math.sqrt(_dot(n, n)) <= DEGENERATE_SIN * longest
 
 
-def _closest_on_edges(p, a, b, c):
+def _closest_on_edges(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3:
     return min((closest_point_segment(p, a, b), closest_point_segment(p, b, c), closest_point_segment(p, c, a)),
                key=lambda q: _dist2(p, q))
 
 
-def closest_point_triangle(p, a, b, c):
+def closest_point_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3:
     """Closest point to ``p`` on triangle ``abc``. A degenerate triangle (:func:`triangle_is_degenerate`) is
     measured through its edges. Otherwise ``p`` is projected onto the plane (relative to ``a``, with the
     unnormalised normal, so the error grows with 1/sin of the smallest angle rather than its square, as the
@@ -88,7 +102,7 @@ def closest_point_triangle(p, a, b, c):
     return _closest_on_edges(p, a, b, c)
 
 
-def closest_point_segment(p, a, b):
+def closest_point_segment(p: Vec3, a: Vec3, b: Vec3) -> Vec3:
     ab = _sub(b, a)
     den = _dot(ab, ab)
     if den == 0.0:
@@ -97,11 +111,11 @@ def closest_point_segment(p, a, b):
     return _lerp(a, ab, t)
 
 
-def _segment_param(p, a, ab, den):
+def _segment_param(p: Sequence[float], a: Sequence[float], ab: Sequence[float], den: float) -> float:
     return 0.0 if den == 0.0 else min(1.0, max(0.0, _dot(_sub(p, a), ab) / den))
 
 
-def segment_segment_distance(p1, q1, p2, q2):
+def segment_segment_distance(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3) -> float:
     """Closest distance between segments ``p1q1`` and ``p2q2``.
 
     The minimum is either interior to both segments or has an endpoint of one of them, so it is the
@@ -130,11 +144,11 @@ def segment_segment_distance(p1, q1, p2, q2):
     return math.sqrt(best)
 
 
-def _edge_functions(ax, ay, bx, by, cx, cy):
+def _edge_functions(ax: _Num, ay: _Num, bx: _Num, by: _Num, cx: _Num, cy: _Num) -> tuple[_Num, _Num, _Num]:
     return cx * by - cy * bx, ax * cy - ay * cx, bx * ay - by * ax
 
 
-def _ray_triangle(o, d, a, b, c):
+def _ray_triangle(o: Vec3, d: Vec3, a: Vec3, b: Vec3, c: Vec3) -> float | None:
     """Two-sided watertight ray/triangle test (Woop, Benthin and Wald 2013): the parameter ``t`` along
     ``o + t d`` where it meets ``abc``, or None (also None for a ray parallel to the plane). The vertices
     are translated to the ray origin and sheared so the ray runs along +z; the 2D edge functions of a
@@ -150,7 +164,7 @@ def _ray_triangle(o, d, a, b, c):
     sh = [(p[kx] - sx * p[kz], p[ky] - sy * p[kz]) for p in (pa, pb, pc)]
     u, v, w = _edge_functions(sh[0][0], sh[0][1], sh[1][0], sh[1][1], sh[2][0], sh[2][1])
     if u == 0.0 or v == 0.0 or w == 0.0:
-        u, v, w = _edge_functions(*(Fraction(x) for p in sh for x in p))
+        u, v, w = _edge_functions(*(Fraction(x) for p in sh for x in p))  # type: ignore[arg-type]  # exact Fraction retry
     if (u < 0 or v < 0 or w < 0) and (u > 0 or v > 0 or w > 0):
         return None
     det = u + v + w
@@ -163,7 +177,7 @@ def _ray_triangle(o, d, a, b, c):
     return t if math.isfinite(t) else None
 
 
-def _ray_triangle_tolerant(o, d, a, b, c, tol):
+def _ray_triangle_tolerant(o: Vec3, d: Vec3, a: Vec3, b: Vec3, c: Vec3, tol: float) -> float | None:
     """Two-sided Moller-Trumbore with barycentric bounds widened by ``tol``; numerators are divided by the
     determinant directly (a subnormal determinant's reciprocal would overflow). Non-finite values miss."""
     e1, e2 = _sub(b, a), _sub(c, a)
@@ -183,7 +197,7 @@ def _ray_triangle_tolerant(o, d, a, b, c, tol):
     return t if math.isfinite(t) else None
 
 
-def segment_triangle_distance(p, q, a, b, c):
+def segment_triangle_distance(p: Vec3, q: Vec3, a: Vec3, b: Vec3, c: Vec3) -> float:
     """Closest distance between segment ``pq`` and triangle ``abc`` (two-sided; 0 when they intersect).
     Degenerate triangles (:func:`triangle_is_degenerate`) are measured through their edges only."""
     best = math.inf
@@ -198,7 +212,7 @@ def segment_triangle_distance(p, q, a, b, c):
     return best
 
 
-def _finite_real(x):
+def _finite_real(x: object) -> bool:
     """A real number (not bool) with a finite float value; integers are bounded before any conversion, so an
     oversized int is rejected instead of raising OverflowError."""
     if isinstance(x, bool):
@@ -208,8 +222,8 @@ def _finite_real(x):
     return isinstance(x, float) and math.isfinite(x)
 
 
-def _check_points(points, what):
-    pts = []
+def _check_points(points: Iterable[Sequence[float]], what: str) -> list[Vec3]:
+    pts: list[Vec3] = []
     for p in points:
         if len(p) != 3 or not all(_finite_real(x) for x in p):
             raise ValueError(f"{what} must be finite 3-vectors")
@@ -217,23 +231,34 @@ def _check_points(points, what):
     return pts
 
 
-def _box_overlap(lo, hi, box, pad):
+def _box_overlap(lo: Sequence[float], hi: Sequence[float], box: Sequence[float], pad: float) -> bool:
     return (box[0] - pad <= hi[0] and lo[0] <= box[3] + pad and box[1] - pad <= hi[1] and lo[1] <= box[4] + pad
             and box[2] - pad <= hi[2] and lo[2] <= box[5] + pad)
 
 
 class _Budget:
-    def __init__(self, max_work):
-        self.max_work = max_work
-        self.work = 0
+    def __init__(self, max_work: int) -> None:
+        self.max_work: int = max_work
+        self.work: int = 0
 
-    def spend(self, n=1):
+    def spend(self, n: int = 1) -> None:
         self.work += n
         if self.work > self.max_work:
             raise LimitError(f"collision query exceeded its work budget of {self.max_work} unit(s)")
 
 
-def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=False):
+@overload
+def capsule_hits(col: Collision, path_points: Iterable[Sequence[float]], radius: float,
+                 max_work: int = ..., *, result: Literal[False] = ...) -> list[int]: ...
+
+
+@overload
+def capsule_hits(col: Collision, path_points: Iterable[Sequence[float]], radius: float,
+                 max_work: int = ..., *, result: Literal[True]) -> CapsuleResult: ...
+
+
+def capsule_hits(col: Collision, path_points: Iterable[Sequence[float]], radius: float,
+                 max_work: int = DEFAULT_MAX_WORK, *, result: bool = False) -> list[int] | CapsuleResult:
     """Collision objects touched by the capsule swept along the polyline ``path_points`` (map frame, metres)
     with ``radius`` metres: those with a triangle at distance <= ``radius`` (+ CONTACT_TOL_M) from a path segment.
 
@@ -249,13 +274,13 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
     budget = _Budget(max_work)
     reach = radius + CONTACT_TOL_M                  # the inclusive contact distance, used by every test below
     pad = reach + AABB_TABLE_TOL_M
-    bounds = []
+    bounds: list[tuple[Vec3, Vec3]] = []
     for p, q in segs:
         bounds.append(((min(p[0], q[0]), min(p[1], q[1]), min(p[2], q[2])),
                        (max(p[0], q[0]), max(p[1], q[1]), max(p[2], q[2]))))
     v, idx = col.vertices, col.indices
     whole = (tuple(min(b[0][a] for b in bounds) for a in range(3)), tuple(max(b[1][a] for b in bounds) for a in range(3)))
-    hits = []
+    hits: list[int] = []
     for k, e in enumerate(col.objects):
         box = e["aabb"]
         s0, n = e["tri_start"], e["tri_count"]
@@ -270,6 +295,7 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
             if not _box_overlap(lo, hi, box, pad):
                 continue
             scan = False
+            tris: Iterable[tuple[int, Box6]]
             cand = _grid_candidates(grid, lo, hi, reach) if grid is not None else None
             if cand is not None:
                 budget.spend(len(cand))
@@ -295,9 +321,9 @@ def capsule_hits(col, path_points, radius, max_work=DEFAULT_MAX_WORK, *, result=
     return CapsuleResult(hits, budget.work) if result else hits
 
 
-def _tri_boxes(col, k, s0, n):
+def _tri_boxes(col: Collision, k: int, s0: int, n: int) -> list[Box6]:
     """Cached per-triangle boxes of collision object ``k`` (built once, O(triangles))."""
-    cache = col.__dict__.setdefault("_tri_box_cache", {})
+    cache: dict[int, list[Box6]] = col.__dict__.setdefault("_tri_box_cache", {})
     boxes = cache.get(k)
     if boxes is None:
         v, idx = col.vertices, col.indices
@@ -309,7 +335,7 @@ def _tri_boxes(col, k, s0, n):
     return boxes
 
 
-def _plane_clear(p, q, a, b, c, reach):
+def _plane_clear(p: Vec3, q: Vec3, a: Vec3, b: Vec3, c: Vec3, reach: float) -> bool:
     """True when both segment ends lie farther than ``reach`` from the triangle's plane on the same side: no
     contact is possible (the distance to a triangle is at least the distance to its plane)."""
     ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
@@ -330,14 +356,17 @@ _GRID_MAX_TRI_CELLS = 64        # a triangle spanning more cells is kept in a sh
 _GRID_MAX_QUERY_CELLS = 1024    # a query spanning more cells falls back to the (budgeted) triangle scan
 
 
-def _tri_grid(col, k, s0, n):
+def _tri_grid(col: Collision, k: int, s0: int, n: int) -> TriGrid:
     """Cached ``(cell dict, cell size, per-triangle boxes, big triangle ids)`` of collision object ``k``: map
     cells -> triangle ids. Cells per triangle are capped, so the build is O(triangles)."""
-    cache = col.__dict__.setdefault("_tri_grids", {})
+    cache: dict[int, TriGrid] = col.__dict__.setdefault("_tri_grids", {})
     if k in cache:
         return cache[k]
     v, idx = col.vertices, col.indices
-    cells, boxes, big, cs = {}, [], [], _GRID_CELL_M
+    cells: dict[tuple[int, int], list[int]] = {}
+    boxes: list[Box6] = []
+    big: list[int] = []
+    cs = _GRID_CELL_M
     inserted, limit = 0, _GRID_MAX_TRI_CELLS * n     # enumeration guard: the per-triangle cap keeps it below
     for t in range(s0, s0 + n):
         a, b, c = v[idx[3 * t]], v[idx[3 * t + 1]], v[idx[3 * t + 2]]
@@ -359,7 +388,7 @@ def _tri_grid(col, k, s0, n):
     return cache[k]
 
 
-def _grid_candidates(grid, lo, hi, reach):
+def _grid_candidates(grid: TriGrid, lo: Sequence[float], hi: Sequence[float], reach: float) -> list[int] | None:
     """Triangle ids near the box, or None when it spans too many cells (the caller scans instead)."""
     cells, cs, _, big = grid
     i0, i1 = math.floor((lo[0] - reach) / cs), math.floor((hi[0] + reach) / cs)
@@ -377,7 +406,7 @@ def _grid_candidates(grid, lo, hi, reach):
     return sorted(out)
 
 
-def _ray_box(o, inv, box, tmax):
+def _ray_box(o: Vec3, inv: Sequence[float | None], box: Sequence[float], tmax: float) -> bool:
     t0, t1 = 0.0, tmax
     for a in range(3):
         lo, hi = box[a] - AABB_TABLE_TOL_M, box[a + 3] + AABB_TABLE_TOL_M
@@ -385,7 +414,7 @@ def _ray_box(o, inv, box, tmax):
             if o[a] < lo or o[a] > hi:
                 return False
             continue
-        ta, tb = (lo - o[a]) * inv[a], (hi - o[a]) * inv[a]
+        ta, tb = (lo - o[a]) * inv[a], (hi - o[a]) * inv[a]  # type: ignore[operator]  # inv[a] is not None here
         if ta > tb:
             ta, tb = tb, ta
         t0, t1 = max(t0, ta), min(t1, tb)
@@ -394,7 +423,8 @@ def _ray_box(o, inv, box, tmax):
     return True
 
 
-def ray_cast(col, origin, direction, max_dist, max_work=DEFAULT_MAX_WORK):
+def ray_cast(col: Collision, origin: Sequence[float], direction: Sequence[float], max_dist: float,
+             max_work: int = DEFAULT_MAX_WORK) -> RayHit | None:
     """Nearest triangle hit by the ray ``origin + t * direction`` for ``0 <= t <= max_dist`` (``t`` in metres;
     ``direction`` is normalised, after scaling by its largest component so huge or tiny directions neither
     overflow nor underflow). Returns :data:`RayHit` ``(t, triangle, object)`` or None; ties go to the lower
@@ -413,7 +443,7 @@ def ray_cast(col, origin, direction, max_dist, max_work=DEFAULT_MAX_WORK):
     inv = tuple(1.0 / x if x != 0.0 else None for x in d)
     budget = _Budget(max_work)
     v, idx = col.vertices, col.indices
-    best = None
+    best: RayHit | None = None
     for k, e in enumerate(col.objects):
         budget.spend()
         limit = best.t if best is not None else max_dist

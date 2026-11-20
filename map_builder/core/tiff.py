@@ -11,14 +11,48 @@ the same code reads local files and HTTP range requests (cloud-optimised
 GeoTIFFs such as the Copernicus DEM on AWS) without downloading whole files.
 """
 
+from __future__ import annotations
+
 import array
 import contextlib
 import math
 import struct
 import sys
 import zlib
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypeAlias, TypedDict
 
 from .errors import FormatError, LimitError
+
+if TYPE_CHECKING:
+    from .cache import CacheLike
+
+# Decoded raster samples (native-endian compact array of ints or floats).
+Samples: TypeAlias = "array.array[int] | array.array[float]"
+
+
+class Crs(TypedDict):
+    kind: str
+    epsg: int
+    zone: NotRequired[int]
+    south: NotRequired[bool]
+
+
+class ByteSource(Protocol):
+    """Random-access byte source (file, memory or HTTP ranges)."""
+
+    description: str
+
+    def read(self, offset: int, length: int) -> bytes: ...
+
+    def close(self) -> None: ...
+
+
+class RangeClient(Protocol):
+    """The part of :class:`map_builder.core.http.HttpClient` used for range requests."""
+
+    def fetch(self, url: str, *, byte_range: tuple[int, int] | None = None, max_bytes: int | None = None,
+              not_found_is_coverage: bool = False) -> bytes: ...
 
 _TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
 _TYPE_FMT = {1: "B", 3: "H", 4: "I", 6: "b", 8: "h", 9: "i", 11: "f", 12: "d"}
@@ -33,43 +67,43 @@ NEEDED_TAGS = frozenset({256, 257, 258, 259, 273, 277, 278, 279, 317, 322, 323, 
                          33550, 33922, 34264, 34735, 42113})
 
 
-def _noop():
+def _noop() -> None:
     pass
 
 
 class FileSource:
-    def __init__(self, path, max_bytes=2 * 1024 ** 3):
-        self.path = path
+    def __init__(self, path: str, max_bytes: int = 2 * 1024 ** 3) -> None:
+        self.path: str = path
         self._f = open(path, "rb")
         self._f.seek(0, 2)
-        self.size = self._f.tell()
+        self.size: int = self._f.tell()
         if self.size > max_bytes:
             self._f.close()
             raise LimitError(f"{path}: file larger than {max_bytes} bytes")
-        self.description = path
+        self.description: str = path
 
-    def read(self, offset, length):
+    def read(self, offset: int, length: int) -> bytes:
         if offset < 0 or length < 0 or offset + length > self.size:
             raise FormatError(f"{self.description}: read beyond end of file (corrupt TIFF?)")
         self._f.seek(offset)
         return self._f.read(length)
 
-    def close(self):
+    def close(self) -> None:
         self._f.close()
 
 
 class BytesSource:
-    def __init__(self, data, description="<memory>"):
-        self.data = data
-        self.size = len(data)
-        self.description = description
+    def __init__(self, data: bytes, description: str = "<memory>") -> None:
+        self.data: bytes = data
+        self.size: int = len(data)
+        self.description: str = description
 
-    def read(self, offset, length):
+    def read(self, offset: int, length: int) -> bytes:
         if offset < 0 or length < 0 or offset + length > self.size:
             raise FormatError(f"{self.description}: read beyond end of data (corrupt TIFF?)")
         return self.data[offset:offset + length]
 
-    def close(self):
+    def close(self) -> None:
         pass
 
 
@@ -84,24 +118,25 @@ class HttpRangeSource:
 
     HEAD_BYTES = 256 * 1024
 
-    def __init__(self, client, url, description, cache=None, max_total_bytes=96 * 1024 * 1024, cache_key=None,
-                 read_cache=True):
-        self.client = client
-        self.url = url
-        self.description = description
-        self.cache = cache
+    def __init__(self, client: RangeClient, url: str, description: str, cache: CacheLike | None = None,
+                 max_total_bytes: int = 96 * 1024 * 1024, cache_key: str | None = None,
+                 read_cache: bool = True) -> None:
+        self.client: RangeClient = client
+        self.url: str = url
+        self.description: str = description
+        self.cache: CacheLike | None = cache
         # Cache identity: must be stable and credential-free (defaults to the description).
-        self.cache_key = cache_key or description
-        self.max_total_bytes = max_total_bytes
-        self.read_cache = read_cache
-        self.fetched = 0
-        self.cache_hits = []
-        self._pending = {}
-        self._committed = []
-        self._head = self._get(0, self.HEAD_BYTES, allow_short=True)
-        self.size = None
+        self.cache_key: str = cache_key or description
+        self.max_total_bytes: int = max_total_bytes
+        self.read_cache: bool = read_cache
+        self.fetched: int = 0
+        self.cache_hits: list[str] = []
+        self._pending: dict[str, bytes] = {}
+        self._committed: list[str] = []
+        self._head: bytes = self._get(0, self.HEAD_BYTES, allow_short=True)
+        self.size: int | None = None
 
-    def _get(self, offset, length, allow_short=False):
+    def _get(self, offset: int, length: int, allow_short: bool = False) -> bytes:
         key = f"{self.cache_key}#{offset}+{length}"
         body = self.cache.get("ranges", key) if (self.cache and self.read_cache) else None
         if body is not None:
@@ -126,7 +161,7 @@ class HttpRangeSource:
             raise FormatError(f"{self.description}: short read at {offset}")
         return body
 
-    def commit(self):
+    def commit(self) -> None:
         """Persist staged ranges; called after they passed validation."""
         pending, self._pending = self._pending, {}
         if self.cache:
@@ -134,11 +169,11 @@ class HttpRangeSource:
                 self.cache.put("ranges", key, body, {"source": self.cache_key})
                 self._committed.append(key)
 
-    def discard(self):
+    def discard(self) -> None:
         """Drop staged ranges whose validation did not complete (e.g. a network failure)."""
         self._pending = {}
 
-    def invalidate(self):
+    def invalidate(self) -> None:
         """The data failed validation: drop staged ranges and delete every cache entry this
         source read or wrote, so a malformed response never persists."""
         self._pending = {}
@@ -148,23 +183,23 @@ class HttpRangeSource:
                 delete("ranges", key)
         self._committed = []
 
-    def read(self, offset, length):
+    def read(self, offset: int, length: int) -> bytes:
         if offset + length <= len(self._head):
             return self._head[offset:offset + length]
         return self._get(offset, length)
 
-    def close(self):
+    def close(self) -> None:
         pass
 
 
-def lzw_decode(data, max_out=None):
+def lzw_decode(data: bytes, max_out: int | None = None) -> bytes:
     """TIFF LZW decode; raises :class:`LimitError` if output would exceed ``max_out`` bytes."""
     out = bytearray()
     table = [bytes([i]) for i in range(256)] + [b"", b""]
     width = 9
     bitpos = 0
     nbits = len(data) * 8
-    prev = None
+    prev: bytes | None = None
     while bitpos + width <= nbits:
         byte_i = bitpos >> 3
         chunk = int.from_bytes(data[byte_i:byte_i + 3].ljust(3, b"\0"), "big")
@@ -201,7 +236,7 @@ def lzw_decode(data, max_out=None):
     return bytes(out)
 
 
-def inflate_capped(data, max_out):
+def inflate_capped(data: bytes, max_out: int) -> bytes:
     """zlib/Deflate decode that never produces more than ``max_out`` bytes."""
     d = zlib.decompressobj()
     out = d.decompress(data, max_out)
@@ -219,16 +254,41 @@ def inflate_capped(data, max_out):
 
 
 class GeoTiff:
-    def __init__(self, source):
-        self.src = source
+    bo: str
+    tags: dict[int, Any]  # Any: TIFF tag values are heterogeneous (str, bytes, int/float tuples)
+    width: int
+    height: int
+    bps: int
+    sample_format: int
+    fmt: str
+    bytes_ps: int
+    compression: int
+    predictor: int
+    block_w: int
+    block_h: int
+    offsets: Any  # Any: raw tag value, validated as a non-empty int tuple in _parse
+    counts: Any  # Any: raw tag value, validated as a non-empty int tuple in _parse
+    block_bytes: int
+    blocks_across: int
+    nodata: float | None
+    x_c0: float
+    y_c0: float
+    sx: float
+    sy: float
+    pixel_is_point: bool
+    vertical_epsg: int | None
+    crs: Crs
+
+    def __init__(self, source: ByteSource) -> None:
+        self.src: ByteSource = source
         with self._validating():
             self._read_header()
-        self._blocks = {}
-        self._cache_bytes = 0
-        self.max_cache_bytes = MAX_BLOCK_CACHE_BYTES
+        self._blocks: dict[int, Samples] = {}
+        self._cache_bytes: int = 0
+        self.max_cache_bytes: int = MAX_BLOCK_CACHE_BYTES
 
     @contextlib.contextmanager
-    def _validating(self):
+    def _validating(self) -> Iterator[None]:
         """Commit the source's staged bytes only if the enclosed parse/decode succeeds."""
         try:
             yield
@@ -243,7 +303,7 @@ class GeoTiff:
             raise
         getattr(self.src, "commit", _noop)()
 
-    def _read_header(self):
+    def _read_header(self) -> None:
         source = self.src
         head = source.read(0, 8)
         if head[:2] == b"II":
@@ -262,12 +322,12 @@ class GeoTiff:
         self._parse()
 
     # -- parsing ---------------------------------------------------------
-    def _read_ifd(self, off):
+    def _read_ifd(self, off: int) -> dict[int, Any]:
         n = struct.unpack(self.bo + "H", self.src.read(off, 2))[0]
         if n == 0 or n > 4096:
             raise FormatError(f"{self.src.description}: implausible IFD entry count {n}")
         raw = self.src.read(off + 2, n * 12)
-        tags = {}
+        tags: dict[int, Any] = {}
         budget = MAX_TAG_BYTES
         for i in range(n):
             tag, typ, count = struct.unpack(self.bo + "HHI", raw[i * 12:i * 12 + 8])
@@ -295,13 +355,13 @@ class GeoTiff:
                 tags[tag] = struct.unpack(self.bo + _TYPE_FMT[typ] * count, data)
         return tags
 
-    def _tag1(self, tag, default=None):
+    def _tag1(self, tag: int, default: Any = None) -> Any:  # Any: tag value type depends on the tag
         v = self.tags.get(tag)
         if v is None:
             return default
         return v[0] if isinstance(v, tuple) else v
 
-    def _parse(self):
+    def _parse(self) -> None:
         d = self.src.description
         self.width = self._tag1(256)
         self.height = self._tag1(257)
@@ -362,7 +422,7 @@ class GeoTiff:
                     self.nodata = math.copysign(math.inf, self.nodata)
         self._parse_geo()
 
-    def _parse_geo(self):
+    def _parse_geo(self) -> None:
         d = self.src.description
         if 34264 in self.tags:
             m = self.tags[34264]
@@ -377,7 +437,7 @@ class GeoTiff:
             ti, tj, _, x0, y0, _ = self.tags[33922][:6]
         if sx <= 0 or sy <= 0:
             raise FormatError(f"{d}: invalid pixel scale")
-        keys = {}
+        keys: dict[int, int] = {}
         gk = self.tags.get(34735)
         if gk:
             for i in range(4, 4 + 4 * gk[3], 4):
@@ -408,11 +468,11 @@ class GeoTiff:
                 "reproject to EPSG:4326 or a WGS84 UTM zone (EPSG:326xx/327xx)")
 
     # -- pixel access ----------------------------------------------------
-    def col_row(self, x, y):
+    def col_row(self, x: float, y: float) -> tuple[float, float]:
         """Fractional pixel-centre coordinates of CRS position (x, y)."""
         return (x - self.x_c0) / self.sx, (self.y_c0 - y) / self.sy
 
-    def _block(self, idx):
+    def _block(self, idx: int) -> Samples:
         if idx in self._blocks:
             return self._blocks[idx]
         if idx >= len(self.offsets):
@@ -427,7 +487,7 @@ class GeoTiff:
         self._cache_bytes += nbytes
         return vals
 
-    def _decode_block(self, idx):
+    def _decode_block(self, idx: int) -> Samples:
         cap = self.block_bytes
         count = self.counts[idx]
         if self.compression == 1:
@@ -455,7 +515,7 @@ class GeoTiff:
         rows = n // self.block_w
         return self._unpredict(raw, rows)
 
-    def _unpredict(self, raw, rows):
+    def _unpredict(self, raw: bytes, rows: int) -> Samples:
         """Decoded samples as a compact native ``array.array`` (bounded memory)."""
         w, b = self.block_w, self.bytes_ps
         if self.predictor == 1:
@@ -467,17 +527,17 @@ class GeoTiff:
                 vals.byteswap()
             return vals
         if self.predictor == 2:
-            vals = list(struct.unpack(f"{self.bo}{w * rows}{self.fmt}", raw))
+            deltas = list(struct.unpack(f"{self.bo}{w * rows}{self.fmt}", raw))
             mask = (1 << self.bps) - 1
             signed = self.sample_format == 2
             for r in range(rows):
                 base = r * w
                 for c in range(1, w):
-                    v = (vals[base + c] + vals[base + c - 1]) & mask
+                    v = (deltas[base + c] + deltas[base + c - 1]) & mask
                     if signed and v >= 1 << (self.bps - 1):
                         v -= 1 << self.bps
-                    vals[base + c] = v
-            return array.array(self.fmt, vals)
+                    deltas[base + c] = v
+            return array.array(self.fmt, deltas)
         # predictor 3: byte-wise differencing over byte planes (MSB plane first)
         out = array.array(self.fmt)
         rowbytes = w * b
@@ -492,7 +552,7 @@ class GeoTiff:
             out.extend(struct.unpack(f">{w}{self.fmt}", bytes(be)))
         return out
 
-    def pixel(self, col, row):
+    def pixel(self, col: int, row: int) -> float | None:
         if not (0 <= col < self.width and 0 <= row < self.height):
             return None
         bx, by = col // self.block_w, row // self.block_h
@@ -508,7 +568,7 @@ class GeoTiff:
             return None
         return v
 
-    def check_window(self, col0, row0, col1, row1):
+    def check_window(self, col0: int, row0: int, col1: int, row1: int) -> None:
         if col1 < col0 or row1 < row0:
             return
         if (col1 - col0 + 1) * (row1 - row0 + 1) > MAX_RASTER_PIXELS_READ:

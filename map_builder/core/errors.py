@@ -1,5 +1,7 @@
 """Error types. Every data-acquisition failure is surfaced, never papered over."""
 
+from __future__ import annotations
+
 
 class MapBuilderError(Exception):
     """Base error; ``str(err)`` is safe to show to users (no secrets)."""
@@ -12,10 +14,10 @@ class AreaError(MapBuilderError):
 class NetworkError(MapBuilderError):
     """Transport/HTTP failure."""
 
-    def __init__(self, message, status=None, url=None):
+    def __init__(self, message: str, status: int | None = None, url: str | None = None) -> None:
         super().__init__(message)
-        self.status = status
-        self.url = url
+        self.status: int | None = status
+        self.url: str | None = url
 
 
 class AuthError(NetworkError):
