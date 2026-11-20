@@ -65,21 +65,21 @@ def _corners_match(a, b):
     return True
 
 
-def _cli_package(out_dir, textures):
+def _cli_package(out_dir, textures, osm=OSM, tag=''):
     from map_builder.core.generate import PlanOptions
     from map_builder.core.geodesy import Area
     from map_builder.core.pipeline import Settings, build_package
 
     s = Settings(elevation_source="file", elevation_file=DEM, elevation_crs="EPSG:4326",
                  elevation_vertical_datum="SYNTHETIC", elevation_license=DEM_LICENSE, osm_source="file",
-                 osm_file=OSM, osm_license=OSM_LICENSE, terrain_spacing=10.0, heightfield_spacing=2.0,
+                 osm_file=osm, osm_license=OSM_LICENSE, terrain_spacing=10.0, heightfield_spacing=2.0,
                  plan_options=PlanOptions(seed=1))
-    pkg = os.path.join(out_dir, f"tex_cli_{int(textures)}.mbmap")
+    pkg = os.path.join(out_dir, f"tex_cli{tag}_{int(textures)}.mbmap")
     build_package(Area(LAT, LON, WIDTH, HEIGHT), s, pkg, "tex", textures=textures)
     return pkg
 
 
-def _generate(pkg, textures):
+def _generate(pkg, textures, osm=OSM):
     for ob in list(bpy.data.objects):
         bpy.data.objects.remove(ob, do_unlink=True)
     s = bpy.context.scene.map_builder
@@ -87,7 +87,7 @@ def _generate(pkg, textures):
     s.centre_lat, s.centre_lon, s.width, s.height = str(LAT), str(LON), WIDTH, HEIGHT
     s.elevation_source, s.elevation_file = "file", DEM
     s.elevation_crs, s.elevation_vertical_datum, s.elevation_license = "EPSG:4326", "SYNTHETIC", DEM_LICENSE
-    s.osm_source, s.osm_file = "file", OSM
+    s.osm_source, s.osm_file = "file", osm
     s.terrain_spacing, s.heightfield_spacing, s.seed = 10.0, 2.0, 1
     s.package_name, s.export_path, s.textures = "tex", pkg, textures
     res, err = run_op(bpy.ops.map_builder.generate)
@@ -235,3 +235,41 @@ def run(out_dir):
           "textures: off->on has the same materials and UV seams as the CLI package")
     check(not [w for w in json.loads(mx["report.json"])["blender_export"]["warnings"] if "UV" in w],
           "textures: off->on needs no fallback-UV warning for generated objects")
+
+    # --- D86 round 3: an L-shaped gable generated with Textures off exports with the CLI's UVs ------------------
+    from checks_roofs import HIPPED_L_OSM
+    lg = os.path.join(out_dir, "tex_l_gabled.osm")
+    with open(lg, "w", encoding="utf-8") as fh:
+        fh.write(HIPPED_L_OSM.replace('v="hipped"', 'v="gabled"'))
+    cli_l = _members(_cli_package(out_dir, True, lg, "_l"))
+    _, _, lnodes = _node_prims(cli_l["visual/map.glb"])
+    s = _generate(os.path.join(out_dir, "tex_bl_l.mbmap"), False, lg)
+    s.textures = True
+    lx = os.path.join(out_dir, "tex_bl_l_x.mbmap")
+    s.export_path = lx
+    res, err = run_op(bpy.ops.map_builder.export)
+    check(res == {"FINISHED"}, f"textures: L gable off->on export ({err or 'ok'})")
+    _, _, bnodes = _node_prims(_members(lx)["visual/map.glb"])
+    roofs = [k for k in lnodes if k[1] == "MB Roof"]
+    check(bool(roofs) and all(k in bnodes and _corners_match(bnodes[k], lnodes[k]) and _corners_match(lnodes[k], bnodes[k])
+                              for k in roofs if k in bnodes) and all(k in bnodes for k in roofs),
+          f"textures: L gable generated off, exported on has the CLI's MB Roof UVs ({roofs})")
+
+    # --- D86 round 3: only generated meshes use stored UVs; an untagged mesh with a generated material gets
+    # the world-XY fallback and one warning ------------------------------------------------------------------------
+    s = _generate(os.path.join(out_dir, "tex_bl_u.mbmap"), False)
+    me = bpy.data.meshes.new("plain_cube")
+    me.from_pydata(v, [], f)
+    me.materials.append(bpy.data.materials["MB Facade"])
+    a = me.color_attributes.new(COLOR_ATTR, "FLOAT_COLOR", "CORNER")
+    a.data.foreach_set("color", [0.5, 0.5, 0.5, 1.0] * len(me.loops))
+    cube = bpy.data.objects.new("plain_cube", me)
+    next(iter(s.export_collection.children)).objects.link(cube)
+    s.textures = True
+    pc = os.path.join(out_dir, "tex_bl_plain.mbmap")
+    s.export_path = pc
+    res, err = run_op(bpy.ops.map_builder.export)
+    rep = json.loads(_members(pc)["report.json"])
+    uvw = [w for w in rep["blender_export"]["warnings"] if "UV" in w]
+    check(res == {"FINISHED"} and len(uvw) == 1 and "plain_cube" in uvw[0],
+          f"textures: an untagged no-UV cube with a generated material gets one fallback warning ({uvw})")

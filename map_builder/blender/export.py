@@ -31,7 +31,6 @@ import bpy
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
-from ..core.mesh import MeshData
 from ..core import textures as tex
 from ..core import uv as core_uv
 from ..core.pipeline import filter_passage_probes, merge_dropped
@@ -194,28 +193,6 @@ def _is_plain_generated(mat: bpy.types.Material | None) -> bool:
             and not mat.get("mb_textured"))
 
 
-def _generated_loop_uvs(ob: bpy.types.Object, me: bpy.types.Mesh, ev: bpy.types.Object) -> array[float] | None:
-    """Per-loop UVs from core/uv.py for a generated mesh that was built with Textures off (it has no UV map),
-    so exporting with Textures on gives the same UVs as generating with it on."""
-    names = [(s.material.get("mb_material") or s.material.name) if s.material else DEFAULT_MATERIAL
-             for s in ev.material_slots] or [DEFAULT_MATERIAL]
-    md = MeshData(ob.name)
-    md.vertices = [tuple(v.co) for v in me.vertices]
-    md.faces = [list(p.vertices) for p in me.polygons]
-    md.face_materials = [min(max(p.material_index, 0), len(names) - 1) for p in me.polygons]
-    md.materials = names
-    core_uv.assign_uvs(md, tuple(ev.matrix_world.translation))
-    if md.face_uvs is None:
-        return None
-    buf = array("f", bytes(4 * 2 * len(me.loops)))
-    for p, fuv in zip(me.polygons, md.face_uvs):
-        if fuv is None:
-            continue
-        for k in range(p.loop_total):
-            buf[2 * (p.loop_start + k)], buf[2 * (p.loop_start + k) + 1] = fuv[k]
-    return buf
-
-
 def _color_reader(me: bpy.types.Mesh, attr_name: str | None) -> ColorReader | None:
     """Function(tri_index) -> linear rgb averaged over the triangle's corners, or None if missing."""
     ca = me.color_attributes
@@ -324,8 +301,6 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
         if layer is not None:
             uvbuf = array("f", bytes(4 * 2 * len(me.loops)))
             layer.uv.foreach_get("vector", uvbuf)
-        elif textures and any(_is_plain_generated(s.material) for s in ev.material_slots):
-            uvbuf = _generated_loop_uvs(ob, me, ev)
         verts = [(co[3 * i], co[3 * i + 1], co[3 * i + 2]) for i in range(nv)]
         tris = [(tv[3 * t], tv[3 * t + 1], tv[3 * t + 2]) for t in range(nt)]
         slot_specs: list[tuple[str, ColorReader | None, str | None]] = []
@@ -336,7 +311,11 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
             mname, spec, attr, mwarn = material_spec(slot.material, textures)
             tname = mname if spec is not None and len(spec) > 3 else None   # texture lookup key (material name)
             if spec is not None:
-                mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
+                if tname is not None and slot.material.as_pointer() not in mat_names and \
+                        len(materials.get(mname, (0, 0, 0, 0))) > 3:   # generated datablocks of one texture share its name
+                    mat_names[slot.material.as_pointer()] = mname
+                else:
+                    mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
                 materials.setdefault(mname, spec)
             reader: ColorReader | None = None
             if attr is not None:

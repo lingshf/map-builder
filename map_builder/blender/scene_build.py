@@ -158,8 +158,9 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
 
     The new mesh is appended to ``created_meshes`` right after it is allocated (before anything that can
     fail), so the caller's single rollback path owns its removal; likewise new materials go to
-    ``created_materials``. ``textures`` adds the UV map (core/uv.py, ``origin`` = the object location) and the
-    textured materials."""
+    ``created_materials``.     The UV map (core/uv.py, ``origin`` = the object
+        location) is always stored, even with Textures off, so a later export with Textures on matches the CLI;
+        ``textures`` selects the textured materials."""
     me = bpy.data.meshes.new(name or md.name)
     created_meshes.append(me)
     me.from_pydata(md.vertices, [], md.faces)
@@ -169,7 +170,7 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
     for m in md.materials:
         me.materials.append(ensure_material(m, created_materials, textures, created_images))
     me.polygons.foreach_set("material_index", md.face_materials)
-    uvsrc = uv_source(md, origin) if textures else None
+    uvsrc = uv_source(md, origin)
     if uvsrc is not None:
         flat: list[float] = []
         for face, fuv in zip(uvsrc.faces, uvsrc.face_uvs):
