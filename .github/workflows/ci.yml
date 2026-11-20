@@ -80,8 +80,9 @@ jobs:
           dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$GITHUB_WORKSPACE/examples/synthetic_sample.mbmap" | tee "$RUNNER_TEMP/sample-cs.txt"
           test "$(tail -n 1 "$RUNNER_TEMP/sample-cs.txt")" = "OK"
           dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$RUNNER_TEMP/v030/examples/synthetic_sample.mbmap" > "$RUNNER_TEMP/base-cs.txt" 2>&1 || true
-          diff <(grep -i '^warning' "$RUNNER_TEMP/sample-cs.txt") <(grep -i '^warning' "$RUNNER_TEMP/base-cs.txt")-Validator on the textured fixture (glTFast proxy, D66)
-      - name: glTF-Validator on the textured fixture (glTFast proxy, D66)-Validator on the textured fixture (glTFast proxy, D66)        run: |
+          diff <(grep -i '^warning' "$RUNNER_TEMP/sample-cs.txt") <(grep -i '^warning' "$RUNNER_TEMP/base-cs.txt")
+      - name: glTF-Validator on the textured fixture (glTFast proxy, D66)
+        run: |
           set -e
           python3 -m tests.make_textured_fixture "$RUNNER_TEMP/textured2.mbmap"
           python3 -c "import zipfile,sys,os; open(os.path.join(os.environ['RUNNER_TEMP'],'fixture.glb'),'wb').write(zipfile.ZipFile(sys.argv[1]).read('visual/map.glb'))" "$RUNNER_TEMP/textured2.mbmap"
