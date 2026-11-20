@@ -1,6 +1,8 @@
 """Pure-Python parts of the demo kit (no Blender, no network): presets, package reading, probe results,
 the static three.js viewer bundle, its zip and summary.md. Imported by run_demo.py and by the unit test."""
 
+from __future__ import annotations
+
 import json
 import math
 import os
@@ -8,7 +10,8 @@ import re
 import shutil
 import sys
 import zipfile
-
+from collections.abc import Sequence
+from typing import Any, NotRequired, TypedDict, cast
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 if REPO not in sys.path:
@@ -32,14 +35,53 @@ class DemoError(ValueError):
     pass
 
 
-def _vec3(v, what):
+class PresetArea(TypedDict):
+    lat: float
+    lon: float
+    width_m: float
+    height_m: float
+
+
+class PresetCamera(TypedDict):
+    name: str
+    eye: list[float]
+    target: list[float]
+    lens_mm: NotRequired[float]
+
+
+class Preset(TypedDict):
+    name: str
+    area: PresetArea
+    cameras: list[PresetCamera]
+
+
+class Package(TypedDict):
+    manifest: dict[str, Any]  # Any: validated package manifest JSON, read through many nested optional keys (open schema owned by core.package)
+    package_id: str
+    glb: bytes
+    collision: bytes
+    notices: str
+
+
+class Probe(TypedDict):
+    id: str
+    kind: str
+    feature: str
+    radius_m: float
+    path_map: list[list[float]]
+    path_gltf: list[list[float]]
+    result: str
+    blocked_by: list[str]
+
+
+def _vec3(v: object, what: str) -> list[float]:
     if (not isinstance(v, (list, tuple)) or len(v) != 3
             or not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in v)):
         raise DemoError(f"{what} must be three finite numbers")
     return [float(x) for x in v]
 
 
-def validate_preset(p):
+def validate_preset(p: object) -> Preset:
     if not isinstance(p, dict):
         raise DemoError("preset must be a JSON object")
     name = p.get("name")
@@ -55,7 +97,7 @@ def validate_preset(p):
     cams = p.get("cameras")
     if not isinstance(cams, list) or not 1 <= len(cams) <= MAX_CAMERAS:
         raise DemoError(f"cameras must list 1..{MAX_CAMERAS} entries")
-    seen = set()
+    seen: set[str] = set()
     for c in cams:
         if not isinstance(c, dict) or not isinstance(c.get("name"), str) or not NAME_RE.fullmatch(c["name"]):
             raise DemoError("camera name must match [a-z0-9][a-z0-9-]*")
@@ -67,10 +109,10 @@ def validate_preset(p):
         lens = c.get("lens_mm", 35)
         if not isinstance(lens, (int, float)) or isinstance(lens, bool) or not 8 <= lens <= 300:
             raise DemoError(f"camera {c['name']} lens_mm must be in [8, 300]")
-    return p
+    return cast("Preset", p)
 
 
-def load_preset(name_or_path):
+def load_preset(name_or_path: str) -> Preset:
     path = name_or_path if name_or_path.lower().endswith(".json") else os.path.join(PRESET_DIR, name_or_path + ".json")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -80,7 +122,7 @@ def load_preset(name_or_path):
     return validate_preset(p)
 
 
-def read_package(path, verify=True):
+def read_package(path: str, verify: bool = True) -> Package:
     """{'manifest', 'package_id', 'glb', 'collision', 'notices'} of a .mbmap. With ``verify`` (the default; only
     tests turn it off) the package validator's bounded, hash-verified reader must accept the package first,
     so a damaged or mismatched package never yields images or probe results under its identity."""
@@ -101,15 +143,16 @@ def read_package(path, verify=True):
         raise DemoError(f"cannot read package: {type(e).__name__}")
 
 
-def probe_results(pkg):
+def probe_results(pkg: Package) -> list[Probe]:
     """Passage probes with PASS / BLOCKED / UNCHECKED against the package collision. Like the validator, all
     probes share one PASSAGE_QUERY_BUDGET; once it runs out the remaining probes are UNCHECKED (reported,
     never passed or blocked, and the demo carries on)."""
     col = read_collision(pkg["collision"])
     left = PASSAGE_QUERY_BUDGET
-    out = []
+    out: list[Probe] = []
     for p in pkg["manifest"].get("passage_probes", []):
-        hits, status = [], None
+        hits: list[int] = []
+        status: str
         try:
             res = capsule_hits(col, p["path_map"], p["radius_m"], max_work=left, result=True)
             left -= res.work
@@ -127,12 +170,19 @@ def probe_results(pkg):
     return out
 
 
-def probes_json(pkg, probes):
+class ViewerDocument(TypedDict):
+    package_id: str
+    name: object   # passed through from the manifest unchanged
+    area: object
+    passage_probes: list[Probe]
+
+
+def probes_json(pkg: Package, probes: Sequence[Probe]) -> ViewerDocument:
     m = pkg["manifest"]
     return {"package_id": pkg["package_id"], "name": m.get("name"), "area": m.get("area"),
-            "passage_probes": probes}
+            "passage_probes": list(probes)}
 
-def write_viewer(out_dir, pkg, probes):
+def write_viewer(out_dir: str, pkg: Package, probes: Sequence[Probe]) -> str:
     """out_dir/viewer/ (+ viewer.zip): static three.js page, map.glb, probes.json, NOTICES.txt, vendor/.
     The zip listing is deterministic (sorted names, fixed timestamps)."""
     vdir = os.path.join(out_dir, "viewer")
@@ -158,13 +208,13 @@ def write_viewer(out_dir, pkg, probes):
     return zpath
 
 
-def zip_listing(zpath):
+def zip_listing(zpath: str) -> list[str]:
     with zipfile.ZipFile(zpath) as z:
         return sorted(z.namelist())
 
 
-def render_names(preset, with_before):
-    names = []
+def render_names(preset: Preset, with_before: bool) -> list[str]:
+    names: list[str] = []
     for c in preset["cameras"]:
         names.append(f"render-{c['name']}-after.png")
         if with_before:
@@ -172,7 +222,8 @@ def render_names(preset, with_before):
     return names
 
 
-def summary_md(preset, pkg, probes, renders, panel_note, before_pkg=None):
+def summary_md(preset: Preset, pkg: Package, probes: Sequence[Probe], renders: Sequence[str], panel_note: str,
+               before_pkg: Package | None = None) -> str:
     m = pkg["manifest"]
     lines = [f"# Demo summary: {preset['name']}", "",
              f"* package: `{m.get('name')}`, id `{pkg.get('package_id')}`, format {m.get('schema_version')}",

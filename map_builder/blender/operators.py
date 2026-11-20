@@ -6,7 +6,11 @@ the report Text ('MapBuilder Report') is written only after a successful operati
 report is never overwritten by a failure.
 """
 
+from __future__ import annotations
+
 import os
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import bpy
 
@@ -18,16 +22,21 @@ from ..core.pipeline import Settings, generate_plan
 from . import export as mb_export
 from .scene_build import build_scene, write_report_text
 from .sources import (SettingsInputError, format_report, migrate_legacy_centre, needs_network, parse_degrees,
-                      redact_diagnostics, reject_credentials, settings_kwargs)
+                      redact_diagnostics, reject_credentials, settings_kwargs, UiValues)
+
+if TYPE_CHECKING:
+    import bpy.types
+
+    from .props import MB_Settings
 
 REPORT_TEXT = "MapBuilder Report"
 
 
-def _abspath(p):
+def _abspath(p: str) -> str:
     return os.path.abspath(bpy.path.abspath(p)) if p else ""
 
 
-def fail(op, headline, problems=()):
+def fail(op: bpy.types.Operator, headline: str, problems: Sequence[object] = ()) -> set[str]:
     """Report a cancelled operation without touching the scene: console gets every problem, the operator
     report the headline plus the first problem."""
     problems = redact_diagnostics([str(p) for p in problems])
@@ -38,7 +47,7 @@ def fail(op, headline, problems=()):
     return {"CANCELLED"}
 
 
-def ui_values(s):
+def ui_values(s: MB_Settings) -> UiValues:
     return {"elevation_source": s.elevation_source, "elevation_file": _abspath(s.elevation_file),
             "elevation_crs": s.elevation_crs, "elevation_vertical_datum": s.elevation_vertical_datum,
             "elevation_license": s.elevation_license, "terrain_spacing": s.terrain_spacing,
@@ -47,21 +56,21 @@ def ui_values(s):
             "package_name": s.package_name, "dsm_correction": s.dsm_correction}
 
 
-def make_settings(s):
+def make_settings(s: MB_Settings) -> Settings:
     kw = settings_kwargs(ui_values(s), os.environ)
     kw["plan_options"] = PlanOptions(buildings=s.buildings, roads=s.roads, trees=s.trees, scatter=s.scatter,
                                      max_trees=s.max_trees, seed=s.seed)
     return Settings(**kw)
 
 
-def make_area(s):
+def make_area(s: MB_Settings) -> Area:
     if s.area_mode == "BBOX":
         return Area.from_bbox(s.bbox_south, s.bbox_west, s.bbox_north, s.bbox_east)
     migrate_legacy_centre(s)
     return Area(parse_degrees(s.centre_lat, "Latitude"), parse_degrees(s.centre_lon, "Longitude"), s.width, s.height)
 
 
-def online_access_problem(values):
+def online_access_problem(values: Mapping[str, object]) -> str | None:
     """Error text if a network source is selected while Blender's online access is disabled."""
     if needs_network(values) and not getattr(bpy.app, "online_access", True):
         names = [n for n, on in (("Copernicus elevation", values["elevation_source"] == "copernicus"),
@@ -79,7 +88,7 @@ class MB_OT_generate(bpy.types.Operator):
                      "(existing content is never changed or deleted)"
     bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self, context):
+    def execute(self, context: bpy.types.Context) -> set[str]:
         s = context.scene.map_builder
         name = s.package_name.strip() or "map"
         problem = online_access_problem(ui_values(s))
@@ -114,7 +123,7 @@ class MB_OT_export(bpy.types.Operator):
     bl_description = "Export the edited map (final evaluated geometry, modifiers applied) as a validated " \
                      ".mbmap package; on failure the previous package is kept"
 
-    def execute(self, context):
+    def execute(self, context: bpy.types.Context) -> set[str]:
         s = context.scene.map_builder
         name = s.package_name.strip() or "map"
         try:
@@ -140,7 +149,7 @@ class MB_OT_validate(bpy.types.Operator):
     bl_label = "Validate Package"
     bl_description = "Validate an existing .mbmap package (hashes, schema, visual/collision consistency)"
 
-    def execute(self, context):
+    def execute(self, context: bpy.types.Context) -> set[str]:
         try:
             path = mb_export.resolve_path(context.scene.map_builder.export_path)
         except MapBuilderError as e:
@@ -157,11 +166,11 @@ class MB_OT_validate(bpy.types.Operator):
 classes = (MB_OT_generate, MB_OT_export, MB_OT_validate)
 
 
-def register():
+def register() -> None:
     for c in classes:
         bpy.utils.register_class(c)
 
 
-def unregister():
+def unregister() -> None:
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

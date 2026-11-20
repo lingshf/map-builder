@@ -8,14 +8,24 @@ entries come from the core, which reduces endpoints to their origin, and :func:`
 it with the core credential policy before creating anything.
 """
 
+from __future__ import annotations
+
 import json
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.glb import node_scale
-from .sources import check_persistable
+from .sources import JsonMapping, check_persistable
+
+if TYPE_CHECKING:
+    import bpy.types
+
+    from ..core.generate import ScenePlan
+    from ..core.mesh import MeshData
 
 COLOR_ATTR = "mb_color"
 META_KEY = "mb_map"
@@ -23,14 +33,14 @@ META_VERSION = 1
 
 # Structure classes (bridge/tunnel/structure) go to their own sub-collections whatever the generator names;
 # their materials are added to the generator's table here, so a structure feature needs no change elsewhere.
-CLASS_COLLECTIONS = {"bridge": "Bridges", "tunnel": "Tunnels", "structure": "Structures"}
-STRUCTURE_MATERIALS = {
+CLASS_COLLECTIONS: dict[str, str] = {"bridge": "Bridges", "tunnel": "Tunnels", "structure": "Structures"}
+STRUCTURE_MATERIALS: dict[str, tuple[tuple[float, float, float], float, float]] = {
     "MB Concrete": ((0.8, 0.8, 0.8), 0.9, 0.0),   # deck sides, piers, headwalls
     "MB Tunnel": ((0.8, 0.8, 0.8), 0.95, 0.0),    # tube walls
 }
 
 
-def ensure_material(name, created=None):
+def ensure_material(name: str, created: list[bpy.types.Material] | None = None) -> bpy.types.Material:
     """The generated material ``name``; reuses an existing generated one (tagged ``mb_material``), never
     modifies or adopts a user material that happens to have the same name."""
     mat = bpy.data.materials.get(name)
@@ -57,7 +67,8 @@ def ensure_material(name, created=None):
     return mat
 
 
-def mesh_from_data(md, name, created_materials, created_meshes):
+def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.types.Material],
+                   created_meshes: list[bpy.types.Mesh]) -> bpy.types.Mesh:
     """Blender mesh with exactly the plan's faces (the generator's closed, CCW-outward shells).
 
     The new mesh is appended to ``created_meshes`` right after it is allocated (before anything that can
@@ -73,7 +84,7 @@ def mesh_from_data(md, name, created_materials, created_meshes):
         me.materials.append(ensure_material(m, created_materials))
     me.polygons.foreach_set("material_index", md.face_materials)
     attr = me.color_attributes.new(COLOR_ATTR, "FLOAT_COLOR", "CORNER")
-    cols = []
+    cols: list[float] = []
     for poly in me.polygons:
         r, g, b = md.face_colors[poly.index]
         cols.extend((r, g, b, 1.0) * poly.loop_total)
@@ -84,7 +95,7 @@ def mesh_from_data(md, name, created_materials, created_meshes):
     return me
 
 
-def unique_collection_name(base):
+def unique_collection_name(base: str) -> str:
     if base not in bpy.data.collections:
         return base
     k = 1
@@ -93,7 +104,8 @@ def unique_collection_name(base):
     return f"{base}.{k:03d}"
 
 
-def build_scene(context, plan, sources, map_name):
+def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[JsonMapping],
+                map_name: str) -> bpy.types.Collection:
     """Instantiate ``plan`` in a NEW collection linked to the scene. Everything that will be saved in the
     .blend (collection metadata, object names and provenance) is first checked with the core credential
     policy; then all datablocks are created and linked last. If anything fails, the datablocks created here
@@ -101,7 +113,7 @@ def build_scene(context, plan, sources, map_name):
     was."""
     area = plan.area
     frame = area.frame
-    meta = {
+    meta: dict[str, object] = {
         "version": META_VERSION,
         "map_name": map_name,
         "area": {"lat": frame.lat0, "lon": frame.lon0, "width_m": area.width, "height_m": area.height},
@@ -116,12 +128,15 @@ def build_scene(context, plan, sources, map_name):
                                     "collection": spec.collection, "provenance": spec.provenance}
                                    for spec in plan.objects]})
     meta_json = json.dumps(meta, sort_keys=True, allow_nan=False)
-    created_objects, created_meshes, created_colls, created_mats = [], [], [], []
+    created_objects: list[bpy.types.Object] = []
+    created_meshes: list[bpy.types.Mesh] = []
+    created_colls: list[bpy.types.Collection] = []
+    created_mats: list[bpy.types.Material] = []
     try:
         root = bpy.data.collections.new(unique_collection_name(f"MapBuilder {map_name}"))
         created_colls.append(root)
-        subs = {}
-        shared = {}
+        subs: dict[str, bpy.types.Collection] = {}
+        shared: dict[str, bpy.types.Mesh] = {}
         for spec in plan.objects:
             coll_name = CLASS_COLLECTIONS.get(spec.mb_class, spec.collection)
             coll = subs.get(coll_name)
@@ -163,7 +178,7 @@ def build_scene(context, plan, sources, map_name):
     return root
 
 
-def write_report_text(name, text):
+def write_report_text(name: str, text: str) -> bpy.types.Text:
     """Write the report to a Text block (only our own report Text is reused and overwritten)."""
     t = bpy.data.texts.get(name)
     if t is None or not t.get("mb_report"):

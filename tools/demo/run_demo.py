@@ -7,14 +7,22 @@ Cycles CPU only (EEVEE/Workbench need OpenGL, which headless dev machines lack).
 renders and also runs under plain Python (``py -3 tools/demo/run_demo.py --bundle-only ...``).
 """
 
+from __future__ import annotations
+
 import argparse
 import math
 import os
 import sys
 import tempfile
+from collections.abc import Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import demo_bundle as db  # noqa: E402
+
+if TYPE_CHECKING:
+    from bpy.types import Object, Scene
 
 PANEL_LIMIT = ("`panel.png` not produced: no Mesa (llvmpipe) Blender copy configured, and background Blender has "
                "no window or OpenGL context (see tools/demo/README.md, \"Panel screenshot\")")
@@ -22,7 +30,7 @@ PANEL_DONE = "`panel.png`: the real Map Builder sidebar in Blender's UI (softwar
 ENV_MESA = "MB_DEMO_BLENDER_MESA"
 
 
-def find_mesa_blender(flag):
+def find_mesa_blender(flag: str | None) -> str | None:
     """Path of the separate Blender copy that has Mesa's opengl32.dll next to blender.exe, or None."""
     path = flag or os.environ.get(ENV_MESA)
     if path and os.path.isfile(path) and os.path.isfile(os.path.join(os.path.dirname(path), "opengl32.dll")):
@@ -30,7 +38,7 @@ def find_mesa_blender(flag):
     return None
 
 
-def run_panel(blender, pkg, preset, out_dir):
+def run_panel(blender: str, pkg: db.Package, preset: db.Preset, out_dir: str) -> tuple[bool, str]:
     """Screenshot of the add-on panel via panel_shot.py in a windowed Blender; (ok, note)."""
     import subprocess
     area = preset["area"]
@@ -55,7 +63,7 @@ def run_panel(blender, pkg, preset, out_dir):
     return False, "`panel.png` not produced: the Mesa Blender run did not write a screenshot"
 
 
-def parse_args(argv):
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--preset", required=True, help="preset name in tools/demo/presets or a path to a .json")
     ap.add_argument("--after", required=True, help="current .mbmap")
@@ -68,11 +76,11 @@ def parse_args(argv):
     return ap.parse_args(argv)
 
 
-def _clear_scene(bpy):
+def _clear_scene(bpy: ModuleType) -> None:
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
-def _setup_render(bpy, scene):
+def _setup_render(bpy: ModuleType, scene: Scene) -> None:
     scene.render.engine = "CYCLES"
     c = scene.cycles
     c.device = "CPU"
@@ -103,7 +111,7 @@ def _setup_render(bpy, scene):
     ob.rotation_euler = (math.radians(40), 0, math.radians(150))
 
 
-def _use_vertex_colors(bpy):
+def _use_vertex_colors(bpy: ModuleType) -> None:
     """The GLB carries colour in COLOR_0; feed the (default) colour attribute into Base Color."""
     for mat in bpy.data.materials:
         nt = mat.node_tree
@@ -114,14 +122,14 @@ def _use_vertex_colors(bpy):
         nt.links.new(vc.outputs["Color"], bsdf.inputs["Base Color"])
 
 
-def _look_at(cam_ob, eye, target):
+def _look_at(cam_ob: Object, eye: Sequence[float], target: Sequence[float]) -> None:
     from mathutils import Vector
     cam_ob.location = Vector(eye)
     d = Vector(target) - Vector(eye)
     cam_ob.rotation_euler = d.to_track_quat("-Z", "Y").to_euler()
 
 
-def render_package(pkg, preset, suffix, out_dir):
+def render_package(pkg: db.Package, preset: db.Preset, suffix: str, out_dir: str) -> list[str]:
     import bpy
     _clear_scene(bpy)
     scene = bpy.context.scene
@@ -137,7 +145,7 @@ def render_package(pkg, preset, suffix, out_dir):
     scene.collection.objects.link(cam_ob)
     scene.camera = cam_ob
     cam.clip_end = 5000
-    names = []
+    names: list[str] = []
     for c in preset["cameras"]:
         cam.lens = c.get("lens_mm", 35)
         _look_at(cam_ob, c["eye"], c["target"])
@@ -149,7 +157,7 @@ def render_package(pkg, preset, suffix, out_dir):
     return names
 
 
-def main(argv):
+def main(argv: Sequence[str]) -> None:
     a = parse_args(argv)
     preset = db.load_preset(a.preset)
     os.makedirs(a.out, exist_ok=True)

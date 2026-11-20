@@ -17,13 +17,6 @@ module = [
     "map_builder.core.mesh",
     "map_builder.core.uv",
     "mbmap_cli",
-    "map_builder.blender.*",
-    "map_builder",
-    "demo_bundle",
-    "make_probe_sample",
-    "panel_shot",
-    "run_demo",
-    "parity_frozen",
 ]
 ignore_errors = true
 

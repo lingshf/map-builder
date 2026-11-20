@@ -4,6 +4,10 @@ The pure-Python core (``map_builder.core``) never imports ``bpy`` so it can be
 unit-tested and used headlessly; Blender modules are imported in register().
 """
 
+from __future__ import annotations
+
+from types import ModuleType
+
 bl_info = {
     "name": "Map Builder",
     "author": "map-builder contributors",
@@ -14,10 +18,10 @@ bl_info = {
     "category": "Import-Export",
 }
 
-_modules = None
+_modules: tuple[ModuleType, ...] | None = None
 
 
-def register():
+def register() -> None:
     global _modules
     from .blender import operators, props, ui
     _modules = (props, operators, ui)
@@ -25,7 +29,7 @@ def register():
         m.register()
 
 
-def unregister():
+def unregister() -> None:
     global _modules
     for m in reversed(_modules or ()):
         m.unregister()

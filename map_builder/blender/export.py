@@ -17,19 +17,32 @@ How it works (see bake.py for the GLB generation decision):
    triangles via the core's atomic ``export_package`` (a failure keeps the previous package).
 """
 
+from __future__ import annotations
+
 import json
 import math
 import os
 from array import array
+from collections.abc import Callable, Collection, Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
 from ..core.pipeline import filter_passage_probes, merge_dropped
-from .bake import (DEFAULT_MATERIAL, WHITE, ExportError, bake_object, degenerate_count, export_baked,
-                   export_name_clashes, outside_area, principled_omissions)
+from .bake import (DEFAULT_MATERIAL, WHITE, BakedObject, Edits, ExportError, MaterialSpec, SocketInfo, SocketValue,
+                   bake_object,
+                   degenerate_count, export_baked, export_name_clashes, outside_area, principled_omissions)
 from .scene_build import META_KEY
+from .sources import JsonObject
+
+if TYPE_CHECKING:
+    import bpy.types
+
+    from ..core.package import ValidationResult
+
+ColorReader = Callable[[Sequence[int], Sequence[int]], tuple[float, ...]]
 
 UNSUPPORTED_TYPES = {"CURVE", "FONT", "SURFACE", "META", "CURVES", "POINTCLOUD", "VOLUME", "GPENCIL",
                      "GREASEPENCIL"}
@@ -39,11 +52,12 @@ ATTRIBUTE_NODES = {"VERTEX_COLOR", "ATTRIBUTE"}
 __all__ = ["ExportError", "collect", "export_map", "find_map_root", "read_meta"]
 
 
-def map_roots(scene):
+def map_roots(scene: bpy.types.Scene) -> list[bpy.types.Collection]:
     return [c for c in scene.collection.children_recursive if META_KEY in c]
 
 
-def find_map_root(context, collection=None):
+def find_map_root(context: bpy.types.Context,
+                  collection: bpy.types.Collection | None = None) -> bpy.types.Collection:
     """The map collection to export: ``collection`` if given, else the map collection containing the
     active collection, else the only map collection in the scene."""
     roots = map_roots(context.scene)
@@ -64,7 +78,7 @@ def find_map_root(context, collection=None):
                           "(or make it active in the Outliner)")
 
 
-def read_meta(root):
+def read_meta(root: bpy.types.Collection) -> tuple[JsonObject, Area]:
     try:
         meta = json.loads(root[META_KEY])
         a = meta["area"]
@@ -84,11 +98,12 @@ def read_meta(root):
 
 # --- materials ------------------------------------------------------------------------------------------
 
-def _linked_from(sock):
+def _linked_from(sock: bpy.types.NodeSocket) -> bpy.types.Node | None:
     return sock.links[0].from_node if sock.is_linked and sock.links else None
 
 
-def material_spec(mat):
+def material_spec(mat: bpy.types.Material | None,
+                  ) -> tuple[str, MaterialSpec | None, str | None, list[str]]:
     """(export name, (rgb, roughness, metallic), colour attribute name or None or "" (= render colour
     attribute), [warnings]) for a Blender material. Supported: a Principled BSDF whose Base Color is a
     constant or comes from a Color Attribute / Attribute node; anything else is approximated and warned,
@@ -96,8 +111,9 @@ def material_spec(mat):
     anisotropy, thin film, other node-driven inputs, volume/displacement) is named in a warning."""
     if mat is None:
         return DEFAULT_MATERIAL, None, None, ["empty material slot (exported with the default grey material)"]
-    warnings = []
+    warnings: list[str] = []
     name = mat.name if mat.library is None else f"{mat.name} [{os.path.basename(mat.library.filepath)}]"
+    rgb: tuple[float, ...]
     if not mat.use_nodes or mat.node_tree is None:
         rgb = tuple(float(c) for c in mat.diffuse_color[:3])
         return name, (rgb, float(mat.roughness), float(mat.metallic)), None, warnings
@@ -111,7 +127,7 @@ def material_spec(mat):
         rgb = tuple(float(c) for c in mat.diffuse_color[:3])
         return name, (rgb, float(mat.roughness), float(mat.metallic)), None, warnings
     base = bsdf.inputs["Base Color"]
-    attr = None
+    attr: str | None = None
     src = _linked_from(base)
     if src is None:
         rgb = tuple(float(c) for c in base.default_value[:3])
@@ -124,7 +140,7 @@ def material_spec(mat):
         warnings.append(f"material {mat.name!r}: Base Color comes from a {src.bl_label} node output other than a "
                         "colour attribute's Color (textures, scalar outputs and node networks are not exported); "
                         "exported with the socket's constant colour")
-    values = []
+    values: list[float] = []
     for key in ("Roughness", "Metallic"):
         sock = bsdf.inputs[key]
         if sock.is_linked:
@@ -133,14 +149,14 @@ def material_spec(mat):
     alpha = bsdf.inputs.get("Alpha")
     if alpha is not None and (alpha.is_linked or alpha.default_value < 1.0):
         warnings.append(f"material {mat.name!r}: transparency is not exported (opaque)")
-    sockets = {}
+    sockets: dict[str, SocketInfo] = {}
     for sock in bsdf.inputs:
         if getattr(sock, "enabled", True):
-            v = getattr(sock, "default_value", None)
+            v: SocketValue = getattr(sock, "default_value", None)
             sockets[sock.name] = (sock.is_linked, tuple(v) if hasattr(v, "__len__") else v)
     omitted = principled_omissions(sockets)
     omitted += [f"material output {key} driven by nodes" for key in ("Volume", "Displacement")
-                if key in out.inputs and out.inputs[key].is_linked]
+                if key in out.inputs and out.inputs[key].is_linked]  # type: ignore[union-attr]  # out is set: bsdf is not None above
     if omitted:
         warnings.append(f"material {mat.name!r}: not exported (omitted): {', '.join(omitted)}")
     if not all(math.isfinite(v) for v in (*rgb, *values)):
@@ -148,7 +164,7 @@ def material_spec(mat):
     return name, (rgb, values[0], values[1]), attr, warnings
 
 
-def _color_reader(me, attr_name):
+def _color_reader(me: bpy.types.Mesh, attr_name: str | None) -> ColorReader | None:
     """Function(tri_index) -> linear rgb averaged over the triangle's corners, or None if missing."""
     ca = me.color_attributes
     if attr_name:
@@ -163,7 +179,7 @@ def _color_reader(me, attr_name):
     layer.data.foreach_get("color", buf)
     corner = layer.domain == "CORNER"
 
-    def read(tri_loops, tri_verts):
+    def read(tri_loops: Sequence[int], tri_verts: Sequence[int]) -> tuple[float, ...]:
         idx = tri_loops if corner else tri_verts
         return tuple(sum(buf[4 * i + k] for i in idx) / 3.0 for k in range(3))
 
@@ -172,8 +188,8 @@ def _color_reader(me, attr_name):
 
 # --- collection & baking ---------------------------------------------------------------------------------
 
-def _instancing_parents(depsgraph, pointers):
-    found = set()
+def _instancing_parents(depsgraph: bpy.types.Depsgraph, pointers: Collection[int]) -> set[int]:
+    found: set[int] = set()
     for inst in depsgraph.object_instances:
         if inst.is_instance and inst.parent is not None:
             parent = inst.parent.original.as_pointer()
@@ -182,21 +198,24 @@ def _instancing_parents(depsgraph, pointers):
     return found
 
 
-def _collection_enabled(lc):
+def _collection_enabled(lc: bpy.types.LayerCollection) -> bool:
     """A layer collection whose content is rendered and visible: not excluded from the view layer, not
     hidden in it, and its collection neither disabled in viewports nor for rendering."""
     c = lc.collection
     return not (lc.exclude or lc.hide_viewport or c.hide_viewport or c.hide_render)
 
 
-def collection_eligibility(view_layer, root):
+def collection_eligibility(view_layer: bpy.types.ViewLayer,
+                           root: bpy.types.Collection) -> tuple[set[int], dict[int, list[str]], bool]:
     """(pointers of objects reachable through at least one fully enabled collection path from the scene
     collection *through* ``root``, {object pointer: sorted names of disabled collections on its paths},
     whether ``root`` itself is on an enabled path). Every path counts: a collection (and so an object)
     can be linked in several places; ancestors of ``root`` are part of the path."""
     root_ptr = root.as_pointer()
-    eligible, blocked, root_enabled = set(), {}, False
-    stack = [(view_layer.layer_collection, False)]
+    eligible: set[int] = set()
+    blocked: dict[int, set[str]] = {}
+    root_enabled = False
+    stack: list[tuple[bpy.types.LayerCollection, bool]] = [(view_layer.layer_collection, False)]
     while stack:
         lc, inside = stack.pop()
         here = lc.collection.as_pointer() == root_ptr
@@ -213,12 +232,12 @@ def collection_eligibility(view_layer, root):
     return eligible, {k: sorted(v) for k, v in blocked.items()}, root_enabled
 
 
-def _label(ob):
+def _label(ob: bpy.types.Object) -> str:
     """Unambiguous object label for diagnostics (linked objects carry their library: 'Name [lib.blend]')."""
     return ob.name_full
 
 
-def _export_material_name(mat_names, key, name):
+def _export_material_name(mat_names: dict[int, str], key: int, name: str) -> str:
     """Unique, deterministic export name per material datablock (``key``): distinct datablocks whose display
     names coincide (e.g. a linked 'X' from lib.blend and a local 'X [lib.blend]') get ' (2)', ' (3)', ... in
     first-seen order, so one never silently takes the other's factors. The default material's name is
@@ -233,7 +252,8 @@ def _export_material_name(mat_names, key, name):
     return unique
 
 
-def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
+def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, materials: dict[str, MaterialSpec],
+                      warnings: list[str], mat_names: dict[int, str]) -> BakedObject:
     ev = ob.evaluated_get(depsgraph)
     me = ev.to_mesh()
     try:
@@ -249,7 +269,7 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
         me.loop_triangles.foreach_get("material_index", tm)
         verts = [(co[3 * i], co[3 * i + 1], co[3 * i + 2]) for i in range(nv)]
         tris = [(tv[3 * t], tv[3 * t + 1], tv[3 * t + 2]) for t in range(nt)]
-        slot_specs = []
+        slot_specs: list[tuple[str, ColorReader | None]] = []
         if not len(ev.material_slots):
             warnings.append(f"{ob.name}: no material (exported with the default grey material)")
             slot_specs.append((DEFAULT_MATERIAL, None))
@@ -258,7 +278,7 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
             if spec is not None:
                 mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
                 materials.setdefault(mname, spec)
-            reader = None
+            reader: ColorReader | None = None
             if attr is not None:
                 reader = _color_reader(me, attr)
                 if reader is None:
@@ -267,7 +287,8 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
             for w in mwarn:
                 warnings.append(f"{ob.name}: {w}")
             slot_specs.append((mname, reader))
-        tri_mats, tri_cols = [], []
+        tri_mats: list[str] = []
+        tri_cols: list[tuple[float, ...]] = []
         last = len(slot_specs) - 1
         for t in range(nt):
             mname, reader = slot_specs[min(max(tm[t], 0), last)]
@@ -278,6 +299,7 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
     finally:
         ev.to_mesh_clear()
     prov_raw = ob.get("mb_provenance")
+    prov: dict[str, object]
     try:
         prov = json.loads(prov_raw) if isinstance(prov_raw, str) and prov_raw else {}
         if not isinstance(prov, dict):
@@ -295,7 +317,9 @@ def _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names):
     return baked
 
 
-def collect(context, root, depsgraph, area=None, generated_ids=()):
+def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: bpy.types.Depsgraph,
+            area: Area | None = None, generated_ids: Iterable[str] = (),
+            ) -> tuple[list[BakedObject], dict[str, MaterialSpec], JsonObject]:
     """Bake the map collection. Returns (baked objects, materials, export report). Raises ExportError
     listing every blocking problem (nothing is written in that case).
 
@@ -305,10 +329,12 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
     scene collection through the map collection is enabled in the view layer (not excluded, hidden or
     disabled for rendering, ancestors included) and the object itself is visible and render-enabled;
     excluded objects are listed in the report."""
-    errors, warnings, excluded = [], [], []
+    errors: list[str] = []
+    warnings: list[str] = []
+    excluded: list[dict[str, str]] = []
     view_layer = context.view_layer
     generated = set(generated_ids)
-    unique = {}
+    unique: dict[int, bpy.types.Object] = {}
     for ob in root.all_objects:
         unique.setdefault(ob.as_pointer(), ob)
     objects = sorted(unique.values(), key=lambda o: (o.name, o.name_full))
@@ -319,11 +345,13 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
             "it is not linked into this scene"
         raise ExportError([f"map collection {root.name!r} is not enabled in view layer {view_layer.name!r}: {why}"])
     instancers = _instancing_parents(depsgraph, set(unique))
-    baked, materials, names = [], {}, []
-    mat_names = {}                              # material datablock pointer -> unique export name
+    baked: list[BakedObject] = []
+    materials: dict[str, MaterialSpec] = {}
+    names: list[tuple[str, str]] = []
+    mat_names: dict[int, str] = {}              # material datablock pointer -> unique export name
     for ob in objects:
         ptr = ob.as_pointer()
-        reason = None
+        reason: str | None = None
         if ptr not in eligible:
             reason = (f"only in collection(s) excluded, hidden or disabled for rendering "
                       f"({', '.join(blocked.get(ptr, [])) or 'outside the enabled map collections'})")
@@ -381,7 +409,7 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
                          + (" ..." if len(excluded) > 5 else "") + ")" if excluded else ""))
     if errors:
         raise ExportError(errors)
-    report = {"warnings": warnings, "excluded_objects": excluded,
+    report: JsonObject = {"warnings": warnings, "excluded_objects": excluded,
               "mirrored_objects": [b.name for b in baked if b.mirrored],
               "objects": len(baked), "triangles": sum(len(b.triangles) for b in baked),
               "geometry": "depsgraph-evaluated meshes (modifiers applied) in world space; GLB and collision "
@@ -389,7 +417,7 @@ def collect(context, root, depsgraph, area=None, generated_ids=()):
     return baked, materials, report
 
 
-def resolve_path(path):
+def resolve_path(path: str) -> str:
     if not path:
         raise MapBuilderError("no export path set")
     if path.startswith("//") and not bpy.data.filepath:
@@ -401,7 +429,8 @@ def resolve_path(path):
     return out
 
 
-def export_map(context, path, name, heightfield_spacing=0.0, root=None):
+def export_map(context: bpy.types.Context, path: str, name: str, heightfield_spacing: float = 0.0,
+               root: bpy.types.Collection | None = None) -> tuple[JsonObject, ValidationResult, JsonObject, Edits]:
     """Export the map collection to ``path``. Returns (manifest, ValidationResult, report, edits) where
     ``report`` is the package report (generation report + ``blender_export`` diagnostics + ``edits``).
     Raises ExportError / MapBuilderError (incl. PackageError); the previous package then stays as it was."""

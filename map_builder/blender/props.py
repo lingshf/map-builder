@@ -9,20 +9,28 @@ field was cleared (never the value). Generate/Export re-check the values, which 
 written as raw custom properties (no update callback).
 """
 
+# No ``from __future__ import annotations`` here: Blender evaluates the class annotations below to find the properties.
+# mypy: disable-error-code="valid-type"
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from ..core.geodesy import DEFAULT_MAX_SIDE_M, MIN_SIDE_M
 from .sources import ENV_OVERPASS_URL, FIELD_LABELS, has_credential, migrate_legacy_centre
 
+if TYPE_CHECKING:
+    import bpy.types
 
-def _is_map_collection(self, coll):
+
+def _is_map_collection(self: "MB_Settings", coll: "bpy.types.Collection") -> bool:
     return "mb_map" in coll
 
 
-def _scrub(prop):
+def _scrub(prop: str) -> Callable[["MB_Settings", "bpy.types.Context"], None]:
     """``update`` callback clearing a credential-like value of ``prop`` before it can be saved."""
-    def update(self, context):
+    def update(self: "MB_Settings", context: "bpy.types.Context") -> None:
         label = FIELD_LABELS.get(prop, prop)
         if has_credential(getattr(self, prop)):
             setattr(self, prop, "")
@@ -114,19 +122,19 @@ class MB_Settings(bpy.types.PropertyGroup):
 
 
 @bpy.app.handlers.persistent
-def _migrate_on_load(*_):
+def _migrate_on_load(*_: object) -> None:
     for scene in bpy.data.scenes:
         migrate_legacy_centre(scene.map_builder)
 
 
-def register():
+def register() -> None:
     bpy.utils.register_class(MB_Settings)
     bpy.types.Scene.map_builder = PointerProperty(type=MB_Settings)
     if _migrate_on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_migrate_on_load)
 
 
-def unregister():
+def unregister() -> None:
     if _migrate_on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_migrate_on_load)
     del bpy.types.Scene.map_builder
