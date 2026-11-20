@@ -26,9 +26,11 @@ omits the optional heightfield. `--seed` controls procedural scatter.
 disables it. Auto is off for local elevation.
 
 `--textures` (the default) embeds the CC0 facade, roof, road and terrain
-textures with world-scaled UVs; `--no-textures` writes the plain-colour GLB of
-earlier versions. The collision (`.mbcol`) and heightfield are byte-identical
-either way, so a simulator sees the same physics. Both write package schema
+textures with world-scaled UVs; `--no-textures` writes a plain-colour GLB of
+the same v0.4.0 geometry (not the v0.3.0 roofs). The collision (`.mbcol`) and
+heightfield are byte-identical either way, so a simulator sees the same
+physics; the GLB, `manifest.json` (`asset_notices`), `NOTICES.txt` and
+therefore the `package_id` differ. Both write package schema
 2.1.0, which v0.3.0 readers still accept.
 
 `--created-utc` fixes the manifest timestamp for reproducible builds with the

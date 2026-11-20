@@ -13,9 +13,10 @@ authorization. Package schema is **2.1.0** (additive; v0.3.0 readers accept it).
 
 ### Added
 
-- **Gabled and hipped roofs on non-rectangular footprints** (#41, #48, #50). L, T, U, trapezoid and other simple
-  footprints up to 64 vertices (no courtyard) get a straight-skeleton roof: a sloped face on every footprint edge
-  for hipped, and vertical gable walls on the representable ends for gabled. Before, these roofs fell back to flat
+- **Gabled and hipped roofs on non-rectangular footprints** (#41, #48, #50). Eligible L, T, U, trapezoid and other
+  simple footprints up to 64 vertices (no courtyard) can get a straight-skeleton roof: a sloped face on every footprint edge
+  for hipped, and vertical gable walls on the representable ends for gabled. This is not every non-rectangular
+  roof; a valid simple footprint can still fall back. Before, these roofs fell back to flat
   or to a pyramid. Where a gable end cannot be represented (the ridge would meet the gable edge outside it, or the
   gable end would be a sliver), the roof falls back to **hipped** with that reason in `provenance.roof_shape`.
   `provenance.roof_construction` says how each roof was built. Skillion roofs were already built on any footprint
@@ -25,11 +26,14 @@ authorization. Package schema is **2.1.0** (additive; v0.3.0 readers accept it).
   `--textures` / `--no-textures`, Blender **Content > Textures**. The vertex colour is divided by each texture's
   mean albedo, so a textured face keeps its palette colour on average. The Textures setting at export decides the
   whole package (materials, UVs, images, notices), whatever it was at Generate (D86). In Blender the scene gets
-  packed images and UV maps; a mesh you add without UVs gets fallback UVs and one warning.
+  packed images and UV maps. When exporting with Textures on, a mesh you added that uses a generated textured
+  material but has no UV map gets world-XY fallback UVs and one warning per object. Textures off gives the
+  plain-colour look for the same v0.4.0 geometry, not the v0.3.0 roofs.
 - **Package schema 2.1.0**: optional UVs and embedded PNGs in the GLB, a top-level `asset_notices` list (name,
   attribution, licence, SHA-256 per image) and an "Assets" section in `NOTICES.txt`. The v0.3.0 Python validator
   and C# reader accept 2.1 packages and ignore both. `.mbcol` (format 2) and the heightfield (format 1) are
-  unchanged, and byte-identical with textures on or off.
+  unchanged, and byte-identical with textures on or off. The toggle changes the GLB, `manifest.json`
+  (`asset_notices`) and `NOTICES.txt`, and therefore the `package_id`.
 - **Texture licence**: the six textures are our own procedural work (`python -m tools.textures.make_textures`),
   dedicated to the public domain under CC0 1.0; see `map_builder/assets/textures/LICENSE-textures.txt`, which
   ships in the extension zip.
@@ -46,12 +50,15 @@ authorization. Package schema is **2.1.0** (additive; v0.3.0 readers accept it).
   comparable.
 - `roof:levels=0` with `roof:shape=hipped` or `pyramidal` and no `roof:height` no longer builds flat: the default
   roof height is used.
-- `roof:direction` follows OSM: it is the direction the slope faces, so a gabled ridge runs across it (D84).
+- `roof:direction` follows OSM: it is the direction the slope faces, and a gabled ridge perpendicular to it is the
+  target, not a guarantee (D84). On a skeleton gable the ridge bearing follows from the footprint; if no emitted
+  ridge is within 10° of perpendicular, `provenance.roof_direction` reports `approximate: ridge NNN° vs tagged DDD°`.
 - Packages report `generator.version` **0.4.0**, so the same inputs give a new `package_id`. With
   `--no-textures`, the Pittsburgh GLB, `.mbcol`, heightfield and report are byte-identical to v0.3.0. The
   committed synthetic sample was regenerated.
 - Typical size cost of textures: GLB +18.6 % (Pittsburgh) and +19.5 % (Munich) excluding the 511,404 bytes of
-  embedded images. Packages: Pittsburgh 4,258,810 -> 5,346,074 bytes, Munich 894,578 -> 1,587,709 bytes.
+  embedded images. Same-RC packages, untextured -> textured: Pittsburgh 4,258,810 -> 5,346,074 bytes, Munich
+  912,870 -> 1,587,709 bytes.
 
 ### Fixed
 

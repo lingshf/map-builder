@@ -21,9 +21,9 @@ flowchart TD
   H -->|No| E
   H -->|Yes| N[Optional inferred DSM correction]
   N --> I[Generate scene plan]
-  I --> R{Roof shape buildable?}
-  R -->|Yes| S[Roof as tagged, straight skeleton if not a rectangle]
-  R -->|No| U[Named fallback: hipped or flat]
+  I --> R{Roof shape buildable for this footprint?}
+  R -->|Yes| S[Roof as tagged: eligible non-rectangles use the straight skeleton]
+  R -->|No, even for a valid simple ring| U[Named fallback: hipped or flat]
   S --> V{Textures on?}
   U --> V
   V -->|Yes| W[CC0 textured materials and UVs]

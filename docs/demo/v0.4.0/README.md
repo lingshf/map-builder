@@ -11,8 +11,9 @@ No UI is mocked. To reproduce, see [docs/DEMO.md](../../DEMO.md).
 Each Munich camera has three images, so each change is shown on its own:
 
 - **roofs**: v0.3.0 vs v0.4.0 with `--no-textures` (only the roofs differ);
-- **textures**: v0.4.0 with `--no-textures` vs v0.4.0 textured (only the
-  textures differ; collision is byte-identical).
+- **textures**: v0.4.0 with `--no-textures` vs v0.4.0 textured (same v0.4.0
+  geometry; only the appearance differs. Collision and heightfield are
+  byte-identical; the GLB, `manifest.json` and `NOTICES.txt` change).
 
 The close-up cameras ([munich-altstadt-v040.json](munich-altstadt-v040.json))
 are aimed at the buildings named in the S3 review.
@@ -67,8 +68,10 @@ was already built on any footprint in v0.3.0. Source: the S3 review, section
 | `bridge-under` | ![untextured](pittsburgh-bridge-under-v040-notex.png) | ![textured: concrete deck and piers](pittsburgh-bridge-under-v040.png) |
 | `tunnel-portal` | ![untextured](pittsburgh-tunnel-portal-v040-notex.png) | ![textured](pittsburgh-tunnel-portal-v040.png) |
 
-Untextured Pittsburgh is byte-identical to v0.3.0 apart from `manifest.json`,
-so the left column is also the v0.3.0 look.
+Untextured Pittsburgh is byte-identical to v0.3.0 apart from `manifest.json`
+(Pittsburgh has no roofs that v0.4.0 builds differently), so here the left
+column is also the v0.3.0 look. That is not true for Munich, where
+`--no-textures` keeps the new v0.4.0 roofs.
 
 ## The three.js viewer (textured)
 

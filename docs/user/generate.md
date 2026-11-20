@@ -112,7 +112,7 @@ OSM `roof:shape` is built as follows:
 | Shape | Footprints |
 |---|---|
 | flat, skillion | any, including courtyards |
-| hipped, gabled | any simple polygon up to 64 vertices, no courtyard (L, T, U, trapezoid...), from the straight skeleton (since v0.4.0; before, rectangles only) |
+| hipped, gabled | eligible simple polygons up to 64 vertices, no courtyard (L, T, U, trapezoid...), from the straight skeleton (since v0.4.0; before, rectangles only). An eligible footprint can still fall back; see below |
 | pyramidal, dome, onion | convex |
 | half-hipped, gambrel, mansard, round, saltbox | rectangles only |
 
@@ -120,7 +120,10 @@ A gabled roof on a non-rectangular footprint gets a vertical gable wall on
 each end the skeleton can represent. If an end cannot be represented (the
 ridge would meet the gable edge outside it, or the gable end would be a
 sliver), the roof falls back to **hipped**, not flat. `roof:direction` is the
-direction the slope faces, so the ridge runs across it. Roof orientation and
+direction the slope faces, and a ridge perpendicular to it is the target, not
+a guarantee: on a skeleton gable the ridge bearing follows from the footprint.
+If no emitted ridge is within 10° of perpendicular, `provenance.roof_direction`
+reports `approximate: ridge NNN° vs tagged DDD°`. Roof orientation and
 direction tags influence supported shapes. Unsupported or ill-fitting shapes
 fall back with `fallback:` provenance; inspect the report rather than assuming
 every tagged roof is reproduced. The synthetic sample's way/1043 demonstrates
@@ -144,7 +147,8 @@ fallback reason (follow-up S3-F1). Each building's `provenance.roof_shape` in
 roads and terrain CC0 base-colour textures (facade, roof tiles, flat-roof
 gravel, asphalt, grass, concrete) with world-scaled UVs. The vertex colour
 keeps each object's palette colour on average; the texture adds detail. Turn
-it off for the plain-colour look of earlier versions. Collision is the same
+it off for the plain-colour look with the same v0.4.0 geometry (it does not
+bring back earlier roofs). Collision is the same
 either way. The panel shows the CC0 attribution while Textures is on, and the
 CLI equivalent is `--textures` / `--no-textures`. What ends up in the package
 is decided at export; see [Export](export.md).
