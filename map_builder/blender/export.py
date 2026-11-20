@@ -19,9 +19,11 @@ How it works (see bake.py for the GLB generation decision):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import struct
 from array import array
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import TYPE_CHECKING
@@ -29,12 +31,15 @@ from typing import TYPE_CHECKING
 import bpy
 
 from ..core.errors import MapBuilderError
+from ..core.generate import MATERIALS
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
+from ..core import textures as tex
+from ..core import uv as core_uv
 from ..core.pipeline import filter_passage_probes, merge_dropped
 from .bake import (DEFAULT_MATERIAL, WHITE, BakedObject, Edits, ExportError, MaterialSpec, SocketInfo, SocketValue,
-                   bake_object,
-                   degenerate_count, export_baked, export_name_clashes, outside_area, principled_omissions)
-from .scene_build import META_KEY
+                   TriUV, bake_object, degenerate_count, export_baked, export_name_clashes, outside_area,
+                   principled_omissions)
+from .scene_build import COLOR_ATTR, META_KEY
 from .sources import JsonObject
 
 if TYPE_CHECKING:
@@ -102,10 +107,12 @@ def _linked_from(sock: bpy.types.NodeSocket) -> bpy.types.Node | None:
     return sock.links[0].from_node if sock.is_linked and sock.links else None
 
 
-def material_spec(mat: bpy.types.Material | None,
+def material_spec(mat: bpy.types.Material | None, textures: bool = True,
                   ) -> tuple[str, MaterialSpec | None, str | None, list[str]]:
-    """(export name, (rgb, roughness, metallic), colour attribute name or None or "" (= render colour
-    attribute), [warnings]) for a Blender material. Supported: a Principled BSDF whose Base Color is a
+    """(export name, (rgb, roughness, metallic[, png bytes]), colour attribute name or None or "" (= render
+    colour attribute), [warnings]) for a Blender material. A generated textured material (``mb_textured``, the
+    Image Texture x Vertex Colour tree of scene_build) is exported by its material name with the PNG of
+    ``core.textures`` (``textures`` on), or as a plain vertex-colour material (``textures`` off). Supported: a Principled BSDF whose Base Color is a
     constant or comes from a Color Attribute / Attribute node; anything else is approximated and warned,
     and every omitted Principled effect (emission, normal/bump, transmission, coat, sheen, subsurface,
     anisotropy, thin film, other node-driven inputs, volume/displacement) is named in a warning."""
@@ -129,7 +136,20 @@ def material_spec(mat: bpy.types.Material | None,
     base = bsdf.inputs["Base Color"]
     attr: str | None = None
     src = _linked_from(base)
-    if src is None:
+    gen = mat.get("mb_material")
+    generated_textured = (mat.library is None and mat.get("mb_textured") and gen in tex.TEXTURES
+                          and src is not None and src.type == "MIX_RGB")
+    generated_plain = (textures and _is_plain_generated(mat) and src is not None and src.type == "VERTEX_COLOR"
+                       and src.layer_name == COLOR_ATTR)
+    if generated_textured:
+        name = gen if textures else name
+        rgb = tuple(float(c) for c in base.default_value[:3]) if textures else WHITE
+        attr = COLOR_ATTR
+    elif generated_plain:   # generated with Textures off, exported with Textures on: the CLI's textured material
+        name = gen
+        rgb = tuple(_canonical(gen)[0])
+        attr = COLOR_ATTR
+    elif src is None:
         rgb = tuple(float(c) for c in base.default_value[:3])
     elif (src.type in ATTRIBUTE_NODES and (src.type == "VERTEX_COLOR" or src.attribute_type == "GEOMETRY")
           and base.links[0].from_socket.identifier == "Color"):
@@ -161,7 +181,57 @@ def material_spec(mat: bpy.types.Material | None,
         warnings.append(f"material {mat.name!r}: not exported (omitted): {', '.join(omitted)}")
     if not all(math.isfinite(v) for v in (*rgb, *values)):
         raise ExportError([f"material {mat.name!r}: non-finite colour/roughness/metallic"])
-    return name, (rgb, values[0], values[1]), attr, warnings
+    if generated_plain:
+        values = [_canonical(gen)[1], _canonical(gen)[2]]
+    spec: MaterialSpec = (rgb, values[0], values[1])
+    if (generated_textured or generated_plain) and textures:
+        spec = (rgb, values[0], values[1], tex.load(gen))
+    return name, spec, attr, warnings
+
+
+def _canonical(tag: str) -> tuple[tuple[float, ...], float, float]:
+    """The CLI writer's factors for the textured material ``tag``."""
+    return MATERIALS.get(tag, ((0.8, 0.8, 0.8), tex.roughness(tag), 0.0))
+
+
+def _material_key(base: str, spec: MaterialSpec) -> str:
+    """Export identity of a material (D88): a digest of its exact parameters (base name, PNG sha256, base colour
+    and the full float32 bits of roughness and metallic). Primitives share one glTF material iff their keys are
+    equal; the key never depends on object names, datablock pointers or iteration order."""
+    h = hashlib.sha256()
+    h.update(base.encode("utf-8") + b"\0")
+    png = bytes(spec[3]) if len(spec) > 3 else b""
+    h.update(hashlib.sha256(png).digest() if png else b"")
+    h.update(struct.pack(f"<{len(spec[0]) + 2}f", *spec[0], spec[1], spec[2]))   # Blender stores float32
+    return "mbkey:" + h.hexdigest()
+
+
+def _final_names(registry: dict[str, tuple[str, MaterialSpec]]) -> dict[str, str]:
+    """Unique display name per material key: the base name, plus an 8-hex suffix of the key when the base name is
+    used by another material of the export (user materials included) or is the reserved default name."""
+    count: dict[str, int] = {}
+    for base, _ in registry.values():
+        count[base] = count.get(base, 0) + 1
+    names: dict[str, str] = {}
+    taken = {DEFAULT_MATERIAL} | {b for b, n in count.items() if n == 1 and b != DEFAULT_MATERIAL}
+    for key in sorted(registry):
+        base = registry[key][0]
+        if count[base] == 1 and base != DEFAULT_MATERIAL:
+            names[key] = base
+            continue
+        digest = key[len("mbkey:"):]
+        n = 8
+        while f"{base} {digest[:n]}" in taken:
+            n += 4
+        names[key] = f"{base} {digest[:n]}"
+        taken.add(names[key])
+    return names
+
+
+def _is_plain_generated(mat: bpy.types.Material | None) -> bool:
+    """A generated (untextured-tree) material of a core.textures texture."""
+    return (mat is not None and mat.library is None and mat.get("mb_material") in tex.TEXTURES
+            and not mat.get("mb_textured"))
 
 
 def _color_reader(me: bpy.types.Mesh, attr_name: str | None) -> ColorReader | None:
@@ -237,23 +307,9 @@ def _label(ob: bpy.types.Object) -> str:
     return ob.name_full
 
 
-def _export_material_name(mat_names: dict[int, str], key: int, name: str) -> str:
-    """Unique, deterministic export name per material datablock (``key``): distinct datablocks whose display
-    names coincide (e.g. a linked 'X' from lib.blend and a local 'X [lib.blend]') get ' (2)', ' (3)', ... in
-    first-seen order, so one never silently takes the other's factors. The default material's name is
-    reserved."""
-    if key in mat_names:
-        return mat_names[key]
-    taken = set(mat_names.values()) | {DEFAULT_MATERIAL}
-    unique, k = name, 2
-    while unique in taken:
-        unique, k = f"{name} ({k})", k + 1
-    mat_names[key] = unique
-    return unique
-
-
 def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, materials: dict[str, MaterialSpec],
-                      warnings: list[str], mat_names: dict[int, str]) -> BakedObject:
+                      warnings: list[str], registry: dict[str, tuple[str, MaterialSpec]],
+                      textures: bool = True) -> BakedObject:
     ev = ob.evaluated_get(depsgraph)
     me = ev.to_mesh()
     try:
@@ -267,34 +323,67 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
         me.loop_triangles.foreach_get("loops", tl)
         tm = array("i", bytes(4 * nt))
         me.loop_triangles.foreach_get("material_index", tm)
+        layer = me.uv_layers.active if textures else None
+        uvbuf: array[float] | None = None
+        if layer is not None:
+            uvbuf = array("f", bytes(4 * 2 * len(me.loops)))
+            layer.uv.foreach_get("vector", uvbuf)
         verts = [(co[3 * i], co[3 * i + 1], co[3 * i + 2]) for i in range(nv)]
         tris = [(tv[3 * t], tv[3 * t + 1], tv[3 * t + 2]) for t in range(nt)]
-        slot_specs: list[tuple[str, ColorReader | None]] = []
+        slot_specs: list[tuple[str, ColorReader | None, str | None]] = []   # (material key or default name, ...)
         if not len(ev.material_slots):
             warnings.append(f"{ob.name}: no material (exported with the default grey material)")
-            slot_specs.append((DEFAULT_MATERIAL, None))
+            slot_specs.append((DEFAULT_MATERIAL, None, None))
         for slot in ev.material_slots:
-            mname, spec, attr, mwarn = material_spec(slot.material)
+            mname, spec, attr, mwarn = material_spec(slot.material, textures)
+            tname = mname if spec is not None and len(spec) > 3 else None   # texture lookup key (material name)
+            base = mname
             if spec is not None:
-                mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
-                materials.setdefault(mname, spec)
+                mname = _material_key(base, spec)
+                registry.setdefault(mname, (base, spec))
             reader: ColorReader | None = None
             if attr is not None:
                 reader = _color_reader(me, attr)
                 if reader is None:
-                    mwarn = mwarn + [f"material {mname!r} reads colour attribute {attr or '(render)'!r}, which "
+                    mwarn = mwarn + [f"material {base!r} reads colour attribute {attr or '(render)'!r}, which "
                                      "this mesh lacks; exported white"]
             for w in mwarn:
                 warnings.append(f"{ob.name}: {w}")
-            slot_specs.append((mname, reader))
+            slot_specs.append((mname, reader, tname))
         tri_mats: list[str] = []
         tri_cols: list[tuple[float, ...]] = []
+        tri_uvs: list[TriUV | None] = []
+        matrix = [list(row) for row in ev.matrix_world]
+        origin = (matrix[0][3], matrix[1][3], matrix[2][3])
+        fallback = 0
         last = len(slot_specs) - 1
         for t in range(nt):
-            mname, reader = slot_specs[min(max(tm[t], 0), last)]
+            mname, reader, tname = slot_specs[min(max(tm[t], 0), last)]
             tri_mats.append(mname)
-            tri_cols.append(reader(tl[3 * t:3 * t + 3], tv[3 * t:3 * t + 3]) if reader else WHITE)
-        matrix = [list(row) for row in ev.matrix_world]
+            col = reader(tl[3 * t:3 * t + 3], tv[3 * t:3 * t + 3]) if reader else WHITE
+            if tname is None:
+                tri_cols.append(col)
+                tri_uvs.append(None)
+                continue
+            tri_cols.append(core_uv.compensated_color(tname, col))
+            if uvbuf is not None:
+                c0, c1, c2 = tl[3 * t:3 * t + 3]
+                tri_uvs.append(((uvbuf[2 * c0], uvbuf[2 * c0 + 1]), (uvbuf[2 * c1], uvbuf[2 * c1 + 1]),
+                                (uvbuf[2 * c2], uvbuf[2 * c2 + 1])))
+            else:   # no UV map (a user mesh): world XY with the per-mesh tile offset, as core/uv does for terrain
+                size = tex.tile_size(tname)
+                off = core_uv.tile_offset(origin, size)
+                pts: list[tuple[float, float]] = []
+                for i in tv[3 * t:3 * t + 3]:
+                    x, y, z = verts[i]
+                    wx = matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z + matrix[0][3]
+                    wy = matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z + matrix[1][3]
+                    pts.append(((wx - off[0]) / size, (wy - off[1]) / size))
+                tri_uvs.append((pts[0], pts[1], pts[2]))
+                fallback += 1
+        if fallback:
+            warnings.append(f"{ob.name}: no UV map; {fallback} triangle(s) of textured materials got fallback "
+                            "UVs (world XY projection)")
         loose_edges = sum(1 for e in me.edges if e.is_loose) if nt else 0
     finally:
         ev.to_mesh_clear()
@@ -310,7 +399,8 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
     mb_id, mb_class = ob.get("mb_id"), ob.get("mb_class")
     baked = bake_object(ob.name, verts, tris, matrix, tri_mats, tri_cols,
                         mb_id=mb_id if isinstance(mb_id, str) else None,
-                        mb_class=mb_class if isinstance(mb_class, str) else None, provenance=prov)
+                        mb_class=mb_class if isinstance(mb_class, str) else None, provenance=prov,
+                        tri_uvs=tri_uvs if any(u is not None for u in tri_uvs) else None)
     if baked.unused_vertices or loose_edges:
         warnings.append(f"{ob.name}: {baked.unused_vertices} loose vertex(es) / {loose_edges} loose edge(s) "
                         "without faces are not exported")
@@ -318,7 +408,7 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
 
 
 def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: bpy.types.Depsgraph,
-            area: Area | None = None, generated_ids: Iterable[str] = (),
+            area: Area | None = None, generated_ids: Iterable[str] = (), textures: bool = True,
             ) -> tuple[list[BakedObject], dict[str, MaterialSpec], JsonObject]:
     """Bake the map collection. Returns (baked objects, materials, export report). Raises ExportError
     listing every blocking problem (nothing is written in that case).
@@ -348,7 +438,7 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
     baked: list[BakedObject] = []
     materials: dict[str, MaterialSpec] = {}
     names: list[tuple[str, str]] = []
-    mat_names: dict[int, str] = {}              # material datablock pointer -> unique export name
+    registry: dict[str, tuple[str, MaterialSpec]] = {}   # material key -> (base name, spec)
     for ob in objects:
         ptr = ob.as_pointer()
         reason: str | None = None
@@ -386,7 +476,7 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
                           "add a Realize Instances node")
             continue
         try:
-            b = _bake_mesh_object(ob, depsgraph, materials, warnings, mat_names)
+            b = _bake_mesh_object(ob, depsgraph, materials, warnings, registry, textures)
         except ExportError as e:
             errors.extend(e.errors)
             continue
@@ -402,6 +492,11 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
         baked.append(b)
         names.append((ob.name, _label(ob)))
     errors.extend(export_name_clashes(names))
+    final = _final_names(registry)
+    for b in baked:
+        b.tri_materials = [final.get(m, m) for m in b.tri_materials]
+    for key, (_, spec) in registry.items():
+        materials[final[key]] = spec
     if not baked and not errors:
         errors.append("nothing to export: no visible mesh objects with faces in the map collection"
                       + (f" ({len(excluded)} object(s) excluded: "
@@ -430,15 +525,17 @@ def resolve_path(path: str) -> str:
 
 
 def export_map(context: bpy.types.Context, path: str, name: str, heightfield_spacing: float = 0.0,
-               root: bpy.types.Collection | None = None) -> tuple[JsonObject, ValidationResult, JsonObject, Edits]:
+               root: bpy.types.Collection | None = None,
+               textures: bool = True) -> tuple[JsonObject, ValidationResult, JsonObject, Edits]:
     """Export the map collection to ``path``. Returns (manifest, ValidationResult, report, edits) where
     ``report`` is the package report (generation report + ``blender_export`` diagnostics + ``edits``).
+    ``textures`` embeds the procedural textures and TEXCOORD_0 (D60); off gives the untextured layout.
     Raises ExportError / MapBuilderError (incl. PackageError); the previous package then stays as it was."""
     out = resolve_path(path)
     root = root or find_map_root(context)
     meta, area = read_meta(root)
     depsgraph = context.evaluated_depsgraph_get()
-    baked, materials, export_report = collect(context, root, depsgraph, area, meta["generated_ids"])
+    baked, materials, export_report = collect(context, root, depsgraph, area, meta["generated_ids"], textures)
     report = json.loads(json.dumps(meta.get("report", {})))   # deep copy; never mutate the stored metadata
     report["warnings"] = list(report.get("warnings", [])) + export_report["warnings"]
     report["blender_export"] = export_report

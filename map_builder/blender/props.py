@@ -108,6 +108,9 @@ class MB_Settings(bpy.types.PropertyGroup):
                           description="Procedural (inferred) trees inside forests and parks")
     max_trees: IntProperty(name="Max trees", default=2000, min=0, max=20000)
     seed: IntProperty(name="Seed", default=1, min=0)
+    textures: BoolProperty(name="Textures", default=True,
+                           description="Procedural CC0 textures: UV-mapped materials on Generate and embedded "
+                                       "textures with TEXCOORD_0 on Export (off: the untextured package layout)")
 
     package_name: StringProperty(name="Map name", default="my_map", update=_scrub("package_name"))
     export_collection: PointerProperty(name="Map collection", type=bpy.types.Collection, poll=_is_map_collection,

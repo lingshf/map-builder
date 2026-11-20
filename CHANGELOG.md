@@ -13,6 +13,11 @@ All notable user-visible changes are recorded here, following
   and `asset_notices` carry the CC0 asset entry. COLOR_0 on textured faces is divided by the texture mean
   albedo so textures do not darken the map. `examples/synthetic_sample.mbmap` is regenerated textured.
 
+- Textures in Blender (S3-TEX-BLENDER): a **Textures** checkbox (default on) generates the textured materials with
+  UV maps and packed CC0 images in the scene (Image Texture x vertex colour divided by the mean albedo) and exports
+  the same UVs, texture bindings and asset notice as the CLI (schema 2.1.0). Meshes without UVs get fallback UVs and
+  one warning per object. The panel lists the CC0 attribution when Textures is on.
+
 ### Fixed
 
 - Blender and the CLI now emit the same passage probes for the same input. The Blender centre latitude/longitude

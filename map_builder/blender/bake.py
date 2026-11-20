@@ -23,8 +23,10 @@ triangles that go to collision, NOT by ``bpy.ops.export_scene.gltf``:
 * It also selects/activates nothing, so export never touches the user's selection or active object.
 
 Costs, accepted for v1: visuals are flat-shaded (face normals) with PBR factors (base colour, roughness,
-metallic) per material plus per-triangle vertex colours (COLOR_0) from a colour attribute; textures, UVs,
-custom normals and node networks beyond a Principled BSDF are not exported (reported as warnings).
+metallic) per material plus per-triangle vertex colours (COLOR_0) from a colour attribute. With textures on (D60)
+the procedural textures of ``core/textures`` are bound by material name and TEXCOORD_0 comes from the mesh's UV
+map (``tri_uvs``), laid out exactly like the CLI writer; custom normals and node networks beyond a Principled
+BSDF are not exported (reported as warnings).
 Instanced meshes (e.g. trees sharing one mesh) are written once per object.
 """
 
@@ -40,6 +42,7 @@ from ..core.errors import MapBuilderError
 from ..core.glb import write_glb
 from ..core.mesh import MeshData
 from ..core.pipeline import export_package, resolve_identities
+from ..core.textures import TEXTURES, asset_notice, load as load_texture
 from .sources import JsonMapping, JsonObject
 
 if TYPE_CHECKING:
@@ -48,8 +51,10 @@ if TYPE_CHECKING:
 
 Tri = tuple[int, int, int]
 Vec3 = tuple[float, float, float]
+Vec2 = tuple[float, float]
+TriUV = tuple[Vec2, Vec2, Vec2]
 Matrix = Sequence[Sequence[float]]
-MaterialSpec = tuple[tuple[float, ...], float, float]       # (rgb, roughness, metallic)
+MaterialSpec = tuple[tuple[float, ...], float, float] | tuple[tuple[float, ...], float, float, bytes]   # (rgb, roughness, metallic[, PNG])
 SocketValue = Any   # Any: Blender socket default (float, colour/vector tuple, None); principled_omissions deliberately tolerates malformed values (TypeError/ValueError), which a precise type would reject
 SocketInfo = tuple[bool, SocketValue]          # (is_linked, default value)
 
@@ -86,7 +91,8 @@ class BakedObject:
 
     def __init__(self, name: str, mb_id: str | None, mb_class: str | None, vertices: list[Vec3],
                  triangles: list[Tri], tri_materials: list[str], tri_colors: list[tuple[float, ...]],
-                 provenance: dict[str, object] | None = None, mirrored: bool = False) -> None:
+                 provenance: dict[str, object] | None = None, mirrored: bool = False,
+                 tri_uvs: Sequence[TriUV | None] | None = None) -> None:
         self.name = name
         self.mb_id = mb_id
         self.mb_class = mb_class
@@ -96,6 +102,7 @@ class BakedObject:
         self.tri_colors = tri_colors
         self.provenance: dict[str, object] = provenance or {}
         self.mirrored = mirrored
+        self.tri_uvs = tri_uvs                   # per triangle: 3 (u, v) corners in triangle order, or None
         self.unused_vertices = 0
 
 
@@ -132,7 +139,8 @@ def det3(m: Matrix) -> float:
 def bake_object(name: str, local_vertices: Sequence[Vec3], triangles: Iterable[Sequence[int]], matrix: Matrix,
                 tri_materials: Sequence[str] | None = None, tri_colors: Sequence[Sequence[float]] | None = None,
                 mb_id: str | None = None, mb_class: str | None = None,
-                provenance: dict[str, object] | None = None) -> BakedObject:
+                provenance: dict[str, object] | None = None,
+                tri_uvs: Sequence[TriUV | None] | None = None) -> BakedObject:
     """Bake an evaluated mesh into world space.
 
     ``local_vertices``: [(x, y, z)] object-space positions of the evaluated mesh; ``triangles``: index
@@ -162,9 +170,15 @@ def bake_object(name: str, local_vertices: Sequence[Vec3], triangles: Iterable[S
         if not (0 <= a < n and 0 <= b < n and 0 <= c < n):
             raise ExportError([f"{name}: triangle vertex index out of range (invalid mesh; run Mesh > Clean Up)"])
         tris.append((a, b, c))
+    if tri_uvs is not None:
+        if len(tri_uvs) != len(tris):
+            raise ExportError([f"{name}: per-triangle UV list does not match the triangle count"])
+        tri_uvs = list(tri_uvs)
     mirrored = det3(m) < 0
     if mirrored:
         tris = [(a, c, b) for a, b, c in tris]
+        if tri_uvs is not None:
+            tri_uvs = [None if u is None else (u[0], u[2], u[1]) for u in tri_uvs]
     # keep only vertices that triangles use (loose vertices/edges have no surface)
     used = sorted({i for t in tris for i in t})
     unused = n - len(used)
@@ -180,7 +194,7 @@ def bake_object(name: str, local_vertices: Sequence[Vec3], triangles: Iterable[S
         raise ExportError([f"{name}: per-triangle material/colour lists do not match the triangle count"])
     if not all(len(c) == 3 and all(math.isfinite(v) for v in c) for c in cols):
         raise ExportError([f"{name}: non-finite vertex colour"])
-    baked = BakedObject(name, mb_id, mb_class, world, tris, mats, cols, provenance, mirrored)
+    baked = BakedObject(name, mb_id, mb_class, world, tris, mats, cols, provenance, mirrored, tri_uvs)
     baked.unused_vertices = unused
     return baked
 
@@ -296,8 +310,9 @@ def package_parts(baked: Sequence[BakedObject], generated_ids: Collection[str],
             raise ExportError([f"{name}: no triangles to export"])
         md = MeshData(name)
         md.vertices = b.vertices
-        for t, mat, col in zip(b.triangles, b.tri_materials, b.tri_colors):
-            md.add_face(t, mat if mat in mats else DEFAULT_MATERIAL, col)
+        uvs = b.tri_uvs or [None] * len(b.triangles)
+        for t, mat, col, uv in zip(b.triangles, b.tri_materials, b.tri_colors, uvs):
+            md.add_face(t, mat if mat in mats else DEFAULT_MATERIAL, col, uv)
         nodes.append({"name": name, "mesh": md, "extras": {"mb_id": mb_id, "mb_class": cls}})
         cols.append(ColObject(name, mb_id, cls, b.vertices, b.triangles))
         info[name] = {"provenance": _provenance(b, mb_id, dup)}
@@ -317,8 +332,12 @@ def export_baked(path: str, name: str, area: Area, sources: Sequence[JsonMapping
     metadata) or one naming an unknown feature raises PackageError.
     Returns (manifest, ValidationResult, edits)."""
     glb, cols, info, edits = package_parts(baked, generated_ids, materials)
+    names_used = {m for b in baked for m in set(b.tri_materials)}
+    pngs = {bytes(spec[3]) for m, spec in (materials or {}).items() if len(spec) > 3 and m in names_used}
+    used = sorted(t for t in TEXTURES if pngs and load_texture(t) in pngs)   # the textures, not the export names
+    notices = [asset_notice(used)] if used else ()      # D65: the entry the CLI writes
     manifest, result = export_package(path, name, area, sources, glb, cols, report, edits=edits,
                                       blender_version=blender_version, heightfield_spacing=heightfield_spacing,
                                       object_info=info, created_utc=created_utc, passage_probes=passage_probes,
-                                      plan_ids=generated_ids)
+                                      plan_ids=generated_ids, asset_notices=notices)
     return manifest, result, edits
