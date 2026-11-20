@@ -5,6 +5,7 @@ import fnmatch
 import hashlib
 import io
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -154,12 +155,14 @@ def _excluded(path, patterns):
 
 def build_ships(build, rel):
     """Whether ``blender --command extension build`` with manifest ``[build]`` table ``build`` (None = no
-    table) ships the file ``rel``: a literal ``paths`` entry naming it or one of its directories, or else no
-    exclude pattern matching it or any of its parent directories (the build prunes excluded directories)."""
+    table) ships the file ``rel``. Either a ``paths`` entry names exactly that file, or no exclude pattern
+    matches the file or any of its parent directories (the build prunes excluded directories).
+
+    Blender writes each ``paths`` entry as-is with ``ZipFile.write(abs, entry)``. A directory entry adds
+    only the directory, not its contents. The arcname is normalised by ``os.path.normpath`` and has its
+    leading slashes stripped."""
     if build is not None and "paths" in build:
-        targets = {p.replace("\\", "/").strip("/").removeprefix("./") for p in build["paths"]}
-        parts = rel.split("/")
-        return any("/".join(parts[:i]) in targets for i in range(1, len(parts) + 1))
+        return any(posixpath.normpath(p.replace("\\", "/")).lstrip("/") == rel for p in build["paths"])
     patterns = BLENDER_DEFAULT_EXCLUDES if build is None else build.get("paths_exclude_pattern")
     if not patterns:   # Blender then skips dot-files only
         return not any(p.startswith(".") for p in rel.split("/"))
@@ -229,11 +232,14 @@ class ExtensionZipTest(unittest.TestCase):
         for label, pats in keeps.items():
             with self.subTest(label):
                 self.assertEqual(_missing_textures({"paths_exclude_pattern": pats}), [], pats)
-        self.assertEqual(_missing_textures({"paths": ["__init__.py", "assets/"]}), [])
-        self.assertEqual(_missing_textures({"paths": ["./assets/textures"]}), [])
-        self.assertEqual(_missing_textures({"paths": ["assets/textures/asphalt.png"]}), [n for n in ASSET_FILES
-                                                                                       if n != "asphalt.png"])
-        self.assertEqual(_missing_textures({"paths": ["core/", "assets/text"]}), ASSET_FILES)
+        # A directory in `paths` ships only the directory entry, not its files (checked against a real build).
+        for dirs in (["__init__.py", "assets/textures/"], ["assets/"], ["./assets/textures"], ["core/", "assets"]):
+            with self.subTest(paths=dirs):
+                self.assertEqual(_missing_textures({"paths": dirs}), ASSET_FILES)
+        every_file = ["__init__.py"] + [f"assets/textures/{n}" for n in ASSET_FILES]
+        self.assertEqual(_missing_textures({"paths": every_file}), [])
+        self.assertEqual(_missing_textures({"paths": [f"./assets/textures/{n}" for n in ASSET_FILES]}), [])
+        self.assertEqual(_missing_textures({"paths": every_file[:-1]}), ASSET_FILES[-1:])
         self.assertEqual(_missing_textures(None), [])
         self.assertEqual(_missing_textures({"paths_exclude_pattern": [".*", "assets/"]}), ASSET_FILES)
 
