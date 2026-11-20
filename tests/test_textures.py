@@ -99,17 +99,77 @@ class TextureSetTest(unittest.TestCase):
         self.assertEqual(asset_notice_problems([n]), [])
 
 
-def _manifest_excludes(rel, patterns):
-    """Whether ``rel`` (posix, relative to the add-on dir) matches a gitignore-style
-    ``paths_exclude_pattern`` from blender_manifest.toml."""
+# Blender's defaults when blender_manifest.toml has no [build] table (bl_pkg cli/blender_ext.py, 4.2).
+BLENDER_DEFAULT_EXCLUDES = ["__pycache__/", ".*", "/*.zip"]
+
+
+def _glob_regex(pattern):
+    """Regex for one gitignore-style pattern, applied to a path whose components are joined by newlines.
+    Same rules as Blender's extension build (``PathPatternMatch``): components use ``fnmatch`` and never
+    cross a separator; ``**`` spans any number of components; a leading ``/`` anchors the pattern at the
+    add-on root, otherwise it may start at any component (even if it contains a ``/``); a trailing ``/``
+    matches directories only."""
+    if pattern.startswith("\\!"):
+        pattern = pattern[1:]
+    pattern = re.sub("/+", "/", pattern)
+    pattern = re.sub("(/\\*\\*)+/?$", "/", pattern)
+    pattern = re.sub("^/?(\\*\\*/)+", "", pattern)
+    pattern = re.sub("(/\\*\\*)+/", "/**/", pattern)
+    anchored, dir_only = pattern.startswith("/"), pattern.endswith("/")
+    parts = pattern.strip("/").split("/")
+    out = ""
+    for i, part in enumerate(parts):
+        if part == "**":
+            continue
+        rx = fnmatch.translate(part).removesuffix("\\Z")
+        rx = "(?:" + rx[4:] if rx.startswith("(?s:") else rx
+        if i:
+            out += "(?:\n|\n(?s:.*)\n)?" if parts[i - 1] == "**" else "\n"
+        out += rx
+    return ("\\A" if anchored else "(?s:.*)^") + out + ("[\n/]" if dir_only else "/?\\Z")
+
+
+def _excluded(path, patterns):
+    """Whether Blender's exclude test rejects ``path`` (posix, relative; directories end with ``/``).
+    Consecutive patterns of the same sign form groups; scanning the groups in order, a matching
+    ``!`` group re-includes the path and stops, a matching positive group excludes it."""
+    groups = []
+    for p in patterns:
+        neg = p.startswith("!")
+        p = p.lstrip("!") if neg else p
+        if not p:
+            continue
+        if not groups or groups[-1][0] != neg:
+            groups.append((neg, []))
+        groups[-1][1].append(_glob_regex(p))
+    probe = path.rstrip("/").replace("/", "\n") + ("/" if path.endswith("/") else "")
+    result = False
+    for neg, rxs in groups:
+        if re.match("(?:" + "|".join(rxs) + ")", probe, re.M):
+            if neg:
+                return False
+            result = True
+    return result
+
+
+def build_ships(build, rel):
+    """Whether ``blender --command extension build`` with manifest ``[build]`` table ``build`` (None = no
+    table) ships the file ``rel``: a literal ``paths`` entry naming it or one of its directories, or else no
+    exclude pattern matching it or any of its parent directories (the build prunes excluded directories)."""
+    if build is not None and "paths" in build:
+        targets = {p.replace("\\", "/").strip("/").removeprefix("./") for p in build["paths"]}
+        parts = rel.split("/")
+        return any("/".join(parts[:i]) in targets for i in range(1, len(parts) + 1))
+    patterns = BLENDER_DEFAULT_EXCLUDES if build is None else build.get("paths_exclude_pattern")
+    if not patterns:   # Blender then skips dot-files only
+        return not any(p.startswith(".") for p in rel.split("/"))
     parts = rel.split("/")
-    for pat in patterns:
-        if pat.endswith("/"):
-            if pat.rstrip("/") in parts[:-1]:
-                return True
-        elif any(fnmatch.fnmatch(p, pat) for p in parts):
-            return True
-    return False
+    dirs = ["/".join(parts[:i]) + "/" for i in range(1, len(parts))]
+    return not any(_excluded(p, patterns) for p in dirs + [rel])
+
+
+def _missing_textures(build):
+    return [n for n in ASSET_FILES if not build_ships(build, f"assets/textures/{n}")]
 
 
 def _extension_zip():
@@ -117,6 +177,8 @@ def _extension_zip():
     on PATH (as in release.yml), else None."""
     env = os.environ.get("MB_EXTENSION_ZIP")
     if env:
+        if not os.path.isfile(env):
+            raise AssertionError(f"MB_EXTENSION_ZIP={env!r} is not a file")
         return env, None
     blender = shutil.which("blender")
     if not blender:
@@ -125,19 +187,55 @@ def _extension_zip():
     subprocess.run([blender, "--command", "extension", "build", "--source-dir", ADDON, "--output-dir", d.name],
                    check=True, capture_output=True)
     zips = [f for f in os.listdir(d.name) if f.endswith(".zip")]
-    return (os.path.join(d.name, zips[0]) if zips else None), d
+    if len(zips) != 1:
+        d.cleanup()
+        raise AssertionError(f"expected exactly one built zip, got {zips}")
+    return os.path.join(d.name, zips[0]), d
 
 
 class ExtensionZipTest(unittest.TestCase):
     def test_manifest_build_rules_keep_the_textures(self):
-        """AC4 (always runs): the manifest's [build] rules do not exclude any texture asset."""
+        """AC4 (always runs): the manifest's [build] rules ship every texture asset."""
         with open(os.path.join(ADDON, "blender_manifest.toml"), "rb") as f:
-            build = tomllib.load(f).get("build", {})
-        if "paths" in build:
-            self.assertTrue(any(p.strip("/") in ("assets", "assets/textures") for p in build["paths"]))
-        for name in ASSET_FILES:
-            self.assertFalse(_manifest_excludes(f"assets/textures/{name}", build.get("paths_exclude_pattern", [])),
-                             name)
+            build = tomllib.load(f).get("build")
+        self.assertFalse(build and "paths" in build and "paths_exclude_pattern" in build)
+        self.assertEqual(_missing_textures(build), [])
+
+    def test_build_rule_mutations_are_caught(self):
+        """The rule check is not vacuous: each of these [build] tables drops a texture, or keeps them all."""
+        drops = {
+            "exact file": ["__pycache__/", "assets/textures/asphalt.png"],
+            "anchored exact file": ["/assets/textures/asphalt.png"],
+            "glob": ["assets/textures/*.png"],
+            "basename glob": ["*.png"],
+            "single-char glob": ["asphal?.png"],
+            "double star": ["assets/**/*.png"],
+            "directory": ["assets/"],
+            "anchored directory": ["/assets/textures/"],
+            "nested directory name": ["textures/"],
+            "licence": ["LICENSE-*"],
+        }
+        for label, pats in drops.items():
+            with self.subTest(label):
+                self.assertNotEqual(_missing_textures({"paths_exclude_pattern": pats}), [], pats)
+        keeps = {
+            "repo manifest": ["__pycache__/", "*.pyc"],
+            "negated": ["*.png", "!assets/textures/*.png"],
+            "anchored elsewhere": ["/textures/"],
+            "file pattern is not a directory pattern": ["asphalt.png/"],
+            "other extension": ["*.jpg", "assets/textures/*.jpeg"],
+            "escaped bang": ["\\!asphalt.png"],
+        }
+        for label, pats in keeps.items():
+            with self.subTest(label):
+                self.assertEqual(_missing_textures({"paths_exclude_pattern": pats}), [], pats)
+        self.assertEqual(_missing_textures({"paths": ["__init__.py", "assets/"]}), [])
+        self.assertEqual(_missing_textures({"paths": ["./assets/textures"]}), [])
+        self.assertEqual(_missing_textures({"paths": ["assets/textures/asphalt.png"]}), [n for n in ASSET_FILES
+                                                                                       if n != "asphalt.png"])
+        self.assertEqual(_missing_textures({"paths": ["core/", "assets/text"]}), ASSET_FILES)
+        self.assertEqual(_missing_textures(None), [])
+        self.assertEqual(_missing_textures({"paths_exclude_pattern": [".*", "assets/"]}), ASSET_FILES)
 
     def test_built_zip_contains_the_textures(self):
         """AC4: the zip built as in release.yml lists every texture file (skipped without Blender/zip)."""
