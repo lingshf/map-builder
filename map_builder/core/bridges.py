@@ -18,6 +18,7 @@ MAX_GRADE = 0.08
 SAMPLE_STEP_M = 10.0
 END_SINK_M = 0.5
 MIN_LENGTH_M = 2.0
+AT_GRADE_TOL_M = 0.3   # an approach road whose surface is within this of the deck top surface (either side) joins it
 PROBE_RADIUS_M = 1.0
 DECK_PROBE_HEIGHT_M = 1.5
 UNDER_PROBE_HEIGHT_M = 1.5
@@ -476,6 +477,19 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
         deck_tris = _deck_triangles(mesh, n_path - 1, np_)
         pairs = _triangle_pairs(deck_tris, road_tris)
         records = _crossing_points(pairs, deck_tris, road_tris)
+    # an unsplit approach (S1-F1): the end runs where the straight deck line stays below the clearance over the
+    # terrain are ramp, not deck. A crossing there is exempt only where the road surface is at the deck's own
+    #     surface: |road z - deck top (ground-only profile)| is at most ``AT_GRADE_TOL_M``, two-sided. A road above that
+    # band is a conflict and one below it a real under-crossing; both are measured
+    # on the exported geometry (D39), wherever it lies and whichever nodes the roads share. A way whose line never
+    # clears the terrain has no real span, so nothing is exempt.
+    lo, hi = _approach_runs(line, ground, clearance)
+    if lo > 0 or hi < len(s) - 1:
+        top0 = deck_profile(s, lower, z_a, z_b)
+        records = [r for r in records
+                   if not all((node(m) < lo or node(m) > hi) for m, w in zip(r[0], r[1]) if w > 1e-9)
+                   or abs(sum(w * top0[node(m)] for m, w in zip(r[0], r[1])) - r[2])
+                   > AT_GRADE_TOL_M]
     for nodes, wd, rz, _rid in records:
         need = rz + clearance + DECK_THICKNESS_M
         for m, w in zip(nodes, wd):
@@ -515,7 +529,7 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
                      for v, (x, y, _) in enumerate(mesh.vertices)]
     road_color = (0.12, 0.12, 0.12) if f.tags.get("highway") not in g.FOOT else (0.35, 0.32, 0.28)
     _assign_materials(mesh, road_color, np_, surface)
-    under = _under_probe(f, xy, s, dirs, top, half, tz, g, z_off)
+    under = _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, (lo, hi))
     n_piers = 0
     if piers_max:
         piers = _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under, road_boxes)
@@ -669,12 +683,20 @@ def _add_pier(mesh, corners, zs, z_bottom, z_off, oz, cx, cy):
         mesh.add_face((lo[i], lo[j], hi[j], hi[i]), "MB Concrete", color)
 
 
-def _under_probe(f, xy, s, dirs, top, half, tz, g, z_off):
+def _approach_runs(top, ground, clearance):
+    """(first, last) deck sample whose clearance over the ground reaches ``clearance``; samples outside are the
+    approach end runs. No such sample: (0, last), i.e. no approach (a low bridge is not an approach)."""
+    ok = [i for i in range(len(top)) if top[i] - DECK_THICKNESS_M - ground[i] >= clearance - 1e-6]
+    return (ok[0], ok[-1]) if ok else (0, len(top) - 1)
+
+
+def _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, span=None):
     """The straight segment across the span at the interior sample with the most clearance under the deck
     (None below ``UNDER_PROBE_MIN_CLEARANCE_M``), level at the highest ground along it + 1.5 m."""
     reach = half + 3.0
     best = None
-    for i in range(1, len(xy) - 1):
+    lo, hi = span or (1, len(xy) - 2)
+    for i in range(max(lo, 1), min(hi, len(xy) - 2) + 1):
         g_max = _ground_max(tz, xy[i][0], xy[i][1], dirs[i], reach, SEGMENT_SAMPLE_M) + g.ROAD_LIFT_M
         clear = top[i] - DECK_THICKNESS_M - g_max
         # the most clearance; among equals (a raised plateau) the sample nearest the middle of the span
