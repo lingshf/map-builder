@@ -122,7 +122,7 @@ def _glob_regex(pattern):
     for i, part in enumerate(parts):
         if part == "**":
             continue
-        rx = fnmatch.translate(part).removesuffix("\\Z")
+        rx = re.sub(r"\\[Zz]$", "", fnmatch.translate(part))  # 3.14 ends with \z, earlier with \Z
         rx = "(?:" + rx[4:] if rx.startswith("(?s:") else rx
         if i:
             out += "(?:\n|\n(?s:.*)\n)?" if parts[i - 1] == "**" else "\n"
