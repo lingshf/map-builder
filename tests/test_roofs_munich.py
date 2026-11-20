@@ -431,6 +431,46 @@ class RoofCheckerTests(unittest.TestCase):
             warped = [(m, tuple((p[0], p[1], p[2] + dz) if p[:2] == (10, 0) else p for p in t)) for m, t in tris]
             self.assertTrue(rc.signature_problems("hipped", warped, outer, 3.0, 3.2), dz)
 
+    @staticmethod
+    def _subdivide(tris):
+        out = []
+        mid = lambda p, q: tuple((x + y) / 2 for x, y in zip(p, q))
+        for m, (a, b, c) in tris:
+            ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+            out += [(m, (a, ab, ca)), (m, (ab, b, bc)), (m, (ca, bc, c)), (m, (ab, bc, ca))]
+        return out
+
+    def test_slopes_signature_and_checks_do_not_depend_on_the_input_order(self):
+        import random
+        gtris, outer = gabled_box()
+        walls = [x for x in gtris if x[0] == rc.FACADE and max(p[2] for p in x[1]) <= 3.0]
+        hip, _ = self._shape_box("hipped")
+        cases = [("hipped", self._subdivide(_oriented(walls + hip, outer)), 5.0, True),
+                 ("gabled", self._subdivide(_oriented(gtris, outer)), 5.0, True),
+                 ("hipped", self._shape_box("hipped", rise=0.2)[0], 3.2, False)]
+
+        def outcome(shape, tris, top, closed):
+            slopes = rc.roof_slopes(tris, shape, outer, top)
+            canon = sorted(sorted(tuple(sorted(tuple(round(c, 6) for c in p) for p in t)) for t in s)
+                           for s in slopes)
+            checks = rc.check_building(tris, outer, [], 3.0, top, shape) if closed else None
+            return canon, rc.signature_problems(shape, tris, outer, 3.0, top), checks
+
+        for shape, tris, top, closed in cases:
+            want = outcome(shape, tris, top, closed)
+            self.assertEqual(want[1], [], shape)
+            if closed:
+                self.assertEqual(want[2], {}, shape)
+            variants = [list(reversed(tris))]
+            for seed in range(6):
+                rng = random.Random(seed)
+                v = list(tris)
+                rng.shuffle(v)
+                variants.append([(m, t[r:] + t[:r]) for m, t in v for r in [rng.randrange(3)]])
+            variants.append([(m, t[1:] + t[:1]) for m, t in reversed(tris)])
+            for v in variants:
+                self.assertEqual(outcome(shape, v, top, closed), want, shape)
+
     def test_extra_or_singleton_slopes_fail_the_signature(self):
         tris, outer = self._shape_box("hipped")
         warped = [(m, tuple((p[0], p[1], p[2] + 1.3) if p[:2] == (10, 0) else p for p in t)) for m, t in tris]

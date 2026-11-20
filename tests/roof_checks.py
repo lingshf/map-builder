@@ -334,7 +334,8 @@ PLANAR_TOL = MM
 
 def plane_deviation(tris):
     """Largest distance of any vertex of ``tris`` (3D triangles) from the plane of the largest one."""
-    best = max(tris, key=lambda t: sum(c * c for c in _cross3(*t)))
+    best = max(tris, key=lambda t: (round(sum(c * c for c in _cross3(*t)), 9),
+                                    tuple(sorted(tuple(round(c, 6) for c in p) for p in t))))
     n = _cross3(*best)
     ln = math.sqrt(sum(c * c for c in n))
     if ln == 0:
@@ -517,47 +518,59 @@ def _sides(outer):
 
 
 def edge_slopes(tris, outer, top_z):
-    """Hipped/pyramidal slopes by footprint side: the triangles whose eave edge lies on side k, plus the
-    triangles reached across shared edges that are not horizontal ridge edges. A triangle reachable from
-    several sides (across a hip) joins the side whose seed plane it lies closest to. Triangles never reached
-    are singleton slopes. No normal-angle cutoff is involved."""
+    """Hipped/pyramidal slopes by footprint side, independent of the triangle order. A side's seed plane is the
+    plane of its largest eave triangle (the triangles with an edge on that side; one on several sides belongs
+    to the lowest-numbered). Every other sloped triangle joins the side, among those whose eave triangles are
+    connected to it across non-ridge edges, whose seed plane is nearest (largest vertex distance, ties to the
+    lower side index). Triangles with no such side are singleton slopes. No angle cutoff, no first-reach rule."""
     sides = _sides(outer)
     items = [t for m, t in tris if m == ROOF and (unit_normal(t) or (0, 0, 1))[2] < 1.0 - 1e-6]
     key = lambda p: tuple(round(c / WELD_M) for c in p)
-    by_edge = {}
+    parent = list(range(len(items)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    first = {}
     for i, t in enumerate(items):
         for k in range(3):
             a, b = t[k], t[(k + 1) % 3]
             if abs(a[2] - top_z) > MM or abs(b[2] - top_z) > MM:
-                by_edge.setdefault(frozenset((key(a), key(b))), []).append(i)
-    side_of, seed = [None] * len(items), {}
+                j = first.setdefault(frozenset((key(a), key(b))), i)
+                parent[find(i)] = find(j)
+    eave_of = {}
     for i, t in enumerate(items):
         for s, seg in enumerate(sides):
             if any(_edge_overlap(((t[k][0], t[k][1]), (t[(k + 1) % 3][0], t[(k + 1) % 3][1])), seg) > MM
                    for k in range(3)):
-                side_of[i] = s
-                seed.setdefault(s, i)
+                eave_of[i] = s
                 break
+    area = lambda t: sum(c * c for c in _cross3(*t))
+    canon = lambda t: (round(area(t), 9), tuple(sorted(key(p) for p in t)))
+    seed = {}
+    for s in range(len(sides)):
+        mine = [items[i] for i, v in eave_of.items() if v == s]
+        if mine:
+            seed[s] = unit_normal(max(mine, key=canon)), max(mine, key=canon)[0]
+    comp_sides = {}
+    for i, s in eave_of.items():
+        comp_sides.setdefault(find(i), set()).add(s)
 
-    def dev(i, j):
-        n, o = unit_normal(items[j]), items[j][0]
-        return max(abs(sum(n[c] * (p[c] - o[c]) for c in range(3))) for p in items[i])
+    def dev(t, s):
+        n, o = seed[s]
+        return max(abs(sum(n[c] * (p[c] - o[c]) for c in range(3))) for p in t)
 
-    progress = True
-    while progress:
-        progress = False
-        for i, t in enumerate(items):
-            if side_of[i] is not None:
-                continue
-            near = {side_of[j] for k in range(3) for j in by_edge.get(frozenset((key(t[k]), key(t[(k + 1) % 3]))), [])
-                    if j != i and side_of[j] is not None}
-            if near:
-                side_of[i] = min(near, key=lambda s: dev(i, seed[s]))
-                progress = True
     groups = {}
     for i, t in enumerate(items):
-        groups.setdefault(side_of[i] if side_of[i] is not None else ("lone", i), []).append(t)
-    return list(groups.values())
+        if i in eave_of:
+            s = eave_of[i]
+        else:
+            near = comp_sides.get(find(i), ())
+            s = min(near, key=lambda c: (round(dev(t, c), 9), c)) if near else ("lone", i)
+        groups.setdefault(s, []).append(t)
+    return [groups[s] for s in sorted(groups, key=str)]
 
 
 def roof_slopes(tris, shape, outer, top_z):
