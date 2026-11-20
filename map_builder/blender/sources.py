@@ -53,16 +53,17 @@ def parse_degrees(text, label):
 
 
 def migrate_legacy_centre(s):
-    """Copy the legacy float32 ``lat``/``lon`` of a .blend saved before the text centre into an empty
-    ``centre_lat``/``centre_lon`` (once; a non-zero legacy value, rounded to the 6 decimals the old panel showed).
-    Returns True if anything was migrated."""
-    moved = False
+    """Copy the legacy float32 ``lat``/``lon`` of a .blend saved before the text centre into empty
+    ``centre_lat``/``centre_lon``, once: both axes together whenever either legacy property is set (a zero axis
+    becomes "0"), rounded to the 6 decimals the old panel showed. ``centre_migrated`` then stops any later
+    migration, so a centre the user clears is never revived from the stale float. Returns True if migrated."""
+    if s.centre_migrated or not (s.is_property_set("lat") or s.is_property_set("lon")):
+        return False
     for text_prop, legacy_prop in (("centre_lat", "lat"), ("centre_lon", "lon")):
-        legacy = getattr(s, legacy_prop)
-        if not getattr(s, text_prop).strip() and legacy != 0.0:
-            setattr(s, text_prop, f"{legacy:.6f}".rstrip("0").rstrip("."))
-            moved = True
-    return moved
+        if not getattr(s, text_prop).strip():
+            setattr(s, text_prop, f"{getattr(s, legacy_prop):.6f}".rstrip("0").rstrip("."))
+    s.centre_migrated = True
+    return True
 
 
 def has_credential(value):

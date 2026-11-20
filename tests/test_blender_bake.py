@@ -328,15 +328,35 @@ class SourcesTest(unittest.TestCase):
     def test_legacy_float_centre_migrates_into_the_text_centre(self):
         from types import SimpleNamespace
         from map_builder.blender.sources import migrate_legacy_centre, parse_degrees
-        old = SimpleNamespace(centre_lat="", centre_lon="", lat=40.4370002746582, lon=-80.01599884033203)
+
+        def scene(lat=0.0, lon=0.0, text=("", ""), is_set=()):
+            return SimpleNamespace(centre_lat=text[0], centre_lon=text[1], lat=lat, lon=lon, centre_migrated=False,
+                                   is_property_set=lambda name: name in is_set)
+
+        old = scene(40.4370002746582, -80.01599884033203, is_set=("lat", "lon"))
         self.assertTrue(migrate_legacy_centre(old))
         self.assertEqual((old.centre_lat, old.centre_lon), ("40.437", "-80.015999"))   # all float32 holds
         self.assertEqual(parse_degrees(old.centre_lat, "Latitude"), 40.437)
-        self.assertFalse(migrate_legacy_centre(old))                      # once: the text centre now wins
-        typed = SimpleNamespace(centre_lat="48.1395", centre_lon="11.5764", lat=1.0, lon=2.0)
-        self.assertFalse(migrate_legacy_centre(typed))
+        self.assertFalse(migrate_legacy_centre(old))                      # once
+        for lat, lon, want in ((0.0, 0.0, ("0", "0")), (47.0, 0.0, ("47", "0")), (0.0, 8.0, ("0", "8"))):
+            with self.subTest(lat=lat, lon=lon):
+                s = scene(lat, lon, is_set=("lat", "lon"))
+                self.assertTrue(migrate_legacy_centre(s))
+                self.assertEqual((s.centre_lat, s.centre_lon), want)
+                self.assertEqual((parse_degrees(s.centre_lat, "Latitude"), parse_degrees(s.centre_lon, "Longitude")),
+                                 (lat, lon))
+        one_axis = scene(47.0, 0.0, is_set=("lat",))                      # only one axis was ever saved
+        migrate_legacy_centre(one_axis)
+        self.assertEqual((one_axis.centre_lat, one_axis.centre_lon), ("47", "0"))
+        cleared = scene(40.437, -80.016, is_set=("lat", "lon"))
+        migrate_legacy_centre(cleared)
+        cleared.centre_lat = ""                                           # the user clears it: not revived
+        self.assertFalse(migrate_legacy_centre(cleared))
+        self.assertEqual(cleared.centre_lat, "")
+        typed = scene(1.0, 2.0, ("48.1395", "11.5764"), is_set=("lat", "lon"))
+        migrate_legacy_centre(typed)
         self.assertEqual((typed.centre_lat, typed.centre_lon), ("48.1395", "11.5764"))
-        fresh = SimpleNamespace(centre_lat="", centre_lon="", lat=0.0, lon=0.0)
+        fresh = scene()                                                   # a new scene: nothing legacy was saved
         self.assertFalse(migrate_legacy_centre(fresh))
         self.assertEqual((fresh.centre_lat, fresh.centre_lon), ("", ""))
         for bad in ("", "abc", "nan", "inf"):

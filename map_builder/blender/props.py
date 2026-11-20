@@ -49,6 +49,7 @@ class MB_Settings(bpy.types.PropertyGroup):
     lat: FloatProperty(name="Latitude (legacy)", default=0.0, min=-85.0, max=85.0, precision=6, options={"HIDDEN"})
     lon: FloatProperty(name="Longitude (legacy)", default=0.0, min=-180.0, max=180.0, precision=6,
                        options={"HIDDEN"})
+    centre_migrated: BoolProperty(name="Legacy centre migrated", default=False, options={"HIDDEN"})
     width: FloatProperty(name="Width (m)", description="East-west extent in metres", default=1000.0,
                          min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
     height: FloatProperty(name="Height (m)", description="North-south extent in metres", default=1000.0,

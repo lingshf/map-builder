@@ -76,12 +76,26 @@ def run(out_dir):
     a = make_area(s)
     check((a.frame.lat0, a.frame.lon0) == (40.437, -80.016),
           f"parity: the centre keeps double precision ({a.frame.lat0}, {a.frame.lon0})")
-    s.centre_lat, s.centre_lon, s.lat, s.lon = "", "", 40.437, -80.016      # a .blend saved with the float centre
-    a = make_area(s)
-    check(abs(float(s.centre_lat) - 40.437) < 1e-5 and abs(float(s.centre_lon) + 80.016) < 1e-5
-          and abs(a.frame.lat0 - 40.437) < 1e-5,
-          f"parity: a legacy float centre migrates into the text centre ({s.centre_lat}, {s.centre_lon})")
-    s.lat = s.lon = 0.0
+    for lat, lon in ((40.437, -80.016), (0.0, 0.0), (47.0, 0.0), (0.0, 8.0)):
+        for prop in ("lat", "lon", "centre_migrated"):
+            s.property_unset(prop)
+        s.centre_lat = s.centre_lon = ""
+        s.lat, s.lon = lat, lon                                        # a .blend saved with the float centre
+        try:
+            a = make_area(s)
+        except ValueError as e:
+            check(False, f"parity: legacy centre ({lat}, {lon}) migrates ({e})")
+            continue
+        check(abs(a.frame.lat0 - lat) < 1e-5 and abs(a.frame.lon0 - lon) < 1e-5 and s.centre_migrated,
+              f"parity: legacy float centre ({lat}, {lon}) migrates ({s.centre_lat!r}, {s.centre_lon!r})")
+        s.centre_lat = ""                                              # cleared by the user: never revived
+        try:
+            make_area(s)
+            check(False, "parity: a cleared centre is not revived from the legacy float")
+        except ValueError:
+            check(True, "parity: a cleared centre is not revived from the legacy float")
+    for prop in ("lat", "lon", "centre_migrated"):
+        s.property_unset(prop)
     for blender_mode, cli_mode in (("AUTO", None), ("ON", True)):
         cli, cli_result = _cli_manifest(out_dir, cli_mode)
         bl, bl_result = _blender_manifest(out_dir, blender_mode)
