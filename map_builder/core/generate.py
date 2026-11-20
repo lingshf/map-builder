@@ -443,7 +443,15 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     height, min_h, roof_src, prov, eave_based = _building_height(tags)
     roof_src_label = prov.get("roof_height")
     roof_shape_tag = tags.get("roof:shape")
-    roof_shape = roofs.resolve_shape(roof_shape_tag, outer, poly.holes, prov)
+    local_outer = [(p[0] - cx, p[1] - cy) for p in outer]
+    plan = roofs.plan_roof(roof_shape_tag, local_outer, poly.holes, prov)
+    roof_shape = plan.shape_built
+    if (roof_src is not None and roof_src <= 1e-6 and roof_shape_tag in ("hipped", "pyramidal")
+            and roof_shape == roof_shape_tag
+            and prov.get("roof_height", "").startswith("inferred:roof:levels")):
+        # roof:levels=0 on a hipped/pyramidal roof gives no height: use the default roof height (D77)
+        roof_src = None
+        prov["roof_levels"] = f"ignored:roof:levels={tags.get('roof:levels')} (default roof height for a {roof_shape} roof)"
 
     # Roof height actually built; a source value that cannot be used is kept separately.
     xs, ys = [p[0] for p in outer], [p[1] for p in outer]
@@ -463,7 +471,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
             roof_h = roof_src
             if roof_h <= 1e-6:
                 prov["roof_shape"] = f"fallback:flat (roof height 0 leaves no {roof_shape} roof)"
-                roof_shape, roof_h = "flat", 0.0
+                roof_shape, roof_h, plan = "flat", 0.0, roofs.flat_plan()
     elif roof_src is None:
         roof_h = min(max(1.0, min(0.3 * short_side, 6.0)), 0.6 * wall_span)
         prov["roof_height"] = "inferred:0.3 x footprint short side (1-6 m, at most 60% of the building height)"
@@ -476,7 +484,7 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
                       f"(building height {height:g} m, min_height {min_h:g} m)")
         if roof_h <= 1e-6:
             prov["roof_shape"] = f"fallback:flat (no room for a {roof_shape} roof)"
-            roof_shape, roof_h = "flat", 0.0
+            roof_shape, roof_h, plan = "flat", 0.0, roofs.flat_plan()
     if roof_src is not None and abs(roof_h - roof_src) > 1e-9:
         prov["roof_height_source"] = f"{roof_src_label} = {roof_src:g} m"
         prov["roof_height"] = f"fallback:{roof_h:g} m built ({reason})"
@@ -486,7 +494,13 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     prov["roof_height_m"] = round(roof_h, 2)
 
     roof_dir = parse_number(tags.get("roof:direction"))
-    across = roofs.resolve_orientation(roof_shape, tags, prov, outer, roof_dir)
+    if plan.skeleton:
+        across = False
+        if tags.get("roof:orientation") is not None:
+            prov["roof_orientation"] = (f"ignored:roof:orientation={tags['roof:orientation']} "
+                                        "(every footprint edge slopes on a skeleton roof)")
+    else:
+        across = roofs.resolve_orientation(roof_shape, tags, prov, outer, roof_dir)
 
     top = height  # relative to the base datum
     wall_top_flat = top - roof_h
@@ -530,8 +544,8 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
                                    f"the underside of the elevated volume at {min_h:.2f} m")
 
     if reserve is not None:
-        extra_v, extra_t = roofs.roof_budget(roof_shape, n_ring)
-        reserve(2 * n_ring + 2 + extra_v, 2 * n_ring + 2 * len(tris) + 4 + extra_t)
+        roof_v, roof_t = roofs.roof_budget(plan, n_ring, len(tris))
+        reserve(2 * n_ring + roof_v, 2 * n_ring + len(tris) + roof_t)
 
     facade = parse_colour(tags.get("building:colour"))
     if facade:
@@ -571,13 +585,15 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     for (a, b, c) in tris:
         add_face((flat_bot[a], flat_bot[c], flat_bot[b]), "MB Facade", facade)  # downward
     local_rings = [[(p[0] - cx, p[1] - cy) for p in r] for r in rings]
-    roofs.build_roof(mesh, local_rings[0], local_rings[1:], wall_top_flat, roof_h, roof_shape, tags, prov,
+    roofs.build_roof(mesh, local_rings[0], local_rings[1:], wall_top_flat, roof_h, plan, tags, prov,
                      top_idx=ring_idx_top, tris=tris, add_face=add_face, roof_col=roof_col, facade=facade,
                      across=across, direction=roof_dir)
     if any(split):
         prov["roof_faces"] = (f"{sum(split)} non-planar face(s) (footprint not an exact rectangle) split into "
                               "triangles along the shorter diagonal")
-    prov["roof_shape_built"] = roof_shape
+    prov["roof_shape_built"] = plan.shape_built
+    if plan.skeleton:
+        prov["roof_construction"] = "straight skeleton (a sloped face on every footprint edge)"
     prov["height_m"] = round(height, 2)
     prov["eave_height_m"] = round(wall_top_flat, 2)
     if elevated:

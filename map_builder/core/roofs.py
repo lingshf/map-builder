@@ -2,12 +2,17 @@
 
 ``generate.build_building`` computes the eave and total heights (OSM semantics) and the wall
 volume; this module decides which roof shape can be built on the footprint
-(:func:`resolve_shape`, with ``fallback:`` provenance) and adds the roof faces
+(:func:`plan_roof`, with ``fallback:`` provenance; a hipped roof on a non-rectangle is planned from the
+straight skeleton) and adds the roof faces
 (:func:`build_roof`). It depends on nothing in ``generate``.
 """
 
 import math
+from dataclasses import dataclass
 
+from .errors import LimitError
+from .skeleton import SkeletonError, straight_skeleton
+from .triangulate import TriangulationError, triangulate
 # Shapes that need a rectangular footprint, and those taking roof:orientation / roof:direction.
 RECT_SHAPES = {"gabled", "hipped", "half-hipped", "gambrel", "mansard", "round", "saltbox"}
 ORIENTED_SHAPES = {"gabled", "hipped", "half-hipped", "gambrel", "round", "saltbox"}
@@ -69,9 +74,10 @@ def add_planar_face(mesh, idx, mat, col, tol=PLANAR_TOL_M):
     return False
 
 
-def resolve_shape(shape_tag, outer, holes, prov):
+def resolve_shape(shape_tag, outer, holes, prov, skeleton_hipped=False):
     """The roof shape that can be built for ``roof:shape`` on this footprint; sets
-    ``prov["roof_shape"]`` (``measured:``/``inferred:``/``fallback:``)."""
+    ``prov["roof_shape"]`` (``measured:``/``inferred:``/``fallback:``). With ``skeleton_hipped`` a hipped
+    roof on a non-rectangular footprint is kept (``plan_roof`` builds it from the straight skeleton)."""
     shape = shape_tag or "flat"
     prov["roof_shape"] = "measured:osm roof:shape" if shape_tag else "inferred:flat"
     if shape not in SUPPORTED_SHAPES:
@@ -80,7 +86,7 @@ def resolve_shape(shape_tag, outer, holes, prov):
     if holes and shape not in ("flat", "skillion"):
         prov["roof_shape"] = f"fallback:flat (roof:shape={shape} with courtyard)"
         shape = "flat"
-    if shape in RECT_SHAPES and not rect_check(outer):
+    if shape in RECT_SHAPES and not rect_check(outer) and not (skeleton_hipped and shape == "hipped"):
         if is_convex(outer):
             prov["roof_shape"] = f"fallback:pyramidal (roof:shape={shape} on non-rectangular footprint)"
             shape = "pyramidal"
@@ -91,6 +97,113 @@ def resolve_shape(shape_tag, outer, holes, prov):
         prov["roof_shape"] = f"fallback:flat ({shape} roof on concave footprint)"
         shape = "flat"
     return shape
+
+
+@dataclass
+class RoofPlan:
+    """The roof decided before any mesh is allocated (``plan_roof``).
+
+    ``shape_built`` is the shape that will be emitted. A skeleton roof additionally carries
+    ``points`` (``(x, y, t)`` in the mesh's local frame; the first ``n_ring`` are the footprint
+    vertices at t = 0, the rest new roof vertices) and ``tris`` (index triples into ``points``,
+    counter-clockwise seen from above), so its exact vertex and triangle counts are known."""
+    shape_built: str
+    n_ring: int = 0
+    points: list = None
+    tris: list = None
+    t_max: float = 0.0
+
+    @property
+    def skeleton(self):
+        return self.points is not None
+
+
+def flat_plan():
+    return RoofPlan("flat")
+
+
+def plan_roof(shape_tag, outer, holes, prov):
+    """Preflight of the roof: the shape that will be built for ``roof:shape`` on this footprint
+    (``outer``/``holes`` in the mesh's local frame), with its skeleton for a hipped roof on a
+    non-rectangular footprint. Sets ``prov["roof_shape"]``; a skeleton failure falls back to the
+    v0.3.0 outcome with the reason appended."""
+    shape = resolve_shape(shape_tag, outer, holes, prov, skeleton_hipped=True)
+    if shape != "hipped" or rect_check(outer):
+        return RoofPlan(shape)
+    try:
+        return _skeleton_plan(outer)
+    except (SkeletonError, LimitError, TriangulationError) as exc:
+        convex = is_convex(outer)
+        shape = "pyramidal" if convex else "flat"
+        prov["roof_shape"] = (f"fallback:{shape} (roof:shape=hipped on non-rectangular footprint; "
+                              f"straight skeleton: {exc})")
+        return RoofPlan(shape)
+
+
+def _skeleton_plan(outer):
+    sk = straight_skeleton(outer)
+    n = len(outer)
+    index = {(float(p[0]), float(p[1])): k for k, p in enumerate(outer)}
+    node_to_pt = {}
+    points = [(float(p[0]), float(p[1]), 0.0) for p in outer]
+    for k, (x, y, t) in enumerate(sk.nodes):
+        if k < len(sk.ring):
+            node_to_pt[k] = index[sk.ring[k]]
+        else:
+            node_to_pt[k] = len(points)
+            points.append((x, y, t))
+    in_skeleton = set(node_to_pt[k] for k in range(len(sk.ring)))
+    extra = [k for k in range(n) if k not in in_skeleton]
+    tris = []
+    for i, face in enumerate(sk.faces):
+        pts = [(sk.nodes[k][0], sk.nodes[k][1]) for k in face]
+        local = triangulate(pts, list(range(len(pts))))
+        a, b = pts[0], pts[1]
+        between = sorted((u, k) for k in extra for u in [_along(outer[k], a, b)] if u is not None)
+        fan = [k for _, k in between]
+        for (p, q, r) in local:
+            tri = [p, q, r]
+            if _signed(pts[p], pts[q], pts[r]) < 0:
+                tri = [p, r, q]
+            ids = [node_to_pt[face[v]] for v in tri]
+            if fan:
+                at = next((j for j in range(3) if tri[j] == 0 and tri[(j + 1) % 3] == 1), None)
+                if at is not None:
+                    c = ids[(at + 2) % 3]
+                    chain = [ids[at]] + fan + [ids[(at + 1) % 3]]
+                    tris += [(chain[j], chain[j + 1], c) for j in range(len(chain) - 1)]
+                    continue
+            tris.append(tuple(ids))
+    t_max = max(p[2] for p in points)
+    if t_max <= 0:
+        raise SkeletonError("the skeleton has no height")
+    if len(tris) > MAX_ROOF_TRIANGLES:
+        raise LimitError(f"skeleton roof needs {len(tris)} triangles (limit {MAX_ROOF_TRIANGLES})")
+    return RoofPlan("hipped", n, points, tris, t_max)
+
+
+def _signed(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _along(p, a, b, tol=1e-5):
+    """Parameter of ``p`` along ``a`` -> ``b`` if it lies strictly between them on the segment, else None."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    ln2 = dx * dx + dy * dy
+    u = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ln2
+    if 0.0 < u < 1.0 and abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / math.sqrt(ln2) <= tol:
+        return u
+    return None
+
+
+def roof_budget(plan, n_ring, n_footprint_tris):
+    """Exact ``(vertices, triangles)`` the roof adds on top of the wall ring (2 n vertices, 2 n wall and
+    ``n_footprint_tris`` floor triangles): for a skeleton roof what the plan will emit, otherwise the
+    per-shape upper bound of :func:`shape_budget` plus the fixed apex/ridge and flat-top allowance."""
+    if plan.skeleton:
+        return len(plan.points) - plan.n_ring, len(plan.tris)
+    extra_v, extra_t = shape_budget(plan.shape_built, n_ring)
+    return 2 + extra_v, n_footprint_tris + 4 + extra_t
 
 
 def resolve_orientation(shape, tags, prov, outer=None, direction=None):
@@ -174,7 +287,7 @@ def dome_rings(n_ring, segments):
     return max(0, min(segments - 1, (MAX_ROOF_TRIANGLES // max(n_ring, 1) - 1) // 2))
 
 
-def roof_budget(shape, n_ring):
+def shape_budget(shape, n_ring):
     """(vertices, triangles) a roof of ``shape`` adds beyond what ``build_building`` reserves
     for the wall ring, the footprint and the apex (2 n + 2 vertices, 2 n + 2 tris + 4)."""
     if shape in ("dome", "onion"):
@@ -201,18 +314,27 @@ def _dome_profile(n_ring, shape):
     return out
 
 
-def build_roof(mesh, ring, holes, eave_z, roof_h, shape, tags, prov, *, top_idx, tris, add_face,
+def build_roof(mesh, ring, holes, eave_z, roof_h, plan, tags, prov, *, top_idx, tris, add_face,
                roof_col, facade, across=False, direction=None):
-    """Add the roof faces of ``shape`` on the wall-top vertices ``top_idx`` (one index list
+    """Emit the ``plan`` (``plan_roof``) on the wall-top vertices ``top_idx`` (one index list
     per ring, outer first, in the mesh's local frame). ``ring``/``holes`` are the local
     footprint rings, the wall tops are at ``eave_z`` (sloped for a skillion), the highest
     point is ``eave_z + roof_h``. ``tris`` triangulates the footprint over the flattened
     ``top_idx``; ``add_face(idx, material, colour)`` adds (and counts split) faces.
     ``across`` swaps the ridge axis of rectangular shapes; ``direction`` (degrees, the way
-    the long slope of a saltbox faces) is the parsed ``roof:direction``."""
+    the long slope of a saltbox faces) is the parsed ``roof:direction``. The plan fixes the shape."""
+    shape = plan.shape_built
     top = eave_z + roof_h
     flat_top = [i for rt in top_idx for i in rt]
     R = "MB Roof"
+    if plan.skeleton:
+        scale = roof_h / plan.t_max
+        ids = list(top_idx[0])
+        for x, y, t in plan.points[plan.n_ring:]:
+            ids.append(mesh.add_vertex(x, y, top if t >= plan.t_max else eave_z + t * scale))
+        for (a, b, c) in plan.tris:
+            mesh.add_face((ids[a], ids[b], ids[c]), R, roof_col)
+        return
     if shape in ("flat", "skillion"):
         for (a, b, c) in tris:
             add_face((flat_top[a], flat_top[b], flat_top[c]), R, roof_col)

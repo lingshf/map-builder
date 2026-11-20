@@ -595,6 +595,39 @@ def _slope_topology_problems(shape, tris, outer, top_z):
         problems.append(f"{len(bad)} roof slope(s) not coplanar within {PLANAR_TOL * 1000:g} mm")
     return problems
 
+def _nodes(tris, outer, top_z):
+    """Roof nodes read from the merged planar slopes, not from raw triangles: the vertices off the footprint where
+    three or more slopes meet. Points that only subdivide a hip or ridge edge touch two slopes and are not nodes,
+    so the result does not change when the surface is subdivided. -> (nodes, slopes)."""
+    segs = _segments(outer)
+    key = lambda p: tuple(round(c / WELD_M) for c in p)
+    slopes = edge_slopes(tris, outer, top_z)
+    touching = {}
+    for g, grp in enumerate(slopes):
+        for t in grp:
+            for p in t:
+                if not _on_boundary((p[0], p[1]), segs):
+                    touching.setdefault(key(p), (p, set()))[1].add(g)
+    return _distinct([p for p, gs in touching.values() if len(gs) >= 3]), slopes
+
+
+def _hip_problems(tris, outer, top_z):
+    """A hipped roof from the merged slopes alone: two or more nodes joined by ridge arcs. A single node is a
+    pyramid, a hipped roof only when its footprint has an apex equidistant from every side (the straight
+    skeleton is a point). The ridge may slope or be at several heights: only the slopes must be planar (checked
+    by the caller)."""
+    nodes, _ = _nodes(tris, outer, top_z)
+    if len(nodes) >= 2:
+        return []
+    if len(nodes) != 1:
+        return ["no roof node where three slopes meet"]
+    apex = nodes[0]
+    dist = [abs((b[0] - a[0]) * (apex[1] - a[1]) - (b[1] - a[1]) * (apex[0] - a[0])) / math.dist(a, b)
+            for a, b in _sides(outer)]
+    if max(dist) - min(dist) > max(MM, 1e-3 * max(dist)):
+        return ["the roof ends in a single apex on a footprint whose skeleton is not a point (pyramidal, not hipped)"]
+    return []
+
 def signature_problems(shape, tris, outer, eave_z, top_z):
     """Why the emitted geometry does not look like ``shape`` (an empty list if it does)."""
     segs = _segments(outer)
@@ -605,10 +638,7 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
     problems = []
     tops = _distinct(top)
     if shape == "hipped":
-        if len(tops) == 1 and not _is_square(outer):
-            problems.append("the roof ends in a single apex on a non-square footprint (pyramidal, not hipped)")
-        if len(tops) >= 2 and _ridge_problem(tops, roof_tris):
-            problems.append(_ridge_problem(tops, roof_tris))
+        problems += _hip_problems(tris, outer, top_z)
         if ends:
             problems.append(f"{len(ends)} gable-end triangle(s) on a hipped roof")
         if _carried(segs, [], roof_tris):
@@ -642,6 +672,10 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
             problems.append("the roof does not end in a single apex")
         if shape == "pyramidal" and ends:
             problems.append(f"{len(ends)} gable-end triangle(s) on a pyramidal roof")
+        if shape == "pyramidal" and len(tops) == 1:
+            nodes, slopes = _nodes(tris, outer, top_z)
+            if len(nodes) != 1 or any(not any(_same(p, tops[0]) for t in g for p in t) for g in slopes):
+                problems.append("a slope does not reach the apex (a ridge roof, not a pyramid)")
         if shape == "pyramidal" and _carried(segs, [], roof_tris):
             problems.append("a footprint edge carries no sloped roof triangle")
         if shape == "pyramidal":
