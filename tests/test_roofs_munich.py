@@ -649,6 +649,23 @@ class HippedSignatureTests(unittest.TestCase):
         for b in (self.skeleton_house(self.L), self.subdivide(self.skeleton_house(self.L))):
             self.assertFalse(self.judge("gabled", b)[0])
 
+    def test_one_gable_end_and_one_hip_end_is_not_gabled_before_or_after_subdivision(self):
+        outer = [(0, 0), (12, 0), (12, 6), (0, 6)]
+        a, b, c, d = (0, 0, 3), (12, 0, 3), (12, 6, 3), (0, 6, 3)
+        r0, r1 = (0, 3, 5), (9, 3, 5)
+        roof = [(a, b, r1), (a, r1, r0), (c, d, r0), (c, r0, r1), (b, c, r1)]
+        tris, _ = self.house(outer, roof)
+        tris, _ = _oriented(tris + [(rc.FACADE, (d, a, r0))], outer), outer
+        built = (tris, outer)
+        sub = self.subdivide(built)
+        for step in (built, sub, self.subdivide(sub)):
+            counted, fails, sig = self.judge("gabled", step)
+            self.assertFalse(counted)
+            self.assertTrue(any("distinct gable end" in p for p in sig), sig)
+        full = self.skeleton_house(self.L, "gabled")
+        for step in (full, self.subdivide(full)):
+            self.assertTrue(self.judge("gabled", step)[0])
+
     def test_roof_orientation_and_direction_choose_the_gable_ends(self):
         from map_builder.core import roofs
 
@@ -669,6 +686,30 @@ class HippedSignatureTests(unittest.TestCase):
         self.assertIn("roof:direction=90", end_edges(None, 90.0)[1]["roof_orientation"])
         self.assertEqual(end_edges("diagonal")[0], along)
         self.assertIn("fallback:along", end_edges("diagonal")[1]["roof_orientation"])
+
+    def test_roof_direction_is_checked_on_the_emitted_ridge_edges(self):
+        from map_builder.core import roofs
+
+        def emitted(direction):
+            prov = {}
+            plan = roofs.plan_roof("gabled", [tuple(map(float, p)) for p in self.T], [], prov, None, direction)
+            bearings = set()
+            for tri in plan.tris:
+                for k in range(3):
+                    a, b = tri[k], tri[(k + 1) % 3]
+                    if a >= plan.n_ring and b >= plan.n_ring and a < b:      # both ends off the footprint: a ridge
+                        pa, pb = plan.points[a], plan.points[b]
+                        bearings.add(round(math.degrees(math.atan2(pb[0] - pa[0], pb[1] - pa[1])) % 180.0))
+            return bearings, prov
+
+        for direction, ridge in ((0.0, 90), (90.0, 0), (5.0, 90), (95.0, 0)):   # within the 10 degree tolerance
+            bearings, prov = emitted(direction)
+            self.assertIn(ridge, bearings, direction)
+            self.assertTrue(prov["roof_direction"].startswith("measured:osm roof:direction="), prov)
+        bearings, prov = emitted(35.0)             # a ridge perpendicular to 35 degrees (125) is not emitted
+        self.assertEqual(bearings, {0, 90})
+        self.assertEqual(prov["roof_direction"], "approximate: ridge 90° vs tagged 35°")
+        self.assertEqual(prov["roof_ridge_bearing"], "90")      # the gable ends' ridge; the stem ridge stays hipped
 
     def test_planted_extra_apex_fails(self):
         tris, outer = self.skeleton_house(self.L)

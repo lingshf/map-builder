@@ -184,18 +184,17 @@ def _gable_ends(sk, orientation, direction, prov):
     long_axis, short_axis = _min_area_axes(sk.ring)
     if orientation in ("along", "across"):
         prov["roof_orientation"] = f"measured:osm roof:orientation={orientation}"
-        across = orientation == "across"
+        axis = short_axis if orientation == "across" else long_axis
     elif orientation is None and direction is not None:
         d = _bearing(direction)
-        across = abs(d[0] * long_axis[0] + d[1] * long_axis[1]) > math.sqrt(0.5)
+        axis = (-d[1], d[0])                               # the ridge target: perpendicular to the slope direction
         prov["roof_orientation"] = (f"measured:osm roof:direction={direction:g} "
-                                    "(ridge perpendicular to the slope direction)")
+                                    "(gable ends on the edges whose normal is nearest the ridge bearing)")
     else:
-        across = False
+        axis = long_axis
         prov["roof_orientation"] = ("inferred:along (ridge parallel to the longer side of the minimum-area "
                                     "bounding rectangle)" if orientation is None else
                                     f"fallback:along (roof:orientation={orientation} not recognised)")
-    axis = short_axis if across else long_axis
     n = len(sk.ring)
     ridge_ends = []
     reasons = []
@@ -213,7 +212,33 @@ def _gable_ends(sk, orientation, direction, prov):
         a, b = sk.ring[i], sk.ring[(i + 1) % n]
         if abs((b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1]) / math.dist(a, b) <= math.sqrt(0.5):
             ends.append(i)
-    return tuple(ends if len(ends) >= 2 else ridge_ends)
+    ends = tuple(ends if len(ends) >= 2 else ridge_ends)
+    if direction is not None and orientation is None:
+        _record_ridge_bearing(sk, ends, direction, prov)
+    return ends
+
+
+def _ridge_bearing(sk, i):
+    """Compass bearing in [0, 180) of the emitted ridge that ends in gable end ``i``."""
+    N = sk.faces[i][2]
+    prev = sk.faces[(i - 1) % len(sk.ring)]
+    M = prev[(prev.index(N) + 1) % len(prev)]
+    nn, mm = sk.nodes[N], sk.nodes[M]
+    return math.degrees(math.atan2(nn[0] - mm[0], nn[1] - mm[1])) % 180.0
+
+
+def _record_ridge_bearing(sk, ends, direction, prov, tolerance=10.0):
+    """``prov["roof_ridge_bearing"]`` lists the emitted ridge bearings; ``roof_direction`` is measured only when
+    one of them is within ``tolerance`` degrees of perpendicular to the tagged direction, else approximate."""
+    want = (direction + 90.0) % 180.0
+    bearings = sorted({round(_ridge_bearing(sk, i), 1) % 180.0 for i in ends})
+    off = lambda b: min(abs(b - want), 180.0 - abs(b - want))
+    best = min(bearings, key=off)
+    prov["roof_ridge_bearing"] = ", ".join(f"{b:g}" for b in bearings)
+    if off(best) <= tolerance:
+        prov["roof_direction"] = f"measured:osm roof:direction={direction:g} (ridge {best:g}° perpendicular within {tolerance:g}°)"
+    else:
+        prov["roof_direction"] = f"approximate: ridge {best:g}° vs tagged {direction:g}°"
 
 
 def _gable_node(sk, i):

@@ -690,8 +690,9 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
             problems.append("a footprint edge carries no sloped roof triangle")
         problems += _slope_topology_problems(shape, tris, outer, top_z)
     elif shape == "gabled":
-        if len(ends) < 2:
-            problems.append(f"{len(ends)} vertical gable-end triangle(s), need >= 2")
+        end_sides = _gable_sides([(FACADE, t) for t in ends], outer, eave_z)
+        if len(end_sides) < 2:
+            problems.append(f"{len(end_sides)} distinct gable end(s) on the footprint sides, need >= 2")
         slopes = roof_slopes(tris, shape, outer, top_z, eave_z)
         if not _apexes_on_two_slopes(ends, slopes):
             problems.append("a gable end does not reach the ridge where two slopes meet")

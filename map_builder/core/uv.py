@@ -103,22 +103,27 @@ def _wall_segments(mesh):
 def _wall_u(segs, pts, n):
     """U (metres) of each point of a vertical face with horizontal normal ``n``, measured along the single wall
     segment that is parallel to the face and contains all of its points; None if there is no such segment.
-    Choosing the segment per face (not per point) keeps a corner on the segment that owns the face."""
-    for ax, ay, bx, by, cum, length in segs:
-        if length < TOL:
-            continue
-        dx, dy = (bx - ax) / length, (by - ay) / length
-        if abs(dx * n[0] + dy * n[1]) > 1e-4:
-            continue
-        us = []
-        for p in pts:
-            t = (p[0] - ax) * dx + (p[1] - ay) * dy
-            off = abs(-(p[0] - ax) * dy + (p[1] - ay) * dx)
-            if off > 1e-4 or not -1e-4 <= t <= length + 1e-4:
-                break
-            us.append(cum + t)
-        else:
-            return us
+    Choosing the segment per face (not per point) keeps a corner on the segment that owns the face. A gable
+    triangle whose apex lies beyond its base segment (a collinear split of the wall run) is owned by the segment
+    that contains its base, and the apex is projected along the same supporting line."""
+    for strict in (True, False):
+        for ax, ay, bx, by, cum, length in segs:
+            if length < TOL:
+                continue
+            dx, dy = (bx - ax) / length, (by - ay) / length
+            if abs(dx * n[0] + dy * n[1]) > 1e-4:
+                continue
+            low = min(p[2] for p in pts)
+            us = []
+            for p in pts:
+                t = (p[0] - ax) * dx + (p[1] - ay) * dy
+                off = abs(-(p[0] - ax) * dy + (p[1] - ay) * dx)
+                inside = -1e-4 <= t <= length + 1e-4
+                if off > 1e-4 or not (inside or (not strict and p[2] > low + 1e-6)):
+                    break
+                us.append(cum + t)
+            else:
+                return us
     return None
 
 

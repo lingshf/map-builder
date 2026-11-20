@@ -223,6 +223,33 @@ class PlaneUvTest(unittest.TestCase):
                 self.assertAlmostEqual(math.dist(pts[a], pts[b]), math.dist(uvs[a], uvs[b]) * rt, delta=1e-4)
         self.assertGreaterEqual(len(planes), 4)
 
+    def test_gable_over_a_collinear_split_wall_keeps_the_wall_u_along_the_run(self):
+        ring = [(0, 0), (10, 0), (10, 1), (10, 4), (4, 4), (4, 10), (0, 10)]   # the east wall is split at y=1
+        mesh, _, _ = build_building(building(ring, roof__shape="gabled", height="9", roof__height="4"),
+                                    flat_grid(), 0.0)
+        mesh.materials.index("MB Roof")
+        uv.assign_uvs(mesh, (X0, 0, 0))
+        facade = mesh.materials.index("MB Facade")
+        ft = textures.tile_size("MB Facade")
+        wall, gables = {}, []
+        for f, m, uvs in zip(mesh.faces, mesh.face_materials, mesh.face_uvs):
+            pts = [mesh.vertices[i] for i in f]
+            if m == facade and len(f) == 4:
+                for p, c in zip(pts, uvs):
+                    wall[tuple(round(x, 5) for x in p)] = c
+            elif m == facade and any(p[2] > 5.0 + 1e-6 for p in pts):
+                gables.append((pts, uvs))
+        self.assertGreaterEqual(len(gables), 2)
+        for pts, uvs in gables:
+            self.assertTrue(all(c is not None for c in uvs))
+            p0, c0 = pts[0], uvs[0]
+            for p, c in zip(pts, uvs):
+                along = math.hypot(p[0] - p0[0], p[1] - p0[1])
+                self.assertAlmostEqual(abs(c[0] - c0[0]) * ft, along, delta=1e-4)   # U runs along the wall
+                key = tuple(round(x, 5) for x in p)
+                if key in wall:
+                    close(self, c, wall[key], "shared with the wall quad")
+
     def test_ring_starting_mid_wall_keeps_cumulative_u_to_the_closing_corner(self):
         ring = [(5, 0), (10, 0), (10, 6), (0, 6), (0, 0)]   # starts 5 m along the south wall
         mesh = uv.textured_copy(flat_building(ring), (X0, 0, 0))
