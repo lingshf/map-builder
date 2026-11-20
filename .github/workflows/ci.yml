@@ -76,3 +76,11 @@ jobs:
           # the frozen v0.3.0 C# reader: must read the textured package unchanged (texture ignored)
           dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$RUNNER_TEMP/textured.mbmap" | tee "$RUNNER_TEMP/tex-cs.txt"
           test "$(tail -n 1 "$RUNNER_TEMP/tex-cs.txt")" = "OK"
+      - name: glTF-Validator on the textured fixture (glTFast proxy, D66)
+        run: |
+          set -e
+          python3 -m tests.make_textured_fixture "$RUNNER_TEMP/textured2.mbmap"
+          python3 -c "import zipfile,sys,os; open(os.path.join(os.environ['RUNNER_TEMP'],'fixture.glb'),'wb').write(zipfile.ZipFile(sys.argv[1]).read('visual/map.glb'))" "$RUNNER_TEMP/textured2.mbmap"
+          npm install --prefix "$RUNNER_TEMP/gv" gltf-validator@2.0.0-dev.3.10
+          cp tools/gltf_validate.js "$RUNNER_TEMP/gv/"
+          node "$RUNNER_TEMP/gv/gltf_validate.js" "$RUNNER_TEMP/fixture.glb"
