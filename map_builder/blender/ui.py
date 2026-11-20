@@ -1,6 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import bpy
 
 from .sources import ENV_OVERPASS_URL
+
+if TYPE_CHECKING:
+    import bpy.types
 
 ATTRIBUTION_LINES = (
     "Elevation: Copernicus DEM GLO-30 (ESA) when selected",
@@ -16,7 +23,7 @@ class MB_PT_main(bpy.types.Panel):
     bl_region_type = "UI"
     bl_category = "Map Builder"
 
-    def draw(self, context):
+    def draw(self, context: bpy.types.Context) -> None:
         s = context.scene.map_builder
         layout = self.layout
         layout.use_property_split = True
@@ -87,9 +94,9 @@ class MB_PT_main(bpy.types.Panel):
             col.label(text=line)
 
 
-def register():
+def register() -> None:
     bpy.utils.register_class(MB_PT_main)
 
 
-def unregister():
+def unregister() -> None:
     bpy.utils.unregister_class(MB_PT_main)

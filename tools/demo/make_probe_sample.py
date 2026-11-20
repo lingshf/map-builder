@@ -6,6 +6,8 @@ The result is the synthetic sample plus three passage probes: one clear (PASS), 
 (BLOCKED) and one whose id contains markup, to show that the viewer lists ids as plain text.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -21,7 +23,7 @@ from map_builder.core.package import assemble, validate_package, write_package  
 SAMPLE = os.path.join(db.REPO, "examples", "synthetic_sample.mbmap")
 
 
-def main(out):
+def main(out: str) -> int:
     with zipfile.ZipFile(SAMPLE) as z:
         m = json.loads(z.read("manifest.json"))
         glb, col_bytes = z.read("visual/map.glb"), z.read("collision/map.mbcol")

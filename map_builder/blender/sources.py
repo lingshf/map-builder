@@ -17,19 +17,30 @@ Generate also checks everything it would persist (collection metadata, object pr
 before creating any datablock.
 """
 
+from __future__ import annotations
+
 import json
 import math
 import urllib.parse
+from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from ..core.osm import DEFAULT_OVERPASS_URL
 from ..core.package import find_secrets, secrets_message
 
+if TYPE_CHECKING:
+    from .props import MB_Settings
+
+# Any: JSON-like documents (sources, report, manifest, scene metadata) whose shape the core defines dynamically
+JsonObject = dict[str, Any]
+JsonMapping = Mapping[str, Any]
+
 ENV_OVERPASS_URL = "MAP_BUILDER_OVERPASS_URL"
 DEFAULT_LOCAL_DATUM = "user-declared (unknown)"
 # panel DSM correction mode -> core Settings.dsm_correction (None = auto: on for Copernicus, off for a local file)
-DSM_CORRECTION_VALUES = {"AUTO": None, "ON": True, "OFF": False}
+DSM_CORRECTION_VALUES: dict[str, bool | None] = {"AUTO": None, "ON": True, "OFF": False}
 # UI labels of the user-typed string settings that could be persisted (.blend, report Text, package)
-FIELD_LABELS = {"elevation_file": "Elevation file", "elevation_crs": "CRS (.asc)",
+FIELD_LABELS: dict[str, str] = {"elevation_file": "Elevation file", "elevation_crs": "CRS (.asc)",
                 "elevation_vertical_datum": "Vertical datum", "elevation_license": "Licence",
                 "osm_file": "OSM file", "cache_dir": "Cache folder", "package_name": "Map name",
                 "export_path": "Package"}
@@ -41,7 +52,7 @@ class SettingsInputError(ValueError):
     """The UI values cannot form valid generation settings (message is safe to show and persist)."""
 
 
-def parse_degrees(text, label):
+def parse_degrees(text: str, label: str) -> float:
     """The centre coordinate typed in the UI as a double (``Area`` validates the range)."""
     try:
         value = float(text.strip().replace(",", "."))
@@ -52,7 +63,7 @@ def parse_degrees(text, label):
     return value
 
 
-def migrate_legacy_centre(s):
+def migrate_legacy_centre(s: MB_Settings) -> bool:
     """Copy the legacy float32 ``lat``/``lon`` of a .blend saved before the text centre into empty
     ``centre_lat``/``centre_lon``, once: both axes together whenever either legacy property is set (a zero axis
     becomes "0"), rounded to the 6 decimals the old panel showed. ``centre_migrated`` then stops any later
@@ -66,17 +77,17 @@ def migrate_legacy_centre(s):
     return True
 
 
-def has_credential(value):
+def has_credential(value: object) -> bool:
     """True if the string ``value`` is credential-like under the core credential policy."""
     return isinstance(value, str) and bool(find_secrets(value))
 
 
-def credential_fields(values):
+def credential_fields(values: Mapping[str, object]) -> list[str]:
     """UI labels of the user-typed fields in ``values`` that hold a credential-like value (never the values)."""
     return [FIELD_LABELS.get(k, k) for k, v in values.items() if k in FIELD_LABELS and has_credential(v)]
 
 
-def reject_credentials(values, outcome="Nothing was generated"):
+def reject_credentials(values: Mapping[str, object], outcome: str = "Nothing was generated") -> None:
     """Raise SettingsInputError naming every field of ``values`` that holds a credential-like value."""
     bad = credential_fields(values)
     if bad:
@@ -84,7 +95,7 @@ def reject_credentials(values, outcome="Nothing was generated"):
                                  f".blend file, the report and the package); remove it. {outcome}.")
 
 
-def redact_diagnostics(problems):
+def redact_diagnostics(problems: Iterable[str]) -> list[str]:
     """Diagnostics safe to print or show: one that contains a credential-like value (e.g. in a user-chosen
     object, material or collection name quoted by an export check) is replaced, never echoed."""
     return [p if not has_credential(p) else
@@ -92,17 +103,17 @@ def redact_diagnostics(problems):
             "rename it)" for p in problems]
 
 
-def check_persistable(parts):
+def check_persistable(parts: Mapping[str, object]) -> None:
     """Raise SettingsInputError if anything in ``parts`` ({label: JSON-like data that would be saved in the
     .blend: collection metadata, provenance, report}) is credential-like. Locations only, never values."""
-    hits = []
+    hits: list[str] = []
     for label, obj in parts.items():
         hits += find_secrets(obj, label)
     if hits:
         raise SettingsInputError(secrets_message("generated scene data", hits) + ". Nothing was generated.")
 
 
-def endpoint_problem(url):
+def endpoint_problem(url: str) -> str | None:
     """None if ``url`` is a plain http(s) endpoint, else why it is unusable (never echoes the URL)."""
     try:
         p = urllib.parse.urlsplit(url)
@@ -114,16 +125,16 @@ def endpoint_problem(url):
     return None
 
 
-def needs_network(values):
+def needs_network(values: Mapping[str, object]) -> bool:
     return values.get("elevation_source") == "copernicus" or values.get("osm_source") == "overpass"
 
 
-def settings_kwargs(values, environ):
+def settings_kwargs(values: Mapping[str, Any], environ: Mapping[str, str]) -> dict[str, Any]:  # Any: heterogeneous UI values / Settings kwargs
     """Keyword arguments for ``core.pipeline.Settings`` from UI ``values`` (dict of plain values with
     absolute paths) and ``environ`` (os.environ or a test dict). Raises SettingsInputError, first for any
     credential-like user-typed value (see :func:`reject_credentials`)."""
     reject_credentials(values)
-    kw = {"elevation_source": values["elevation_source"], "osm_source": values["osm_source"],
+    kw: dict[str, Any] = {"elevation_source": values["elevation_source"], "osm_source": values["osm_source"],
           "terrain_spacing": float(values["terrain_spacing"]), "cache_dir": values.get("cache_dir") or ""}
     if kw["elevation_source"] == "file":
         path = values.get("elevation_file") or ""
@@ -165,13 +176,14 @@ def settings_kwargs(values, environ):
     return kw
 
 
-def _lic_text(lic):
+def _lic_text(lic: object) -> str:
     if isinstance(lic, dict):
         return " ".join(str(lic.get(k)) for k in ("name", "id", "url") if lic.get(k))
     return str(lic or "not declared")
 
 
-def format_report(title, sources, report, extra=None):
+def format_report(title: str, sources: Sequence[JsonMapping] | None, report: JsonMapping | None,
+                  extra: Mapping[str, object] | None = None) -> str:
     """Plain-text report: sources, licences, attribution, resolution, unsupported and invalid features,
     warnings, then the full JSON (contains no credentials: source entries are redacted by the core)."""
     lines = [title, ""]

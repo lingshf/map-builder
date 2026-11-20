@@ -28,7 +28,11 @@ custom normals and node networks beyond a Principled BSDF are not exported (repo
 Instanced meshes (e.g. trees sharing one mesh) are written once per object.
 """
 
+from __future__ import annotations
+
 import math
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from ..core import GENERATOR_VERSION
 from ..core.collision import MAX_ABS_COORD_M, ColObject, count_degenerate
@@ -36,6 +40,30 @@ from ..core.errors import MapBuilderError
 from ..core.glb import write_glb
 from ..core.mesh import MeshData
 from ..core.pipeline import export_package, resolve_identities
+from .sources import JsonMapping, JsonObject
+
+if TYPE_CHECKING:
+    from ..core.geodesy import Area
+    from ..core.package import ValidationResult
+
+Tri = tuple[int, int, int]
+Vec3 = tuple[float, float, float]
+Matrix = Sequence[Sequence[float]]
+MaterialSpec = tuple[tuple[float, ...], float, float]       # (rgb, roughness, metallic)
+SocketValue = Any   # Any: a Principled socket default is a float, a colour/vector tuple or None depending on the socket
+SocketInfo = tuple[bool, SocketValue]          # (is_linked, default value)
+
+
+class DuplicatedEdit(TypedDict):
+    object: str
+    source_id: str
+
+
+class Edits(TypedDict):
+    removed: list[str]
+    duplicated: list[DuplicatedEdit]
+    user_added: list[str]
+
 
 DEFAULT_MATERIAL = "MB Default"
 DEFAULT_MATERIAL_SPEC = ((0.8, 0.8, 0.8), 0.9, 0.0)
@@ -48,16 +76,17 @@ AFFINE_TOL = 1e-6
 class ExportError(MapBuilderError):
     """Blocking problems found before anything is written; the previous package is kept."""
 
-    def __init__(self, errors):
+    def __init__(self, errors: Iterable[str]) -> None:
         super().__init__("export blocked (previous package kept):\n- " + "\n- ".join(errors))
-        self.errors = list(errors)
+        self.errors: list[str] = list(errors)
 
 
 class BakedObject:
     """World-space (map frame) triangles of one exported object, CCW seen from outside."""
 
-    def __init__(self, name, mb_id, mb_class, vertices, triangles, tri_materials, tri_colors, provenance=None,
-                 mirrored=False):
+    def __init__(self, name: str, mb_id: str | None, mb_class: str | None, vertices: list[Vec3],
+                 triangles: list[Tri], tri_materials: list[str], tri_colors: list[tuple[float, ...]],
+                 provenance: dict[str, object] | None = None, mirrored: bool = False) -> None:
         self.name = name
         self.mb_id = mb_id
         self.mb_class = mb_class
@@ -65,16 +94,16 @@ class BakedObject:
         self.triangles = triangles
         self.tri_materials = tri_materials
         self.tri_colors = tri_colors
-        self.provenance = provenance or {}
+        self.provenance: dict[str, object] = provenance or {}
         self.mirrored = mirrored
         self.unused_vertices = 0
 
 
-def _finite(v):
+def _finite(v: object) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
-def transform_problem(matrix):
+def transform_problem(matrix: Matrix) -> str | None:
     """None if ``matrix`` (4x4, row-major nested sequence) is a usable world matrix, else the reason."""
     try:
         rows = [[float(c) for c in r] for r in matrix]
@@ -95,13 +124,15 @@ def transform_problem(matrix):
     return None
 
 
-def det3(m):
+def det3(m: Matrix) -> float:
     return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
 
 
-def bake_object(name, local_vertices, triangles, matrix, tri_materials=None, tri_colors=None, mb_id=None,
-                mb_class=None, provenance=None):
+def bake_object(name: str, local_vertices: Sequence[Vec3], triangles: Iterable[Sequence[int]], matrix: Matrix,
+                tri_materials: Sequence[str] | None = None, tri_colors: Sequence[Sequence[float]] | None = None,
+                mb_id: str | None = None, mb_class: str | None = None,
+                provenance: dict[str, object] | None = None) -> BakedObject:
     """Bake an evaluated mesh into world space.
 
     ``local_vertices``: [(x, y, z)] object-space positions of the evaluated mesh; ``triangles``: index
@@ -114,7 +145,7 @@ def bake_object(name, local_vertices, triangles, matrix, tri_materials=None, tri
         raise ExportError([f"{name}: {problem}"])
     m = [[float(c) for c in r] for r in matrix]
     n = len(local_vertices)
-    world = []
+    world: list[Vec3] = []
     for p in local_vertices:
         x, y, z = p
         if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z)):
@@ -125,7 +156,7 @@ def bake_object(name, local_vertices, triangles, matrix, tri_materials=None, tri
         if not all(math.isfinite(c) and abs(c) <= MAX_ABS_COORD_M for c in q):
             raise ExportError([f"{name}: world-space vertex is non-finite or beyond {MAX_ABS_COORD_M:g} m"])
         world.append(q)
-    tris = []
+    tris: list[Tri] = []
     for t in triangles:
         a, b, c = (int(i) for i in t)
         if not (0 <= a < n and 0 <= b < n and 0 <= c < n):
@@ -143,7 +174,8 @@ def bake_object(name, local_vertices, triangles, matrix, tri_materials=None, tri
         tris = [(remap[a], remap[b], remap[c]) for a, b, c in tris]
     k = len(tris)
     mats = list(tri_materials) if tri_materials is not None else [DEFAULT_MATERIAL] * k
-    cols = [tuple(float(v) for v in c) for c in tri_colors] if tri_colors is not None else [WHITE] * k
+    cols: list[tuple[float, ...]] = ([tuple(float(v) for v in c) for c in tri_colors] if tri_colors is not None
+                                     else [WHITE] * k)
     if len(mats) != k or len(cols) != k:
         raise ExportError([f"{name}: per-triangle material/colour lists do not match the triangle count"])
     if not all(len(c) == 3 and all(math.isfinite(v) for v in c) for c in cols):
@@ -153,18 +185,18 @@ def bake_object(name, local_vertices, triangles, matrix, tri_materials=None, tri
     return baked
 
 
-def degenerate_count(obj):
+def degenerate_count(obj: BakedObject) -> int:
     v = obj.vertices
     return count_degenerate((v[a], v[b], v[c]) for a, b, c in obj.triangles)
 
 
-def outside_area(obj, area, margin_m=1.0):
+def outside_area(obj: BakedObject, area: Area, margin_m: float = 1.0) -> bool:
     """True if any vertex lies outside the area rectangle (plus margin) in XY."""
     hx, hy = area.half
     return any(abs(p[0]) > hx + margin_m or abs(p[1]) > hy + margin_m for p in obj.vertices)
 
 
-def export_name_clashes(entries):
+def export_name_clashes(entries: Iterable[tuple[str, str]]) -> list[str]:
     """Blocking errors for distinct objects that would share an export name.
 
     ``entries``: [(export name, unambiguous label)] with one entry per *distinct* object (the caller
@@ -172,7 +204,7 @@ def export_name_clashes(entries):
     object share ``name`` (their ``name_full`` differs by the library); export names bind glTF nodes to
     collision objects and derive identities (docs/PACKAGE_FORMAT.md), so such a clash blocks the export
     instead of dropping or silently renaming one of them."""
-    by_name = {}
+    by_name: dict[str, list[str]] = {}
     for name, label in entries:
         by_name.setdefault(name, []).append(label)
     return [f"{len(labels)} objects share the export name {name!r}: " + ", ".join(repr(x) for x in sorted(labels))
@@ -192,19 +224,20 @@ PRINCIPLED_NORMALS = (("Normal", "normal/bump map (Normal input)"), ("Coat Norma
                       ("Tangent", "custom tangent (Tangent input)"))
 
 
-def principled_omissions(inputs):
+def principled_omissions(inputs: Mapping[str, SocketInfo]) -> list[str]:
     """Effects of a Principled BSDF that the export omits, in a fixed order.
 
     ``inputs``: {socket name: (is_linked, default value)} of the enabled inputs (Blender 4.x names; a
     value is a float or a colour/vector tuple). Reported: emission (colour x strength non-zero, or either
     input linked), non-zero or linked subsurface/transmission/coat/sheen/anisotropic/thin-film weights,
     linked Normal/Coat Normal/Tangent, and any other linked input outside :data:`PRINCIPLED_HANDLED`."""
-    out, covered = [], set(PRINCIPLED_HANDLED)
+    out: list[str] = []
+    covered = set(PRINCIPLED_HANDLED)
 
-    def linked(name):
+    def linked(name: str) -> bool:
         return bool(inputs.get(name, (False, None))[0])
 
-    def number(name):
+    def number(name: str) -> float:
         v = inputs.get(name, (False, 0.0))[1]
         try:
             return float(v)
@@ -231,7 +264,7 @@ def principled_omissions(inputs):
     return out
 
 
-def _provenance(obj, mb_id, edits_dup):
+def _provenance(obj: BakedObject, mb_id: str, edits_dup: Mapping[str, str]) -> dict[str, object]:
     if mb_id.startswith("user:"):
         return {"source": "user-added in Blender (no generated identity)"}
     prov = dict(obj.provenance or {})
@@ -241,7 +274,9 @@ def _provenance(obj, mb_id, edits_dup):
     return prov
 
 
-def package_parts(baked, generated_ids, materials):
+def package_parts(baked: Sequence[BakedObject], generated_ids: Collection[str],
+                  materials: Mapping[str, MaterialSpec] | None,
+                  ) -> tuple[bytes, list[ColObject], dict[str, dict[str, object]], Edits]:
     """(glb bytes, [ColObject], object_info, edits) from baked objects. Identities follow
     docs/PACKAGE_FORMAT.md via :func:`resolve_identities`; each glTF node and its collision object are
     built from the same world-space triangles (identity node transform)."""
@@ -250,9 +285,11 @@ def package_parts(baked, generated_ids, materials):
     resolved, edits = resolve_identities([(b.name, b.mb_id, b.mb_class) for b in baked], generated_ids)
     by_name = {b.name: b for b in baked}
     dup = {d["object"]: d["source_id"] for d in edits["duplicated"]}
-    mats = {DEFAULT_MATERIAL: DEFAULT_MATERIAL_SPEC}
+    mats: dict[str, MaterialSpec] = {DEFAULT_MATERIAL: DEFAULT_MATERIAL_SPEC}
     mats.update(materials or {})
-    nodes, cols, info = [], [], {}
+    nodes: list[dict[str, object]] = []
+    cols: list[ColObject] = []
+    info: dict[str, dict[str, object]] = {}
     for name, mb_id, cls in resolved:
         b = by_name[name]
         if not b.triangles:
@@ -268,8 +305,11 @@ def package_parts(baked, generated_ids, materials):
     return glb, cols, info, edits
 
 
-def export_baked(path, name, area, sources, baked, generated_ids, materials, report, blender_version=None,
-                 heightfield_spacing=None, created_utc=None, passage_probes=()):
+def export_baked(path: str, name: str, area: Area, sources: Sequence[JsonMapping], baked: Sequence[BakedObject],
+                 generated_ids: Collection[str], materials: Mapping[str, MaterialSpec] | None,
+                 report: JsonObject, blender_version: str | None = None,
+                 heightfield_spacing: float | None = None, created_utc: str | None = None,
+                 passage_probes: Sequence[JsonMapping] = ()) -> tuple[JsonObject, ValidationResult, Edits]:
     """Write the package atomically (core ``write_package``: a failed write keeps the previous file).
     ``passage_probes`` come from the plan; a probe whose feature mb_id is among ``generated_ids`` (the
     original plan) but no longer among the exported objects is dropped and its id listed in report.json

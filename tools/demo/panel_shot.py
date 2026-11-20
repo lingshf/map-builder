@@ -7,6 +7,8 @@ sidebar panel next to the package's map and saves a real screenshot of the Blend
 Started by run_demo.py --panel; exits Blender when done (exit code 0 only if the file was written).
 """
 
+from __future__ import annotations
+
 import argparse
 import math
 import os
@@ -26,11 +28,11 @@ ap.add_argument("--lon", type=float, required=True)
 ap.add_argument("--width", type=float, required=True)
 ap.add_argument("--height", type=float, required=True)
 ap.add_argument("--name", default="map")
-ARGS = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
-state = {"ticks": 0, "shot": False}
+ARGS: argparse.Namespace = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
+state: dict[str, int | bool] = {"ticks": 0, "shot": False}
 
 
-def view3d():
+def view3d() -> tuple[bpy.types.Window, bpy.types.Area]:
     for win in bpy.context.window_manager.windows:
         for area in win.screen.areas:
             if area.type == "VIEW_3D":
@@ -38,7 +40,7 @@ def view3d():
     return None, None
 
 
-def setup():
+def setup() -> None:
     import map_builder
     map_builder.register()
     s = bpy.context.scene.map_builder
@@ -77,7 +79,7 @@ def setup():
     win.cursor_warp(win.width - 5, 5)
 
 
-def tick():
+def tick() -> float:
     state["ticks"] += 1
     if state["ticks"] == 1:
         setup()
