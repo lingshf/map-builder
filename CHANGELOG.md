@@ -45,7 +45,7 @@ Package schema stays **2.0.0**.
   over the terrain), a crossing is exempt only if the road surface lies within
   0.3 m of the nominal deck top, above or below (a two-sided surface gap); no
   shared OSM node is needed. Roads further above or below are still measured
-  on the exported geometry and still warn (#32).
+  on the exported geometry and warn only if the clearance is insufficient (#32).
 - Packages now report `generator.version` **0.3.0**, and a unit test keeps it
   equal to the add-on version (D50). v0.1.0 and v0.2.0 packages report
   `generator.version` 0.1.0, a known historical mislabel. Because the
