@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
 """S2-F6 road sliver check: a needle road face that Blender's float32 storage turns over (z <= 0) is removed by
 the generator. The minimal face from the headless Blender Pittsburgh build (osm:way/223360727) is put into a real

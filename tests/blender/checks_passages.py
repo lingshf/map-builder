@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
 """S2-ELEV checks: elevated building parts and building passages survive Blender edits (D21, D24).
 

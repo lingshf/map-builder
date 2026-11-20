@@ -29,4 +29,4 @@ permission produces an error, never a substitute flat map.
 
 If the sidebar is missing, verify that the extension is enabled and that the
 active editor is a 3D Viewport. This is a Blender extension, not a standalone app.
-The code licence is provisionally GPL-3.0-or-later pending owner confirmation.
+The add-on code is GPL-3.0-or-later; the core library, CLI and docs are Apache-2.0 (see the README Licence section). The extension's licence is declared in `blender_manifest.toml`.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 lingshf
 import * as THREE from "three";
 import { GLTFLoader } from "./vendor/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "./vendor/jsm/controls/OrbitControls.js";

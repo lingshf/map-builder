@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
 """S1-TUNNEL checks: the fixture road tunnel (way/1072) is generated as a tunnel-class tube in the Tunnels
 collection with its bore probe, and a mirrored (negative-scale) tunnel still exports as a valid package."""

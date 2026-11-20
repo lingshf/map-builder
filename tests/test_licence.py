@@ -10,7 +10,8 @@ import unittest
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GPL = "GPL-3.0-or-later"
 APACHE = "Apache-2.0"
-SPDX = re.compile(r"^(?:#|//) SPDX-License-Identifier: (\S+)\s*$", re.M)
+SPDX = re.compile(r"^(?:#|//|<!--) SPDX-License-Identifier: (\S+?)(?: -->)?\s*$", re.M)
+BPY = re.compile(r"^\s*(?:import bpy|from bpy)", re.M)
 
 
 def _tracked():
@@ -20,6 +21,9 @@ def _tracked():
 
 def _expected(rel):
     gpl = rel.startswith("map_builder/blender/") or rel == "map_builder/__init__.py"
+    if not gpl and rel.endswith(".py"):
+        with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+            gpl = BPY.search(f.read()) is not None
     return GPL if gpl else APACHE
 
 
@@ -32,7 +36,7 @@ class SpdxTest(unittest.TestCase):
     def test_every_first_party_source_has_the_right_spdx_header(self):
         bad = []
         for rel in _tracked():
-            if "/vendor/" in rel or not rel.endswith((".py", ".cs")):
+            if rel.startswith("tools/demo/viewer/vendor/") or not rel.endswith((".py", ".cs", ".js", ".html")):
                 continue
             with open(os.path.join(REPO, rel), encoding="utf-8") as f:
                 head = f.read(400)
@@ -41,13 +45,9 @@ class SpdxTest(unittest.TestCase):
                 bad.append((rel, m and m.group(1)))
         self.assertEqual(bad, [])
 
-    def test_manifest_and_pyproject_declare_the_split(self):
+    def test_manifest_declares_gpl(self):
         with open(os.path.join(REPO, "map_builder", "blender_manifest.toml"), "rb") as f:
             self.assertEqual(tomllib.load(f)["license"], ["SPDX:" + GPL])
-        with open(os.path.join(REPO, "pyproject.toml"), "rb") as f:
-            project = tomllib.load(f)["project"]
-        self.assertEqual(project["license"], APACHE)
-        self.assertIn("LICENSE", project["license-files"])
 
 
 class LicenceTextTest(unittest.TestCase):

@@ -275,7 +275,8 @@ class ExtensionZipTest(unittest.TestCase):
                 self.assertEqual(len(root), 1, names[:20])
                 for name in LICENCE_FILES:
                     self.assertIn(f"{root[0]}{name}", names)
-                    self.assertEqual(z.read(f"{root[0]}{name}"), open(os.path.join(ADDON, name), "rb").read())
+                    with open(os.path.join(ADDON, name), "rb") as f:
+                        self.assertEqual(z.read(f"{root[0]}{name}"), f.read())
         finally:
             if tmp:
                 tmp.cleanup()

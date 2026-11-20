@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 lingshf
 // Runs the Khronos glTF-Validator (npm `gltf-validator`) on a GLB and fails on any
 // error, or on any warning about textures, samplers, images or TEXCOORD_0.
 // usage: node tools/gltf_validate.js FILE.glb   (D66: glTFast proxy, no Unity Editor in CI)

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
 """Core checks of the headless Blender integration test for the Map Builder add-on (Blender 4.2 LTS).
 

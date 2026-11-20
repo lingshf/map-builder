@@ -268,12 +268,12 @@ The code is under a split licence (decision D13, option B):
 
 | Path | Licence |
 |---|---|
-| `map_builder/blender/`, `map_builder/__init__.py`, `map_builder/blender_manifest.toml` (Blender add-on, imports `bpy`) | GPL-3.0-or-later (`LICENSE-GPL-3.0.txt`) |
+| `map_builder/blender/`, `map_builder/blender_manifest.toml`, `map_builder/__init__.py` (add-on bootstrap; the one exception in the otherwise-Apache package) and any first-party file that imports `bpy` (`tests/blender/`, `tools/demo/`, `docs/demo/` scripts) | GPL-3.0-or-later (`LICENSE-GPL-3.0.txt`) |
 | `map_builder/core/`, `tools/` (CLI), `pyproject.toml`, `examples/` (C# reader), `docs/` (incl. the `.mbmap` format spec), `design/`, `tests/`, `.github/` | Apache-2.0 (`LICENSE`) |
 | `map_builder/assets/textures/` | CC0 1.0 (`LICENSE-textures.txt`) |
 | `tools/demo/viewer/vendor/` (three.js) | MIT (`LICENSE-three.txt`) |
 
-Every first-party source file carries an SPDX header; see `NOTICE`. The Blender extension zip
+Every first-party source file carries an SPDX header; see `NOTICE`. The Blender extension's licence is declared in `map_builder/blender_manifest.toml`; there is no published Python distribution, so no packaging licence metadata yet. The Blender extension zip
 ships the licence texts and `NOTICE` inside `map_builder/`.
 
 **Generated data is not covered by the code licences.** `.mbmap` packages and GLB files you
