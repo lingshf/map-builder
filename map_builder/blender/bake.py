@@ -42,7 +42,7 @@ from ..core.errors import MapBuilderError
 from ..core.glb import write_glb
 from ..core.mesh import MeshData
 from ..core.pipeline import export_package, resolve_identities
-from ..core.textures import asset_notice
+from ..core.textures import TEXTURES, asset_notice, load as load_texture
 from .sources import JsonMapping, JsonObject
 
 if TYPE_CHECKING:
@@ -332,7 +332,9 @@ def export_baked(path: str, name: str, area: Area, sources: Sequence[JsonMapping
     metadata) or one naming an unknown feature raises PackageError.
     Returns (manifest, ValidationResult, edits)."""
     glb, cols, info, edits = package_parts(baked, generated_ids, materials)
-    used = sorted({m for b in baked for m in b.tri_materials if len((materials or {}).get(m, ())) > 3})
+    names_used = {m for b in baked for m in set(b.tri_materials)}
+    pngs = {bytes(spec[3]) for m, spec in (materials or {}).items() if len(spec) > 3 and m in names_used}
+    used = sorted(t for t in TEXTURES if pngs and load_texture(t) in pngs)   # the textures, not the export names
     notices = [asset_notice(used)] if used else ()      # D65: the entry the CLI writes
     manifest, result = export_package(path, name, area, sources, glb, cols, report, edits=edits,
                                       blender_version=blender_version, heightfield_spacing=heightfield_spacing,

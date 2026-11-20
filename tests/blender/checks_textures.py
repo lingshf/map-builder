@@ -273,3 +273,46 @@ def run(out_dir):
     uvw = [w for w in rep["blender_export"]["warnings"] if "UV" in w]
     check(res == {"FINISHED"} and len(uvw) == 1 and "plain_cube" in uvw[0],
           f"textures: an untagged no-UV cube with a generated material gets one fallback warning ({uvw})")
+
+    # --- D86 round 4: plain and textured generated variants of one texture with different roughness keep their
+    # own glTF materials, and the names do not depend on object names ---------------------------------------------
+    from map_builder.blender.scene_build import ensure_material as _em
+
+    def _cube(name, mat, loc):
+        m = bpy.data.meshes.new(name)
+        m.from_pydata(v, [], f)
+        m.materials.append(mat)
+        at = m.color_attributes.new(COLOR_ATTR, "FLOAT_COLOR", "CORNER")
+        at.data.foreach_set("color", [0.5, 0.5, 0.5, 1.0] * len(m.loops))
+        o = bpy.data.objects.new(name, m)
+        o.location = loc
+        next(iter(s.export_collection.children)).objects.link(o)
+        return o
+
+    def _mats(path):
+        gl_, _, _ = _node_prims(_members(path)["visual/map.glb"])
+        return {m["name"]: (round(m["pbrMetallicRoughness"]["roughnessFactor"], 3),
+                            "baseColorTexture" in m["pbrMetallicRoughness"]) for m in gl_["materials"]}
+    bpy.data.objects.remove(cube, do_unlink=True)
+    plain = next(m for m in bpy.data.materials if m.get("mb_material") == "MB Facade" and not m.get("mb_textured"))
+    tmat = _em("MB Facade", None, True)
+    tweaked = tmat.copy()
+    next(n for n in tweaked.node_tree.nodes if n.type == "BSDF_PRINCIPLED").inputs["Roughness"].default_value = 0.21
+    tweaked["mb_material"], tweaked["mb_textured"] = "MB Facade", True
+    c1, c2, c3 = _cube("mix_a", plain, (60, 20, 1)), _cube("mix_b", tweaked, (70, 20, 1)), _cube("mix_c", tmat, (80, 20, 1))
+    p1 = os.path.join(out_dir, "tex_bl_mix1.mbmap")
+    s.export_path = p1
+    res, err = run_op(bpy.ops.map_builder.export)
+    ok1 = res == {"FINISHED"}
+    m1 = _mats(p1) if ok1 else {}
+    c1.name, c2.name, c3.name = "zz_a", "aa_b", "mm_c"
+    p2 = os.path.join(out_dir, "tex_bl_mix2.mbmap")
+    s.export_path = p2
+    res, err = run_op(bpy.ops.map_builder.export)
+    m2 = _mats(p2) if res == {"FINISHED"} else {}
+    fac = {n: v_ for n, v_ in m1.items() if n.startswith("MB Facade")}
+    check(ok1 and m1 == m2 and len(fac) == 2 and 0.21 in [r_ for r_, _ in fac.values()] and all(t for _, t in fac.values()),
+          f"textures: a plain/textured mix with a different roughness exports two textured materials, "
+          f"independent of object names ({fac})")
+    check(json.loads(_members(p1)["manifest.json"]).get("asset_notices") is not None,
+          "textures: the mixed package carries the notice")

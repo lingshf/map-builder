@@ -145,7 +145,7 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True,
         attr = COLOR_ATTR
     elif generated_plain:   # generated with Textures off, exported with Textures on: the CLI's textured material
         name = gen
-        rgb = tuple(MATERIALS.get(gen, ((0.8, 0.8, 0.8), 0.9, 0.0))[0])
+        rgb = tuple(_canonical(gen)[0])
         attr = COLOR_ATTR
     elif src is None:
         rgb = tuple(float(c) for c in base.default_value[:3])
@@ -180,11 +180,27 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True,
     if not all(math.isfinite(v) for v in (*rgb, *values)):
         raise ExportError([f"material {mat.name!r}: non-finite colour/roughness/metallic"])
     if generated_plain:
-        values = [tex.roughness(gen), 0.0]
+        values = [_canonical(gen)[1], _canonical(gen)[2]]
     spec: MaterialSpec = (rgb, values[0], values[1])
     if (generated_textured or generated_plain) and textures:
         spec = (rgb, values[0], values[1], tex.load(gen))
     return name, spec, attr, warnings
+
+
+def _canonical(tag: str) -> tuple[tuple[float, ...], float, float]:
+    """The CLI writer's factors for the textured material ``tag``."""
+    return MATERIALS.get(tag, ((0.8, 0.8, 0.8), tex.roughness(tag), 0.0))
+
+
+def _textured_export_name(tag: str, spec: MaterialSpec) -> str:
+    """Export name of a textured generated material: the tag itself for the CLI's exact factors, otherwise the
+    tag plus its parameters. It depends on the parameters only (never on object names or iteration order), and
+    datablocks with identical parameters share one glTF material."""
+    rgb, rough, metal = _canonical(tag)
+    if all(abs(a - b) < 1e-4 for a, b in zip((*spec[0], spec[1], spec[2]), (*rgb, rough, metal))):   # float32 noise
+        return tag
+    col = "".join(f"{round(min(max(c, 0.0), 1.0) * 255):02x}" for c in spec[0])
+    return f"{tag} [{col} r{spec[1]:.3f} m{spec[2]:.3f}]"
 
 
 def _is_plain_generated(mat: bpy.types.Material | None) -> bool:
@@ -311,8 +327,8 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
             mname, spec, attr, mwarn = material_spec(slot.material, textures)
             tname = mname if spec is not None and len(spec) > 3 else None   # texture lookup key (material name)
             if spec is not None:
-                if tname is not None and slot.material.as_pointer() not in mat_names and \
-                        len(materials.get(mname, (0, 0, 0, 0))) > 3:   # generated datablocks of one texture share its name
+                if tname is not None:
+                    mname = _textured_export_name(tname, spec)
                     mat_names[slot.material.as_pointer()] = mname
                 else:
                     mname = _export_material_name(mat_names, slot.material.as_pointer(), mname)
