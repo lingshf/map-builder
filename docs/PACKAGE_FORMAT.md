@@ -4,7 +4,11 @@ This is the contract between map-builder (the producer) and any runtime (the con
 Format and schema versions follow semver: a consumer must reject an unknown **major**
 version and must ignore unknown fields. Major version 2 (this document) added the `bridge`,
 `tunnel` and `structure` collision classes with per-kind winding rules, `.mbcol` v2 and
-`passage_probes`; 1.x packages are rejected and must be regenerated.
+`passage_probes`; 1.x packages are rejected and must be regenerated. Minor version 2.1.0 is
+additive: optional embedded PNG base-colour textures with `TEXCOORD_0`, and the optional
+`asset_notices[]` manifest field (see "Textures and asset notices (2.1.0)"). The writer
+default stays 2.0.0 until the generator emits textures; a 2.1.0 package is written only when
+the caller passes `schema_version="2.1.0"`.
 
 ## Container
 
@@ -186,6 +190,46 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
   fails with "cannot verify binding" instead of passing.
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
+
+## Textures and asset notices (2.1.0)
+
+Textures are optional and never change geometry, collision or identity. A reader that ignores
+them still renders `baseColorFactor` × vertex colour (`COLOR_0`), which every 2.1.0 material
+keeps. Readers written for 2.0.0 accept a 2.1.0 package unchanged: `asset_notices` is a
+top-level field they ignore, and the extra GLB parts are standard glTF.
+
+GLB rules (checked by the Python validator and the C# reader, which share these messages):
+
+* Images are PNG, **embedded** in the BIN chunk through `bufferView` with
+  `mimeType: "image/png"`. A `uri` is an error (no external files, no data URIs). The
+  validator reads the PNG signature and IHDR only; it does not decode pixels.
+* Each side is a power of two, at most 1024. All embedded images together are at most 4 MiB.
+* `textures[].source` indexes `images`; an optional `sampler` indexes `samplers`.
+* A material's `pbrMetallicRoughness.baseColorTexture` has an `index` into `textures` and
+  `texCoord` 0 (or absent). No other texture slots or extensions
+  (`extensionsRequired` stays empty).
+* Every primitive that uses a textured material has `TEXCOORD_0`: float32 `VEC2`, not
+  normalized, finite, with the same count as `POSITION`. Untextured primitives carry no UVs.
+* The writer shares one image/texture/sampler (REPEAT, linear/mip-linear) per distinct PNG.
+
+`asset_notices[]` (optional, top-level) records the provenance of the embedded images:
+
+```jsonc
+"asset_notices": [{ "name": "…", "attribution": "…",
+                    "license": { "id": "CC0-1.0", "name": "…", "url": "…", "text": "…" },
+                    "sha256": ["<64 lowercase hex of each PNG this entry covers>"] }]
+```
+
+* `name` and `attribution` are non-empty strings. `license` declares at least one of `id`,
+  `name`, `text` (and optionally `url`), all strings. `sha256` is a non-empty array.
+* Every embedded image's SHA-256 must be listed in some entry; otherwise the package is
+  invalid ("texture without provenance"). A listed hash that is not an image in the GLB is a
+  warning in the Python validator (an error in the C# reader, where warnings are errors).
+* `NOTICES.txt` gets an "Assets" section; each entry's attribution and each declared licence
+  value must appear in it verbatim. The `sources[]` kinds stay `elevation` and `features`.
+
+Reference tools: `python -m tests.make_textured_fixture OUT.mbmap` writes a complete textured
+2.1.0 package, and `MbmapReader --validate-many <dir>` prints one verdict per `.mbmap`.
 
 ## `manifest.json` (abridged)
 

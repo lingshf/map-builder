@@ -7,6 +7,9 @@ class MeshData:
     ``faces`` are tuples of vertex indices, CCW when seen from outside.
     ``face_materials`` indexes into ``materials`` (material spec names) and
     ``face_colors`` holds an (r, g, b) linear colour per face.
+    ``face_uvs`` is ``None`` (no UVs) or a list parallel to ``faces`` whose entries are either
+    ``None`` or one (u, v) pair per face corner (glTF convention, v down from the image top).
+    UVs are per corner, so faces sharing a vertex may carry different UVs.
     """
 
     def __init__(self, name):
@@ -16,6 +19,7 @@ class MeshData:
         self.face_materials = []
         self.face_colors = []
         self.materials = []
+        self.face_uvs = None
 
     def material_index(self, name):
         if name not in self.materials:
@@ -26,10 +30,17 @@ class MeshData:
         self.vertices.append((float(x), float(y), float(z)))
         return len(self.vertices) - 1
 
-    def add_face(self, idx, material, color):
+    def add_face(self, idx, material, color, uvs=None):
+        """``uvs``: optional (u, v) per corner of ``idx``."""
+        if uvs is not None and len(uvs) != len(idx):
+            raise ValueError("uvs must have one (u, v) per face corner")
+        if uvs is not None and self.face_uvs is None:
+            self.face_uvs = [None] * len(self.faces)
         self.faces.append(tuple(idx))
         self.face_materials.append(self.material_index(material))
         self.face_colors.append(tuple(color))
+        if self.face_uvs is not None:
+            self.face_uvs.append(None if uvs is None else tuple((float(u), float(v)) for u, v in uvs))
 
     def triangles(self):
         """Fan-triangulated faces. Every face with more than 3 vertices that the generator

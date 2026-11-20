@@ -5,6 +5,7 @@ using System.Text.Json;
 using MapBuilder.Reference;
 
 // Usage: dotnet run -c Release -- <package.mbmap>
+//        dotnet run -c Release -- --validate-many <dir>   (one verdict line per *.mbmap in <dir>)
 // Verifies the package (container rules, files[] one-to-one, sizes, SHA-256), computes package_id,
 // parses .mbcol/.mbhf/GLB, checks the visual/collision name binding, runs the orientation probes against
 // the GLB through a simulated X-negating importer (plus two negative controls), checks each passage probe
@@ -17,10 +18,44 @@ static class Program
     static int Main(string[] args)
     {
         if (args.Length >= 3 && args[0] == "--probe-work") return ProbeWork(args[1], args[2], args.Length == 4 ? long.Parse(args[3]) : (long?)null);
-        if (args.Length != 1) { Console.Error.WriteLine("usage: MbmapReader <package.mbmap> | --probe-work <map.mbcol> <probes.json> [shared budget]"); return 2; }
+        if (args.Length == 2 && args[0] == "--validate-many") return ValidateMany(args[1]);
+        if (args.Length != 1) { Console.Error.WriteLine("usage: MbmapReader <package.mbmap> | --validate-many <dir> | --probe-work <map.mbcol> <probes.json> [shared budget]"); return 2; }
+        return Validate(args[0]);
+    }
+
+    // Batch mode: validates every *.mbmap in <dir> (sorted by name) in this one process and prints one verdict
+    // line per package, "<file>: OK" or "<file>: <first problem>". Exit code 0 only if all are OK.
+    static int ValidateMany(string dir)
+    {
+        var files = Directory.GetFiles(dir, "*.mbmap");
+        Array.Sort(files, StringComparer.Ordinal);
+        var real = Console.Out;
+        int bad = 0;
+        foreach (var f in files)
+        {
+            var sw = new StringWriter();
+            Console.SetOut(sw);
+            int rc;
+            try { rc = Validate(f); }
+            finally { Console.SetOut(real); }
+            string verdict = "OK";
+            if (rc != 0)
+            {
+                bad++;
+                verdict = "FAILED";
+                foreach (var line in sw.ToString().Split('\n'))
+                    if (line.StartsWith("INVALID:") || line.StartsWith("FAIL:")) { verdict = line.TrimEnd('\r'); break; }
+            }
+            Console.WriteLine($"{Path.GetFileName(f)}: {verdict}");
+        }
+        return bad == 0 ? 0 : 1;
+    }
+
+    static int Validate(string path)
+    {
         try
         {
-            using (var p = MbmapPackage.Load(args[0]))
+            using (var p = MbmapPackage.Load(path))
                 return Report(p);
         }
         catch (Exception e) when (e is MbmapException || e is InvalidDataException || e is IOException || e is UnauthorizedAccessException)
@@ -90,7 +125,7 @@ static class Program
         Console.WriteLine($"triangles  by class: {string.Join(", ", classes)}");
 
         // Visual/collision binding: every glTF node with triangles <-> one collision object of the same name.
-        var nodes = Glb.Read(p.Member(MbmapPackage.VisualPath, "visual"));
+        var nodes = p.VisualNodes;
         var visual = new Dictionary<string, VisualNode>(StringComparer.Ordinal);
         foreach (var n in nodes)
             if (n.TrianglesGltf.Count > 0 && !visual.TryAdd(n.Name, n)) failures.Add("two glTF nodes with triangles share a name");

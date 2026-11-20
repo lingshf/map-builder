@@ -36,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the frozen-reader step needs the v0.3.0 tag for git archive
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
@@ -59,3 +61,31 @@ jobs:
           code=${PIPESTATUS[0]}
           set -e
           test "$code" = "1" && grep -q "INVALID: collision/map.mbcol: SHA-256 mismatch" "$RUNNER_TEMP/out.txt"
+      - name: Frozen v0.3.0 readers accept a complete textured 2.1.0 package
+        run: |
+          set -e
+          V030="$RUNNER_TEMP/v030"
+          mkdir -p "$V030"
+          git archive v0.3.0 map_builder tools examples/csharp examples/synthetic_sample.mbmap | tar -x -C "$V030"
+          python3 -m tests.make_textured_fixture "$RUNNER_TEMP/textured.mbmap"
+          # the v0.3.0 Python validator: no errors, and no warnings beyond the committed sample's own
+          (cd "$V030" && python3 -m tools.mbmap_cli validate "$RUNNER_TEMP/textured.mbmap") | tee "$RUNNER_TEMP/tex.txt"
+          (cd "$V030" && python3 -m tools.mbmap_cli validate "$GITHUB_WORKSPACE/examples/synthetic_sample.mbmap") | tee "$RUNNER_TEMP/sample.txt"
+          grep -q "^VALID: 0 error(s)" "$RUNNER_TEMP/tex.txt"
+          diff <(grep '^warning:' "$RUNNER_TEMP/tex.txt") <(grep '^warning:' "$RUNNER_TEMP/sample.txt")
+          # the frozen v0.3.0 C# reader: must read the textured package unchanged (texture ignored)
+          dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$RUNNER_TEMP/textured.mbmap" | tee "$RUNNER_TEMP/tex-cs.txt"
+          test "$(tail -n 1 "$RUNNER_TEMP/tex-cs.txt")" = "OK"
+          # AC4: the frozen C# reader on the committed sample; same warnings as the archived v0.3.0 baseline
+          dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$GITHUB_WORKSPACE/examples/synthetic_sample.mbmap" | tee "$RUNNER_TEMP/sample-cs.txt"
+          test "$(tail -n 1 "$RUNNER_TEMP/sample-cs.txt")" = "OK"
+          dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$RUNNER_TEMP/v030/examples/synthetic_sample.mbmap" > "$RUNNER_TEMP/base-cs.txt" 2>&1 || true
+          diff <(grep -i '^warning' "$RUNNER_TEMP/sample-cs.txt") <(grep -i '^warning' "$RUNNER_TEMP/base-cs.txt")
+      - name: glTF-Validator on the textured fixture (glTFast proxy, D66)
+        run: |
+          set -e
+          python3 -m tests.make_textured_fixture "$RUNNER_TEMP/textured2.mbmap"
+          python3 -c "import zipfile,sys,os; open(os.path.join(os.environ['RUNNER_TEMP'],'fixture.glb'),'wb').write(zipfile.ZipFile(sys.argv[1]).read('visual/map.glb'))" "$RUNNER_TEMP/textured2.mbmap"
+          npm install --prefix "$RUNNER_TEMP/gv" gltf-validator@2.0.0-dev.3.10
+          cp tools/gltf_validate.js "$RUNNER_TEMP/gv/"
+          node "$RUNNER_TEMP/gv/gltf_validate.js" "$RUNNER_TEMP/fixture.glb"
