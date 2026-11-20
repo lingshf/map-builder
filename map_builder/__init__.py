@@ -7,7 +7,7 @@ unit-tested and used headlessly; Blender modules are imported in register().
 bl_info = {
     "name": "Map Builder",
     "author": "map-builder contributors",
-    "version": (0, 2, 0),
+    "version": (0, 3, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > Map Builder",
     "description": "Real terrain + OpenStreetMap layout with procedural details; exports GLB + collision map packages",

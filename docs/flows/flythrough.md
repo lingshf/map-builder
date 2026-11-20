@@ -1,6 +1,6 @@
 # Fly-through check: export, validate, probe results
 
-v0.2.0. Detail: [bridges, tunnels and passages](../user/structures.md).
+v0.3.0. Detail: [bridges, tunnels and passages](../user/structures.md).
 
 ```mermaid
 flowchart TD

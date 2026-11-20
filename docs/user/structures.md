@@ -1,11 +1,12 @@
-# Bridges, tunnels and passages (v0.2.0)
+# Bridges, tunnels and passages (v0.3.0)
 
-v0.2.0 generates places you can fly **under or through**. Each one is an
+Map Builder generates places you can fly **under or through**. Each one is an
 ordinary editable Blender object. It is exported as collision with its own
 class, plus a **passage probe**: a capsule path that must stay clear of all
 collision. Use the probes to check a map before you hand it to a simulator.
 See the [fly-through check flow](../flows/flythrough.md) and the
-[Pittsburgh demo](../demo/v0.2.0/README.md).
+[v0.3.0 real-data demo](../demo/v0.3.0/README.md) (Pittsburgh bridges and
+tunnel; Munich elevated part, building passage and roofs).
 
 ## What is generated
 
@@ -37,6 +38,23 @@ the finished collision (D21). A probe that collision blocks at generation is
 
 Read these entries instead of assuming that every bridge has every probe. The
 Pittsburgh demo exports 13 probes and reports 29 blocked ones.
+
+## Real-data example: Munich Altstadt
+
+The `munich-altstadt` demo preset (48.1395 N, 11.5764 E, 400 x 400 m) has
+all three building and road structures on real OSM data:
+
+| Probe | Kind | What it is |
+|---|---|---|
+| `osm:way/879138845:under` | elevated | Space beneath a raised building part (`min_level`) |
+| `osm:way/1163022325:passage` | elevated | Rid Passage, a way through a building (building passage) |
+| `osm:way/405100898:bore` | tunnel | Road tunnel, radius 1.5 m |
+
+All three PASS in the Python validator and in the C# reader. `report.json`
+counts 2 building passages and 26 tunnel ways. The tunnel ways form a joined
+underground road network, so neighbouring tubes block 25 of the 26 bore probes,
+and another object blocks the second passage's probe. All 26 are listed in
+`passage_probes_blocked`.
 
 ## Check a package
 

@@ -1,6 +1,6 @@
 # Simulator use: integration preview
 
-**v0.2.0 does not add a playable map loader to
+**v0.3.0 does not add a playable map loader to
 lingshf/drone-flight-simulator.** This release delivers a package contract, a
 sample and a reference reader. No simulator files are changed by installing the
 Blender extension.

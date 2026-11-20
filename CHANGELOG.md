@@ -6,6 +6,26 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-20
+
+"Passages, roofs and the real-data v2 demo" (end of v2). **Release
+candidate**: tagging requires release review and coordinator authorization.
+Package schema stays **2.0.0**.
+
+### Added
+
+- Munich Altstadt demo preset (48.1395 N, 11.5764 E, 400 x 400 m). It is the
+  second real-data area: a real elevated building part, a real building
+  passage, a road tunnel and tagged OSM roofs, with fixed cameras `overview`,
+  `elevated-under`, `passage` and `roofs` (#36, D49 outcome A).
+- Headless Blender roof checks (`tests/blender/checks_roofs.py`). They check
+  ridge, rise and wall/roof attachment for the supported shapes (#34).
+- [v0.3.0 demo](docs/demo/v0.3.0/README.md) and [docs/DEMO.md](docs/DEMO.md):
+  reproduce steps, numbers and attribution for both real-data presets.
+- The release attaches both real-data packages (`munich-altstadt-0.3.0.mbmap`,
+  `pittsburgh-0.3.0.mbmap`, GLB inside, ODbL attribution in `NOTICES.txt`)
+  next to the extension zip (S2-F4).
+
 ### Fixed
 
 - Blender export no longer fails validation with "road object ... normal does
@@ -16,11 +36,36 @@ All notable user-visible changes are recorded here, following
   float32 ulps) for both storage paths and records them in the road's
   `slivers_dropped` provenance. CLI output is unchanged (S2-F6).
 
+### Changed
+
+- A road that continues straight from a bridge end without being split from
+  it no longer produces clearance warnings against its own bridge (#32).
+- Packages now report `generator.version` **0.3.0**, and a unit test keeps it
+  equal to the add-on version (D50). v0.1.0 and v0.2.0 packages report
+  `generator.version` 0.1.0, a known historical mislabel. Because the
+  manifest changes, every `package_id` changes from v0.3.0 on, even where the
+  geometry is byte-identical to v0.2.0. The committed
+  `examples/synthetic_sample.mbmap` was regenerated
+  (`sha256:2b560d04…`).
+- Tests no longer depend on wall-clock speed: the TLS deadline test is
+  deterministic, and the terrain-source tests have no timing gates (#31, #35).
+
+### Known limitations
+
+- Of 67 tagged non-flat roofs in the Munich area, only 5 are built as tagged
+  (4 gabled, 1 skillion). The other 62 fall back (53 flat, 9 pyramidal),
+  mostly gabled or hipped roofs on non-rectangular footprints (S2-F5, later).
+- `tests/test_csharp_parity.py` builds the C# reader with `dotnet build`. If
+  two test suites run in parallel, the builds can race on the output files
+  (`CS2012`); run the suites one at a time.
+- Some local tests take several seconds (L5). This is measured only; there is no gate.
+- Degenerate (zero-area) collision triangles are a validation warning: 76 in
+  Pittsburgh and 59 in Munich (L1).
+
 ## [0.2.0] - 2026-11-20
 
-"Fly under bridges and through tunnels." **Release candidate**, not a published
-release: tagging requires release review and coordinator authorization.
-Package schema stays **2.0.0**.
+"Fly under bridges and through tunnels." Published as a GitHub
+**pre-release**. Package schema stays **2.0.0**.
 
 ### Added
 
