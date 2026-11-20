@@ -448,6 +448,22 @@ class CrossingTest(unittest.TestCase):
         self.assertLess(prov["clearance_m"], 1.0)
         self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
 
+    def test_a_junction_road_that_later_crosses_under_the_deck_is_still_measured(self):
+        # shares a node at x=-95 (its own junction) but loops back and passes under the deck at x=-60
+        plan, ids, grid = make_scene(
+            [([(-100, 0), (-95, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
+             ([(-95, 0), (-95, 30), (-60, 30), (-60, -30)], {"highway": "residential"})],
+            valley_height, width=300.0, joins=[(0, 1, 1, 0)])
+        prov = objects(plan, "bridge")[0].provenance
+        col, _ = plan_collision(plan)
+        z0 = terrain_height(grid, -60.0, 0.0) + ROAD_LIFT_M - plan.frame.z_offset
+        hit = ray_cast(col, (-60.0, 0.0, z0 + 0.5), (0.0, 0.0, 1.0), 30.0)
+        self.assertEqual(col.objects[hit.object]["mb_id"], ids[0])
+        self.assertLess(0.5 + hit.t, 5.0 - 1.0)
+        self.assertIs(prov["clearance_met"], False)
+        self.assertAlmostEqual(prov["clearance_m"], 0.5 + hit.t, delta=0.6)
+        self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
+
     def test_a_low_middle_span_still_warns(self):
         plan, ids, _ = make_scene(
             [([(-40, 0), (40, 0)], {"highway": "secondary", "bridge": "yes"}),
