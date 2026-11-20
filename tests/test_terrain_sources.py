@@ -991,6 +991,9 @@ class RangeCacheValidationTest(unittest.TestCase):
         self.assertIsNotNone(self.fetch(tr))  # same cache: the UTM header must not be replayed
 
 
+DRIBBLE_BYTES = 60   # 3 s of 50 ms dribbling, far longer than the 0.6 s deadline
+
+
 class RoundFourTest(unittest.TestCase):
     def test_nested_inner_ring_goes_to_smallest_enclosing_outer(self):
         b = OsmBuilder()
@@ -1035,7 +1038,9 @@ class RoundFourTest(unittest.TestCase):
             with conn:
                 conn.recv(4096)
                 conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-                while not stop.is_set():  # endless chunk-size line, one byte per 50 ms
+                for _ in range(DRIBBLE_BYTES):  # long chunk-size line, one byte per 50 ms, then close
+                    if stop.is_set():
+                        return
                     try:
                         conn.sendall(b"0")
                     except OSError:
@@ -1045,31 +1050,29 @@ class RoundFourTest(unittest.TestCase):
         th.start()
         self.addCleanup(stop.set)
         port = srv.getsockname()[1]
-        start = time_mod.monotonic()
-        with self.assertRaises(NetworkError) as cm:
+        with self.assertRaises(NetworkError) as cm:  # without the deadline the server closes first: other message
             UrllibTransport(total_timeout=0.6).request("GET", f"http://127.0.0.1:{port}/", {}, None, 0.4, 10_000)
-        self.assertLess(time_mod.monotonic() - start, 3.0)
         self.assertIn("time limit", str(cm.exception))
 
     def test_blocked_dns_resolution_returns_at_deadline(self):
         import socket as socket_mod
         import threading
-        import time as time_mod
         release = threading.Event()
         self.addCleanup(release.set)
         real = socket_mod.getaddrinfo
+        resolver_done = []
 
         def blocked(*a, **k):
             release.wait(5.0)
+            resolver_done.append(True)
             return real(*a, **k)
         with mock.patch("socket.getaddrinfo", blocked):
-            start = time_mod.monotonic()
             with self.assertRaises(NetworkError) as cm:
                 UrllibTransport(total_timeout=0.3).request("GET", "http://resolver-stall.invalid/", {}, None,
                                                            10.0, 1000)
-            elapsed = time_mod.monotonic() - start
+            returned_while_blocked = not resolver_done  # waiting on the resolver would have run it to the end
             release.set()
-        self.assertLess(elapsed, 1.0)
+        self.assertTrue(returned_while_blocked)
         self.assertIn("time limit", str(cm.exception))
 
     def test_stalled_workers_are_capped(self):
@@ -1119,17 +1122,17 @@ class RoundFourTest(unittest.TestCase):
                 conn.recv(4096)
                 try:
                     conn.sendall(b"\x16\x03\x03\x40\x00")
-                    while not stop.is_set():
+                    for _ in range(DRIBBLE_BYTES):
+                        if stop.is_set():
+                            return
                         conn.sendall(b"\x00")
                         time_mod.sleep(0.05)
                 except OSError:
                     return
         threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
-        start = time_mod.monotonic()
         with self.assertRaises(NetworkError) as cm:  # each receive makes progress: only the watchdog stops it
             UrllibTransport(total_timeout=0.6).request("GET", f"https://127.0.0.1:{port}/", {}, None, 10.0, 1000)
-        self.assertLess(time_mod.monotonic() - start, 3.0)
         self.assertIn("time limit", str(cm.exception))
 
 
