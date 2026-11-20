@@ -36,7 +36,7 @@ def _cli_manifest(out_dir, dsm):
 
     s = Settings(elevation_source="file", elevation_file=DEM, elevation_crs="EPSG:4326",
                  elevation_vertical_datum="SYNTHETIC", elevation_license=DEM_LICENSE, osm_source="file",
-                 osm_file=OSM, osm_license=OSM_LICENSE, terrain_spacing=10.0, heightfield_spacing=2.0,
+                 osm_file=OSM, osm_license=OSM_LICENSE, terrain_spacing=10.0, heightfield_spacing=10.0,
                  dsm_correction=dsm, plan_options=PlanOptions(seed=SEED))
     pkg = os.path.join(out_dir, f"parity_cli_{dsm}.mbmap")
     manifest, result = build_package(Area(checks_core.LAT, checks_core.LON, checks_core.WIDTH, checks_core.HEIGHT),
@@ -56,7 +56,7 @@ def _blender_manifest(out_dir, mode):
     s.elevation_source, s.elevation_file = "file", DEM
     s.elevation_crs, s.elevation_vertical_datum, s.elevation_license = "EPSG:4326", "SYNTHETIC", DEM_LICENSE
     s.osm_source, s.osm_file = "file", OSM
-    s.terrain_spacing, s.heightfield_spacing, s.seed = 10.0, 2.0, SEED
+    s.terrain_spacing, s.heightfield_spacing, s.seed = 10.0, 10.0, SEED
     s.dsm_correction = mode
     s.package_name, s.export_path = "parity", pkg
     res, err = run_op(bpy.ops.map_builder.generate)
