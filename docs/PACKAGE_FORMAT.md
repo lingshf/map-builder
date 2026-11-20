@@ -281,8 +281,7 @@ names neither an exported object nor a plan feature, with an error instead of dr
 |---|---|
 | `osm:way/123`, `osm:relation/45`, `osm:node/9` | Generated from that OSM element. Local `.osm` files may use negative ids for unsaved edits, e.g. `osm:way/-7`. |
 | `osm:relation/45#k` | Part `k` of an OSM element that was split into several objects (for example, a multipolygon with several outer rings). |
-| `osm:way/123:headwall0`, `:headwall1` | Tunnel portal headwall at the start (0) / end (1) of that way's tube. |
-| `osm:way/123:deck`, `:under`, `:bore` | Suffixes also recognised by the validator; these are the ids of the bridge deck / underpass probes and tunnel bore probe of that element. |
+| `osm:way/123:headwall0`, `osm:way/123:headwall1` | Portal headwall (class `structure`) at the start (0) / end (1) of the tunnel built from that way. Only `0` and `1`, and only on way ids. The `:deck`, `:under` and `:bore` suffixes appear only in passage probe ids, never as object `mb_id`s. |
 | `terrain:grid` | The terrain. |
 | `scatter:<area id>#k` | A procedurally scattered tree. |
 | `<id>~<object name>` | A user duplicate of a generated object. The first object in name order keeps the plain id. |

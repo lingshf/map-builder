@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from map_builder.core.collision import ColObject, read_collision, write_collision
+from map_builder.core.errors import LimitError
 from map_builder.core.query import capsule_hits
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,30 +55,68 @@ def _cases():
 
 @unittest.skipUnless(shutil.which("dotnet"), "the .NET SDK is not installed")
 class CsharpCapsuleParityTest(unittest.TestCase):
-    def test_hits_and_work_match_python_per_probe(self):
-        objs, probes = _cases()
-        col = read_collision(write_collision(objs))
-        with tempfile.TemporaryDirectory() as d:
-            with open(os.path.join(d, "c.mbcol"), "wb") as f:
-                f.write(write_collision(objs))
-            with open(os.path.join(d, "p.json"), "w") as f:
-                json.dump([{"path": path, "radius": r} for path, r in probes], f)
-            build = subprocess.run(["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", PROJECT],
-                                   capture_output=True, text=True)
-            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
-            run = subprocess.run(["dotnet", os.path.join(PROJECT, "bin", "Release", "net8.0", "MbmapReader.dll"),
-                                  "--probe-work", os.path.join(d, "c.mbcol"), os.path.join(d, "p.json")],
-                                 capture_output=True, text=True)
+    @classmethod
+    def setUpClass(cls):
+        cls.objs, cls.probes = _cases()
+        cls.col = read_collision(write_collision(cls.objs))
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        with open(os.path.join(cls.tmp.name, "c.mbcol"), "wb") as f:
+            f.write(write_collision(cls.objs))
+        with open(os.path.join(cls.tmp.name, "p.json"), "w") as f:
+            json.dump([{"path": path, "radius": r} for path, r in cls.probes], f)
+        build = subprocess.run(["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", PROJECT],
+                               capture_output=True, text=True)
+        assert build.returncode == 0, build.stdout + build.stderr
+
+    def run_reader(self, *extra):
+        run = subprocess.run(["dotnet", os.path.join(PROJECT, "bin", "Release", "net8.0", "MbmapReader.dll"),
+                              "--probe-work", os.path.join(self.tmp.name, "c.mbcol"),
+                              os.path.join(self.tmp.name, "p.json"), *extra], capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
-        got = run.stdout.splitlines()
-        self.assertEqual(len(got), len(probes), run.stdout)
-        want = []
-        for i, (path, r) in enumerate(probes):
-            res = capsule_hits(col, path, r, result=True)
-            want.append(f"probe {i} hits={','.join(map(str, res.objects))} work={res.work}")
-        self.assertEqual(got, want)
-        self.assertTrue(any("hits=" in w and "hits= " not in w and not w.split("hits=")[1].startswith(" ") for w in want))
-        self.assertTrue(any(w.split("hits=")[1].startswith(" work") for w in want))
+        return run.stdout.splitlines()
+
+    def python_unlimited(self):
+        out = []
+        for path, r in self.probes:
+            res = capsule_hits(self.col, path, r, result=True)
+            out.append((res.objects, res.work))
+        return out
+
+    def python_shared(self, budget):
+        """The validator's loop (package.py): probes draw on one budget in order; the first that does not fit
+        ends the run, leaving it and every later probe unchecked."""
+        out, left = [], budget
+        for i, (path, r) in enumerate(self.probes):
+            try:
+                res = capsule_hits(self.col, path, r, max_work=left, result=True)
+            except LimitError:
+                out.append(f"probe {i} unchecked")
+                break
+            left -= res.work
+            out.append(f"probe {i} hits={','.join(map(str, res.objects))} left={left}")
+        return out
+
+    def test_hits_and_work_match_python_per_probe(self):
+        want = [f"probe {i} hits={','.join(map(str, o))} work={w}" for i, (o, w) in enumerate(self.python_unlimited())]
+        self.assertEqual(self.run_reader(), want)
+        self.assertTrue(any(not w.split("hits=")[1].startswith(" work") for w in want), "no probe hit anything")
+        self.assertTrue(any(w.split("hits=")[1].startswith(" work") for w in want), "no probe was clear")
+
+    def test_shared_budget_boundary_matches_python(self):
+        works = [w for _, w in self.python_unlimited()]
+        total = sum(works)
+        prefix = sum(works[:4])
+        for budget in (total, total - 1, prefix, prefix - 1, works[0], works[0] - 1):
+            got = self.run_reader(str(budget))
+            self.assertEqual(got, self.python_shared(budget), f"shared budget {budget}")
+        self.assertEqual(len(self.run_reader(str(total))), len(self.probes))            # exact fit: all checked, left 0
+        self.assertTrue(self.run_reader(str(total))[-1].endswith("left=0"))
+        short = self.run_reader(str(total - 1))
+        self.assertEqual(short[-1], f"probe {len(self.probes) - 1} unchecked")           # one unit short: last unchecked
+        self.assertEqual(len(short), len(self.probes))
+        self.assertEqual(self.run_reader(str(prefix))[-1], "probe 4 unchecked")          # first four fit exactly
+        self.assertEqual(self.run_reader(str(prefix - 1))[-1], "probe 3 unchecked")      # one unit short of them
 
 
 if __name__ == "__main__":

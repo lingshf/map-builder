@@ -99,7 +99,7 @@ PASSAGE_PATH_MIN, PASSAGE_PATH_MAX = 2, 64
 PASSAGE_RADIUS_MAX_M = 10.0
 PASSAGE_QUERY_BUDGET = 2_000_000    # object/triangle visits shared by all passage probes of one package
 
-_MB_ID = re.compile(r"(osm:(node|way|relation)/-?\d+(#\d+)?(:(deck|under|bore|headwall\d+))?|terrain:grid|scatter:.+#\d+)")
+_MB_ID = re.compile(r"(osm:(node|way|relation)/-?\d+(#\d+)?|osm:way/-?\d+:headwall[01]|terrain:grid|scatter:.+#\d+)")
 _SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
 
