@@ -38,6 +38,11 @@ Owner: dev · sprint S4 · any lane · D92 · closes S3-F2, S3-F3
 
 The suite should get faster (one C# build instead of one per class).
 
+## Downstream
+
+S4-FORMAT-POLICY's frozen C# reader fixture uses the shared build helper from this task. That is a hard edge:
+FORMAT-POLICY's C# cases merge after this task.
+
 ## Expected tests
 
 Changes to existing tests only, plus the unraisable-hook guard.

@@ -24,18 +24,24 @@ Baseline (f8bedf6): 29/67 counted, and 34 of the 38 uncounted roofs carry a name
 
 ## Acceptance criteria
 
-1. `tests.test_roofs_munich` asserts the **floor ≥ 29** counted and **every** uncounted roof (38 or fewer) has
-   a non-empty named reason (baseline 34/38). The checker in `tests/roof_checks.py` is not loosened; any
+1. **Must:** `tests.test_roofs_munich` asserts the **floor ≥ 29** counted and that **every** roof that is still
+   uncounted has a non-empty named reason (baseline 34 of 38; the test iterates over the uncounted set, not a
+   fixed 38). **Aim:** the 4 analytic gables become counted through the planar-exact build. The checker in `tests/roof_checks.py` is not loosened; any
    change to it is limited to the reference-plane choice, and is covered by a permutation and subdivision
    invariance test (D73, D80).
 2. The frozen v0.3.0 replay does not inflate (it stays 1/67).
 3. A unit test shows the old largest-triangle reference rejected a roof that a planar-exact build passes, or
    that the new builder output is planar to within `TOL`.
 4. A 9007 perturbation test passes at ±1e-9 m around the axis.
-5. A reservation-bounds test shows reserved ≥ emitted for every roof kind, and reserved ≤ emitted × (1 +
-   documented margin).
+5. **Pre-change measurement:** before editing, record on f8bedf6 the ratio reserved / emitted (triangles and
+   vertices) for every Munich and sample roof, by kind (min, median, max) in the PR. The documented margin is
+   then chosen from that table. A reservation-bounds test shows reserved ≥ emitted for every roof kind, and
+   reserved ≤ emitted × (1 + margin). **Must:** no undercount. **Aim:** the max ratio falls below the
+   pre-change max.
 6. Real data: Munich and Pittsburgh CLI builds VALID; the counted number and the reason histogram are in the
    PR.
+7. If the checker's reference plane changed, notify the lane-A dev so that the S4-ROOF-SPIKE final-checker
+   replay runs (D95), and quote the replayed floor baseline (main before this PR, final checker) in the PR.
 
 ## Performance considerations
 

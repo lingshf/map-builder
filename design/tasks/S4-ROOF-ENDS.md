@@ -6,8 +6,9 @@ Owner: dev · sprint S4 · lane A · after S4-ROOF-SPIKE and S4-ROOF-NAMED · D8
 
 30 Munich gabled roofs fall back to hipped because a gable end is not representable: 21 because the ridge
 meets the gable edge outside it, 9 because the gable end is a sliver. One pyramidal roof is flat because its
-footprint is concave. S4-ROOF-SPIKE measures how many of them the construction below turns into counted roofs;
-the coordinator records that number as the stretch (D95).
+footprint is concave. S4-ROOF-SPIKE measures how many of them the construction below turns into counted roofs.
+After the final-checker replay, the coordinator records the stretch as a D-number (D95). This task does not
+start before that number exists.
 
 ## Scope
 
@@ -20,8 +21,8 @@ the coordinator records that number as the stretch (D95).
 
 ## Acceptance criteria
 
-1. Munich counted ≥ **29** (floor) and ≥ the recorded stretch, or the PR explains the gap per roof. All
-   uncounted roofs are named.
+1. **Must:** Munich counted ≥ **29** under the final checker, and every roof that is still uncounted is named.
+   **Aim:** ≥ the recorded stretch (D95); if missed, the PR explains the gap per roof (way id, reason).
 2. The checker is unchanged. Every new construction passes overlap, gap, slope-count, ridge and vertical-end
    checks on the emitted triangles (D64, D71, D80).
 3. Synthetic cases written first (DoD 10): a chamfered L, a trapezoid end, a mixed end, a sliver end, a

@@ -17,7 +17,10 @@ Owner: dev · sprint S4 · lane B · D74, D88 · closes S3-F6, S3-F11
 
 ## Acceptance criteria
 
-1. A headless Blender check reproduces the float32 error on f8bedf6, and it passes after the fix.
+1. **Pre-change measurement:** on f8bedf6, record in the PR the bbox error (metres, per edge) of the
+   Blender-derived area against the double-precision area for the Munich and Pittsburgh centres and one area
+   at 48 N far from the origin. The test threshold is set from that table (must: below the smallest feature the
+   test uses). A headless Blender check reproduces the error on f8bedf6 and passes after the fix.
 2. The exported GLB names the default material "MB Default" exactly when its parameters equal the default;
    material identity is still the D88 key (existing tests unchanged).
 3. Munich and Pittsburgh headless-Blender builds VALID, with the same probe ids as the CLI.

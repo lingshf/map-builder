@@ -14,7 +14,8 @@ Of the 67 tagged non-flat Munich roofs, 29 are built as tagged under the frozen 
 | 4 | gabled, analytic | none; they fail the checker's `planar` test (S3-F1) |
 | 1 + 1 + 1 + 1 | flat | courtyard; quadruple_saltbox; roof height 0; concave pyramidal |
 
-The sprint-3 target of 40 was set without a measurement (D90 retro). This spike measures it.
+The sprint-3 target of 40 was set without a measurement (D90 retro). This spike measures the input to the
+stretch. No stretch number exists until it does (D95).
 
 ## Scope
 
@@ -31,11 +32,17 @@ Run it on the frozen Munich snapshot with the **unchanged** checker (`tests/roof
 
 1. A PR comment, or a draft PR that is closed, reports for each of the 4 items: the roofs it would turn into
    counted roofs (OSM way ids), the roofs it would not, and why.
-2. It reports the measured total counted under the unchanged checker, for example "29 → N". This is the input
-   to the D95 stretch. It also gives an effort estimate for S4-ROOF-ENDS (lines touched, risk).
-3. It reports any checker change that would be *needed*. Such a change is a finding for the coordinator,
+2. It reports the measured total counted under the unchanged checker, for example "29 → N", with the scratch
+   branch SHA and the snapshot SHA-256 so it can be replayed. It also gives an effort estimate for S4-ROOF-ENDS
+   (lines touched, risk).
+3. **Final-checker replay (D95).** If S4-ROOF-NAMED merges a checker change (reference plane only), the spike
+   branch is rebased onto that main and both numbers are replayed under the final checker: the floor baseline
+   (main, no S4 construction) and the spike count. Only the replayed pair is reported to the coordinator, who
+   records the stretch as a D-number before S4-ROOF-ENDS starts. If the checker did not change, the original
+   pair stands; say so explicitly.
+4. It reports any checker change that would be *needed*. Such a change is a finding for the coordinator,
    never part of the measurement.
-4. When the time box expires, report what was measured and stop.
+5. When the time box expires, report what was measured and stop.
 
 ## Performance considerations
 

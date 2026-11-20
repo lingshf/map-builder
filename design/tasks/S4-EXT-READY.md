@@ -32,7 +32,7 @@ Owner: dev · sprint S4 · any lane · D13, D100
 
 1. Two clean builds from two fresh clones of the same commit, with mtimes normalised as in `release.yml`, are
    byte-identical. Recorded in the PR; the workflow step is shown in a dry run on a fork or a test tag.
-2. The manifest test passes in PR CI in ≤ 1 s.
+2. The manifest test passes in PR CI; its duration is measured and quoted (expected ≤ 1 s), not asserted.
 3. `extension validate` passes (recorded).
 4. The checklist names every user action; no personal data is invented (D100).
 5. `ExtensionZipTest` (texture set and licence texts in the zip) still passes on the built zip.

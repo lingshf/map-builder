@@ -87,23 +87,26 @@ Theme D93; decisions D94–D104, measured baselines and budgets in [../roadmap.m
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
 | [S4-ROOF-SPIKE](S4-ROOF-SPIKE.md) | S4 | dev | — (½ day, D95) | none merged (scratch branch) | ready | |
-| [S4-ROOF-NAMED](S4-ROOF-NAMED.md) | S4 | dev | — | `core/roofs.py`, `core/generate.py` (roof section, reservation), `tests/roof_checks.py` (reference plane), `tests/test_roofs*.py`, `munich_roofs_expected.json`; soft: sample (D103), VALIDATION | ready | |
-| [S4-ROOF-ENDS](S4-ROOF-ENDS.md) | S4 | dev | S4-ROOF-SPIKE, S4-ROOF-NAMED | `core/roofs.py`, `core/skeleton.py`, `core/generate.py` (roof section), `tests/test_roofs*.py`, `tests/test_skeleton.py`, `tests/blender/checks_roofs.py`; soft: sample, VALIDATION | blocked | |
+| [S4-ROOF-NAMED](S4-ROOF-NAMED.md) | S4 | dev | — | `core/roofs.py`, `core/generate.py` (roof section, reservation), `tests/roof_checks.py` (reference plane), `tests/test_roofs*.py`, `munich_roofs_expected.json`; soft: sample slot (D103), VALIDATION | ready | |
+| [S4-ROOF-ENDS](S4-ROOF-ENDS.md) | S4 | dev | S4-ROOF-SPIKE, S4-ROOF-NAMED, stretch recorded after the final-checker replay (D95) | `core/roofs.py`, `core/skeleton.py`, `core/generate.py` (roof section), `tests/test_roofs*.py`, `tests/test_skeleton.py`, `tests/blender/checks_roofs.py`; soft: sample slot, VALIDATION | blocked | |
 | [S4-PERF-PKG](S4-PERF-PKG.md) | S4 | dev | — | `core/package.py` (writer, validator internals; byte- and message-identical, D97) | ready | |
-| [S4-TEX-WATER](S4-TEX-WATER.md) | S4 | dev | — | `tools/textures/**`, `map_builder/assets/textures/terrain_*` + `LICENSE-textures.txt`, `core/textures.py`, `core/uv.py` (mean-albedo entry), `tests/test_textures.py`; soft: sample | ready | |
+| [S4-TEX-WATER](S4-TEX-WATER.md) | S4 | dev | — | `tools/textures/**`, `map_builder/assets/textures/terrain_*` + `LICENSE-textures.txt`, `core/textures.py`, `core/uv.py` (mean-albedo entry), `tests/test_textures.py`; soft: sample slot | ready | |
 | [S4-PERF-UV](S4-PERF-UV.md) | S4 | dev | S4-TEX-WATER | `core/uv.py` (byte-identical, D97) | blocked | |
 | [S4-BLENDER-HYGIENE](S4-BLENDER-HYGIENE.md) | S4 | dev | — | `blender/export.py` (material naming), `blender/bake.py` (default material, bbox), bbox code in `blender/sources.py`/`props.py`, new Blender checks; soft: `run_integration.py` | ready | |
-| [S4-COL-DEGEN](S4-COL-DEGEN.md) | S4 | dev | S4-BLENDER-HYGIENE | `core/collision.py`, `blender/bake.py`, `blender/export.py` (degenerate handling), collision tests; soft: sample, VALIDATION | blocked | |
+| [S4-COL-DEGEN](S4-COL-DEGEN.md) | S4 | dev | S4-BLENDER-HYGIENE | `core/collision.py`, `blender/bake.py`, `blender/export.py` (degenerate handling), collision tests; soft: sample slot, VALIDATION | blocked | |
 | [S4-TEST-HYGIENE](S4-TEST-HYGIENE.md) | S4 | dev | — | `tests/test_csharp_parity.py`, `tests/test_demo_bundle.py`, `tests/test_bridges.py` (45° test), `NuGet.config` (new), MbmapReader `.csproj` (build props), `ci.yml` (C# job), test bootstrap | ready | |
-| [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | S4-PERF-PKG (only for a `package.py` edit) | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections), `tests/test_format_policy.py` (new) | ready (docs/tests); blocked for any `package.py` edit | |
+| [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | **S4-TEST-HYGIENE** (hard: frozen C# fixture uses its build harness); S4-PERF-PKG only for a `package.py` edit | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections, stale 2.0.0 paragraph), `tests/test_format_policy.py` (new), C# test harness (use; edits serialised after TEST-HYGIENE) | blocked | |
 | [S4-EXT-READY](S4-EXT-READY.md) | S4 | dev | — | `.github/workflows/release.yml`, `tests/test_manifest.py` (new), `docs/PLATFORM_SUBMISSION.md` (new), `blender_manifest.toml` (non-version fields) | ready | |
 | [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | blocked | |
 | [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW and its blocker S4-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | blocked | |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
 (then FORMAT-POLICY if needed); `core/uv.py` to TEX-WATER, then PERF-UV; `blender/bake.py` and `export.py` to
-BLENDER-HYGIENE, then COL-DEGEN. Perf tasks keep every package byte-identical (D97). Output-changing tasks
-regenerate the sample on rebase (D103). Tasks that touch probes or collision (S4-COL-DEGEN) attach the
+BLENDER-HYGIENE, then COL-DEGEN; `tests/test_csharp_parity.py` and the C# harness to TEST-HYGIENE, then
+FORMAT-POLICY. Perf tasks keep every package byte-identical (D97). **Sample slot (D103):** output-changing PRs
+(TEX-WATER, COL-DEGEN, and ROOF-NAMED/ENDS only if the fixture's roofs change) regenerate
+`examples/synthetic_sample.mbmap` only while holding the single exclusive merge-time slot from the coordinator
+(rebase, regenerate, green CI and gate, merge, release); rebasing alone does not serialise writers. Tasks that touch probes or collision (S4-COL-DEGEN) attach the
 Pittsburgh Python and C# runs (D47).
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
@@ -124,7 +127,7 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
    → **S3-REVIEW** → **REL-v0.4.0** → close check → retro → tag `v0.4.0` (D63, **released**)
 6. Wave 6 (sprint 4, D93): lanes **S4-ROOF-SPIKE** → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** ∥ **S4-PERF-PKG**
    → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** ∥ **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** →
-   **S4-FORMAT-POLICY** → **S4-EXT-READY** → **S4-REVIEW** → **REL-v0.5.0** → close check → retro → tag 0.5.0 (D104)
+   **S4-FORMAT-POLICY** (hard edge after TEST-HYGIENE) → **S4-EXT-READY** → **S4-REVIEW** → **REL-v0.5.0** → close check → retro → tag 0.5.0 (D104)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks
 (roof section, building loop, bridge hook, tunnel hook). The pairs listed as parallel above
