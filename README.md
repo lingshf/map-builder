@@ -175,6 +175,11 @@ NOTICES.txt (or equivalent attribution) with any product that uses a map.**
   Data bucket, with no account needed.
 * **Local files:** you declare the licence and vertical datum yourself, and they are recorded
   verbatim.
+* **Textures** in `map_builder/assets/textures/` (facade, roof tiles, flat-roof gravel, asphalt,
+  terrain and concrete) are our own work. They are generated procedurally by a seeded script,
+  `python -m tools.textures.make_textures`, and dedicated to the public domain under
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/); see `LICENSE-textures.txt`
+  there. They contain no photographs and no third-party or map imagery.
 * No Google (Maps/Earth/3D Tiles) content is used or supported.
 
 ## CLI (no Blender)
