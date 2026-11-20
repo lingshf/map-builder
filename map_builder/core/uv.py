@@ -163,9 +163,10 @@ def assign_uvs(mesh: MeshData, origin: Vec3 = (0.0, 0.0, 0.0)) -> MeshData:
     uvs: list[FaceUV] = []
     # per-material constants: kind 0 = planar XY (terrain, road, facade fallback), 1 = facade (walls first),
     # 2 = roof, 3 = box projection
+    tile_f = [1.0 if t is None else t for t in tile]   # untextured slots (kind None) are never read
     kinds = [None if t is None else 0 if n in ("MB Terrain", "MB Road") else 1 if n == "MB Facade"
              else 2 if n in ("MB Roof", "MB Roof Flat") else 3 for n, t in zip(names, tile)]
-    offs = [None if t is None else tile_offset(origin, t) for t in tile]
+    offs = [tile_offset(origin, t) for t in tile_f]
     ox, oy, oz = origin
     verts = mesh.vertices
     for fi, (f, mi) in enumerate(zip(mesh.faces, mesh.face_materials)):
@@ -173,7 +174,7 @@ def assign_uvs(mesh: MeshData, origin: Vec3 = (0.0, 0.0, 0.0)) -> MeshData:
         if kind is None:
             uvs.append(None)
             continue
-        t = tile[mi]
+        t = tile_f[mi]
         pts = [verts[i] for i in f]
         if kind == 0:
             e0, e1, _ = offs[mi]
