@@ -12,6 +12,7 @@ straight skeleton) and adds the roof faces
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
@@ -155,6 +156,11 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
     falls back to the hipped skeleton roof and a skeleton failure to the v0.3.0 outcome, with the reason
     appended."""
     shape = resolve_shape(shape_tag, outer, holes, prov, skeleton_hipped=True)
+    if shape == "gabled" and rect_check(outer) and "rect" in os.environ.get("SPIKE", ""):
+        try:
+            return _spike_weighted(outer, straight_skeleton(outer), orientation, direction, prov, "perp")
+        except (_GableError, SkeletonError, TriangulationError, LimitError):
+            pass
     if shape not in ("hipped", "gabled") or rect_check(outer):
         return RoofPlan(shape)
     try:
@@ -163,6 +169,11 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
             try:
                 return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, prov))
             except _GableError as exc:
+                for mode in [m for m in os.environ.get("SPIKE", "").split(",") if m in ("all", "valid", "prune", "perp")]:
+                    try:
+                        return _spike_weighted(outer, sk, orientation, direction, prov, mode)
+                    except (_GableError, SkeletonError, TriangulationError, LimitError):
+                        continue
                 prov["roof_shape"] = f"fallback:hipped (gable end not representable: {exc})"
                 prov.pop("roof_orientation", None)
         return _skeleton_plan(outer, sk)
@@ -311,11 +322,12 @@ def _gable_node(sk: Skeleton, i: int) -> tuple[Node, int]:
     return (p[0], p[1], t), N
 
 
-def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofPlan:
+def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = (), walls: Sequence[int] = ()) -> RoofPlan:
     n = len(outer)
     nodes = list(sk.nodes)
     faces = [list(f) for f in sk.faces]
     gable_apex: dict[int, int] = {}
+    wall_set = set(walls)
     for i in ends:
         apex, N = _gable_node(sk, i)
         nodes.append(apex)
@@ -341,6 +353,19 @@ def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofP
         a, b = pts[0], pts[1]
         between = sorted((u, k) for k in extra for u in [_along(outer[k], a, b)] if u is not None)
         fan = [k for _, k in between]
+        if i in wall_set:
+            ln = math.dist(a, b)
+            ux, uy = (b[0] - a[0]) / ln, (b[1] - a[1]) / ln
+            poly = [(0.0, 0.0, node_to_pt[face[0]])] + [(u * ln, 0.0, k) for u, k in between]
+            poly.append((ln, 0.0, node_to_pt[face[1]]))
+            for k in face[2:]:
+                poly.append(((nodes[k][0] - a[0]) * ux + (nodes[k][1] - a[1]) * uy, nodes[k][2], node_to_pt[k]))
+            for (p, q, r) in triangulate([(x, y) for x, y, _ in poly], list(range(len(poly)))):
+                tri = [p, q, r]
+                if _signed(poly[p][:2], poly[q][:2], poly[r][:2]) < 0:
+                    tri = [p, r, q]
+                gable_tris.append(tuple(poly[v][2] for v in tri))  # type: ignore[arg-type]
+            continue
         if i in gable_apex:
             chain = [node_to_pt[face[0]]] + fan + [node_to_pt[face[1]]]
             top = node_to_pt[gable_apex[i]]
@@ -365,7 +390,59 @@ def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofP
         raise SkeletonError("the skeleton has no height")
     if len(tris) + len(gable_tris) > MAX_ROOF_TRIANGLES:
         raise LimitError(f"skeleton roof needs {len(tris) + len(gable_tris)} triangles (limit {MAX_ROOF_TRIANGLES})")
-    return RoofPlan("gabled" if ends else "hipped", n, points, tris, t_max, gable_tris)
+    return RoofPlan("gabled" if ends or walls else "hipped", n, points, tris, t_max, gable_tris)
+
+
+def _spike_weighted(outer: Ring, sk: Skeleton, orientation: str | None, direction: float | None,
+                    prov: Prov, mode: str) -> RoofPlan:
+    """SPIKE: gable ends as zero-speed wavefront edges (vertical cuts); mode 'all' or 'valid' (mixed gable + hip)."""
+    long_axis, short_axis = _min_area_axes(sk.ring)
+    if orientation in ("along", "across"):
+        axis = short_axis if orientation == "across" else long_axis
+    elif orientation is None and direction is not None:
+        d = _bearing(direction)
+        axis = (-d[1], d[0])
+    else:
+        axis = long_axis
+    n = len(sk.ring)
+    cand = []
+    for i, f in enumerate(sk.faces):
+        if len(f) != 3 and mode != "perp":
+            continue
+        a, b = sk.ring[i], sk.ring[(i + 1) % n]
+        if abs((b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1]) / math.dist(a, b) <= math.sqrt(0.5):
+            if mode == "valid":
+                try:
+                    _gable_node(sk, i)
+                except _GableError:
+                    continue
+            cand.append(i)
+    if len(cand) < 2:
+        raise _GableError("fewer than two candidate gable ends")
+    fixed = frozenset(frozenset((sk.ring[i], sk.ring[(i + 1) % n])) for i in cand)
+    if mode in ("prune", "perp"):
+        while True:
+            if len(fixed) < 2:
+                raise _GableError("fewer than two representable gable ends")
+            wsk = straight_skeleton(sk.ring, fixed)
+            tmax = max(p[2] for p in wsk.nodes)
+            bad = set()
+            for i in range(n):
+                e = frozenset((wsk.ring[i], wsk.ring[(i + 1) % n]))
+                if e not in fixed:
+                    continue
+                tops = [wsk.nodes[k][2] for k in wsk.faces[i][2:] if wsk.nodes[k][2] > 1e-3]
+                if len(tops) != 1 or tops[0] < GABLE_MIN_HEIGHT_RATIO * tmax:
+                    bad.add(e)
+            if not bad:
+                break
+            fixed = fixed - bad
+    else:
+        wsk = straight_skeleton(sk.ring, fixed)
+    cand = [i for i in range(n) if frozenset((wsk.ring[i], wsk.ring[(i + 1) % n])) in fixed]
+    plan = _skeleton_plan(outer, wsk, (), cand)
+    prov["roof_orientation"] = f"spike:weighted:{mode}"
+    return plan
 
 
 def _signed(a: Point, b: Point, c: Point) -> float:
