@@ -1,0 +1,353 @@
+{
+ "status": "RC evidence on main f9ef418 (S2-F6 merged); both presets VALID in the CLI and in headless Blender",
+ "base_commit": "f9ef4188d3e39c50004bbdf83e7d606e374ce8e5",
+ "inputs": "live Overpass + Copernicus GLO-30 acquisition on 2026-11-20 UTC, then cache-only builds (network forbidden)",
+ "options": {
+  "seed": 1,
+  "dsm_correction": true,
+  "terrain_spacing_m": 10.0,
+  "heightfield_spacing_m": 2.0,
+  "created_utc": "2026-11-20T00:00:00Z"
+ },
+ "blender": "4.2.23 LTS (Mesa llvmpipe copy), Cycles CPU, 1280x720, 64 samples",
+ "render_total_seconds": 568,
+ "render_budget_seconds": 1800,
+ "areas": {
+  "munich-altstadt": {
+   "preset": "tools/demo/presets/munich-altstadt.json",
+   "area": {
+    "lat": 48.1395,
+    "lon": 11.5764,
+    "width_m": 400,
+    "height_m": 400
+   },
+   "package_id": "sha256:2caff942c8f528111e229415047f5e926375d94fe2ac4595c3ddf0e7940eea64",
+   "file_sha256": "b6b4a1af755592d686c31067689771086b14b5369cc373652e3e485388da723c",
+   "file_bytes": 894578,
+   "generator_version": "0.3.0",
+   "osm_base_timestamp": "2026-11-20T03:40:03Z",
+   "acquire_live_s": 107,
+   "build_seconds_plan_package_validate": {
+    "runs": [
+     3.451,
+     3.499,
+     3.519
+    ],
+    "median": 3.499,
+    "byte_identical_runs": true,
+    "target_max": 120,
+    "rebuilt_on": "f9ef418 + RC; packages byte-identical to the pre-rebase build"
+   },
+   "objects": 389,
+   "classes": {
+    "terrain": 1,
+    "building": 148,
+    "road": 197,
+    "tunnel": 26,
+    "vegetation": 17
+   },
+   "counts": {
+    "building_passages": 2,
+    "buildings": 148,
+    "buildings_outside_area": 119,
+    "buildings_with_courtyards": 1,
+    "objects": 389,
+    "roads": 197,
+    "roads_clipped_by_higher_priority": 144,
+    "roads_fully_covered": 3,
+    "roads_trimmed_at_terrain_edge": 48,
+    "terrain_cut_cells": 38,
+    "trees": 17,
+    "tunnels": 26
+   },
+   "collision_triangles": 22608,
+   "degenerate_triangles": 59,
+   "passage_probes": [
+    {
+     "id": "osm:way/879138845:under",
+     "kind": "elevated",
+     "radius_m": 1.0,
+     "capsule_work": 813,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/1163022325:passage",
+     "kind": "elevated",
+     "radius_m": 1.0,
+     "capsule_work": 493,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/405100898:bore",
+     "kind": "tunnel",
+     "radius_m": 1.5,
+     "capsule_work": 1342,
+     "python": "PASS",
+     "csharp": "PASS"
+    }
+   ],
+   "probe_work_total": 2648,
+   "passage_probes_blocked": 26,
+   "python_validator": "VALID: 0 error(s), 1 warning(s)",
+   "csharp_reader": "OK",
+   "renders": {
+    "images": [
+     "overview",
+     "elevated-under",
+     "passage",
+     "roofs",
+     "panel"
+    ],
+    "seconds": 366,
+    "roofs_pair_seconds": 78
+   },
+   "headless_blender": {
+    "result": "VALID",
+    "summary": "VALID: 0 error(s), 1 warning(s) (55 degenerate triangles)",
+    "objects": 385,
+    "generate_incl_download_s": 44.7,
+    "export_s": 3.2,
+    "package_id": "sha256:5224a0cb28f97fd037c8fafa6ff4f5ba1f9870328414023d47e8dfb5125513bc",
+    "csharp_reader": "OK, 1/1 passage probes PASS",
+    "note": "fresh live OSM, so objects and probes differ from the cached CLI build"
+   },
+   "roofs": {
+    "buildings": 148,
+    "inferred_flat": 68,
+    "tagged_flat": 13,
+    "tagged_non_flat": 67,
+    "built_as_tagged": {
+     "gabled": 4,
+     "skillion": 1
+    },
+    "fallback": {
+     "flat": 53,
+     "pyramidal": 9
+    },
+    "fallback_gabled_or_hipped_non_rectangular": 46,
+    "built_shapes": {
+     "flat": 134,
+     "pyramidal": 9,
+     "gabled": 4,
+     "skillion": 1
+    }
+   }
+  },
+  "pittsburgh": {
+   "preset": "tools/demo/presets/pittsburgh.json",
+   "area": {
+    "lat": 40.437,
+    "lon": -80.016,
+    "width_m": 1200,
+    "height_m": 1000
+   },
+   "package_id": "sha256:094fb730dfd27386d90b8de08682265f96712986b983e29850ca19508e846d16",
+   "file_sha256": "6fb2e99eae10963710c8035f869cb99cd014ec7c2e67a19a4e393eac0a984ff5",
+   "file_bytes": 4258810,
+   "generator_version": "0.3.0",
+   "osm_base_timestamp": "2026-11-20T03:43:08Z",
+   "acquire_live_s": 127,
+   "build_seconds_plan_package_validate": {
+    "runs": [
+     18.402,
+     18.74,
+     18.704
+    ],
+    "median": 18.704,
+    "byte_identical_runs": true,
+    "target_max": 120,
+    "rebuilt_on": "f9ef418 + RC; packages byte-identical to the pre-rebase build"
+   },
+   "objects": 3290,
+   "classes": {
+    "terrain": 1,
+    "building": 987,
+    "road": 258,
+    "bridge": 33,
+    "tunnel": 5,
+    "structure": 6,
+    "vegetation": 2000
+   },
+   "counts": {
+    "bridges": 33,
+    "buildings": 987,
+    "buildings_outside_area": 136,
+    "objects": 3290,
+    "roads": 258,
+    "roads_clipped_by_higher_priority": 221,
+    "roads_fully_covered": 2,
+    "roads_trimmed_at_terrain_edge": 66,
+    "terrain_cut_cells": 32,
+    "trees": 2000,
+    "tunnel_headwalls": 6,
+    "tunnels": 5
+   },
+   "collision_triangles": 144108,
+   "degenerate_triangles": 76,
+   "passage_probes": [
+    {
+     "id": "osm:way/11950069:under",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 3539,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/24957029:under",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 3387,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/121593794:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 6807,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/121593794:under",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 3510,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/173225719:under",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 3376,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/550018203:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 8532,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/550018206:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 5745,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/54223852:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 4434,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/54210147:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 3444,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/264591820:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 7169,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/550018192:deck",
+     "kind": "bridge",
+     "radius_m": 1.0,
+     "capsule_work": 3362,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/11965424:bore",
+     "kind": "tunnel",
+     "radius_m": 1.5,
+     "capsule_work": 33632,
+     "python": "PASS",
+     "csharp": "PASS"
+    },
+    {
+     "id": "osm:way/28411466:bore",
+     "kind": "tunnel",
+     "radius_m": 1.5,
+     "capsule_work": 34520,
+     "python": "PASS",
+     "csharp": "PASS"
+    }
+   ],
+   "probe_work_total": 121457,
+   "passage_probes_blocked": 29,
+   "python_validator": "VALID: 0 error(s), 1 warning(s)",
+   "csharp_reader": "OK",
+   "renders": {
+    "images": [
+     "overview",
+     "dsm-ground",
+     "bridge-under",
+     "tunnel-portal"
+    ],
+    "seconds": 124
+   },
+   "headless_blender": {
+    "result": "VALID",
+    "summary": "VALID: 0 error(s), 1 warning(s) (78 degenerate triangles)",
+    "objects": 3313,
+    "generate_incl_download_s": 55.2,
+    "export_s": 22.2,
+    "package_id": "sha256:207ea7056dc26b66cc29e94924cbc7567ad552152b1fb80ea4800e639bd3084b",
+    "csharp_reader": "OK, 14/14 passage probes PASS",
+    "fixed_by": "S2-F6 (#37, D51); before the fix: road object #1163 normal did not point up",
+    "note": "fresh live OSM, so objects and probes differ from the cached CLI build"
+   }
+  }
+ },
+ "before_packages": {
+  "munich-v010": {
+   "package_id": "sha256:44a8aafe5b8961cdd95052eff3119afc0d8b490ff68262fde12e48a90f768e46",
+   "objects": 359,
+   "passage_probes": 0,
+   "used_for": "passage and elevated-under before"
+  },
+  "munich-noroof": {
+   "package_id": "sha256:21d36414af79a37ff19659ed07f089d73340cc174a63fc8c3a451f1f66db046c",
+   "used_for": "roofs before (roof:* tags removed, v0.3.0 code)"
+  },
+  "munich-v020": {
+   "package_id": "sha256:d6a7d40eb2101179739112e9891c5a1353315014d014422c8fd8a74f4b06b052",
+   "note": "byte-identical members to v0.3.0; only manifest generator.version differs (D50)"
+  },
+  "pittsburgh-v020": {
+   "package_id": "sha256:dbb5b59712f74001a9e1e46ee60e057537d8bf1208d50da3c4aad339653c1a26",
+   "note": "byte-identical members to v0.3.0; only manifest generator.version differs (D50)"
+  }
+ },
+ "release_zip": {
+  "file": "map_builder-0.3.0.zip",
+  "bytes": 218374,
+  "sha256": "BD6057EFC446183F32EB7B41E7FDCB627548200636F1702076B24CC4814DB5BB",
+  "extension_validate": "OK",
+  "g4_clean_profile_install": "imports (0, 3, 0); harness OK: 0 failure(s), 169 PASS, 16 s"
+ },
+ "release_assets_sha256": {
+  "munich-altstadt-0.3.0.mbmap": "B6B4A1AF755592D686C31067689771086B14B5369CC373652E3E485388DA723C",
+  "pittsburgh-0.3.0.mbmap": "6FB2E99EAE10963710C8035F869CB99CD014EC7C2E67A19A4E393EAC0A984FF5",
+  "map_builder-0.3.0.zip": "BD6057EFC446183F32EB7B41E7FDCB627548200636F1702076B24CC4814DB5BB"
+ }
+}

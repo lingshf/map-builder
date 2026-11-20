@@ -193,7 +193,7 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
 {
   "schema": "map-builder.package", "schema_version": "2.0.0",
   "name": "…", "created_utc": "…",
-  "generator": {"name": "map-builder", "version": "0.1.0", "blender": "4.2.23 LTS" | null},
+  "generator": {"name": "map-builder", "version": "0.3.0", "blender": "4.2.23 LTS" | null},
   "georeference": {"origin": {"lat_deg", "lon_deg"}, "horizontal_datum": "WGS84 (EPSG:4326)",
                    "projection": "…", "vertical_datum": "EGM2008", "z_offset_m": 386,
                    "height_formula": "H = z + z_offset_m", "units": "metre"},

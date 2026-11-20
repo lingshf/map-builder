@@ -3,8 +3,8 @@
 Use Blender **4.2 LTS** (release tooling uses 4.2.23). Later versions have not been
 qualified by this release.
 
-1. When the authorized v0.2.0 pre-release is published, download
-   `map_builder-0.2.0.zip` from its GitHub Release assets. Until then, build it from
+1. When the authorized v0.3.0 pre-release is published, download
+   `map_builder-0.3.0.zip` from its GitHub Release assets. Until then, build it from
    the release-candidate checkout with the commands below.
 2. In Blender, open **Edit > Preferences > Get Extensions**, open the dropdown menu,
    choose **Install from Disk...**, and select the zip **without unpacking it**.

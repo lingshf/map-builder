@@ -208,6 +208,15 @@ def replace_table(data, table_bytes):
     return bytes(out)
 
 
+class GeneratorVersionTest(unittest.TestCase):
+    def test_generator_version_matches_the_add_on_version(self):
+        import map_builder
+        from map_builder.core import GENERATOR_VERSION
+        self.assertEqual(GENERATOR_VERSION, ".".join(map(str, map_builder.bl_info["version"])))
+        with open(os.path.join(os.path.dirname(map_builder.__file__), "blender_manifest.toml"), encoding="utf-8") as f:
+            self.assertIn(f'\nversion = "{GENERATOR_VERSION}"\n', f.read())
+
+
 class CollisionFormatTest(unittest.TestCase):
     def test_header_and_layout_offsets(self):
         data = write_collision(two_objects())

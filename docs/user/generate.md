@@ -114,6 +114,14 @@ shapes. Unsupported or ill-fitting shapes fall back with `fallback:` provenance;
 inspect the report rather than assuming every tagged roof is reproduced.
 The synthetic sample's way/1043 demonstrates a dome.
 
+On real data, many tagged roofs fall back. In the Munich Altstadt demo, 67
+buildings have a tagged non-flat `roof:shape`. 5 are built as tagged
+(4 gabled, 1 skillion) and 62 fall back (53 to flat, 9 to pyramidal), mostly
+because gabled and hipped roofs need a rectangular footprint. Each building's
+`provenance.roof_shape` in `manifest.json` says which: `measured:osm roof:shape`
+(built as tagged), `fallback:...` with the reason, or `inferred:flat` (no tag).
+See the [v0.3.0 demo](../demo/v0.3.0/README.md#example-2-tagged-roofs).
+
 On steep real terrain, a road face thinner than float32 can represent may be
 omitted if storing it would make it non-upward-facing. `slivers_dropped` in the
 road's provenance records the count, maximum width and total area. This is
