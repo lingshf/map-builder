@@ -18,7 +18,7 @@ MAX_GRADE = 0.08
 SAMPLE_STEP_M = 10.0
 END_SINK_M = 0.5
 MIN_LENGTH_M = 2.0
-JUNCTION_RADIUS_M = 15.0   # an approach's own junction road is exempt from the clearance only this close to its node
+AT_GRADE_TOL_M = 0.3   # an approach road whose surface is this close under the deck underside (or above) joins it
 PROBE_RADIUS_M = 1.0
 DECK_PROBE_HEIGHT_M = 1.5
 UNDER_PROBE_HEIGHT_M = 1.5
@@ -477,16 +477,19 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
         deck_tris = _deck_triangles(mesh, n_path - 1, np_)
         pairs = _triangle_pairs(deck_tris, road_tris)
         records = _crossing_points(pairs, deck_tris, road_tris)
-    # an unsplit approach (S1-F1): the end runs where the straight end-to-end deck line stays below the clearance
-    # over the terrain are ramp, not deck; only a crossing within `JUNCTION_RADIUS_M` of a node the road shares with the way there is that junction; every other crossing (also further along the same road) stays in the D39 minimum. A way
-    # whose line never clears the terrain has no real span, so nothing is exempt.
+    # an unsplit approach (S1-F1): the end runs where the straight deck line stays below the clearance over the
+    # terrain are ramp, not deck. A crossing there is exempt only where the road surface is at the deck's own
+    # surface: its gap to the deck underside (ground-only profile) is at most ``AT_GRADE_TOL_M`` (a road at or
+    # above the underside joins the deck). Every positive gap above that is a real under-crossing and is measured
+    # on the exported geometry (D39), wherever it lies and whichever nodes the roads share. A way whose line never
+    # clears the terrain has no real span, so nothing is exempt.
     lo, hi = _approach_runs(line, ground, clearance)
     if lo > 0 or hi < len(s) - 1:
-        joined = _approach_junctions(ctx.classified.roads, f, kept, pts, s[lo], s[hi])
+        top0 = deck_profile(s, lower, z_a, z_b)
         records = [r for r in records
-                   if not all((node(m) < lo or node(m) > hi)
-                              and any(abs(s[node(m)] - sj) <= JUNCTION_RADIUS_M for sj in joined.get(r[3], ()))
-                              for m, w in zip(r[0], r[1]) if w > 1e-9)]
+                   if not all((node(m) < lo or node(m) > hi) for m, w in zip(r[0], r[1]) if w > 1e-9)
+                   or sum(w * (top0[node(m)] - DECK_THICKNESS_M) for m, w in zip(r[0], r[1])) - r[2]
+                   > AT_GRADE_TOL_M]
     for nodes, wd, rz, _rid in records:
         need = rz + clearance + DECK_THICKNESS_M
         for m, w in zip(nodes, wd):
@@ -686,25 +689,6 @@ def _approach_runs(top, ground, clearance):
     ok = [i for i in range(len(top)) if top[i] - DECK_THICKNESS_M - ground[i] >= clearance - 1e-6]
     return (ok[0], ok[-1]) if ok else (0, len(top) - 1)
 
-
-def _approach_junctions(roads, f, kept, pts, s_lo, s_hi):
-    """Road id -> arc lengths along the bridge way ``f`` of the nodes it shares with that road inside an approach
-    end run (before ``s_lo`` or after ``s_hi``): the approach's own at-grade junctions."""
-    if not f.node_ids:
-        return {}
-    at = {}
-    run = 0.0
-    for j, (x, y) in enumerate(pts):
-        if j:
-            run += math.hypot(x - pts[j - 1][0], y - pts[j - 1][1])
-        if run < s_lo - 1e-6 or run > s_hi + 1e-6:
-            at.setdefault(f.node_ids[kept[j]], []).append(run)
-    out = {}
-    for r in roads:
-        if r.id != f.id:
-            for n in r.node_ids:
-                out.setdefault(r.id, []).extend(at.get(n, ()))
-    return {k: v for k, v in out.items() if v}
 
 def _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, span=None):
     """The straight segment across the span at the interior sample with the most clearance under the deck
