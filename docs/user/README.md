@@ -1,4 +1,4 @@
-# User guide (v0.3.0 preview)
+# User guide
 
 Map Builder runs inside Blender 4.2 LTS. It creates editable maps and exports
 visuals plus engine-neutral collision; it is not a flight simulator.
@@ -8,6 +8,10 @@ visuals plus engine-neutral collision; it is not a flight simulator.
 3. [Edit, export and inspect GLB / .mbmap](export.md).
 4. [Fly under bridges, through tunnels and passages: probes and limits](structures.md).
 5. [Understand the simulator handoff](simulator.md).
+6. [Build and validate with the CLI; use demo presets](cli.md).
+
+For development see the [developer guide](../dev/README.md); for the current
+pipeline and package design see the [architecture overview](../architecture/README.md).
 
 See the [v0.3.0 real-data demo](../demo/v0.3.0/README.md) (Pittsburgh and Munich;
 [reproduce it](../DEMO.md)), the [v0.2.0 Pittsburgh bridge/tunnel demo](../demo/v0.2.0/README.md),
