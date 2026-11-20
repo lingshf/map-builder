@@ -81,6 +81,14 @@ def seams(prims):
     return sum(1 for sides in edges.values() if len(sides) > 1)
 
 
+def _normal(pts):
+    (ax, ay, az), (bx, by, bz), (cx, cy, cz) = pts[0], pts[1], pts[2]
+    u, v = (bx - ax, by - ay, bz - az), (cx - ax, cy - ay, cz - az)
+    n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+    m = math.sqrt(sum(c * c for c in n))
+    return tuple(c / m for c in n)
+
+
 def node(name, mesh, loc):
     return {"name": name, "mesh": mesh, "location": loc}
 
@@ -149,6 +157,32 @@ class PlaneUvTest(unittest.TestCase):
         s = math.hypot(4, 2)
         for p, got in zip(pts, m.face_uvs[0]):
             close(self, got, (p[0] / 2.0, (p[1] * 4 / s + (p[2] - 6) * 2 / s) / 2.0), "hip")
+
+    def test_skeleton_hipped_roof_on_an_l_footprint(self):
+        ring = [(0, 0), (20, 0), (20, 8), (8, 8), (8, 20), (0, 20)]
+        mesh, _, _ = build_building(building(ring, roof__shape="hipped", height="9", roof__height="4"),
+                                    flat_grid(), 0.0)
+        roof = mesh.materials.index("MB Roof")
+        roof_faces = [i for i, m in enumerate(mesh.face_materials) if m == roof]
+        self.assertGreater(len(roof_faces), 4)
+        uv.assign_uvs(mesh, (X0, 0, 0))
+        tile = textures.tile_size("MB Roof")
+        planes = {}
+        for i in roof_faces:
+            pts = [mesh.vertices[v] for v in mesh.faces[i]]
+            n = _normal(pts)
+            key = tuple(round(c, 4) for c in n) + (round(sum(a * b for a, b in zip(n, pts[0])), 3),)
+            planes.setdefault(key, []).append((pts, mesh.face_uvs[i]))
+        for faces in planes.values():
+            # per plane the UV is one isometric map: edge lengths in UV (metres) equal the 3D lengths
+            for pts, uvs in faces:
+                for a in range(len(pts)):
+                    b = (a + 1) % len(pts)
+                    d3 = math.dist(pts[a], pts[b])
+                    d2 = math.dist(uvs[a], uvs[b]) * tile
+                    self.assertAlmostEqual(d3, d2, delta=1e-4)
+        self.assertGreaterEqual(len(planes), 4)
+        self.assertTrue(all(abs(c) < 100 / tile for f in planes.values() for _, u in f for p in u for c in p))
 
     def test_terrain_and_road_use_world_xy_minus_the_mesh_offset(self):
         for mat, tile in (("MB Terrain", 8.0), ("MB Road", 4.0)):
