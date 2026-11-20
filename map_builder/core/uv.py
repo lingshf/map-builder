@@ -47,8 +47,7 @@ FaceUV: TypeAlias = "tuple[UV, ...] | None"
 def _normal(pts: Sequence[Sequence[float]]) -> Vec3 | None:
     """Unit normal of a polygon by Newell's method, or None for a degenerate one."""
     nx = ny = nz = 0.0
-    for k, p in enumerate(pts):
-        q = pts[(k + 1) % len(pts)]
+    for p, q in zip(pts, (*pts[1:], pts[0])):
         nx += (p[1] - q[1]) * (p[2] + q[2])
         ny += (p[2] - q[2]) * (p[0] + q[0])
         nz += (p[0] - q[0]) * (p[1] + q[1])
@@ -162,33 +161,48 @@ def assign_uvs(mesh: MeshData, origin: Vec3 = (0.0, 0.0, 0.0)) -> MeshData:
     segs, quads, base_z = _wall_segments(mesh) if "MB Facade" in names else ([], {}, None)
     roof_faces: dict[int, RoofFace] = {}
     uvs: list[FaceUV] = []
+    # per-material constants: kind 0 = planar XY (terrain, road, facade fallback), 1 = facade (walls first),
+    # 2 = roof, 3 = box projection
+    tile_f = [1.0 if t is None else t for t in tile]   # untextured slots (kind None) are never read
+    kinds = [None if t is None else 0 if n in ("MB Terrain", "MB Road") else 1 if n == "MB Facade"
+             else 2 if n in ("MB Roof", "MB Roof Flat") else 3 for n, t in zip(names, tile)]
+    offs = [tile_offset(origin, t) for t in tile_f]
+    ox, oy, oz = origin
+    verts = mesh.vertices
     for fi, (f, mi) in enumerate(zip(mesh.faces, mesh.face_materials)):
-        name, t = names[mi], tile[mi]
-        pts = [mesh.vertices[i] for i in f]
-        n = _normal(pts) or (0.0, 0.0, 1.0)
-        if t is None:
+        kind = kinds[mi]
+        if kind is None:
             uvs.append(None)
             continue
-        off = tile_offset(origin, t)
-        world = [(p[0] + origin[0] - off[0], p[1] + origin[1] - off[1], p[2] + origin[2] - off[2]) for p in pts]
-        if name == "MB Facade" and abs(n[2]) < 1e-3 and base_z is not None:
-            us: Sequence[float] | None
-            if fi in quads:
-                ua, ub = quads[fi]
-                us = (ua, ub, ub, ua)
-            else:
-                us = _wall_u(segs, pts, n)
-            if us is not None:
-                uvs.append(tuple((u / t, (p[2] - base_z) / t) for u, p in zip(us, pts)))
-                continue
-        if name in ("MB Roof", "MB Roof Flat"):
+        t = tile_f[mi]
+        pts = [verts[i] for i in f]
+        if kind == 0:
+            e0, e1, _ = offs[mi]
+            uvs.append(tuple(((p[0] + ox - e0) / t, (p[1] + oy - e1) / t) for p in pts))
+            continue
+        n = _normal(pts) or (0.0, 0.0, 1.0)
+        if kind == 1:
+            if abs(n[2]) < 1e-3 and base_z is not None:
+                us: Sequence[float] | None
+                if fi in quads:
+                    ua, ub = quads[fi]
+                    us = (ua, ub, ub, ua)
+                else:
+                    us = _wall_u(segs, pts, n)
+                if us is not None:
+                    uvs.append(tuple((u / t, (p[2] - base_z) / t) for u, p in zip(us, pts)))
+                    continue
+            e0, e1, _ = offs[mi]
+            uvs.append(tuple(((p[0] + ox - e0) / t, (p[1] + oy - e1) / t) for p in pts))
+        elif kind == 2:
             roof_faces[fi] = (mi, pts, n, t)
             uvs.append(None)
-            continue
-        if name in ("MB Terrain", "MB Road") or (name == "MB Facade"):
-            uvs.append(tuple((w[0] / t, w[1] / t) for w in world))
         else:
-            uvs.append(tuple((lambda uv: (uv[0] / t, uv[1] / t))(_box_uv(w, n)) for w in world))
+            e = offs[mi]
+            world = [(p[0] + ox - e[0], p[1] + oy - e[1], p[2] + oz - e[2]) for p in pts]
+            ax = max(range(3), key=lambda i: abs(n[i]))
+            i, j = [(1, 2), (0, 2), (0, 1)][ax]
+            uvs.append(tuple((w[i] / t, w[j] / t) for w in world))
     _roof_uvs(roof_faces, uvs)
     mesh.face_uvs = uvs
     return mesh
@@ -256,8 +270,18 @@ def textured_copy(mesh: MeshData, origin: Vec3 = (0.0, 0.0, 0.0)) -> MeshData:
     out = MeshData(mesh.name)
     out.vertices, out.faces = mesh.vertices, mesh.faces
     out.face_materials, out.materials = mesh.face_materials, mesh.materials
-    out.face_colors = [compensated_color(mesh.materials[m], c) if mesh.materials[m] in TEXTURE_MEAN_ALBEDO else c
-                       for m, c in zip(mesh.face_materials, mesh.face_colors)]
+    means = [TEXTURE_MEAN_ALBEDO.get(n) for n in mesh.materials]
+    colors = []
+    for m, c in zip(mesh.face_materials, mesh.face_colors):
+        mean = means[m]
+        if mean is not None:
+            if len(c) == 3:   # same arithmetic as compensated_color, unrolled
+                c0, c1, c2 = c[0] / mean[0], c[1] / mean[1], c[2] / mean[2]
+                c = (c0 if c0 < 1.0 else 1.0, c1 if c1 < 1.0 else 1.0, c2 if c2 < 1.0 else 1.0)
+            else:
+                c = compensated_color(mesh.materials[m], c)
+        colors.append(c)
+    out.face_colors = colors
     return assign_uvs(out, origin)
 
 
