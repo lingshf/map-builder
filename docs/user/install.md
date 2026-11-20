@@ -3,16 +3,17 @@
 Use Blender **4.2 LTS** (release tooling uses 4.2.23). Later versions have not been
 qualified by this release.
 
-1. When the authorized v0.3.0 pre-release is published, download
-   `map_builder-0.3.0.zip` from its GitHub Release assets. Until then, build it from
-   the release-candidate checkout with the commands below.
+1. Download `map_builder-0.3.0.zip` from the [v0.3.0 release](https://github.com/lingshf/map-builder/releases/tag/v0.3.0),
+   or build an extension from the source checkout as described below.
 2. In Blender, open **Edit > Preferences > Get Extensions**, open the dropdown menu,
    choose **Install from Disk...**, and select the zip **without unpacking it**.
 3. Enable Map Builder if it is not already enabled. In a 3D Viewport press **N**,
    then select the **Map Builder** sidebar tab.
 4. Start with the [offline sample](generate.md). It requires no network permission.
 
-Build from the repository root in PowerShell, replacing the executable path:
+Build from the repository root in PowerShell, replacing the executable path.
+This is a **template, unverified with the placeholder path**; validation and
+build were verified with Blender 4.2.23 in the documentation audit.
 
 ```powershell
 $blender = "C:\path\to\blender.exe"

@@ -33,7 +33,7 @@ unsupported features, invalid features and warnings before using the map. A
 successful generation can still have warnings; it does not mean every OSM
 feature was generated.
 
-**Synthetic attribution caveat:** the v0.1.0 Blender UI assumes local OSM files
+**Synthetic attribution caveat:** the current Blender UI assumes local OSM files
 are OSM data; it has no synthetic OSM licence override. For a correctly labelled,
 redistributable synthetic package, use the
 [release demo](../demo/v0.1.0/README.md), which declares synthetic attribution
@@ -59,7 +59,7 @@ Never put credentials in the scene. The optional private Overpass endpoint is
 read from `MAP_BUILDER_OVERPASS_URL` at generation time, not entered in a URL
 field. Reports retain only sanitized source information.
 
-## DSM terrain correction (inferred ground, preview)
+## DSM terrain correction (inferred ground)
 
 GLO-30 is a roughly 30 m **surface model**: rooftops, tree canopy and bridge decks
 can appear as raised ground. The **Sources > DSM correction** control lowers

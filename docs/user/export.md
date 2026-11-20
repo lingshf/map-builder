@@ -24,12 +24,16 @@ custom normals are not carried into the flat-shaded GLB.
 
 A `.mbmap` is a ZIP **package**, not a Blender import file. First validate it:
 
+The following command is an **unverified template**: replace the example path
+with your own package.
+
 ```powershell
 py -3.12 tools\mbmap_cli.py validate C:\your-output\sample.mbmap
 ```
 
 To inspect your own validated output, copy it to a new `.zip` path and extract
-into a new directory:
+into a new directory. These commands are **unverified templates**; replace
+both paths and use a destination that does not already exist:
 
 ```powershell
 Copy-Item C:\your-output\sample.mbmap C:\your-output\sample.zip

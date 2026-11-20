@@ -58,6 +58,10 @@ and another object blocks the second passage's probe. All 26 are listed in
 
 ## Check a package
 
+These are **unverified templates**: replace `my_map.mbmap` with your own package.
+The same validators were run on the committed synthetic sample; see the
+[CLI guide](cli.md).
+
 ```powershell
 py -3.12 tools\mbmap_cli.py validate my_map.mbmap
 dotnet run -c Release --project examples\csharp\MbmapReader -- my_map.mbmap
@@ -84,8 +88,12 @@ from generation, not recalculated from your edits.** If you lower a deck or move
 a pier into a probe path, the export **still succeeds and replaces the previous
 package**. Validation reports `passage probe N is blocked ...` as a warning, not
 an error. Read the export's validation warnings. If a probe is blocked, undo
-the edit or regenerate the map, and do not fly that passage. If you delete a structure, its probes are
-not exported and are listed in `report.json` `passage_probes_dropped`.
+the edit or regenerate the map, and do not fly that passage. If you delete a structure, its probes are not exported and their IDs are listed
+in the exported `report.json` `passage_probes_dropped`. **Known discrepancy:**
+export replaces the generation-time dropped-probe list, so it may lose entries
+about missing passage roads or the probe cap; the package contract describes
+those entries. Inspect or save the Blender generation report before export,
+which replaces the report text.
 
 ## Limits (D25)
 

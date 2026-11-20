@@ -14,6 +14,13 @@ The contract is [docs/PACKAGE_FORMAT.md](docs/PACKAGE_FORMAT.md). Test coverage 
 [docs/VALIDATION.md](docs/VALIDATION.md). The guide for consumers (Unity presentation and a
 physics Core) is [docs/UNITY_CORE_HANDOFF.md](docs/UNITY_CORE_HANDOFF.md).
 
+## Documentation
+
+* [User guide](docs/user/README.md): install, generate, export, CLI, presets and consumption.
+* [Developer guide](docs/dev/README.md): repository layout, checks and contribution workflow.
+* [Architecture overview](docs/architecture/README.md): pipeline, decisions and package format.
+* [Release notes](docs/releases/README.md), [demos](docs/DEMO.md) and [workflow diagrams](docs/flows/overview.md).
+
 ## Install (Blender 4.2 LTS or newer)
 
 ```powershell
