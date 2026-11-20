@@ -991,18 +991,18 @@ class RangeCacheValidationTest(unittest.TestCase):
         self.assertIsNotNone(self.fetch(tr))  # same cache: the UTM header must not be replayed
 
 
-DRIBBLE_BYTES = 60   # 3 s of 50 ms dribbling, far longer than the 0.6 s deadline
-
-
 class DeadlineProbe:
     """Records, without timing anything, how UrllibTransport arms its deadline machinery:
     the timeout each request worker is joined with, each watchdog timer interval, and every socket
     shutdown the watchdog performs. A late return or a missing shutdown shows up as a wrong count/value."""
 
-    def __init__(self):
-        self.joins, self.timers, self.shutdowns = [], [], []
+    def __init__(self, manual_timer=False):
+        """With ``manual_timer`` the watchdog timer never fires by itself; ``fire()`` runs it on demand."""
+        self.joins, self.timers, self.shutdowns, self.handshakes = [], [], [], []
+        self.manual_timer, self._manual = manual_timer, []
 
     def __enter__(self):
+        import ssl
         import threading
         from map_builder.core import http as http_mod
         probe = self
@@ -1019,12 +1019,25 @@ class DeadlineProbe:
                 probe.timers.append(interval)
                 real_timer.__init__(self, interval, *a, **k)
 
+            def start(self):
+                if probe.manual_timer:
+                    probe._manual.append(self)
+                else:
+                    real_timer.start(self)
+
         def shutdown(sock):
             probe.shutdowns.append(sock)
             real_shutdown(sock)
+
+        real_handshake = ssl.SSLSocket.do_handshake
+
+        def do_handshake(sslsock, *a, **k):
+            probe.handshakes.append(sslsock)
+            return real_handshake(sslsock, *a, **k)
         self._patches = [mock.patch.object(threading, "Thread", ProbeThread),
                          mock.patch.object(threading, "Timer", ProbeTimer),
-                         mock.patch.object(http_mod, "_shutdown_quietly", shutdown)]
+                         mock.patch.object(http_mod, "_shutdown_quietly", shutdown),
+                         mock.patch.object(ssl.SSLSocket, "do_handshake", do_handshake)]
         for p in self._patches:
             p.start()
         return self
@@ -1033,6 +1046,10 @@ class DeadlineProbe:
         for p in reversed(self._patches):
             p.stop()
 
+    def fire(self):
+        for timer in list(self._manual):
+            timer.function(*timer.args, **timer.kwargs)
+
     def assert_armed(self, case, total):
         case.assertEqual(len(self.joins), 1)
         case.assertGreaterEqual(self.joins[0], total)
@@ -1040,6 +1057,11 @@ class DeadlineProbe:
         case.assertEqual(len(self.timers), 1)
         case.assertLessEqual(self.timers[0], total + 0.01)  # the watchdog fires at the deadline, not later
         case.assertGreaterEqual(len(self.shutdowns), 1)     # and it really shuts the stalled socket down
+
+    def assert_handshake_socket_shut_down(self, case):
+        """The very SSL socket that ran the stalled handshake, not just any socket, was shut down."""
+        case.assertEqual(len(self.handshakes), 1)
+        case.assertTrue(any(s is self.handshakes[0] for s in self.shutdowns))
 
 class RoundFourTest(unittest.TestCase):
     def test_nested_inner_ring_goes_to_smallest_enclosing_outer(self):
@@ -1073,35 +1095,30 @@ class RoundFourTest(unittest.TestCase):
     def test_dribbled_chunk_framing_hits_deadline_on_a_real_socket(self):
         import socket as socket_mod
         import threading
-        import time as time_mod
         srv = socket_mod.socket()
         srv.bind(("127.0.0.1", 0))
         srv.listen(1)
         self.addCleanup(srv.close)
         stop = threading.Event()
+        self.addCleanup(stop.set)
+        probe = DeadlineProbe(manual_timer=True)  # the watchdog fires only when the test says so
 
-        def serve():
+        def serve():  # a chunk that announces 4 KiB but delivers 2 bytes: the framing never completes
             conn, _ = srv.accept()
             with conn:
                 conn.recv(4096)
-                conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-                for _ in range(DRIBBLE_BYTES):  # long chunk-size line, one byte per 50 ms, then close
-                    if stop.is_set():
-                        return
-                    try:
-                        conn.sendall(b"0")
-                    except OSError:
-                        return
-                    time_mod.sleep(0.05)
-        th = threading.Thread(target=serve, daemon=True)
-        th.start()
-        self.addCleanup(stop.set)
+                try:
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1000\r\nab")
+                    probe.fire()  # the deadline passes mid chunk
+                    stop.wait(30.0)  # keep the peer open: only the watchdog's shutdown can end the read (EOF then fails as a truncated body)
+                except OSError:
+                    return
+        threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
-        with DeadlineProbe() as probe, self.assertRaises(NetworkError) as cm:
-            UrllibTransport(total_timeout=0.6).request("GET", f"http://127.0.0.1:{port}/", {}, None, 0.4, 10_000)
-        probe.assert_armed(self, 0.6)
+        with probe, self.assertRaises(NetworkError) as cm:
+            UrllibTransport(total_timeout=30.0).request("GET", f"http://127.0.0.1:{port}/", {}, None, 1.0, 10_000)
+        probe.assert_armed(self, 30.0)
         self.assertIn("time limit", str(cm.exception))
-
     def test_blocked_dns_resolution_returns_at_deadline(self):
         import socket as socket_mod
         import threading
@@ -1160,32 +1177,31 @@ class RoundFourTest(unittest.TestCase):
     def test_stalled_tls_handshake_hits_deadline(self):
         import socket as socket_mod
         import threading
-        import time as time_mod
         srv = socket_mod.socket()
         srv.bind(("127.0.0.1", 0))
         srv.listen(1)
         self.addCleanup(srv.close)
         stop = threading.Event()
         self.addCleanup(stop.set)
+        probe = DeadlineProbe(manual_timer=True)  # the watchdog fires only when the test says so
 
-        def serve():  # TLS handshake record header announcing 16 KiB, then one byte per 50 ms
+        def serve():  # TLS handshake record header announcing 16 KiB, then a few bytes: never completes
             conn, _ = srv.accept()
             with conn:
-                conn.recv(4096)
+                conn.recv(4096)  # ClientHello received: the client socket is already registered
                 try:
-                    conn.sendall(b"\x16\x03\x03\x40\x00")
-                    for _ in range(DRIBBLE_BYTES):
-                        if stop.is_set():
-                            return
-                        conn.sendall(b"\x00")
-                        time_mod.sleep(0.05)
+                    conn.sendall(b"\x16\x03\x03\x40\x00\x00\x00\x00")
+                    probe.fire()  # the deadline passes mid-handshake
+                    stop.wait(30.0)  # keep the peer open: only the watchdog's shutdown can end the handshake
                 except OSError:
                     return
         threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
-        with DeadlineProbe() as probe, self.assertRaises(NetworkError) as cm:  # only the watchdog stops it
-            UrllibTransport(total_timeout=0.6).request("GET", f"https://127.0.0.1:{port}/", {}, None, 10.0, 1000)
-        probe.assert_armed(self, 0.6)
+        with probe, self.assertRaises(NetworkError) as cm:
+            UrllibTransport(total_timeout=30.0).request("GET", f"https://127.0.0.1:{port}/", {}, None, 1.0, 1000)
+        # the 1 s per-op timeout above only bounds the run where shutdown() does not wake a blocked TLS read (Windows)
+        probe.assert_armed(self, 30.0)
+        probe.assert_handshake_socket_shut_down(self)
         self.assertIn("time limit", str(cm.exception))
 
 
