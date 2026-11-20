@@ -25,7 +25,7 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 | [S1-REVIEW](S1-REVIEW.md) | S1 | design | REL-v0.2.0 RC | `design/` only | done | #29, [report](../reviews/S1-REVIEW.md) |
 | [S2-ROOF](S2-ROOF.md) | S2 (may start in S1) | dev | #11 | `core/generate.py` (roof section of `build_building` only), new `core/roofs.py`, `tests/test_roofs.py` | done | #18 |
 | [S2-ELEV](S2-ELEV.md) | S2 | dev | S1-SEAMS | `core/passages.py`, `core/generate.py` (building loop in `build_plan` only), `tests/test_passages.py`, `tests/blender/checks_passages.py` | done | #24 |
-| [REL-v0.3.0](REL-v0.3.0.md) | S2 | release manager | ELEV, ROOF, v0.2.0 tagged (done) | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.3.0/`, `docs/releases/v0.3.0.md`, `docs/DEMO.md` | blocked | |
+| [REL-v0.3.0](REL-v0.3.0.md) | S2 | release manager | ELEV, ROOF, v0.2.0 tagged (all done); **remaining blockers: S1-F1, S1-F2** | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.3.0/`, `docs/releases/v0.3.0.md`, `docs/DEMO.md` | blocked | |
 | TEST-HYGIENE | S1 | dev | — | `tests/test_dsm_correction.py`, `tests/test_scene_generation.py`, `tests/test_package.py`, `tools/demo/presets/pittsburgh.json` | done | #23 |
 | PERF-PROBE-INDEX | S1 | dev | — | `core/query.py`, `core/structures.py` | closed (D44/D45) | #25 |
 | FIX-CS-PROBE-PARITY | S1 | dev | — | `examples/csharp/MbmapReader/`, `core/package.py` (`mb_id` regex), `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` | done (D46) | #27 |
