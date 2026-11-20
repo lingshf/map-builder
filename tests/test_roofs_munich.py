@@ -35,8 +35,8 @@ EXPECTED = os.path.join(FIX, "munich_roofs_expected.json")
 COUNTEREXAMPLES = os.path.join(FIX, "roof_counterexamples.osm")
 AREA_ARGS = (48.1395, 11.5764, 400.0, 400.0)
 BASELINE = 1            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
-COUNTED = 34            # S4-ROOF-NAMED: 29 + the 5 near-rectangular gables built planar-exact (floor stays 29, D95/D105)
-GABLED_COUNTED = 22     # of the 52 eligible gabled ways: 17 skeleton + 5 near-rectangles built planar-exact ...
+COUNTED = 33            # S4-ROOF-NAMED: 29 + the 4 near-rectangular gables built planar-exact (floor stays 29, D95/D105)
+GABLED_COUNTED = 21     # of the 52 eligible gabled ways: 17 skeleton + 4 near-rectangles built planar-exact ...
 GABLED_FALLBACK_HIPPED = 30   # ... these fall back to a named hipped roof
 TOTAL = 67
 # The 11 eligible hipped footprints (three have roof:levels=0, D77); one of them is a near-rectangle (analytic path),
@@ -49,7 +49,7 @@ SKELETON_BUILT = HIPPED_BUILT - {"osm:way/242367322"}
 D77_HEIGHTS = {"osm:way/242367322": 1.9559, "osm:way/79401262": 6.0, "osm:way/96815240": 6.0,
                "osm:way/219431658": 3.4117, "osm:way/48966941": 6.0, "osm:way/80965514": 3.8129,
                "osm:way/80965548": 4.1797, "osm:way/80965666": 2.7387, "osm:way/93216412": 6.0,
-               "osm:way/264235611": 4.2698}   # S4-ROOF-NAMED: a near-rectangular gabled roof is now a skeleton roof (D77)
+               }
 
 
 def roof_h(mb_id, e):

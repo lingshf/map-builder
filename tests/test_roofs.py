@@ -111,6 +111,17 @@ class RoofShapeTest(unittest.TestCase):
         self.assertIsNone(roofs.analytic_gable_slope_error([(-10, -6), (10, -6), (10, 6), (-10, 6 + 1e-7)], False))
         self.assertIn("off parallel", roofs.analytic_gable_slope_error([(-10, -6), (10, -6), (11, 6), (-10, 5.5)], False))
 
+    def test_a_plain_skeleton_gable_is_not_downgraded_by_the_node_repair(self):
+        """R1: this heptagon is a gable on the plain skeleton; merging its close nodes would make a ridge node of
+        more than three faces and a hipped roof, so the merge is only a repair."""
+        ring = [(9.00019601723119, 0), (5.6113767927687, 7.036750926744197), (-2.0027002464196415, 8.774357319810488),
+                (-8.10876776784019, 3.904833874695344), (-8.108829230483774, -3.9048526443272222),
+                (-2.0026605776245576, -8.774341824246491), (5.611624620039219, -7.036721056278658)]
+        prov: dict = {}
+        plan = roofs.plan_roof("gabled", ring, [], prov)
+        self.assertEqual(plan.shape_built, "gabled", prov["roof_shape"])
+        self.assertTrue(plan.ends)
+
     def test_skeleton_gable_survives_a_hair_of_noise_on_a_noisy_l_footprint(self):
         """A noisy L splits its ridge into two nodes 2e-4 m apart; they are merged, so the gable never depends on
         float noise (S4-ROOF-NAMED: CI-only 9007 failure)."""

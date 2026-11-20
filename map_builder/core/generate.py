@@ -526,7 +526,9 @@ def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, se
     roof_dir = parse_number(tags.get("roof:direction"))
     plan = roofs.plan_roof(roof_shape_tag, local_outer, poly.holes, prov, tags.get("roof:orientation"), roof_dir)
     roof_shape = plan.shape_built
-    if (roof_src is not None and roof_src <= 1e-6 and (roof_shape_tag in ("hipped", "pyramidal") or plan.skeleton)
+    near_rect_gable = roof_shape_tag == "gabled" and roofs.rect_check(local_outer)   # D107: no D77 height for these
+    if (roof_src is not None and roof_src <= 1e-6
+            and (roof_shape_tag in ("hipped", "pyramidal") or (plan.skeleton and not near_rect_gable))
             and (roof_shape == roof_shape_tag or plan.skeleton)
             and isinstance(roof_src_label, str) and roof_src_label.startswith("inferred:roof:levels")):
         # roof:levels=0 on a hipped/pyramidal roof gives no height: use the default roof height (D77)

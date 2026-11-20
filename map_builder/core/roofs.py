@@ -163,27 +163,57 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
     if shape not in ("hipped", "gabled") or (rect_check(outer) and (shape == "hipped" or analytic_gable)):
         return RoofPlan(shape)
     near_rect = rect_check(outer)
-    try:
+
+    def run(merge: bool, p: Prov) -> RoofPlan:
         sk = straight_skeleton(outer)
-        _merge_close_nodes(sk.nodes, sk.faces, len(sk.ring), set(), set())
+        if merge:
+            _merge_close_nodes(sk.nodes, sk.faces, len(sk.ring), set(), set())
         if shape == "gabled":
             try:
-                return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, prov))
+                return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, p))
             except _GableError as exc:
-                prov["roof_shape"] = f"fallback:hipped (gable end not representable: {exc})"
-                prov.pop("roof_orientation", None)
+                p["roof_shape"] = f"fallback:hipped (gable end not representable: {exc})"
+                p.pop("roof_orientation", None)
         return _skeleton_plan(outer, sk)
-    except (SkeletonError, LimitError, TriangulationError) as exc:
-        if near_rect:
-            prov["roof_shape"] = (f"approximate:gabled (the two slopes of a near-rectangular footprint are not "
-                                  f"coplanar: {analytic_gable_slope_error(outer, across)}; straight skeleton: {exc})")
-            return RoofPlan("gabled")
-        convex = is_convex(outer)
-        shape = "pyramidal" if convex else "flat"
-        prov["roof_shape"] = (f"fallback:{shape} (roof:shape={shape_tag} on non-rectangular footprint; "
-                              f"straight skeleton: {exc})")
-        prov.pop("roof_orientation", None)
-        return RoofPlan(shape)
+
+    # The plain skeleton is kept when it gives the wanted roof; nodes a hair apart are merged only to repair it.
+    errors = (SkeletonError, LimitError, TriangulationError)
+    try:
+        p1 = dict(prov)
+        plan = run(False, p1)
+        if plan.ends or shape != "gabled":
+            prov.clear()
+            prov.update(p1)
+            return plan
+        first: tuple[RoofPlan, Prov] | None = (plan, p1)
+    except errors as exc:
+        first = None
+        failure = exc
+    try:
+        p2 = dict(prov)
+        plan = run(True, p2)
+        if first is None or plan.ends:
+            prov.clear()
+            prov.update(p2)
+            return plan
+    except errors as exc:
+        if first is None:
+            failure = exc
+    if first is not None:
+        prov.clear()
+        prov.update(first[1])
+        return first[0]
+    exc = failure
+    if near_rect:
+        prov["roof_shape"] = (f"approximate:gabled (the two slopes of a near-rectangular footprint are not "
+                              f"coplanar: {analytic_gable_slope_error(outer, across)}; straight skeleton: {exc})")
+        return RoofPlan("gabled")
+    convex = is_convex(outer)
+    shape = "pyramidal" if convex else "flat"
+    prov["roof_shape"] = (f"fallback:{shape} (roof:shape={shape_tag} on non-rectangular footprint; "
+                          f"straight skeleton: {exc})")
+    prov.pop("roof_orientation", None)
+    return RoofPlan(shape)
 
 
 def analytic_gable_slope_error(outer: Ring, across: bool, ref_height: float = 10.0,
