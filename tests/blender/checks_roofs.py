@@ -67,6 +67,15 @@ def matches(got, want):
     return all(any(near(w, g) for g in got) for w in want) and all(any(near(g, w) for w in want) for g in got)
 
 
+def eave_from_walls(ob):
+    """Wall top measured on the mesh: the lowest top edge of the vertical quads (roof faces are not walls)."""
+    mw, tops = ob.matrix_world, []
+    for p in ob.data.polygons:
+        if len(p.vertices) == 4 and abs(p.normal.z) < 1e-3:
+            tops.append(max((mw @ ob.data.vertices[i].co).z for i in p.vertices))
+    return min(tops) if tops else float("nan")
+
+
 def apex(pts):
     top = max(p[2] for p in pts)
     out = []
@@ -147,13 +156,17 @@ def run(out_dir):
         bad = [e for e, c in welded_edge_faces(ob).items() if c != 2]
         check(not bad, f"roofs: {shape} roof+walls are closed manifold ({len(bad)} bad edges)")
         check(signed_volume(world_triangles(ob)) > 0, f"roofs: {shape} is outward-wound (positive volume)")
-        wall_top = max(p[2] for p in got) - sp.provenance["roof_height_m"]
-        shape_invariants(shape, got, wall_top, ob)
+        eave = eave_from_walls(ob)
+        rise = top_b - eave
+        want_rise = sp.provenance["roof_height_m"]
+        check(abs(rise - want_rise) <= 0.01, f"roofs: {shape} measured rise {rise:.3f} m (apex - wall top) = declared roof height {want_rise} m")
+        shape_invariants(shape, got, eave, ob)
 
     gab, hip = world_verts(by_id(root, "osm:way/1023")), world_verts(by_id(root, "osm:way/1028"))
     ridge_g, ridge_h = apex(gab)[1], apex(hip)[1]
     check(len(ridge_g) == 2 and len(ridge_h) == 2, "roofs: gabled and hipped ridges are both two-point")
-    check(dist(*ridge_h) < dist(*ridge_g), "roofs: the hipped ridge is shorter than the gabled ridge (hips cut ends)")
+    check(len(ridge_g) == 2 and len(ridge_h) == 2 and dist(*ridge_h) < dist(*ridge_g),
+          "roofs: the hipped ridge is shorter than the gabled ridge (hips cut ends)")
 
     # --- edits round-trip through export ------------------------------------------------------------------
     moved = by_id(root, "osm:way/1043")
