@@ -1,7 +1,7 @@
 # Map Builder overview
 
-v0.1.0 preview. Detail: [generation](generate.md), [export](export.md),
-[consumer handoff](consumer.md).
+v0.2.0 preview. Detail: [generation](generate.md), [export](export.md),
+[fly-through check](flythrough.md), [consumer handoff](consumer.md).
 
 ```mermaid
 flowchart TD
@@ -15,6 +15,7 @@ flowchart TD
   H --> I[Export package]
   I --> J[Validate package]
   J --> K[Inspect GLB]
-  J --> L[Check reference reader]
+  J --> P[Check passage probes]
+  P --> L[Check reference reader]
   L --> M[Consumer adapter pending]
 ```

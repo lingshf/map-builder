@@ -6,6 +6,53 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
+"Fly under bridges and through tunnels." **Release candidate**, not a published
+release: tagging requires release review and coordinator authorization.
+Package schema stays **2.0.0**.
+
+### Added
+
+- Highway bridges (`highway=*` + `bridge=*`) are generated as editable deck
+  solids (class `bridge`) whose height follows OSM `layer` (5 m clearance per
+  layer, ramps of 8 % or less). They carry `deck` and, where clearance is at
+  least 4 m, `under` passage probes (#21).
+- Bridge piers where a deck stands more than 6 m above the ground, kept off
+  roads beneath, and 1 m parapets on wide enough decks (#26).
+- Road tunnels (`highway=*` + `tunnel=*`) as flyable tubes with an arched
+  roof, an exact terrain cut that does not leak, portal headwalls (class
+  `structure`), matching heightfield NaN cells and a `bore` passage probe (#22).
+- Elevated building parts get an `under` probe. `tunnel=building_passage` /
+  `covered=yes` highways split their building into lower parts and an upper
+  part with a flyable `passage` probe (#24).
+- The generator re-checks every probe against the finished scene. Blocked
+  probes are not exported; they are listed in `report.json`
+  `passage_probes_blocked` with the blocking `mb_id` (#21, #22, #24). At
+  export, edits are not re-probed: a probe that an edit blocks, or that is not
+  checked within the query budget, is a validation **warning**, and the
+  package is still `VALID` ([check a package](docs/user/structures.md#check-a-package)).
+- Pittsburgh demo preset with fixed cameras; fast tests without wall-clock
+  gates (#23).
+- User guide [bridges, tunnels and passages](docs/user/structures.md),
+  [fly-through check flow](docs/flows/flythrough.md), and a
+  [Pittsburgh v0.2.0 demo](docs/demo/v0.2.0/README.md) that compares
+  before/after renders from the unchanged v0.1.0 cameras (REL-v0.2.0).
+
+### Changed
+
+- The C# reference reader now counts probe query work the same way as the
+  Python validator, so it checks all 13 Pittsburgh probes within its budget.
+  Both validators accept tunnel headwall ids (`osm:way/N:headwall0`,
+  `osm:way/N:headwall1`) without a warning (#27, D46).
+
+### Not included
+
+- PERF-PROBE-INDEX (#25) was closed without merging. Probe checking performance
+  is unchanged.
+- Railway bridges/tunnels (including funiculars), culverts, `man_made=bridge`
+  outlines and `man_made=tunnel` remain unsupported and reported (D25).
+
 ## [0.1.0] - 2026-11-19
 
 Baseline **preview candidate**, not a published release. Final tagging requires
@@ -88,5 +135,6 @@ release review and coordinator authorization.
 - Code licence is provisionally GPL-3.0-or-later; owner confirmation and a root
   licence file are still outstanding. Source-data licences apply separately.
 
-[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lingshf/map-builder/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lingshf/map-builder/releases/tag/v0.1.0

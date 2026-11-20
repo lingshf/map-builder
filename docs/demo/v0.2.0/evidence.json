@@ -1,0 +1,418 @@
+{
+ "status": "RC evidence on the rebased RC head; C# 13/13 checked and PASS (D46 resolved by #27)",
+ "base_commit": "ecf349e (main, includes #27); first built on b97f3a3ec2d711e687d654c8ac39d175a427e9b2",
+ "area": {
+  "lat": 40.437,
+  "lon": -80.016,
+  "width_m": 1200,
+  "height_m": 1000
+ },
+ "inputs": "cache-only rebuild from the 2026-11-19 v0.1.0 Pittsburgh acquisition, reclassified with current code",
+ "options": {
+  "seed": 1,
+  "dsm_correction": true,
+  "terrain_spacing_m": 10.0,
+  "heightfield_spacing_m": 2.0,
+  "created_utc": "2026-11-20T00:00:00Z"
+ },
+ "package_id": "sha256:882855ca2c0cf1b17294743c7f7865a5ede3b532999cdfd02f304d9a824c5b7c",
+ "before_package_id": "sha256:5abdabef613b43bbf62cb4eb6a2528e6d0857e55c708b26795638705f26fedba",
+ "build_seconds_plan_package_validate": {
+  "runs": [
+   18.898,
+   19.196,
+   18.953
+  ],
+  "median": 18.953,
+  "byte_identical_runs": true,
+  "target_max": 120,
+  "first_build_on_b97f3a3": {
+   "runs": [
+    18.769,
+    20.198,
+    21.112
+   ],
+   "median": 20.198
+  }
+ },
+ "objects": 3290,
+ "classes": {
+  "terrain": 1,
+  "building": 987,
+  "road": 258,
+  "bridge": 33,
+  "tunnel": 5,
+  "structure": 6,
+  "vegetation": 2000
+ },
+ "python_validation": [
+  "VALID: 0 error(s), 1 warning(s)",
+  "package_id sha256:882855ca2c0cf1b17294743c7f7865a5ede3b532999cdfd02f304d9a824c5b7c",
+  "warning: collision has 76 degenerate (zero-area) triangles"
+ ],
+ "passage_probes": [
+  {
+   "id": "osm:way/11950069:under",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/24957029:under",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/121593794:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/121593794:under",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/173225719:under",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/550018203:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/550018206:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/54223852:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/54210147:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/264591820:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/550018192:deck",
+   "kind": "bridge",
+   "radius_m": 1.0
+  },
+  {
+   "id": "osm:way/11965424:bore",
+   "kind": "tunnel",
+   "radius_m": 1.5
+  },
+  {
+   "id": "osm:way/28411466:bore",
+   "kind": "tunnel",
+   "radius_m": 1.5
+  }
+ ],
+ "passage_probes_blocked_count": 29,
+ "passage_probes_blocked": [
+  {
+   "id": "osm:way/11950069:deck",
+   "blocker": "osm:way/121593794"
+  },
+  {
+   "id": "osm:way/24957029:deck",
+   "blocker": "osm:way/121593795"
+  },
+  {
+   "id": "osm:way/54210154:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/121593795:deck",
+   "blocker": "osm:way/24957029"
+  },
+  {
+   "id": "osm:way/173225719:deck",
+   "blocker": "osm:way/364838217"
+  },
+  {
+   "id": "osm:way/264591932:deck",
+   "blocker": "osm:way/24957029"
+  },
+  {
+   "id": "osm:way/54210161:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/137766148:deck",
+   "blocker": "osm:way/550018203"
+  },
+  {
+   "id": "osm:way/137766151:deck",
+   "blocker": "osm:way/137766148"
+  },
+  {
+   "id": "osm:way/264591970:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/550018210:deck",
+   "blocker": "osm:way/137766151"
+  },
+  {
+   "id": "osm:way/43082522:deck",
+   "blocker": "osm:way/550018211"
+  },
+  {
+   "id": "osm:way/550018211:deck",
+   "blocker": "osm:way/43082522"
+  },
+  {
+   "id": "osm:way/24957033:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/54210140:deck",
+   "blocker": "osm:way/379511882"
+  },
+  {
+   "id": "osm:way/54210143:deck",
+   "blocker": "osm:way/379511882"
+  },
+  {
+   "id": "osm:way/54210148:deck",
+   "blocker": "osm:way/379511882"
+  },
+  {
+   "id": "osm:way/54210156:deck",
+   "blocker": "osm:way/121593802"
+  },
+  {
+   "id": "osm:way/54210157:deck",
+   "blocker": "osm:way/54210162"
+  },
+  {
+   "id": "osm:way/54210162:deck",
+   "blocker": "osm:way/54210157"
+  },
+  {
+   "id": "osm:way/54210163:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/121593802:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/264591784:deck",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/323231442:deck",
+   "blocker": "osm:way/54210157"
+  },
+  {
+   "id": "osm:way/379511882:deck",
+   "blocker": "osm:way/54210140"
+  },
+  {
+   "id": "osm:way/625362030:deck",
+   "blocker": "osm:way/54210157"
+  },
+  {
+   "id": "osm:way/54223854:bore",
+   "blocker": "osm:way/534078565"
+  },
+  {
+   "id": "osm:way/550018216:bore",
+   "blocker": "terrain:grid"
+  },
+  {
+   "id": "osm:way/550018195:bore",
+   "blocker": "osm:way/550018190"
+  }
+ ],
+ "csharp_reader": {
+  "result": "OK; passages 0..12 all PASS (13/13 checked); no query-budget warning; no mb_id warning",
+  "package_id": "sha256:882855ca2c0cf1b17294743c7f7865a5ede3b532999cdfd02f304d9a824c5b7c",
+  "before_fix": "on b97f3a3 the budget ran out and probes 9..12 were not checked (D46)"
+ },
+ "piers": {
+  "bridges_with_piers": 3,
+  "total": 20,
+  "by_bridge": [
+   {
+    "mb_id": "osm:way/11950069",
+    "length_m": 217.51,
+    "piers": 3
+   },
+   {
+    "mb_id": "osm:way/121593794",
+    "length_m": 215.0,
+    "piers": 3
+   },
+   {
+    "mb_id": "osm:way/173225719",
+    "length_m": 645.91,
+    "piers": 14
+   }
+  ]
+ },
+ "tunnel_headwall_leak_test": {
+  "osm:way/11965424:headwall0": {
+   "rays": 961,
+   "holes": 0,
+   "below_ground": 0,
+   "min_top_minus_ground_m": -0.0
+  },
+  "osm:way/11965424:headwall1": {
+   "rays": 620,
+   "holes": 0,
+   "below_ground": 0,
+   "min_top_minus_ground_m": -0.0
+  },
+  "osm:way/28411466:headwall0": {
+   "rays": 462,
+   "holes": 0,
+   "below_ground": 0,
+   "min_top_minus_ground_m": -0.0
+  },
+  "osm:way/28411466:headwall1": {
+   "rays": 961,
+   "holes": 0,
+   "below_ground": 0,
+   "min_top_minus_ground_m": -0.0
+  },
+  "osm:way/54223854:headwall0": {
+   "rays": 744,
+   "holes": 0,
+   "below_ground": 0,
+   "min_top_minus_ground_m": -0.0
+  },
+  "osm:way/54223854:headwall1": {
+   "rays": 961,
+   "holes": 0,
+   "below_ground": 0,
+   "min_top_minus_ground_m": -0.0
+  }
+ },
+ "terrain_correction": {
+  "applied": true,
+  "masked_points": 8532,
+  "lowered_points": 5201,
+  "max_lowering_m": 33.255,
+  "mean_lowering_m": 3.67
+ },
+ "unsupported_bridge_tunnel": [
+  {
+   "id": "osm:way/550018208",
+   "reason": "man_made=bridge outline (not supported in v1)",
+   "tags": {
+    "layer": "2",
+    "man_made": "bridge"
+   }
+  },
+  {
+   "id": "osm:way/1244965378",
+   "reason": "man_made=bridge outline (not supported in v1)",
+   "tags": {
+    "bridge": "yes",
+    "layer": "3",
+    "man_made": "bridge"
+   }
+  },
+  {
+   "id": "osm:way/1244978189",
+   "reason": "man_made=bridge outline (not supported in v1)",
+   "tags": {
+    "bridge": "yes",
+    "layer": "2",
+    "man_made": "bridge"
+   }
+  },
+  {
+   "id": "osm:way/550018207",
+   "reason": "man_made=bridge outline (not supported in v1)",
+   "tags": {
+    "layer": "1",
+    "man_made": "bridge"
+   }
+  },
+  {
+   "id": "osm:way/1244965379",
+   "reason": "man_made=bridge outline (not supported in v1)",
+   "tags": {
+    "layer": "2",
+    "man_made": "bridge"
+   }
+  },
+  {
+   "id": "osm:way/54834750",
+   "reason": "railway lines are not generated in v1",
+   "tags": {
+    "bridge": "yes",
+    "layer": "1",
+    "railway": "funicular"
+   }
+  },
+  {
+   "id": "osm:way/833629681",
+   "reason": "railway lines are not generated in v1",
+   "tags": {
+    "bridge": "yes",
+    "layer": "1",
+    "railway": "funicular"
+   }
+  },
+  {
+   "id": "osm:way/778113555",
+   "reason": "man_made=bridge outline (not supported in v1)",
+   "tags": {
+    "layer": "2",
+    "man_made": "bridge"
+   }
+  }
+ ],
+ "render": {
+  "blender": "4.2.23 LTS",
+  "engine": "Cycles CPU",
+  "resolution": [
+   1280,
+   720
+  ],
+  "samples": 64,
+  "pittsburgh_renders": 8,
+  "wall_seconds_including_panel": 280.2,
+  "budget_seconds": 1800,
+  "before_pixels_identical_to_v0.1.0": true
+ },
+ "synthetic": {
+  "package_id": "sha256:d1e98213052911657a5092365a8b99a0bb20e9e903bfb5eea22ebfd3141ebaea",
+  "validation": "VALID: 0 error(s), 1 warning(s)",
+  "probes": [
+   "osm:way/1048:under elevated",
+   "osm:way/1098:passage elevated",
+   "osm:way/1069:deck bridge",
+   "osm:way/1072:bore tunnel"
+  ],
+  "csharp": "4/4 PASS"
+ },
+ "reproduction_on_rc_head": {
+  "step": "SPRINT_CLOSE step 2",
+  "result": "same package_id as the rendered package; Python VALID; C# 13/13 PASS; renders not redone"
+ },
+ "g4_release_zip_clean_profile": {
+  "zip": "map_builder-0.2.0.zip",
+  "files": 32,
+  "sha256": "e9f3bcfe58f813a7dd6c8502eb47ca275c274775ffbae4000024bbb326ff5f89",
+  "blender": "4.2.23 LTS (Mesa build), empty BLENDER_USER_RESOURCES profile",
+  "install": "blender --command extension install-file -r user_default -e",
+  "load": "bl_ext.user_default.map_builder loaded, MB_PT_main registered, manifest version 0.2.0",
+  "harness": "tests/blender/run_integration.py with map_builder imported from the installed copy",
+  "result": "OK: 0 failure(s); 99 PASS; 15 s"
+ }
+}
