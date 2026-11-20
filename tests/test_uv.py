@@ -184,6 +184,45 @@ class PlaneUvTest(unittest.TestCase):
         self.assertGreaterEqual(len(planes), 4)
         self.assertTrue(all(abs(c) < 100 / tile for f in planes.values() for _, u in f for p in u for c in p))
 
+    def test_gabled_l_house_gable_ends_continue_the_wall_u_and_slopes_get_a_plane_uv(self):
+        ring = [(0, 0), (20, 0), (20, 8), (8, 8), (8, 20), (0, 20)]
+        mesh, _, _ = build_building(building(ring, roof__shape="gabled", height="9", roof__height="4"),
+                                    flat_grid(), 0.0)
+        uv.assign_uvs(mesh, (X0, 0, 0))
+        facade, roof = mesh.materials.index("MB Facade"), mesh.materials.index("MB Roof")
+        ft, rt = textures.tile_size("MB Facade"), textures.tile_size("MB Roof")
+        wall, gables = {}, []
+        for f, m, uvs in zip(mesh.faces, mesh.face_materials, mesh.face_uvs):
+            pts = [mesh.vertices[i] for i in f]
+            if m == facade and len(f) == 4:
+                for p, c in zip(pts, uvs):
+                    wall[tuple(round(x, 5) for x in p)] = c
+            elif m == facade and any(p[2] > 5.0 + 1e-6 for p in pts):
+                gables.append((pts, uvs))
+        self.assertEqual(len(gables), 2)
+        for pts, uvs in gables:
+            self.assertTrue(all(c is not None for c in uvs))
+            for p, c in zip(pts, uvs):
+                key = tuple(round(x, 5) for x in p)
+                if key in wall:    # the eave corners are the wall's own top corners
+                    close(self, c, wall[key], "gable eave corner")
+                else:              # the apex: same segment, V from the wall base
+                    self.assertAlmostEqual(c[1], p[2] / ft, places=6)
+            us = [c[0] for c in uvs]
+            self.assertLessEqual(max(us) - min(us), 8.0 / ft + 1e-6)   # inside the 8 m end wall
+        planes = {}
+        for f, m, uvs in zip(mesh.faces, mesh.face_materials, mesh.face_uvs):
+            if m != roof:
+                continue
+            pts = [mesh.vertices[i] for i in f]
+            n = _normal(pts)
+            key = tuple(round(c, 4) for c in n) + (round(sum(a * b for a, b in zip(n, pts[0])), 3),)
+            planes.setdefault(key, []).append((pts, uvs))
+            for a in range(len(pts)):
+                b = (a + 1) % len(pts)
+                self.assertAlmostEqual(math.dist(pts[a], pts[b]), math.dist(uvs[a], uvs[b]) * rt, delta=1e-4)
+        self.assertGreaterEqual(len(planes), 4)
+
     def test_ring_starting_mid_wall_keeps_cumulative_u_to_the_closing_corner(self):
         ring = [(5, 0), (10, 0), (10, 6), (0, 6), (0, 0)]   # starts 5 m along the south wall
         mesh = uv.textured_copy(flat_building(ring), (X0, 0, 0))
