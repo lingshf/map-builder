@@ -991,9 +991,6 @@ class RangeCacheValidationTest(unittest.TestCase):
         self.assertIsNotNone(self.fetch(tr))  # same cache: the UTM header must not be replayed
 
 
-DRIBBLE_BYTES = 60   # 3 s of 50 ms dribbling, far longer than the 0.6 s deadline
-
-
 class DeadlineProbe:
     """Records, without timing anything, how UrllibTransport arms its deadline machinery:
     the timeout each request worker is joined with, each watchdog timer interval, and every socket
@@ -1085,35 +1082,30 @@ class RoundFourTest(unittest.TestCase):
     def test_dribbled_chunk_framing_hits_deadline_on_a_real_socket(self):
         import socket as socket_mod
         import threading
-        import time as time_mod
         srv = socket_mod.socket()
         srv.bind(("127.0.0.1", 0))
         srv.listen(1)
         self.addCleanup(srv.close)
         stop = threading.Event()
+        self.addCleanup(stop.set)
+        probe = DeadlineProbe(manual_timer=True)  # the watchdog fires only when the test says so
 
-        def serve():
+        def serve():  # an unterminated chunk-size line: the client keeps waiting for its end
             conn, _ = srv.accept()
             with conn:
                 conn.recv(4096)
-                conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-                for _ in range(DRIBBLE_BYTES):  # long chunk-size line, one byte per 50 ms, then close
-                    if stop.is_set():
-                        return
-                    try:
-                        conn.sendall(b"0")
-                    except OSError:
-                        return
-                    time_mod.sleep(0.05)
-        th = threading.Thread(target=serve, daemon=True)
-        th.start()
-        self.addCleanup(stop.set)
+                try:
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n000")
+                    probe.fire()  # the deadline passes mid chunk-size line
+                    stop.wait(30.0)  # keep the peer open: only the watchdog's shutdown can end the read
+                except OSError:
+                    return
+        threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
-        with DeadlineProbe() as probe, self.assertRaises(NetworkError) as cm:
-            UrllibTransport(total_timeout=0.6).request("GET", f"http://127.0.0.1:{port}/", {}, None, 0.4, 10_000)
-        probe.assert_armed(self, 0.6)
+        with probe, self.assertRaises(NetworkError) as cm:
+            UrllibTransport(total_timeout=30.0).request("GET", f"http://127.0.0.1:{port}/", {}, None, 1.0, 10_000)
+        probe.assert_armed(self, 30.0)
         self.assertIn("time limit", str(cm.exception))
-
     def test_blocked_dns_resolution_returns_at_deadline(self):
         import socket as socket_mod
         import threading
