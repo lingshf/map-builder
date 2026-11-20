@@ -160,9 +160,14 @@ def build_ships(build, rel):
 
     Blender writes each ``paths`` entry as-is with ``ZipFile.write(abs, entry)``. A directory entry adds
     only the directory, not its contents. The arcname is normalised by ``os.path.normpath`` and has its
-    leading slashes stripped."""
+    leading slashes stripped. The build fails outright, so nothing ships, in two cases: a duplicate entry
+    after normalisation, or a file entry with a trailing slash."""
     if build is not None and "paths" in build:
-        return any(posixpath.normpath(p.replace("\\", "/")).lstrip("/") == rel for p in build["paths"])
+        entries = [p.replace("\\", "/") for p in build["paths"]]
+        norm = [posixpath.normpath(p).lstrip("/") for p in entries]
+        if len(set(norm)) != len(norm) or any(p.endswith("/") and n == rel for p, n in zip(entries, norm)):
+            return False
+        return rel in norm
     patterns = BLENDER_DEFAULT_EXCLUDES if build is None else build.get("paths_exclude_pattern")
     if not patterns:   # Blender then skips dot-files only
         return not any(p.startswith(".") for p in rel.split("/"))
@@ -240,6 +245,10 @@ class ExtensionZipTest(unittest.TestCase):
         self.assertEqual(_missing_textures({"paths": every_file}), [])
         self.assertEqual(_missing_textures({"paths": [f"./assets/textures/{n}" for n in ASSET_FILES]}), [])
         self.assertEqual(_missing_textures({"paths": every_file[:-1]}), ASSET_FILES[-1:])
+        # Both of these make Blender's build fail, so the guard rejects them.
+        slash = every_file[:-1] + [every_file[-1] + "/"]
+        self.assertIn(ASSET_FILES[-1], _missing_textures({"paths": slash}))
+        self.assertNotEqual(_missing_textures({"paths": every_file + ["./" + every_file[1]]}), [])
         self.assertEqual(_missing_textures(None), [])
         self.assertEqual(_missing_textures({"paths_exclude_pattern": [".*", "assets/"]}), ASSET_FILES)
 
