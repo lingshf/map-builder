@@ -18,7 +18,7 @@ so simultaneous events (symmetric shapes) produce a single multi-way node. Both 
 ``PLANAR_TOL_M`` of ``roofs.py`` (not imported, to keep this module free of cycles).
 
 Bounds: at most ``MAX_SKELETON_VERTICES`` vertices after merging collinear runs, and at most
-``MAX_SKELETON_EVENTS`` processed events (edge, split and spike steps; a simple polygon needs
+``MAX_SKELETON_EVENTS`` processed events (edge, split and every spike-resolution step; a simple polygon needs
 fewer than 4 n of them). Finding the next event is O(n^2), so the whole run is O(n^3) with an O(n^2)
 event cap and never depends on wall-clock time. Exceeding the cap raises :class:`LimitError`.
 
@@ -236,6 +236,11 @@ class _Run:
         return cand if cand[1:4] < cur[1:4] else cur
 
     # -- event handling -------------------------------------------------------
+    def charge(self):
+        self.events += 1
+        if self.events > MAX_SKELETON_EVENTS:
+            raise LimitError(f"straight skeleton exceeded {MAX_SKELETON_EVENTS} events")
+
     def settle(self, x, t):
         """Terminate or repair the cycle containing the fresh vertex ``x`` (spikes, size 2)."""
         while True:
@@ -249,6 +254,7 @@ class _Run:
                 return
             if not self.antiparallel(x.ep, x.en):
                 return
+            self.charge()
             p, q = x.prev, x.next
             px = x.at(t)
             dp, dq = math.dist(p.at(t), px), math.dist(q.at(t), px)
@@ -322,9 +328,7 @@ class _Run:
             ev = self.find_event(alive)
             if ev is None:
                 raise SkeletonError("no skeleton event found (degenerate or numerically unstable ring)")
-            self.events += 1
-            if self.events > MAX_SKELETON_EVENTS:
-                raise LimitError(f"straight skeleton exceeded {MAX_SKELETON_EVENTS} events")
+            self.charge()
             t = max(ev[0], self.now)
             self.now = t
             if ev[1] == 0:

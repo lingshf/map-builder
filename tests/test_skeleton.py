@@ -61,15 +61,47 @@ def check_no_overlap(tris, footprint_area):
     return total / footprint_area
 
 
-def check_no_gap(tris, ring):
-    """Footprint minus the part covered by the triangles (footprint triangulated independently)."""
-    pts = list(ring)
-    covered = 0.0
-    for i, j, k in triangulate(pts, range(len(pts))):
-        f = [pts[i], pts[j], pts[k]]
-        covered += sum(_area(_clip(list(t), f)) for t in tris)
-    return (ring_area(pts) - covered) / ring_area(pts)
+def _subtract(piece, tri):
+    """``piece`` (convex) minus the convex CCW ``tri``, as a list of convex pieces."""
+    out = []
+    for i in range(len(tri)):
+        a, b = tri[i], tri[(i + 1) % len(tri)]
+        outside = _halfplane(piece, b, a)
+        if len(outside) >= 3 and _area(outside) > 0:
+            out.append(outside)
+        piece = _halfplane(piece, a, b)
+        if len(piece) < 3:
+            break
+    return out
 
+
+def _halfplane(poly, a, b):
+    """``poly`` clipped to the closed left side of the directed line a -> b."""
+    out = []
+    for j in range(len(poly)):
+        p, q = poly[j - 1], poly[j]
+        sp = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+        sq = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
+        if sq >= 0:
+            if sp < 0:
+                out.append(_cross(p, q, sp, sq))
+            out.append(q)
+        elif sp >= 0:
+            out.append(_cross(p, q, sp, sq))
+    return out
+
+
+def check_no_gap(tris, ring):
+    """(footprint - union of all triangles) / footprint: the uncovered part of the independently
+    triangulated footprint, computed by subtracting every triangle from every footprint piece."""
+    pts = list(ring)
+    uncovered = 0.0
+    for i, j, k in triangulate(pts, range(len(pts))):
+        pieces = [[pts[i], pts[j], pts[k]]]
+        for t in tris:
+            pieces = [r for p in pieces for r in _subtract(p, t)]
+        uncovered += sum(_area(p) for p in pieces)
+    return uncovered / ring_area(pts)
 
 def assert_tiles(test, ring):
     sk = straight_skeleton(ring)
@@ -77,6 +109,7 @@ def assert_tiles(test, ring):
     tris = face_triangles(sk)
     test.assertLessEqual(abs(check_no_gap(tris, sk.ring)), TOL)
     test.assertLessEqual(check_no_overlap(tris, area), TOL)
+    test.assertLessEqual(abs(sum(_area(t) for t in tris) - area) / area, TOL)  # nothing outside
     return sk
 
 
@@ -112,6 +145,15 @@ SHAPES = {"L": L_SHAPE, "L unequal": L_UNEQUAL, "T": T_SHAPE, "T unequal": T_UNE
 
 def regular(n, r=10.0):
     return [(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n)) for k in range(n)]
+
+
+class TestTilingChecks(unittest.TestCase):
+    def test_gap_check_sees_a_duplicated_half_square(self):
+        sq = [(0, 0), (4, 0), (4, 4), (0, 4)]
+        half = [(0, 0), (4, 0), (4, 4)]
+        self.assertAlmostEqual(check_no_gap([half, half], sq), 0.5, places=9)
+        self.assertAlmostEqual(check_no_overlap([half, half], 16.0), 0.5, places=9)
+        self.assertAlmostEqual(check_no_gap([half, [(0, 0), (4, 4), (0, 4)]], sq), 0.0, places=9)
 
 
 class TestSimpleShapes(unittest.TestCase):
@@ -170,7 +212,7 @@ class TestTiling(unittest.TestCase):
         self.assertLessEqual(sk.events, 4 * MAX_SKELETON_VERTICES)
 
     def test_event_counter_is_reported(self):
-        self.assertEqual(straight_skeleton(RECT).events, 1)
+        self.assertEqual(straight_skeleton(RECT).events, 2)  # one edge event + one spike step
         self.assertGreater(straight_skeleton(ARROW).events, 1)
 
 
@@ -228,6 +270,14 @@ class TestDegenerateInput(unittest.TestCase):
     def test_fewer_than_three_vertices(self):
         with self.assertRaisesRegex(SkeletonError, "fewer than 3"):
             straight_skeleton([(0, 0), (1, 0)])
+
+    def test_spike_steps_are_charged_against_the_cap(self):
+        # RECT needs one edge event plus one spike-resolution step
+        with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 1):
+            with self.assertRaisesRegex(LimitError, "exceeded 1 events"):
+                straight_skeleton(RECT)
+        with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 2):
+            straight_skeleton(RECT)
 
     def test_event_cap_raises_limit_error(self):
         with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 0):
