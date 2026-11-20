@@ -907,7 +907,7 @@ class RoofCounterexampleTests(unittest.TestCase):
         feats, _ = feature_rings(COUNTEREXAMPLES)
         for i in ("osm:way/9002", "osm:way/9007"):
             prov = self.objects[i].provenance
-            self.assertEqual(prov["roof_shape_built"], "gabled", i)
+            self.assertEqual(prov["roof_shape_built"], "gabled", (i, prov["roof_shape"]))
             self.assertIn("vertical gable wall", prov["roof_construction"], i)
             outer = [(p[0], p[1]) for p in feats[i].geometry.outer]
             short = min(max(p[0] for p in outer) - min(p[0] for p in outer),
