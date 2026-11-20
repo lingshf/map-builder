@@ -1,7 +1,9 @@
 # REL-v0.3.0: "passages, roofs and the real-data v2 demo" (end of v2)
 
-Owner: release manager · depends on S2-ELEV, S2-ROOF merged, S1-REVIEW done · follows
-[SPRINT_CLOSE.md](SPRINT_CLOSE.md) · demo area D26 (Pittsburgh)
+Owner: release manager · depends on S2-ELEV, S2-ROOF, S1-F1, S1-F2 merged and on the
+[S2-REVIEW](../reviews/S2-REVIEW.md) findings S2-F1, S2-F2, S2-F3 (D48: review first, then one
+RC) · follows [SPRINT_CLOSE.md](SPRINT_CLOSE.md) · demo areas: D26 Pittsburgh (bridges,
+tunnels) + the S2-F2 preset (elevated parts, passages, roofs)
 
 ## Scope
 
@@ -17,9 +19,13 @@ RC PR: version 0.3.0, CHANGELOG, `docs/user/` (elevated parts, building passages
 
 ## Acceptance criteria
 
-Common release criteria, plus: package built with live Copernicus GLO-30 + Overpass via the CLI
+Common release criteria, plus: each demo package (Pittsburgh and the S2-F2 preset) built with live Copernicus GLO-30 + Overpass via the CLI
 and in headless Blender, `VALID`; a drone capsule (r = 1 m) passes under a real bridge, through
-the real tunnel and beneath an elevated part (validator + C#).
+the real tunnel and beneath an elevated part (validator + C#). If the S2-F2 area decision fell back to option (c),
+the elevated-part case uses the synthetic sample and the release notes say so.
+
+**Assets (S2-F4):** besides the extension zip, the release attaches the real-data demo
+`.mbmap` (GLB inside) for each preset, with ODbL attribution in the notes and the package.
 
 ## Performance considerations
 
