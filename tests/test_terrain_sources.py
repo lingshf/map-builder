@@ -998,10 +998,11 @@ class DeadlineProbe:
 
     def __init__(self, manual_timer=False):
         """With ``manual_timer`` the watchdog timer never fires by itself; ``fire()`` runs it on demand."""
-        self.joins, self.timers, self.shutdowns = [], [], []
+        self.joins, self.timers, self.shutdowns, self.handshakes = [], [], [], []
         self.manual_timer, self._manual = manual_timer, []
 
     def __enter__(self):
+        import ssl
         import threading
         from map_builder.core import http as http_mod
         probe = self
@@ -1027,9 +1028,16 @@ class DeadlineProbe:
         def shutdown(sock):
             probe.shutdowns.append(sock)
             real_shutdown(sock)
+
+        real_handshake = ssl.SSLSocket.do_handshake
+
+        def do_handshake(sslsock, *a, **k):
+            probe.handshakes.append(sslsock)
+            return real_handshake(sslsock, *a, **k)
         self._patches = [mock.patch.object(threading, "Thread", ProbeThread),
                          mock.patch.object(threading, "Timer", ProbeTimer),
-                         mock.patch.object(http_mod, "_shutdown_quietly", shutdown)]
+                         mock.patch.object(http_mod, "_shutdown_quietly", shutdown),
+                         mock.patch.object(ssl.SSLSocket, "do_handshake", do_handshake)]
         for p in self._patches:
             p.start()
         return self
@@ -1049,6 +1057,11 @@ class DeadlineProbe:
         case.assertEqual(len(self.timers), 1)
         case.assertLessEqual(self.timers[0], total + 0.01)  # the watchdog fires at the deadline, not later
         case.assertGreaterEqual(len(self.shutdowns), 1)     # and it really shuts the stalled socket down
+
+    def assert_handshake_socket_shut_down(self, case):
+        """The very SSL socket that ran the stalled handshake, not just any socket, was shut down."""
+        case.assertEqual(len(self.handshakes), 1)
+        case.assertTrue(any(s is self.handshakes[0] for s in self.shutdowns))
 
 class RoundFourTest(unittest.TestCase):
     def test_nested_inner_ring_goes_to_smallest_enclosing_outer(self):
@@ -1185,8 +1198,10 @@ class RoundFourTest(unittest.TestCase):
         threading.Thread(target=serve, daemon=True).start()
         port = srv.getsockname()[1]
         with probe, self.assertRaises(NetworkError) as cm:
-            UrllibTransport(total_timeout=30.0).request("GET", f"https://127.0.0.1:{port}/",             {}, None, 1.0, 1000)  # Windows ignores shutdown on a blocked TLS read, so this bounds it
+            UrllibTransport(total_timeout=30.0).request("GET", f"https://127.0.0.1:{port}/", {}, None, 1.0, 1000)
+        # the 1 s per-op timeout above only bounds the run where shutdown() does not wake a blocked TLS read (Windows)
         probe.assert_armed(self, 30.0)
+        probe.assert_handshake_socket_shut_down(self)
         self.assertIn("time limit", str(cm.exception))
 
 
