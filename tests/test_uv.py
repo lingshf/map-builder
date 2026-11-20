@@ -184,6 +184,62 @@ class PlaneUvTest(unittest.TestCase):
         self.assertGreaterEqual(len(planes), 4)
         self.assertTrue(all(abs(c) < 100 / tile for f in planes.values() for _, u in f for p in u for c in p))
 
+    def test_ring_starting_mid_wall_keeps_cumulative_u_to_the_closing_corner(self):
+        ring = [(5, 0), (10, 0), (10, 6), (0, 6), (0, 0)]   # starts 5 m along the south wall
+        mesh = uv.textured_copy(flat_building(ring), (X0, 0, 0))
+        _, prims = decode(export([node("b", mesh, (X0, 0, 0))], ["MB Facade", "MB Roof"]))
+        facade = next(p for p in prims if p["material"] == "MB Facade")
+        tile = textures.tile_size("MB Facade")
+        cum = [0, 5, 11, 21, 27, 32]
+        for q in range(5):
+            corners = [facade["uv"][6 * q + k] for k in (0, 1, 2, 5)]
+            want = [(cum[q], -0.3), (cum[q + 1], -0.3), (cum[q + 1], 6), (cum[q], 6)]
+            for got, (u, v) in zip(corners, want):
+                close(self, got, (u / tile, v / tile), f"quad {q}")
+
+    def test_one_slope_with_float_noise_normals_has_continuous_uv(self):
+        m = MeshData("slope")
+        zs = (6.0, 6.0, 8.0 + 3e-5, 8.0, 7.0 - 2e-5)
+        vs = [m.add_vertex(x, y, z) for (x, y), z in zip(((0, 0), (10, 0), (10, 4), (0, 4), (5, 2)), zs)]
+        for tri in ((0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)):   # a fan over one plane, normals differ ~1e-5
+            m.add_face([vs[i] for i in tri], "MB Roof", (0.4, 0.2, 0.1))
+        uv.assign_uvs(m, (X0, 0, 0))
+        by_vertex = {}
+        for f, uvs in zip(m.faces, m.face_uvs):
+            for i, c in zip(f, uvs):
+                by_vertex.setdefault(i, []).append(c)
+        for cs in by_vertex.values():
+            for c in cs[1:]:
+                close(self, c, cs[0], "shared corner")
+
+    def test_hipped_slopes_are_continuous_across_interior_edges_but_keep_real_hips(self):
+        ring = [(0, 0), (20, 0), (20, 8), (8, 8), (8, 20), (0, 20)]
+        mesh, _, _ = build_building(building(ring, roof__shape="hipped", height="9", roof__height="4"),
+                                    flat_grid(), 0.0)
+        roof = mesh.materials.index("MB Roof")
+        uv.assign_uvs(mesh, (X0, 0, 0))
+        edges = {}
+        for fi, (f, mi) in enumerate(zip(mesh.faces, mesh.face_materials)):
+            if mi == roof:
+                for k in range(len(f)):
+                    edges.setdefault(frozenset((f[k], f[(k + 1) % len(f)])), []).append(
+                        (_normal([mesh.vertices[v] for v in f]), {f[k]: mesh.face_uvs[fi][k],
+                                                                  f[(k + 1) % len(f)]: mesh.face_uvs[fi][(k + 1) % len(f)]}))
+        interior = hips = 0
+        for sides in edges.values():
+            if len(sides) != 2:
+                continue
+            (n1, u1), (n2, u2) = sides
+            same = sum(a * b for a, b in zip(n1, n2)) >= 1 - 1e-6
+            jump = max(math.dist(u1[v], u2[v]) for v in u1)
+            if same:
+                interior += 1
+                self.assertLess(jump, TOL)
+            else:
+                hips += 1
+        self.assertGreater(interior, 0)
+        self.assertGreater(hips, 0)
+
     def test_terrain_and_road_use_world_xy_minus_the_mesh_offset(self):
         for mat, tile in (("MB Terrain", 8.0), ("MB Road", 4.0)):
             m = MeshData(mat)

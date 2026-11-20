@@ -20,7 +20,7 @@ py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 
 The build is deterministic. With the fixed `--created-utc`, Python 3.12 on Windows x64
 (the platform the sample was generated on) reproduces it byte-identically and gives
-`package_id = sha256:05d8ad89be7d0fed6882e704080167879a31e48e9649f26ac821ced4ef2cced9`.
+`package_id = sha256:7555f2f0690dea3871835be9c40c3702fcf4e11c82c2db3fceb3eee4ae5c4899`.
 Validation reports `VALID: 0 error(s), 1 warning(s)`; the warning is two degenerate
 (zero-area) collision triangles, which is allowed. `tests/test_examples.py` checks that the
 committed file still validates and matches a fresh build; on other platforms, where the
