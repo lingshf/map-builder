@@ -38,8 +38,10 @@ Package schema stays **2.0.0**.
 
 ### Changed
 
-- A road that continues straight from a bridge end without being split from
-  it no longer produces clearance warnings against its own bridge (#32).
+- An unsplit bridge approach no longer raises a clearance warning for a road
+  that joins it at grade: the road must share an OSM node with the bridge way
+  within 15 m along the deck, where the deck is still below clearance height.
+  Real undercrossings, including the same road further along, still warn (#32).
 - Packages now report `generator.version` **0.3.0**, and a unit test keeps it
   equal to the add-on version (D50). v0.1.0 and v0.2.0 packages report
   `generator.version` 0.1.0, a known historical mislabel. Because the
@@ -190,6 +192,7 @@ release review and coordinator authorization.
 - Code licence is provisionally GPL-3.0-or-later; owner confirmation and a root
   licence file are still outstanding. Source-data licences apply separately.
 
-[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lingshf/map-builder/releases/tag/v0.3.0
 [0.2.0]: https://github.com/lingshf/map-builder/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lingshf/map-builder/releases/tag/v0.1.0

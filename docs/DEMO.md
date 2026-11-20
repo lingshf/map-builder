@@ -38,11 +38,14 @@ later had 385 objects instead of 389.
 ## 1. Build from live data (CLI path)
 
 Run from the source root with Python 3.12. The first build downloads from
-Overpass and Copernicus into `cache-<area>`. Set `MB_OFFLINE=1` to rebuild
-from that cache with network access forbidden.
+Overpass and Copernicus into `cache-<area>` under `MB_ROOT` (a fresh temp
+directory unless `MB_ROOT` is already set). To replay offline, keep the same
+`MB_ROOT`, set `MB_OFFLINE=1` and run the block again: it rebuilds from that
+cache with network access forbidden.
 
 ```powershell
-$env:MB_ROOT = Join-Path $env:TEMP ("map-builder-demo-" + [guid]::NewGuid().ToString("N"))
+if (-not $env:MB_ROOT) { $env:MB_ROOT = Join-Path $env:TEMP ("map-builder-demo-" + [guid]::NewGuid().ToString("N")) }
+New-Item -ItemType Directory -Force $env:MB_ROOT | Out-Null
 @'
 import copy, os, statistics, sys, time
 from pathlib import Path
