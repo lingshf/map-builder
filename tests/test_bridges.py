@@ -411,7 +411,7 @@ class CrossingTest(unittest.TestCase):
                                 for w in plan.report["warnings"]))
 
     def test_the_approachs_own_junction_gives_no_clearance_warning(self):
-        plan, ids, _ = self._valley_bridge(-60, joined=True)   # shares an OSM node with the bridge way
+        plan, ids, _ = self._valley_bridge(-97, joined=True)   # joins the deck 3 m from its end, where it is still at grade
         prov = objects(plan, "bridge")[0].provenance
         self.assertEqual([w for w in plan.report["warnings"] if "clearance" in w], [])
         self.assertIsNot(prov["clearance_met"], False)
@@ -462,6 +462,23 @@ class CrossingTest(unittest.TestCase):
         self.assertLess(0.5 + hit.t, 5.0 - 1.0)
         self.assertIs(prov["clearance_met"], False)
         self.assertAlmostEqual(prov["clearance_m"], 0.5 + hit.t, delta=0.6)
+        self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
+
+    def test_a_loop_back_road_under_the_ramp_is_measured_wherever_it_joins(self):
+        # joins at (-76, 0) but crosses under the raised deck at (-68, 0): the geometry, not the node or the
+        # distance, decides
+        plan, ids, grid = make_scene(
+            [([(-100, 0), (-76, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
+             ([(-76, 0), (-76, 20), (-68, 20), (-68, -20)], {"highway": "service"})],
+            valley_height, width=300.0, joins=[(0, 1, 1, 0)])
+        prov = objects(plan, "bridge")[0].provenance
+        col, _ = plan_collision(plan)
+        z0 = terrain_height(grid, -68.0, 0.0) + ROAD_LIFT_M - plan.frame.z_offset
+        hit = ray_cast(col, (-68.0, 0.0, z0 + 0.5), (0.0, 0.0, 1.0), 30.0)
+        self.assertEqual(col.objects[hit.object]["mb_id"], ids[0])
+        self.assertLess(0.5 + hit.t, 5.0 - 1.0)
+        self.assertIs(prov["clearance_met"], False)
+        self.assertLessEqual(prov["clearance_m"], 0.5 + hit.t + 0.05)   # the minimum over the whole road
         self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
 
     def test_a_low_middle_span_still_warns(self):
