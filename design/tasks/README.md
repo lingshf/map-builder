@@ -40,21 +40,34 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 
 ## Sprint 3 (v0.4.0)
 
-Scope D54; decisions D55–D63 in [../roadmap.md](../roadmap.md#v3-sprint-3-v040--non-rectangular-roofs-and-textures).
+Scope D54; decisions D55–D88 in [../roadmap.md](../roadmap.md#v3-sprint-3-v040--non-rectangular-roofs-and-textures).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
-| [S3-ROOF-CASES](S3-ROOF-CASES.md) | S3 | dev | — | `tests/fixtures/munich_roofs.osm`, `munich_roofs_expected.json`, `roof_counterexamples.osm`, `tests/roof_checks.py`, `tests/test_roofs_munich.py` (all new), `tests/fixtures/README.md` | ready | |
-| [S3-SKELETON](S3-SKELETON.md) | S3 | dev | — | `core/skeleton.py`, `tests/test_skeleton.py` (new) | ready | |
-| [S3-ROOF-HIPPED](S3-ROOF-HIPPED.md) | S3 | dev | S3-SKELETON, S3-ROOF-CASES | `core/roofs.py`, `core/generate.py` (building roof section ~446–580 only), `tests/test_roofs.py`, `tests/test_roofs_munich.py`, `tests/blender/checks_roofs.py`; soft: VALIDATION row | blocked | |
-| [S3-ROOF-GABLED](S3-ROOF-GABLED.md) | S3 | dev | S3-ROOF-HIPPED | same as HIPPED (serialised) | blocked | |
-| [S3-TEX-FORMAT](S3-TEX-FORMAT.md) | S3 | dev | — | `core/glb.py`, `core/mesh.py`, `core/package.py` (schema-version writing, `asset_notices`, notices; sole S3 owner, D65), `tests/make_textured_fixture.py` (new), `examples/csharp/MbmapReader/**`, `docs/PACKAGE_FORMAT.md`, `tests/test_package.py`, `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` (C# job); soft: `docs/UNITY_CORE_HANDOFF.md`. Not the schema constant or sample (D64) | ready | |
-| [S3-TEX-ASSETS](S3-TEX-ASSETS.md) | S3 | dev | — (third wave-5a lane after CASES) | `tools/textures/**`, `map_builder/assets/textures/**`, `core/textures.py`, `tests/test_textures.py` (all new); soft: README licence, `blender_manifest.toml` | ready | |
-| [S3-TEX-UV-CORE](S3-TEX-UV-CORE.md) | S3 | dev | S3-TEX-FORMAT, S3-TEX-ASSETS | `core/uv.py`, `tests/test_uv.py` (new), `core/pipeline.py`, `tools/mbmap_cli.py`, `core/__init__.py` (schema 2.1.0), **`examples/synthetic_sample.mbmap` (sole S3 owner, D64)**, VALIDATION sample rows; soft: README CLI | blocked | |
-| [S3-TEX-BLENDER](S3-TEX-BLENDER.md) | S3 | dev | S3-TEX-UV-CORE | `blender/scene_build.py`, `bake.py`, `export.py`, `sources.py`, `ui.py`, `props.py`, `operators.py`, `tests/blender/checks_textures.py` (new); soft: `tests/blender/run_integration.py` (one line) | blocked | |
-| [S3-PARITY](S3-PARITY.md) | S3 | dev | — (½ day, D62) | `tests/blender/checks_parity.py` (new); soft: `run_integration.py` (one line), optional VALIDATION note; only if fixing: `blender/bake.py` probe export (serialise with S3-TEX-BLENDER) | ready | |
-| [S3-REVIEW](S3-REVIEW.md) | S3 | design | all S3 dev tasks | `design/` only | blocked | |
-| [REL-v0.4.0](REL-v0.4.0.md) | S3 | release manager | S3-REVIEW and its blocker S3-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.4.0/`, `docs/releases/v0.4.0.md` | blocked | |
+| [S3-ROOF-CASES](S3-ROOF-CASES.md) | S3 | dev | — | `tests/fixtures/munich_roofs.osm`, `munich_roofs_expected.json`, `roof_counterexamples.osm`, `tests/roof_checks.py`, `tests/test_roofs_munich.py` (all new), `tests/fixtures/README.md`; soft: `tests/test_skeleton.py` (whichever of CASES/SKELETON merges second switches it to the shared checker; CASES did, #43) | done | #43 (6dce54d) |
+| [S3-SKELETON](S3-SKELETON.md) | S3 | dev | — | `core/skeleton.py`, `tests/test_skeleton.py` (new) | done | #41 (44cde70) |
+| [S3-ROOF-HIPPED](S3-ROOF-HIPPED.md) | S3 | dev | S3-SKELETON, S3-ROOF-CASES | `core/roofs.py`, `core/generate.py` (building roof section ~446–580 only), `tests/test_roofs.py`, `tests/test_roofs_munich.py`, `tests/blender/checks_roofs.py`; soft: VALIDATION row | done | #48 (bce89c8) |
+| [S3-ROOF-GABLED](S3-ROOF-GABLED.md) | S3 | dev | S3-ROOF-HIPPED | same as HIPPED (serialised) | done (D82 re-baseline 29/67) | #50 (9d22181) |
+| [S3-TEX-FORMAT](S3-TEX-FORMAT.md) | S3 | dev | — | `core/glb.py`, `core/mesh.py`, `core/package.py` (schema-version writing, `asset_notices`, notices; sole S3 owner, D65), `tests/make_textured_fixture.py` (new), `examples/csharp/MbmapReader/**`, `docs/PACKAGE_FORMAT.md`, `tests/test_package.py`, `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` (C# job); soft: `docs/UNITY_CORE_HANDOFF.md`. Not the schema constant or sample (D64) | done | #42 (f9fb660) |
+| [S3-TEX-ASSETS](S3-TEX-ASSETS.md) | S3 | dev | — (third wave-5a lane after CASES) | `tools/textures/**`, `map_builder/assets/textures/**`, `core/textures.py`, `tests/test_textures.py` (all new); soft: README licence, `blender_manifest.toml` | done | #46 (cfae512) |
+| [S3-TEX-UV-CORE](S3-TEX-UV-CORE.md) | S3 | dev | S3-TEX-FORMAT, S3-TEX-ASSETS | `core/uv.py`, `tests/test_uv.py` (new), `core/pipeline.py`, `tools/mbmap_cli.py`, `core/__init__.py` (schema 2.1.0), **`examples/synthetic_sample.mbmap` (sole S3 owner, D64)**, VALIDATION sample rows; soft: README CLI | done | #49 (740a147) |
+| [S3-TEX-BLENDER](S3-TEX-BLENDER.md) | S3 | dev | S3-TEX-UV-CORE | `blender/scene_build.py`, `bake.py`, `export.py`, `sources.py`, `ui.py`, `props.py`, `operators.py`, `tests/blender/checks_textures.py` (new); soft: `tests/blender/run_integration.py` (one line) | done | #53 (54fc028) |
+| [S3-PARITY](S3-PARITY.md) | S3 | dev | — (½ day, D62) | `tests/blender/checks_parity.py` (new); soft: `run_integration.py` (one line), optional VALIDATION note; only if fixing: `blender/bake.py` probe export (serialise with S3-TEX-BLENDER) | done (fix in S3-PARITY-FIX) | #45 (b3aaf63), #47 (9c99745) |
+| S3-TYPING | S3 | dev | — (D79, D83) | annotations only, avoiding the roof/#46 files; no behaviour change | done | #51 (aa2a979), #52 (cc1d653), #54 (872a536) |
+| [S3-REVIEW](S3-REVIEW.md) | S3 | design | all S3 dev tasks | `design/` only | in review (GO, no v0.4.0 blockers) | this PR |
+| [REL-v0.4.0](REL-v0.4.0.md) | S3 | release manager | S3-REVIEW and its blocker S3-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.4.0/`, `docs/releases/v0.4.0.md` | ready (no S3-Fn blockers) |  |
+| S3-F1 | later | dev | — | `core/roofs.py` | later — analytic near-rectangle gables: planar failure has no named reason (4 Munich roofs) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F2 | later | dev | — | `tests/test_demo_bundle.py` | later — ResourceWarning leak in a test (finalizer escapes `-W error`) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F3 | later | dev | — | `tests/test_bridges.py` | later — shrink the 5.5 s 45° bridge-crossing test ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F4 | later | dev | — | `core/uv.py` | later — `assign_uvs` pure-Python cost (`build_scene` +62 %) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F5 | later | dev | — | `core/package.py` | later — ZIP_STORED for PNGs in the package ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F6 | later | dev | — | `blender/` centre/bbox | later — bbox float32 precision (D74) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F7 | later | dev | — | `core/roofs.py`, `tests/roof_checks.py` | later — largest-triangle reference-plane warp ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F8 | later | dev | — | roof fixtures/tests | later — 9007 near-axis fixture sensitivity ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F9 | later | dev | — | `core/generate.py` (roof section) | later — loose legacy reservation bounds ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F10 | later | dev | — | `core/roofs.py`, `core/skeleton.py` | later — S4 roofs: chamfered/angled and mixed gable ends; pyramidal on concave footprints ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F11 | later | dev | — | `blender/export.py` | later — "MB Default" material digest suffix ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
+| S3-F12 | later | dev | — | `core/collision.py`, `blender/bake.py` | later — `.mbcol` degenerate-triangle warnings (pre-existing) ([S3-REVIEW §4](../reviews/S3-REVIEW.md#4-gaps-and-s3-fn-tasks)) | |
 
 Sample and harness ownership (D64): only S3-TEX-UV-CORE changes `examples/synthetic_sample.mbmap`
 and the default schema version; roof tasks keep the sample byte-identical and add their synthetic cases as
