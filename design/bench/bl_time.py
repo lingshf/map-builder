@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 # S4 baseline harness (D91): headless Blender Generate vs Export, median of 3. See design/roadmap.md, sprint 4 baselines.
 # Usage: blender --background --factory-startup --online-mode --python-exit-code 1 --python bl_time.py -- <tree root> <tag> <frozen cache dir> <out dir>
 import bpy, os, sys, time, shutil, json, statistics

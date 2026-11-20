@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 # S4 baseline harness (D91): CLI plan vs package (write + strict validate), median of 3, offline. See design/roadmap.md.
 # Usage: MB_ROOT=<dir with cache-munich, cache-pittsburgh> MB_TAG=<tag> PYTHONPATH=<tree root> python cli_time.py munich pittsburgh
 import copy, os, statistics, sys, time, json
