@@ -100,7 +100,7 @@ class MB_OT_generate(bpy.types.Operator):
             area = make_area(s)
             settings = make_settings(s)
             plan, sources = generate_plan(area, settings, progress=lambda f: wm.progress_update(int(f * 90)))
-            root = build_scene(context, plan, sources, name)
+            root = build_scene(context, plan, sources, name, s.textures)
         except (MapBuilderError, SettingsInputError, ValueError, OSError) as e:
             return fail(self, "Generation failed; nothing was created", [str(e)])
         finally:
@@ -130,7 +130,7 @@ class MB_OT_export(bpy.types.Operator):
             reject_credentials({"package_name": s.package_name, "export_path": s.export_path},
                                "Nothing was exported")
             manifest, result, report, edits = mb_export.export_map(
-                context, s.export_path, name, s.heightfield_spacing, root=s.export_collection)
+                context, s.export_path, name, s.heightfield_spacing, root=s.export_collection, textures=s.textures)
         except (MapBuilderError, ValueError, OSError) as e:
             errors = getattr(e, "errors", None) or [str(e)]
             return fail(self, f"Export failed (previous package kept): {len(errors)} problem(s)", errors)

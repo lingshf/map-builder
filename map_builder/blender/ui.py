@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import bpy
 
-from .sources import ENV_OVERPASS_URL
+from .sources import ENV_OVERPASS_URL, attribution_lines
 
 if TYPE_CHECKING:
     import bpy.types
@@ -75,6 +75,7 @@ class MB_PT_main(bpy.types.Panel):
         row.prop(s, "roads", toggle=True)
         row.prop(s, "trees", toggle=True)
         box.prop(s, "scatter")
+        box.prop(s, "textures")
         box.prop(s, "max_trees")
         box.prop(s, "seed")
         box.prop(s, "package_name")
@@ -91,6 +92,8 @@ class MB_PT_main(bpy.types.Panel):
 
         col = layout.column(align=True)
         for line in ATTRIBUTION_LINES:
+            col.label(text=line)
+        for line in attribution_lines(s.textures):
             col.label(text=line)
 
 

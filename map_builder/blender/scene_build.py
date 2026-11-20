@@ -11,23 +11,28 @@ it with the core credential policy before creating anything.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import bpy
 
+from ..core import textures as tex
+from ..core import uv as core_uv
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.glb import node_scale
+from ..core.mesh import MeshData
 from .sources import JsonMapping, check_persistable
 
 if TYPE_CHECKING:
     import bpy.types
 
     from ..core.generate import ScenePlan
-    from ..core.mesh import MeshData
 
 COLOR_ATTR = "mb_color"
+UV_MAP = "UVMap"
 META_KEY = "mb_map"
 META_VERSION = 1
 
@@ -40,16 +45,81 @@ STRUCTURE_MATERIALS: dict[str, tuple[tuple[float, float, float], float, float]] 
 }
 
 
-def ensure_material(name: str, created: list[bpy.types.Material] | None = None) -> bpy.types.Material:
+def _is_generated(mat: bpy.types.Material, name: str, textured: bool) -> bool:
+    return mat.get("mb_material") == name and mat.library is None and bool(mat.get("mb_textured")) == textured
+
+
+def ensure_image(name: str, created_images: list[bpy.types.Image] | None = None) -> bpy.types.Image:
+    """The packed image of the texture of material ``name`` (PNG bytes from core/textures, never a file on
+    disk); one datablock per PNG file, shared by materials that use the same file (concrete)."""
+    fname = tex.TEXTURES[name][0]
+    img = next((i for i in bpy.data.images if i.get("mb_image") == fname and i.library is None), None)
+    if img is not None:
+        return img
+    fd, path = tempfile.mkstemp(suffix=".png")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(tex.load(name))
+        img = bpy.data.images.load(path)
+        if created_images is not None:
+            created_images.append(img)
+        img.name = f"mb_{fname}"
+        img.pack()
+        img.filepath = ""
+        img["mb_image"] = fname
+    finally:
+        os.remove(path)
+    return img
+
+
+def _textured_nodes(nt: bpy.types.NodeTree, bsdf: bpy.types.Node, name: str,
+                    created_images: list[bpy.types.Image] | None) -> None:
+    """Principled Base Color <- Mix(Multiply)(Image Texture, Mix(Divide)(Vertex Colour, texture mean albedo)).
+    The divide is the viewport twin of the exporter's COLOR_0 compensation (core.uv), clamped to 1 like it."""
+    x, y = bsdf.location.x, bsdf.location.y
+    attr = nt.nodes.new("ShaderNodeVertexColor")
+    attr.layer_name = COLOR_ATTR
+    attr.location = (x - 900, y - 200)
+    comp = nt.nodes.new("ShaderNodeMixRGB")
+    comp.blend_type, comp.use_clamp = "DIVIDE", True
+    comp.inputs["Fac"].default_value = 1.0
+    comp.inputs["Color2"].default_value = (*core_uv.TEXTURE_MEAN_ALBEDO[name], 1.0)
+    comp.location = (x - 700, y - 200)
+    uvmap = nt.nodes.new("ShaderNodeUVMap")
+    uvmap.uv_map = UV_MAP
+    uvmap.location = (x - 900, y + 100)
+    image = nt.nodes.new("ShaderNodeTexImage")
+    image.image = ensure_image(name, created_images)
+    image.interpolation = "Linear"
+    image.extension = "REPEAT"
+    image.location = (x - 700, y + 100)
+    mix = nt.nodes.new("ShaderNodeMixRGB")
+    mix.blend_type = "MULTIPLY"
+    mix.inputs["Fac"].default_value = 1.0
+    mix.location = (x - 300, y)
+    nt.links.new(uvmap.outputs["UV"], image.inputs["Vector"])
+    nt.links.new(attr.outputs["Color"], comp.inputs["Color1"])
+    nt.links.new(image.outputs["Color"], mix.inputs["Color1"])
+    nt.links.new(comp.outputs["Color"], mix.inputs["Color2"])
+    nt.links.new(mix.outputs["Color"], bsdf.inputs["Base Color"])
+
+
+def ensure_material(name: str, created: list[bpy.types.Material] | None = None, textures: bool = False,
+                    created_images: list[bpy.types.Image] | None = None) -> bpy.types.Material:
     """The generated material ``name``; reuses an existing generated one (tagged ``mb_material``), never
-    modifies or adopts a user material that happens to have the same name."""
+    modifies or adopts a user material that happens to have the same name. ``textures`` builds the textured
+    node tree for the materials of ``core.textures`` (the others are unaffected)."""
+    textured = bool(textures) and name in tex.TEXTURES
     mat = bpy.data.materials.get(name)
-    if mat is not None and mat.get("mb_material") == name and mat.library is None:
+    if mat is not None and _is_generated(mat, name, textured):
         return mat
-    mat = next((m for m in bpy.data.materials if m.get("mb_material") == name and m.library is None), None)
+    mat = next((m for m in bpy.data.materials if _is_generated(m, name, textured)), None)
     if mat is not None:
         return mat
-    base, rough, metal = STRUCTURE_MATERIALS.get(name) or MATERIALS.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
+    if textured:   # the CLI writer's factors, so both paths emit the same material
+        base, rough, metal = MATERIALS.get(name, ((0.8, 0.8, 0.8), tex.roughness(name), 0.0))
+    else:
+        base, rough, metal = STRUCTURE_MATERIALS.get(name) or MATERIALS.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
     mat = bpy.data.materials.new(name)
     if created is not None:
         created.append(mat)
@@ -59,21 +129,37 @@ def ensure_material(name: str, created: list[bpy.types.Material] | None = None) 
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
     bsdf.inputs["Base Color"].default_value = (*base, 1.0)
-    attr = nt.nodes.new("ShaderNodeVertexColor")
-    attr.layer_name = COLOR_ATTR
-    attr.location = (bsdf.location.x - 300, bsdf.location.y)
-    nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
+    if textured:
+        _textured_nodes(nt, bsdf, name, created_images)
+        mat["mb_textured"] = True
+    else:
+        attr = nt.nodes.new("ShaderNodeVertexColor")
+        attr.layer_name = COLOR_ATTR
+        attr.location = (bsdf.location.x - 300, bsdf.location.y)
+        nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
     mat["mb_material"] = name
     return mat
 
 
+def uv_source(md: MeshData, origin: tuple[float, float, float]) -> MeshData | None:
+    """``md`` with ``face_uvs`` from core/uv.py (the rule the CLI uses), or None if no face is textured.
+    A copy: the plan's mesh is shared with collision and must not change."""
+    out = MeshData(md.name)
+    out.vertices, out.faces, out.face_materials, out.materials = md.vertices, md.faces, md.face_materials, md.materials
+    core_uv.assign_uvs(out, origin)
+    return out if out.face_uvs is not None else None
+
+
 def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.types.Material],
-                   created_meshes: list[bpy.types.Mesh]) -> bpy.types.Mesh:
+                   created_meshes: list[bpy.types.Mesh], textures: bool = False,
+                   origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
+                   created_images: list[bpy.types.Image] | None = None) -> bpy.types.Mesh:
     """Blender mesh with exactly the plan's faces (the generator's closed, CCW-outward shells).
 
     The new mesh is appended to ``created_meshes`` right after it is allocated (before anything that can
     fail), so the caller's single rollback path owns its removal; likewise new materials go to
-    ``created_materials``."""
+    ``created_materials``. ``textures`` adds the UV map (core/uv.py, ``origin`` = the object location) and the
+    textured materials."""
     me = bpy.data.meshes.new(name or md.name)
     created_meshes.append(me)
     me.from_pydata(md.vertices, [], md.faces)
@@ -81,8 +167,18 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
         raise MapBuilderError(f"generated mesh {md.name!r} was altered by Blender's mesh validation; "
                               "refusing to create a scene that differs from the plan")
     for m in md.materials:
-        me.materials.append(ensure_material(m, created_materials))
+        me.materials.append(ensure_material(m, created_materials, textures, created_images))
     me.polygons.foreach_set("material_index", md.face_materials)
+    uvsrc = uv_source(md, origin) if textures else None
+    if uvsrc is not None:
+        flat: list[float] = []
+        for face, fuv in zip(uvsrc.faces, uvsrc.face_uvs):
+            for k in range(len(face)):
+                flat.extend(fuv[k] if fuv is not None else (0.0, 0.0))
+        if len(flat) != 2 * len(me.loops):
+            raise MapBuilderError(f"generated mesh {md.name!r}: UV count does not match Blender's loops")
+        layer = me.uv_layers.new(name=UV_MAP)
+        layer.data.foreach_set("uv", flat)
     attr = me.color_attributes.new(COLOR_ATTR, "FLOAT_COLOR", "CORNER")
     cols: list[float] = []
     for poly in me.polygons:
@@ -105,7 +201,7 @@ def unique_collection_name(base: str) -> str:
 
 
 def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[JsonMapping],
-                map_name: str) -> bpy.types.Collection:
+                map_name: str, textures: bool = False) -> bpy.types.Collection:
     """Instantiate ``plan`` in a NEW collection linked to the scene. Everything that will be saved in the
     .blend (collection metadata, object names and provenance) is first checked with the core credential
     policy; then all datablocks are created and linked last. If anything fails, the datablocks created here
@@ -132,6 +228,7 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
     created_meshes: list[bpy.types.Mesh] = []
     created_colls: list[bpy.types.Collection] = []
     created_mats: list[bpy.types.Material] = []
+    created_images: list[bpy.types.Image] = []
     try:
         root = bpy.data.collections.new(unique_collection_name(f"MapBuilder {map_name}"))
         created_colls.append(root)
@@ -146,7 +243,8 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
                 root.children.link(coll)
                 subs[coll_name] = coll
             if spec.mesh is not None:
-                me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes)
+                me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes, textures, spec.location,
+                                    created_images)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)
                 me = shared.get(spec.mesh_key)
                 if me is None:
@@ -174,6 +272,8 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
             bpy.data.collections.remove(c)
         for m in created_mats:
             bpy.data.materials.remove(m)
+        for img in created_images:
+            bpy.data.images.remove(img)
         raise
     return root
 

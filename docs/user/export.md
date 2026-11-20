@@ -17,8 +17,12 @@ previous package; they do not prove that the new edits were saved.
 
 Curves, text, instances, particles, zero/non-finite transforms and invalid solid
 buildings can block export. Convert intentional new geometry to ordinary meshes
-and fix the named problem. Unsupported materials are reported; textures and
-custom normals are not carried into the flat-shaded GLB.
+and fix the named problem. Unsupported materials are reported; custom normals are not carried into the flat-shaded GLB.
+
+With **Textures** on (the default, in the Content box), the generated materials export with their CC0
+base-colour textures and UVs, and the package carries the CC0 asset notice (schema 2.1.0). A mesh you added with a
+generated textured material but no UV map gets world-XY fallback UVs and one warning per object. Turn **Textures**
+off to export the untextured layout. The Textures setting at generate time decides only the viewport look; the one at export time decides the whole package, so generated materials, UVs and the notice always agree, even if you generated with Textures off.
 
 ## Open the visuals
 

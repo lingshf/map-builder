@@ -25,6 +25,7 @@ import urllib.parse
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NotRequired, Required, TypedDict
 
+from ..core import textures as tex
 from ..core.generate import PlanOptions
 from ..core.osm import DEFAULT_OVERPASS_URL
 from ..core.package import find_secrets, secrets_message
@@ -158,6 +159,11 @@ def endpoint_problem(url: str) -> str | None:
     if p.scheme not in ("http", "https") or not p.hostname:
         return "must be an http:// or https:// URL with a host name"
     return None
+
+
+def attribution_lines(textures: bool) -> list[str]:
+    """Attribution lines of the panel that depend on the settings (D65: the texture notice is not a source)."""
+    return [f"Textures: {tex.NOTICE_ATTRIBUTION}, {tex.NOTICE_LICENSE['id']}"] if textures else []
 
 
 def needs_network(values: Mapping[str, object]) -> bool:
