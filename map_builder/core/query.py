@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Bounded geometric queries against a parsed ``.mbcol`` (:class:`collision.Collision`).
 
 Pure Python. Triangles are two-sided for every query here (winding only defines the contact

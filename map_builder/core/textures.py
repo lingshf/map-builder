@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """The procedural CC0 texture set shipped as package data (S3-TEX-ASSETS, D56).
 
 The PNGs in ``map_builder/assets/textures/`` are generated offline by

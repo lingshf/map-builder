@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """OpenStreetMap acquisition and feature classification.
 
 Online via an Overpass API endpoint, or offline from a local ``.osm`` XML file

@@ -87,3 +87,7 @@ over an unnecessary feature registry (D18). Preserve deterministic behavior,
 fail clearly on required data errors, and do not persist credentials. The
 core must remain usable without Blender. Tests should be bounded by work rather
 than wall-clock gates; see the DoD for the full conventions.
+
+## Licence
+
+Split licence (D13): any first-party file that imports `bpy` (`map_builder/blender/`, and the `tests/blender/`, `tools/demo/` and `docs/demo/` scripts) is GPL-3.0-or-later, as is `map_builder/__init__.py` (the add-on bootstrap) and the manifest; everything else we wrote is Apache-2.0. Exceptions: `map_builder/assets/textures/` stays CC0 and `tools/demo/viewer/vendor/` (three.js) stays MIT. New `.py`/`.cs`/`.js`/`.html` files need an SPDX header (`# SPDX-License-Identifier: ...` plus `# Copyright 2026 lingshf`); `tests/test_licence.py` enforces it. Keep `map_builder/LICENSE-*.txt` and `map_builder/NOTICE` identical to the root copies, because the extension zip ships only `map_builder/`.

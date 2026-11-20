@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Pure-Python parts of the demo kit (no Blender, no network): presets, package reading, probe results,
 the static three.js viewer bundle, its zip and summary.md. Imported by run_demo.py and by the unit test."""
 

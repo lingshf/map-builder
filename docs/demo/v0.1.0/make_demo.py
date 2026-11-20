@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Offline release evidence. Run in factory-startup Blender; see README.md."""
 
 import argparse

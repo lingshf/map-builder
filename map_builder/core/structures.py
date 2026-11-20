@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Shared helpers for bridge, tunnel and passage generation (pure Python, no bpy).
 
 * :func:`sweep`: a 2D profile swept along a 3D path, closed ends = solid, open ends = tube.

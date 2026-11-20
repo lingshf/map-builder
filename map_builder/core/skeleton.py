@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Straight skeleton of a simple polygon without holes (D55).
 
 Pure geometry: no Blender, no OSM types. ``straight_skeleton(ring)`` returns one planar face per

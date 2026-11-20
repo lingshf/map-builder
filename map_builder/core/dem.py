@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Elevation acquisition and sampling.
 
 Providers return an :class:`ElevationGrid` sampled on a regular grid in the map

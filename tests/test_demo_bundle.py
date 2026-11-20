@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Pure-Python parts of the demo kit (tools/demo). No Blender, no network, no renders."""
 
 import json

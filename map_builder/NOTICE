@@ -1,0 +1,20 @@
+map-builder
+Copyright 2026 lingshf and map-builder contributors
+
+This repository is licensed under a split licence:
+
+* Blender add-on code is GPL-3.0-or-later: map_builder/blender/, map_builder/blender_manifest.toml,
+  map_builder/__init__.py (the add-on bootstrap, an exception to its package), and any first-party
+  file that imports bpy (tests/blender/, tools/demo/ and docs/demo/ scripts). See LICENSE-GPL-3.0.txt.
+* All other first-party material (map_builder/core/, the CLI in tools/, packaging,
+  examples/, docs/, design/, tests/, .github/) is Apache-2.0. See LICENSE.
+* map_builder/assets/textures/ is CC0 1.0 (map_builder/assets/textures/LICENSE-textures.txt).
+* tools/demo/viewer/vendor/ (three.js) keeps its MIT licence
+  (tools/demo/viewer/vendor/LICENSE-three.txt).
+
+Generated .mbmap packages and GLB files are NOT covered by the code licences above.
+They carry data-source attribution in their NOTICES.txt: OpenStreetMap contributors
+(ODbL 1.0), Copernicus GLO-30 DEM, and the CC0 textures.
+
+The Blender extension zip ships only map_builder/, which therefore contains copies of
+this NOTICE, LICENSE-Apache-2.0.txt and LICENSE-GPL-3.0.txt.

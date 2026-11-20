@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 lingshf
 // Reference reader for .mbmap packages (map-builder.package 2.x). The contract is docs/PACKAGE_FORMAT.md;
 // struct layouts and checks mirror map_builder/core/collision.py, glb.py and package.py.
 //

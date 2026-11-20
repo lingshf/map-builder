@@ -120,6 +120,6 @@ The heightfield is terrain-only and cannot represent underpasses. See
   merged skeleton building block from a connected roof implementation.
 
 The [decision record](../../design/roadmap.md#decision-record) contains status,
-rationale and later decisions. The code licence remains provisional (D10/D13);
+rationale and later decisions. The code licence is the D13 split (add-on GPL-3.0-or-later, rest Apache-2.0; supersedes D10);
 source data attribution is separate. See [user limits](../../README.md#limits)
 and [validation gaps](../VALIDATION.md).

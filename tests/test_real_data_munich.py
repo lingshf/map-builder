@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S2-F2: elevated parts, building passages and roof shapes on real OpenStreetMap data.
 
 The fixture is an excerpt (OSM ways within ~50 m of two spots, plus a few chosen ways) of the 400 x 400 m

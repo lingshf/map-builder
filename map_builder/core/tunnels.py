@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Tunnel stage of ``build_plan`` (D18, D21, D23): highway ways tagged ``tunnel=*`` become flyable tubes.
 
 * The floor profile is linear in arc length between the road z at the two ends (terrain + ``ROAD_LIFT_M``).

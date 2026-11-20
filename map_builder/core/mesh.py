@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Plain mesh container shared by generation, export and tests."""
 
 from __future__ import annotations

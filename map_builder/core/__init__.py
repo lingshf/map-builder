@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Pure-Python core of map-builder.
 
 Nothing in this package imports ``bpy``; it is unit-testable with a plain

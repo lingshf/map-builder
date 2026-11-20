@@ -122,10 +122,10 @@ Who: **U** = user, **C** = coordinator, **De** = design, **Dev** = earlier dev p
 | D7 | Terrain/OSM ingestion split into its own PR (#2) | Dev | done |
 | D8 | GLB/package/collision (#4) and validation (#6) separate PRs | Dev | done |
 | D9 | Portable Blender 4.2.23 at `C:\tools\` for headless integration tests (manual, not CI) | Dev | final |
-| D10 | Licence provisionally GPL-3.0-or-later | Dev | provisional (see D13) |
+| D10 | Licence provisionally GPL-3.0-or-later | Dev | superseded by D13 |
 | D11 | v1 real-data demo: SF FiDi 800 × 800 m | U | done |
 | D12 | v2 = bridges, tunnels, elevated parts, roof shapes, DSM correction, one PR each; bump package format if semantics change | U | final |
-| D13 | Licence confirmation deferred by the user | U | open (user) |
+| D13 | Split licence, option B: Blender add-on (`map_builder/blender/`, manifest) and any first-party file importing bpy GPL-3.0-or-later, with `map_builder/__init__.py` as the add-on bootstrap exception; all other first-party code, docs and tests Apache-2.0; textures CC0 and vendored three.js MIT unchanged; generated data not covered by the code licence (user decision 2026-11-20) | U | final |
 | D14 | Package format 2.0 PR (#10) before bridges | C | done |
 | D15 | DSM correction before bridges; clearance measured from corrected ground | C | final |
 | D16 | PR #11 finished under the old process; the new team process starts from bridges | C | final |
@@ -279,8 +279,7 @@ graph LR
 
 ## Decisions that need the user
 
-1. **D13 licence.** Still deferred; nothing in v2 depends on it. Releases carry the provisional
-   GPL-3.0-or-later notice.
+1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.

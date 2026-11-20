@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """World-scaled UV assignment for textured export (S3-TEX-UV-CORE, D57/D59).
 
 UVs are assigned after generation, from the final mesh only, so ``generate.py`` and ``roofs.py`` are not

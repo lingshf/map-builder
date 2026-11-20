@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Geometry checker for emitted roof triangles (S3-ROOF-CASES; shared by the roof tasks and S3-REVIEW).
 
 It works on the triangles written to ``visual/map.glb`` and ``collision/map.mbcol`` (decoded from the built

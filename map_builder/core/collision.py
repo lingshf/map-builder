@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Platform-neutral static collision formats (see docs/PACKAGE_FORMAT.md).
 
 ``.mbcol`` v2 (authoritative): triangles in the map frame (metres, +X east, +Y north,

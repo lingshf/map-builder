@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """Create Blender data from a ScenePlan. Only adds new datablocks; never deletes user content.
 
 Blender world space *is* the map frame (+X east, +Y north, +Z up, metres, z = H - z_offset_m), so plan

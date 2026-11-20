@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """DSM terrain correction (pure Python, no bpy).
 
 Copernicus GLO-30 is a digital *surface* model: buildings, tree canopy and bridge decks are part of

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Bridge stage of ``build_plan`` (D18, D21, D22, D25): highway ways tagged ``bridge=*`` (not ``no``) become
 flyable-under deck solids (class ``bridge``) with passage probes over and under the deck.
 

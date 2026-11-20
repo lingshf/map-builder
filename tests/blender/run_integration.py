@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Runner of the headless Blender integration test (Blender 4.2 LTS).
 
     blender --background --factory-startup --python tests/blender/run_integration.py -- <out_dir>

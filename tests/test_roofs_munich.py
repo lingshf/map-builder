@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S3-ROOF-CASES: the Munich roof snapshot, its frozen v0.3.0 outcomes and the built-as-tagged metric.
 
 ``tests/fixtures/munich_roofs.osm`` holds the 67 buildings of the 400 x 400 m Munich Altstadt area

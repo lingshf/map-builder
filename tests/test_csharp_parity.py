@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """The C# reader's capsule check must match query.capsule_hits: same hit/clear result and same work units per probe.
 
 Skipped when the .NET SDK is not installed (the CI ``csharp-reader`` job runs it)."""

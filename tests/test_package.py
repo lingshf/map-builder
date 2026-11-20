@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Package contract tests (docs/PACKAGE_FORMAT.md): mbcol/mbhf/GLB formats, axes and handedness,
 orientation probes, per-triangle winding, identity, validator robustness, atomic writes, pipeline."""
 

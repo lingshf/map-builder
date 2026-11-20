@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Minimal glTF 2.0 binary (GLB) reader and writer.
 
 The writer produces simple, valid GLB files from :class:`MeshData` (used for tests,

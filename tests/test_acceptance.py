@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """End-to-end acceptance tests (validation stage).
 
 They use the committed SYNTHETIC fixtures (tests/fixtures) and only fill gaps left by the unit tests:

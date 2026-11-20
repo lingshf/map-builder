@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Shared structure helpers (map_builder/core/structures.py): sweep, polyline_z_profile, check_probes."""
 
 import math

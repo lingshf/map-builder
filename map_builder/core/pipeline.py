@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """End-to-end pipeline glue shared by the Blender add-on and headless tools.
 
 Nothing here substitutes data on failure: every acquisition, generation or export error is

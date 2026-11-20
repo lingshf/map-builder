@@ -6,6 +6,11 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+* Licence confirmed (D13, option B): Blender add-on code (`map_builder/blender/`) is GPL-3.0-or-later;
+  everything else we wrote is Apache-2.0. Added `LICENSE`, `LICENSE-GPL-3.0.txt`, `NOTICE` and SPDX
+  headers; the extension zip now ships the licence texts. Textures stay CC0; generated packages keep
+  their data attribution.
+
 ## [0.4.0] - 2026-11-20
 
 "Real roofs and textures" (sprint 3). **Release candidate**: tagging requires release review and coordinator

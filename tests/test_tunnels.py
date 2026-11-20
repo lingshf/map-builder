@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S1-TUNNEL: road tunnels (map_builder/core/tunnels.py)."""
 
 import math

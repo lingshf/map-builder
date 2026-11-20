@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Error types. Every data-acquisition failure is surfaced, never papered over."""
 
 from __future__ import annotations

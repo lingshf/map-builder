@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Geodesy, map frame and axis conventions.
 
 Map frame ("local ENU")

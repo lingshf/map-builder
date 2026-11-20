@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Bridge decks (map_builder/core/bridges.py, S1-BRIDGE): profile maths, end heights, validity, probes."""
 
 import math

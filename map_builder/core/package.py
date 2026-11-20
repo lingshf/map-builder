@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Map package (``.mbmap``): manifest, hashing, atomic write and validation.
 
 The authoritative contract is docs/PACKAGE_FORMAT.md. A package is a ZIP archive::

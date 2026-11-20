@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """S3-PARITY: the CLI path and the Blender path emit the same passage probes from the same input files.
 
 Both paths read the same synthetic acquisition files (OSM + DEM) with the same area and settings. The CLI path is

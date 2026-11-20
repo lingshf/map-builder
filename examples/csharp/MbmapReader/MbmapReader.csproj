@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 lingshf -->
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Reference reader for consumers (e.g. a Core netstandard2.1 adapter). MbmapReader.cs uses C# 8 and
@@ -13,6 +15,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>MapBuilder.Reference</RootNamespace>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
   </PropertyGroup>
 
 </Project>

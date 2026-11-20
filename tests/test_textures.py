@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """The procedural CC0 texture set (S3-TEX-ASSETS): reproducible, valid, small, shipped and licensed."""
 
 import contextlib
@@ -23,6 +25,7 @@ from tools.textures import make_textures
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADDON = os.path.join(REPO, "map_builder")
+LICENCE_FILES = ["LICENSE-GPL-3.0.txt", "LICENSE-Apache-2.0.txt", "NOTICE"]
 TEX_DIR = os.path.join(ADDON, "assets", "textures")
 ASSET_FILES = sorted({f for f, _, _ in textures.TEXTURES.values()} | {textures.LICENSE_FILE})
 MAX_SET_BYTES = 2 * 1024 * 1024   # D60
@@ -251,6 +254,32 @@ class ExtensionZipTest(unittest.TestCase):
         self.assertNotEqual(_missing_textures({"paths": every_file + ["./" + every_file[1]]}), [])
         self.assertEqual(_missing_textures(None), [])
         self.assertEqual(_missing_textures({"paths_exclude_pattern": [".*", "assets/"]}), ASSET_FILES)
+
+    def test_manifest_build_rules_keep_the_licence_texts(self):
+        """Licence split: the manifest's [build] rules ship the licence texts and NOTICE."""
+        with open(os.path.join(ADDON, "blender_manifest.toml"), "rb") as f:
+            build = tomllib.load(f).get("build")
+        for name in LICENCE_FILES:
+            self.assertTrue(os.path.isfile(os.path.join(ADDON, name)), name)
+            self.assertTrue(build_ships(build, name), name)
+
+    def test_built_zip_contains_the_licence_texts(self):
+        """The zip built as in release.yml carries the licence texts (skipped without Blender/zip)."""
+        path, tmp = _extension_zip()
+        if path is None:
+            self.skipTest("no MB_EXTENSION_ZIP and no blender on PATH")
+        try:
+            with zipfile.ZipFile(path) as z:
+                names = z.namelist()
+                root = [n[:-len("blender_manifest.toml")] for n in names if n.endswith("blender_manifest.toml")]
+                self.assertEqual(len(root), 1, names[:20])
+                for name in LICENCE_FILES:
+                    self.assertIn(f"{root[0]}{name}", names)
+                    with open(os.path.join(ADDON, name), "rb") as f:
+                        self.assertEqual(z.read(f"{root[0]}{name}"), f.read())
+        finally:
+            if tmp:
+                tmp.cleanup()
 
     def test_built_zip_contains_the_textures(self):
         """AC4: the zip built as in release.yml lists every texture file (skipped without Blender/zip)."""

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Turn classified features + elevation into an editable scene plan.
 
 The plan is plain data (no bpy). The Blender layer instantiates it; tests use
