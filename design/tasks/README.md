@@ -30,7 +30,7 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 | PERF-PROBE-INDEX | S1 | dev | — | `core/query.py`, `core/structures.py` | closed (D44/D45) | #25 |
 | FIX-CS-PROBE-PARITY | S1 | dev | — | `examples/csharp/MbmapReader/`, `core/package.py` (`mb_id` regex), `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` | done (D46) | #27 |
 | [S1-F2](S1-F2.md) | S2 | dev | — | `tests/test_terrain_sources.py` | done | #31 |
-| [S1-F1](S1-F1.md) | S2 | dev | — | `core/bridges.py` (approach detection) | review | #32 |
+| [S1-F1](S1-F1.md) | S2 | dev | — | `core/bridges.py` (approach detection) | done | #32 |
 | [S2-REVIEW](S2-REVIEW.md) | S2 | design | REL-v0.3.0 RC merged | `design/` only | blocked | |
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro

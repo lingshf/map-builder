@@ -477,12 +477,14 @@ def _build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes):
         pairs = _triangle_pairs(deck_tris, road_tris)
         records = _crossing_points(pairs, deck_tris, road_tris)
     # an unsplit approach (S1-F1): the end runs where the straight end-to-end deck line stays below the clearance
-    # over the terrain are ramp, not deck; crossings there are at-grade junctions, not under-deck conflicts. A way
+    # over the terrain are ramp, not deck; only roads sharing an OSM node with the way there are its own junctions; any other crossing stays in the D39 minimum. A way
     # whose line never clears the terrain has no real span, so nothing is exempt.
     lo, hi = _approach_runs(line, ground, clearance)
     if lo > 0 or hi < len(s) - 1:
+        joined = _approach_junction_roads(ctx.classified.roads, f, kept, pts, s[lo], s[hi])
         records = [r for r in records
-                   if not all(node(m) < lo or node(m) > hi for m, w in zip(r[0], r[1]) if w > 1e-9)]
+                   if not (r[3] in joined and all(node(m) < lo or node(m) > hi
+                                                  for m, w in zip(r[0], r[1]) if w > 1e-9))]
     for nodes, wd, rz, _rid in records:
         need = rz + clearance + DECK_THICKNESS_M
         for m, w in zip(nodes, wd):
@@ -681,6 +683,21 @@ def _approach_runs(top, ground, clearance):
     approach end runs. No such sample: (0, last), i.e. no approach (a low bridge is not an approach)."""
     ok = [i for i in range(len(top)) if top[i] - DECK_THICKNESS_M - ground[i] >= clearance - 1e-6]
     return (ok[0], ok[-1]) if ok else (0, len(top) - 1)
+
+
+def _approach_junction_roads(roads, f, kept, pts, s_lo, s_hi):
+    """Ids of the roads that share an OSM node with the bridge way ``f`` at a vertex inside an approach end run
+    (before arc length ``s_lo`` or after ``s_hi``): the approach's own at-grade junctions."""
+    ids = {}
+    run = 0.0
+    if not f.node_ids:
+        return set()
+    for j, (x, y) in enumerate(pts):
+        if j:
+            run += math.hypot(x - pts[j - 1][0], y - pts[j - 1][1])
+        if run < s_lo - 1e-6 or run > s_hi + 1e-6:
+            ids[f.node_ids[kept[j]]] = True
+    return {r.id for r in roads if r.id != f.id and any(n in ids for n in r.node_ids)}
 
 
 def _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, span=None):
