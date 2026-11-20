@@ -139,4 +139,4 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
   falls back to a 1e-4 tolerance comparison if platform maths differ.
 * Performance, memory use and frame rate (FPS) of generated maps.
 * Real-world data quality (OSM completeness, DEM accuracy, vertical datum correctness).
-| S2-F3 | Headless Blender 4.2.23 LTS (Windows x64), roof checks | 155 PASS (99 before + 56 in `checks_roofs.py`), `OK: 0 failure(s)`; harness 30 s -> 36 s. Mutation (hipped ridge collapsed to a gable) fails 2 roof checks |
+| S2-F3 | Headless Blender 4.2.23 LTS (Windows x64), roof checks | 160 PASS (99 before + 61 in `checks_roofs.py`), `OK: 0 failure(s)`; harness 30 s -> 36 s. Mutations fail: hipped ridge collapsed to a gable (2 checks), gabled rise 3 m -> 2 m (3 checks) |
