@@ -32,6 +32,23 @@ ROOF_GEOMETRY = {"osm:way/80965553": (15.0, 3.0), "osm:way/80965659": (15.0, 3.3
 TOL = 0.05
 
 
+def fit_plane(pts):
+    """Least-squares z = a*x + b*y + c through pts (normal equations, 3 x 3)."""
+    n = len(pts)
+    sx = sum(p[0] for p in pts); sy = sum(p[1] for p in pts); sz = sum(p[2] for p in pts)
+    sxx = sum(p[0] ** 2 for p in pts); syy = sum(p[1] ** 2 for p in pts); sxy = sum(p[0] * p[1] for p in pts)
+    sxz = sum(p[0] * p[2] for p in pts); syz = sum(p[1] * p[2] for p in pts)
+    m = [[sxx, sxy, sx, sxz], [sxy, syy, sy, syz], [sx, sy, n, sz]]
+    for i in range(3):
+        k = max(range(i, 3), key=lambda r: abs(m[r][i]))
+        m[i], m[k] = m[k], m[i]
+        for r in range(3):
+            if r != i:
+                f = m[r][i] / m[i][i]
+                m[r] = [x - f * y for x, y in zip(m[r], m[i])]
+    return tuple(m[i][3] / m[i][i] for i in range(3))
+
+
 def plan():
     n = 43
     grid = make_grid([[0.0] * n for _ in range(n)], 10.0, -210.0, -210.0)
@@ -114,11 +131,49 @@ class MunichRealDataTest(unittest.TestCase):
                     self.assertTrue(all(len(f) == 3 for f in faces_on_roof), mb_id)
                     for r in ridge:
                         self.assertGreaterEqual(sum(r in f for f in faces_on_roof), 3, mb_id)
+                    self.assert_gable_slopes(mb_id, verts, faces_on_roof, ridge, top - measured_eave)
                 else:
-                    heights = {round(verts[i][2], 1) for i in roof_verts}
-                    self.assertGreater(len(heights), 2, mb_id)           # sloped plane, not a flat lid
+                    self.assert_skillion_plane(mb_id, verts, roof_verts, rise)
                     low = [v for v in verts if abs(v[2] - measured_eave) <= TOL]
                     self.assertTrue(low, mb_id)                          # slope starts at the eave
+
+    def assert_skillion_plane(self, mb_id, verts, roof_verts, rise):
+        """All roof vertices lie on one plane that falls to the north (roof:direction=N) by rise over the depth."""
+        pts = [verts[i] for i in roof_verts]
+        a, b, c = fit_plane(pts)
+        for x, y, z in pts:
+            self.assertAlmostEqual(a * x + b * y + c, z, delta=TOL, msg=mb_id)       # coplanar
+        self.assertAlmostEqual(a, 0.0, delta=0.05, msg=mb_id)
+        self.assertLess(b, 0.0, mb_id)                                                # high side south
+        ys = [v[1] for v in verts]
+        self.assertAlmostEqual(-b, rise / (max(ys) - min(ys)), delta=0.01, msg=mb_id)   # slope = rise / depth
+
+    def assert_gable_slopes(self, mb_id, verts, faces_on_roof, ridge, rise):
+        """Every sloping roof triangle falls away from the ridge with rise / half-width (the two slopes of a
+        non-rectangular footprint are split into triangles, so each triangle is its own plane, within 20 %)."""
+        r0, r1 = verts[ridge[0]], verts[ridge[1]]
+        d = (r1[0] - r0[0], r1[1] - r0[1])
+        norm = math.hypot(*d)
+        n = (-d[1] / norm, d[0] / norm)
+        eave_pts = [v for v in verts if abs(v[2] - (max(w[2] for w in verts) - rise)) <= TOL]
+        half = {side: sum(abs((e[0] - r0[0]) * n[0] + (e[1] - r0[1]) * n[1]) for e in eave_pts
+                          if side * ((e[0] - r0[0]) * n[0] + (e[1] - r0[1]) * n[1]) > 0)
+                / sum(1 for e in eave_pts if side * ((e[0] - r0[0]) * n[0] + (e[1] - r0[1]) * n[1]) > 0)
+                for side in (1, -1)}
+        slopes = []
+        for f in faces_on_roof:
+            (x0, y0, _), (x1, y1, _), (x2, y2, _) = (verts[i] for i in f)
+            if abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)) < 1e-6:           # vertical: a gable end
+                continue
+            a, b, c = fit_plane([verts[i] for i in f])
+            side = 1 if (a * n[0] + b * n[1]) < 0 else -1                             # z falls away from the ridge
+            grad = math.hypot(a, b)
+            self.assertAlmostEqual(grad, rise / half[side], delta=0.2 * rise / half[side], msg=mb_id)
+            slopes.append((side, grad))
+        self.assertEqual(sorted(side for side, _ in slopes), [-1, -1, 1, 1], mb_id)
+        for side in (-1, 1):                    # the two triangles of one slope average to the expected pitch
+            mean = sum(g for sd, g in slopes if sd == side) / 2
+            self.assertAlmostEqual(mean, rise / half[side], delta=0.02, msg=mb_id)
 
     def test_unmodellable_real_roofs_report_their_fallback(self):
         flat = self.objects["osm:way/85765729"].provenance
