@@ -1018,6 +1018,8 @@ class PlanarFacesTest(unittest.TestCase):
                     assert_closed_manifold(self, mesh)
         _, _, prov = build_building(building(trapezoid, height="10", roof__shape="gabled"), flat_grid(), 0.0)
         self.assertEqual(prov["roof_shape_built"], "gabled")
+        self.assertIn("roof_construction", prov)          # S4-ROOF-NAMED: planar-exact, nothing to split
+        _, _, prov = build_building(building(trapezoid, height="10", roof__shape="hipped"), flat_grid(), 0.0)
         self.assertIn("split", prov["roof_faces"])
 
 

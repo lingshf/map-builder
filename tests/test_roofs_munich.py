@@ -35,9 +35,9 @@ EXPECTED = os.path.join(FIX, "munich_roofs_expected.json")
 COUNTEREXAMPLES = os.path.join(FIX, "roof_counterexamples.osm")
 AREA_ARGS = (48.1395, 11.5764, 400.0, 400.0)
 BASELINE = 1            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
-COUNTED = 29            # S3-ROOF-GABLED: re-baselined by D82 (D61 target was 40); 12 + 17 skeleton gabled ways
-GABLED_COUNTED = 17     # of the 52 eligible gabled ways ...
-GABLED_FALLBACK_HIPPED = 30   # ... these fall back to a named hipped roof; 4 near-rectangles stay analytic, 1 is flat
+COUNTED = 34            # S4-ROOF-NAMED: 29 + the 5 near-rectangular gables built planar-exact (floor stays 29, D95/D105)
+GABLED_COUNTED = 22     # of the 52 eligible gabled ways: 17 skeleton + 5 near-rectangles built planar-exact ...
+GABLED_FALLBACK_HIPPED = 30   # ... these fall back to a named hipped roof
 TOTAL = 67
 # The 11 eligible hipped footprints (three have roof:levels=0, D77); one of them is a near-rectangle (analytic path),
 # the others are built from the straight skeleton.
@@ -48,7 +48,8 @@ SKELETON_BUILT = HIPPED_BUILT - {"osm:way/242367322"}
 # v0.3.0 froze roof_h_m = 0 for the three roof:levels=0 ways; D77 now builds the default roof height (frozen JSON untouched)
 D77_HEIGHTS = {"osm:way/242367322": 1.9559, "osm:way/79401262": 6.0, "osm:way/96815240": 6.0,
                "osm:way/219431658": 3.4117, "osm:way/48966941": 6.0, "osm:way/80965514": 3.8129,
-               "osm:way/80965548": 4.1797, "osm:way/80965666": 2.7387, "osm:way/93216412": 6.0}
+               "osm:way/80965548": 4.1797, "osm:way/80965666": 2.7387, "osm:way/93216412": 6.0,
+               "osm:way/264235611": 4.2698}   # S4-ROOF-NAMED: a near-rectangular gabled roof is now a skeleton roof (D77)
 
 
 def roof_h(mb_id, e):
@@ -991,6 +992,25 @@ class RoofCounterexampleTests(unittest.TestCase):
             eave = 9.0                                            # building:levels=3
             top = eave + max(1.0, min(0.3 * short, 6.0))
             self.assertEqual(rc.check_building(decoded[i]["visual"], outer, [], eave, top, "gabled"), {}, i)
+
+    def test_9007_is_stable_at_1e9_metres_either_side_of_the_axis(self):
+        """S3-F8: the L footprint is built gabled, with the same roof construction, whichever side of an axis a
+        vertex falls on by 1e-9 m (no float-library sensitivity)."""
+        import copy
+        from map_builder.core.osm import Polygon
+        feats, _ = feature_rings(COUNTEREXAMPLES)
+        base = feats["osm:way/9007"]
+        grid = make_grid([[0.0] * 41 for _ in range(41)], 10.0, -200.0, -200.0)
+        for k in range(len(base.geometry.outer)):
+            for axis in (0, 1):
+                for eps in (-1e-9, 0.0, 1e-9):
+                    f = copy.deepcopy(base)
+                    ring = [list(p) for p in f.geometry.outer]
+                    ring[k][axis] += eps
+                    f.geometry = Polygon([tuple(p) for p in ring], [])
+                    _, _, prov = generate.build_building(f, grid, 0.0)
+                    self.assertEqual(prov["roof_shape_built"], "gabled", (k, axis, eps, prov["roof_shape"]))
+                    self.assertIn("roof_construction", prov, (k, axis, eps))
 
     def test_80_vertex_footprint_is_not_a_gable(self):
         prov = self.objects["osm:way/9005"].provenance

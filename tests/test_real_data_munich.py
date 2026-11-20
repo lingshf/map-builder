@@ -124,6 +124,11 @@ class MunichRealDataTest(unittest.TestCase):
                 roof_verts = [i for i, v in enumerate(verts) if v[2] > measured_eave + TOL]
                 self.assertTrue(roof_verts, mb_id)
                 faces_on_roof = [f for f in mesh.faces if any(i in roof_verts for i in f)]
+                if shape == "gabled" and "roof_construction" in self.objects[mb_id].provenance:
+                    # S4-ROOF-NAMED: a near-rectangle with unequal eaves is a skeleton roof (planar slopes, a ridge
+                    # that may rise towards one end); roof_checks judges its tiling, planarity and gables
+                    self.assertTrue(any(abs(v[2] - top) <= TOL for v in verts), mb_id)
+                    continue
                 if shape == "gabled":
                     ridge = [i for i, v in enumerate(verts) if abs(v[2] - top) <= TOL]
                     self.assertEqual(len(ridge), 2, mb_id)
