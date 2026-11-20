@@ -56,7 +56,10 @@ flyable tubes (class `tunnel`) with open portals cut into the terrain.
 
 * Terrain cut: only cells in the tube's XY bounding corridor are tested (grid indexing), O(cells
   in corridor × profile segments); no full-terrain scan.
-* Tube + headwalls ≤ (profile points × samples) + 200 triangles per tunnel; budget reserved.
+* Tube + headwalls ≤ 2 × n × (samples − 1) + 2 × 200 triangles per tunnel, where n is the
+  number of cross-section profile points, each ring-to-ring quad counts as 2 triangles and each
+  of the 2 headwalls has ≤ 200; budget reserved. (Wording corrected in S1-REVIEW; the earlier
+  "(profile points × samples) + 200" counted quads, not triangles, and one headwall.)
 * Probe as in S1-BRIDGE; fixture build ≤ +20 %.
 
 ## Expected tests

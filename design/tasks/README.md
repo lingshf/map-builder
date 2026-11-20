@@ -13,19 +13,24 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 
 | id | sprint | owner | dependencies | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
-| [DSM](https://github.com/lingshf/map-builder/pull/11) | pre | dev (old process) | — | `core/dsm.py`, `core/osm.py`, `core/generate.py`, `core/pipeline.py`, Blender props/ui/sources, CLI | in progress | #11 |
+| [DSM](https://github.com/lingshf/map-builder/pull/11) | pre | dev (old process) | — | `core/dsm.py`, `core/osm.py`, `core/generate.py`, `core/pipeline.py`, Blender props/ui/sources, CLI | done | #11 |
 | [S1-RELEASE-WF](S1-RELEASE-WF.md) | S1 | dev | — | `.github/workflows/release.yml`, `docs/releases/README.md` | done | #13 |
-| [REL-v0.1.0](REL-v0.1.0.md) | S1 | release manager | #11, #13 | `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.1.0/`, `docs/releases/v0.1.0.md` | blocked | |
-| [S1-DEMOKIT](S1-DEMOKIT.md) | S1 | dev | — | `tools/demo/` (new), `tests/test_demo_bundle.py` | ready | |
-| [S1-SEAMS](S1-SEAMS.md) | S1 | dev | #11 | `core/osm.py` (`_unsupported_reason`, `Classified`, routing), `core/generate.py` (`ScenePlan`, `build_plan` stage hooks), new `core/structures.py`, stub `core/bridges.py` / `core/tunnels.py` / `core/passages.py`, `blender/scene_build.py`, `tests/blender/*` (split into modules) | blocked | |
-| [S1-BRIDGE](S1-BRIDGE.md) | S1 | dev | S1-SEAMS | `core/bridges.py`, `core/generate.py` (bridge hook only), `tests/test_bridges.py`, `tests/blender/checks_bridges.py` | blocked | |
-| [S1-TUNNEL](S1-TUNNEL.md) | S1 | dev | S1-SEAMS | `core/tunnels.py`, `core/generate.py` (tunnel hook only), `tests/test_tunnels.py`, `tests/blender/checks_tunnels.py` | blocked | |
-| [S1-PIERS](S1-PIERS.md) | S1 | dev | S1-BRIDGE | `core/bridges.py`, `tests/test_bridges.py` | blocked | |
-| [REL-v0.2.0](REL-v0.2.0.md) | S1 | release manager | DEMOKIT, SEAMS, BRIDGE, PIERS, TUNNEL, REL-v0.1.0 | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.2.0/`, `docs/releases/v0.2.0.md` | blocked | |
-| [S1-REVIEW](S1-REVIEW.md) | S1 | design | REL-v0.2.0 RC merged | `design/` only | blocked | |
-| [S2-ROOF](S2-ROOF.md) | S2 (may start in S1) | dev | #11 | `core/generate.py` (roof section of `build_building` only), new `core/roofs.py`, `tests/test_roofs.py` | blocked | |
-| [S2-ELEV](S2-ELEV.md) | S2 | dev | S1-SEAMS | `core/passages.py`, `core/generate.py` (building loop in `build_plan` only), `tests/test_passages.py`, `tests/blender/checks_passages.py` | blocked | |
+| [REL-v0.1.0](REL-v0.1.0.md) | S1 | release manager | #11, #13 | `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.1.0/`, `docs/releases/v0.1.0.md` | done | #16 |
+| [S1-DEMOKIT](S1-DEMOKIT.md) | S1 | dev | — | `tools/demo/` (new), `tests/test_demo_bundle.py` | done | #14 |
+| [S1-SEAMS](S1-SEAMS.md) | S1 | dev | #11 | `core/osm.py` (`_unsupported_reason`, `Classified`, routing), `core/generate.py` (`ScenePlan`, `build_plan` stage hooks), new `core/structures.py`, stub `core/bridges.py` / `core/tunnels.py` / `core/passages.py`, `blender/scene_build.py`, `tests/blender/*` (split into modules) | done | #19 |
+| [S1-BRIDGE](S1-BRIDGE.md) | S1 | dev | S1-SEAMS | `core/bridges.py`, `core/generate.py` (bridge hook only), `tests/test_bridges.py`, `tests/blender/checks_bridges.py` | done | #21 |
+| [S1-TUNNEL](S1-TUNNEL.md) | S1 | dev | S1-SEAMS | `core/tunnels.py`, `core/generate.py` (tunnel hook only), `tests/test_tunnels.py`, `tests/blender/checks_tunnels.py` | done | #22 |
+| [S1-PIERS](S1-PIERS.md) | S1 | dev | S1-BRIDGE | `core/bridges.py`, `tests/test_bridges.py` | done | #26 |
+| [REL-v0.2.0](REL-v0.2.0.md) | S1 | release manager | DEMOKIT, SEAMS, BRIDGE, PIERS, TUNNEL, REL-v0.1.0 | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.2.0/`, `docs/releases/v0.2.0.md` | review (RC) | #28 |
+| [S1-REVIEW](S1-REVIEW.md) | S1 | design | REL-v0.2.0 RC | `design/` only | in progress | [report](../reviews/S1-REVIEW.md) |
+| [S2-ROOF](S2-ROOF.md) | S2 (may start in S1) | dev | #11 | `core/generate.py` (roof section of `build_building` only), new `core/roofs.py`, `tests/test_roofs.py` | done | #18 |
+| [S2-ELEV](S2-ELEV.md) | S2 | dev | S1-SEAMS | `core/passages.py`, `core/generate.py` (building loop in `build_plan` only), `tests/test_passages.py`, `tests/blender/checks_passages.py` | done | #24 |
 | [REL-v0.3.0](REL-v0.3.0.md) | S2 | release manager | ELEV, ROOF, v0.2.0 tagged | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.3.0/`, `docs/releases/v0.3.0.md`, `docs/DEMO.md` | blocked | |
+| TEST-HYGIENE | S1 | dev | — | `tests/test_dsm_correction.py`, `tests/test_scene_generation.py`, `tests/test_package.py`, `tools/demo/presets/pittsburgh.json` | done | #23 |
+| PERF-PROBE-INDEX | S1 | dev | — | `core/query.py`, `core/structures.py` | closed (D44/D45) | #25 |
+| FIX-CS-PROBE-PARITY | S1 | dev | — | `examples/csharp/MbmapReader/`, `core/package.py` (`mb_id` regex), `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` | review, **blocks tag v0.2.0 (D46)** | #27 |
+| [S1-F1](S1-F1.md) | S2 | dev | — | `core/bridges.py` (approach detection) | ready | |
+| [S1-F2](S1-F2.md) | S2 | dev | — | `tests/test_terrain_sources.py` | ready | |
 | [S2-REVIEW](S2-REVIEW.md) | S2 | design | REL-v0.3.0 RC merged | `design/` only | blocked | |
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
