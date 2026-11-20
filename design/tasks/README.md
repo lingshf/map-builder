@@ -25,13 +25,16 @@ PR at a time. Releases happen only in the REL tasks (D17, D28).
 | [S1-REVIEW](S1-REVIEW.md) | S1 | design | REL-v0.2.0 RC | `design/` only | done | #29, [report](../reviews/S1-REVIEW.md) |
 | [S2-ROOF](S2-ROOF.md) | S2 (may start in S1) | dev | #11 | `core/generate.py` (roof section of `build_building` only), new `core/roofs.py`, `tests/test_roofs.py` | done | #18 |
 | [S2-ELEV](S2-ELEV.md) | S2 | dev | S1-SEAMS | `core/passages.py`, `core/generate.py` (building loop in `build_plan` only), `tests/test_passages.py`, `tests/blender/checks_passages.py` | done | #24 |
-| [REL-v0.3.0](REL-v0.3.0.md) | S2 | release manager | ELEV, ROOF, v0.2.0 tagged (all done); **remaining blockers: S1-F1, S1-F2** | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.3.0/`, `docs/releases/v0.3.0.md`, `docs/DEMO.md` | blocked | |
+| [REL-v0.3.0](REL-v0.3.0.md) | S2 | release manager | ELEV, ROOF, v0.2.0 tagged, S1-F1, S1-F2 (all done), S2-REVIEW (D48); **remaining blockers: S2-F1, S2-F2, S2-F3** | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.3.0/`, `docs/releases/v0.3.0.md`, `docs/DEMO.md` | blocked | |
 | TEST-HYGIENE | S1 | dev | — | `tests/test_dsm_correction.py`, `tests/test_scene_generation.py`, `tests/test_package.py`, `tools/demo/presets/pittsburgh.json` | done | #23 |
 | PERF-PROBE-INDEX | S1 | dev | — | `core/query.py`, `core/structures.py` | closed (D44/D45) | #25 |
 | FIX-CS-PROBE-PARITY | S1 | dev | — | `examples/csharp/MbmapReader/`, `core/package.py` (`mb_id` regex), `tests/test_csharp_parity.py`, `.github/workflows/ci.yml` | done (D46) | #27 |
-| [S1-F2](S1-F2.md) | S2 | dev | — | `tests/test_terrain_sources.py` | done | #31 |
-| [S1-F1](S1-F1.md) | S2 | dev | — | `core/bridges.py` (approach detection) | done | #32 |
-| [S2-REVIEW](S2-REVIEW.md) | S2 | design | REL-v0.3.0 RC merged | `design/` only | blocked | |
+| [S1-F2](S1-F2.md) | S2 | dev | — | `tests/test_terrain_sources.py` | done (`c9fd1aa`) | #31 |
+| [S1-F1](S1-F1.md) | S2 | dev | — | `core/bridges.py` (approach detection) | done (`2de9024`) | #32 |
+| [S2-REVIEW](S2-REVIEW.md) | S2 | design | S1-F1, S1-F2; runs **before** REL-v0.3.0 (D48) | `design/` only | done | #33, [report](../reviews/S2-REVIEW.md) |
+| [S2-F1](S2-F1.md) | S2 | dev | S2-REVIEW | `tests/test_terrain_sources.py` | ready | |
+| [S2-F2](S2-F2.md) | S2 | dev | S2-REVIEW; area per D49 | `tools/demo/presets/<area>.json` (new), `tests/test_demo_bundle.py` (preset rows), new excerpt tests/fixtures | ready | |
+| [S2-F3](S2-F3.md) | S2 | dev | S2-REVIEW | `tests/blender/checks_roofs.py` (new); soft: fixture OSM, sample, VALIDATION | ready | |
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
@@ -43,7 +46,9 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
 2. Wave 2: **S1-BRIDGE** ∥ **S1-TUNNEL** ∥ (ROOF if still open, else **S2-ELEV**)
 3. Wave 3: **S1-PIERS** ∥ **S2-ELEV** → **REL-v0.2.0** → **S1-REVIEW** → retro → tag `v0.2.0` (**released**)
    (any S2 task already merged is simply part of main and ships with it)
-4. Wave 4: remaining S2 → **REL-v0.3.0** → **S2-REVIEW** → retro → tag `v0.3.0` (end of v2)
+4. Wave 4 (D48): **S2-REVIEW** (done first) → **S2-F1** ∥ **S2-F2** ∥ **S2-F3** → **REL-v0.3.0**
+   (alone; also attaches the real-data `.mbmap`, S2-F4) → short S2 close check (design) → retro →
+   tag `v0.3.0` (end of v2)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks
 (roof section, building loop, bridge hook, tunnel hook). The pairs listed as parallel above

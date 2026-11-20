@@ -1,7 +1,8 @@
 # S2-REVIEW: sprint 2 + end-of-v2 milestone review + test audit
 
-Owner: Design · after REL-v0.3.0's RC PR merges, before the retro and tag ·
-[SPRINT_CLOSE.md](SPRINT_CLOSE.md) step 3
+Owner: Design · **D48: runs before REL-v0.3.0** on main after S1-F1/S1-F2; its findings define
+the remaining v0.3.0 scope. A short close check on the RC replaces the post-RC review step of
+[SPRINT_CLOSE.md](SPRINT_CLOSE.md) for v0.3.0. Report: [../reviews/S2-REVIEW.md](../reviews/S2-REVIEW.md)
 
 ## Checklist
 

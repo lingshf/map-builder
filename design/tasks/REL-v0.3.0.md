@@ -1,7 +1,9 @@
 # REL-v0.3.0: "passages, roofs and the real-data v2 demo" (end of v2)
 
-Owner: release manager · depends on S2-ELEV, S2-ROOF merged, S1-REVIEW done · follows
-[SPRINT_CLOSE.md](SPRINT_CLOSE.md) · demo area D26 (Pittsburgh)
+Owner: release manager · depends on S2-ELEV, S2-ROOF, S1-F1, S1-F2 merged and on the
+[S2-REVIEW](../reviews/S2-REVIEW.md) findings S2-F1, S2-F2, S2-F3 (D48: review first, then one
+RC) · follows [SPRINT_CLOSE.md](SPRINT_CLOSE.md) · demo areas: D26 Pittsburgh (bridges,
+tunnels) + the S2-F2 preset (elevated parts, passages, roofs)
 
 ## Scope
 
@@ -17,9 +19,22 @@ RC PR: version 0.3.0, CHANGELOG, `docs/user/` (elevated parts, building passages
 
 ## Acceptance criteria
 
-Common release criteria, plus: package built with live Copernicus GLO-30 + Overpass via the CLI
-and in headless Blender, `VALID`; a drone capsule (r = 1 m) passes under a real bridge, through
-the real tunnel and beneath an elevated part (validator + C#).
+Common release criteria, plus the branch matching the S2-F2 outcome (D49):
+
+* **S2-F2 outcome A (second area found):** both real-data packages (Pittsburgh and the S2-F2
+  preset) are built with live Copernicus GLO-30 + Overpass via the CLI and in headless Blender,
+  `VALID`. A drone capsule (r = 1 m) passes under a real bridge and through the real tunnel
+  (Pittsburgh) and beneath a real elevated part or passage (S2-F2 preset), in the validator and
+  in C#. **Assets (S2-F4):** besides the extension zip, both real-data `.mbmap` files (GLB
+  inside) are attached.
+* **S2-F2 outcome B (fallback (c)):** only Pittsburgh is required as real data: built as above,
+  `VALID`, bridge and tunnel probes PASS in the validator and in C#. The elevated-part/passage
+  case uses the committed synthetic sample (`1048:under`, `1098:passage` PASS in Python and C#).
+  **Assets (S2-F4):** the extension zip and the Pittsburgh `.mbmap` only. The release notes and
+  `docs/DEMO.md` state plainly that elevated parts, building passages and roof shapes are
+  evidenced on synthetic data only, and link the S2-F2 search record.
+
+Either way, real-data packages carry ODbL attribution in the notes and the package.
 
 ## Performance considerations
 
