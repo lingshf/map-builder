@@ -4,6 +4,7 @@ The fixture is an excerpt (OSM ways within ~50 m of two spots, plus a few chosen
 Munich Altstadt area of tools/demo/presets/munich-altstadt.json, fetched from Overpass on 2026-11-19 (OpenStreetMap
 contributors, ODbL). The terrain is flat (z = 0): the live GLO-30 build is checked separately in the PR."""
 
+import math
 import os
 import unittest
 
@@ -24,6 +25,11 @@ BENDING = "osm:way/25882450"
 # tagged roof:shape -> mb_ids generated as exactly that shape (rectangular footprints)
 MEASURED_ROOFS = {"gabled": ["osm:way/80965553", "osm:way/80965659", "osm:way/144135890", "osm:way/150797496"],
                   "skillion": ["osm:way/108429818"]}
+# mb_id -> (eave z, rise to the apex) in metres, from building:levels x 3 m and the roof height rule / roof:height=7
+ROOF_GEOMETRY = {"osm:way/80965553": (15.0, 3.0), "osm:way/80965659": (15.0, 3.32),
+                 "osm:way/144135890": (15.0, 6.0), "osm:way/150797496": (18.0, 4.29),
+                 "osm:way/108429818": (15.0, 7.0)}
+TOL = 0.05
 
 
 def plan():
@@ -81,6 +87,32 @@ class MunichRealDataTest(unittest.TestCase):
                 self.assertTrue(prov["roof_shape"].startswith("measured:"), (mb_id, prov["roof_shape"]))
                 self.assertEqual(prov["roof_shape_built"], shape, mb_id)
                 assert_closed_manifold(self, self.objects[mb_id].mesh)
+
+    def test_exported_roof_geometry_has_the_tagged_rise_ridge_and_gables(self):
+        for shape, ids in MEASURED_ROOFS.items():
+            for mb_id in ids:
+                eave, rise = ROOF_GEOMETRY[mb_id]
+                mesh = self.objects[mb_id].mesh
+                verts = mesh.vertices
+                top = max(v[2] for v in verts)
+                self.assertAlmostEqual(top - eave, rise, delta=TOL, msg=mb_id)
+                roof_verts = [i for i, v in enumerate(verts) if v[2] > eave + TOL]
+                self.assertTrue(roof_verts, mb_id)
+                faces_on_roof = [f for f in mesh.faces if any(i in roof_verts for i in f)]
+                if shape == "gabled":
+                    ridge = [i for i, v in enumerate(verts) if abs(v[2] - top) <= TOL]
+                    self.assertEqual(len(ridge), 2, mb_id)
+                    self.assertGreater(math.dist(verts[ridge[0]][:2], verts[ridge[1]][:2]), 2.0, mb_id)
+                    # two slopes (non-planar quads split into 2 triangles each) and two gable-end triangles
+                    self.assertEqual(len(faces_on_roof), 6, mb_id)
+                    self.assertTrue(all(len(f) == 3 for f in faces_on_roof), mb_id)
+                    for r in ridge:
+                        self.assertGreaterEqual(sum(r in f for f in faces_on_roof), 3, mb_id)
+                else:
+                    heights = {round(verts[i][2], 1) for i in roof_verts}
+                    self.assertGreater(len(heights), 2, mb_id)           # sloped plane, not a flat lid
+                    low = [v for v in verts if eave - TOL <= v[2] <= eave + TOL]
+                    self.assertTrue(low, mb_id)                          # slope starts at the eave
 
     def test_unmodellable_real_roofs_report_their_fallback(self):
         flat = self.objects["osm:way/85765729"].provenance
