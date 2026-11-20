@@ -411,7 +411,7 @@ class CrossingTest(unittest.TestCase):
                                 for w in plan.report["warnings"]))
 
     def test_the_approachs_own_junction_gives_no_clearance_warning(self):
-        plan, ids, _ = self._valley_bridge(-97, joined=True)   # joins the deck 3 m from its end, where it is still at grade
+        plan, ids, _ = self._valley_bridge(-99, joined=True)   # joins the deck 1 m from its end, where the road is at the deck surface
         prov = objects(plan, "bridge")[0].provenance
         self.assertEqual([w for w in plan.report["warnings"] if "clearance" in w], [])
         self.assertIsNot(prov["clearance_met"], False)
@@ -461,7 +461,18 @@ class CrossingTest(unittest.TestCase):
         self.assertEqual(col.objects[hit.object]["mb_id"], ids[0])
         self.assertLess(0.5 + hit.t, 5.0 - 1.0)
         self.assertIs(prov["clearance_met"], False)
-        self.assertAlmostEqual(prov["clearance_m"], 0.5 + hit.t, delta=0.6)
+        self.assertLessEqual(prov["clearance_m"], 0.5 + hit.t + 0.05)
+        self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
+
+    def test_a_road_far_above_the_approach_deck_is_a_conflict_not_a_junction(self):
+        # a 2.5 m wide knoll puts the road 6.6 m above the terrain, 2.6 m above the deck top at x=-55
+        plan, ids, _ = make_scene(
+            [([(-100, 0), (100, 0)], {"highway": "secondary", "bridge": "yes"}),
+             ([(-55, -45), (-55, 45)], {"highway": "residential"})],
+            lambda x, y: valley_height(x, y) + (6.6 if abs(x + 55) < 2.5 else 0.0), width=300.0)
+        prov = objects(plan, "bridge")[0].provenance
+        self.assertIs(prov["clearance_met"], False)
+        self.assertLess(prov["clearance_m"], 0.0)
         self.assertTrue(any(ids[1] in w and "crossing road" in w for w in plan.report["warnings"]))
 
     def test_a_loop_back_road_under_the_ramp_is_measured_wherever_it_joins(self):
