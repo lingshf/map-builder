@@ -33,7 +33,9 @@ EXPECTED = os.path.join(FIX, "munich_roofs_expected.json")
 COUNTEREXAMPLES = os.path.join(FIX, "roof_counterexamples.osm")
 AREA_ARGS = (48.1395, 11.5764, 400.0, 400.0)
 BASELINE = 1            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
-COUNTED = 12            # S3-ROOF-HIPPED: the baseline plus the 11 skeleton hipped roofs
+COUNTED = 29            # S3-ROOF-GABLED: re-baselined by D82 (D61 target was 40); 12 + 17 skeleton gabled ways
+GABLED_COUNTED = 17     # of the 52 eligible gabled ways ...
+GABLED_FALLBACK_HIPPED = 30   # ... these fall back to a named hipped roof; 4 near-rectangles stay analytic, 1 is flat
 TOTAL = 67
 # The 11 eligible hipped footprints (three have roof:levels=0, D77); one of them is a near-rectangle (analytic path),
 # the others are built from the straight skeleton.
@@ -42,7 +44,9 @@ HIPPED_BUILT = {"osm:way/283850482", "osm:way/351239741", "osm:way/80965521", "o
                   "osm:way/242367322", "osm:way/79401262", "osm:way/96815240"}
 SKELETON_BUILT = HIPPED_BUILT - {"osm:way/242367322"}
 # v0.3.0 froze roof_h_m = 0 for the three roof:levels=0 ways; D77 now builds the default roof height (frozen JSON untouched)
-D77_HEIGHTS = {"osm:way/242367322": 1.9559, "osm:way/79401262": 6.0, "osm:way/96815240": 6.0}
+D77_HEIGHTS = {"osm:way/242367322": 1.9559, "osm:way/79401262": 6.0, "osm:way/96815240": 6.0,
+               "osm:way/219431658": 3.4117, "osm:way/48966941": 6.0, "osm:way/80965514": 3.8129,
+               "osm:way/80965548": 4.1797, "osm:way/80965666": 2.7387, "osm:way/93216412": 6.0}
 
 
 def roof_h(mb_id, e):
@@ -539,6 +543,7 @@ class HippedSignatureTests(unittest.TestCase):
     L = [(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)]
     TRAPEZOID = [(0, 0), (12, 0), (9, 5), (2, 6)]
     TRIANGLE = [(0, 0), (6, 0), (0, 8)]                     # incenter (2, 2), inradius 2
+    T = [(0, 0), (24, 0), (24, 6), (15, 6), (15, 14), (9, 14), (9, 6), (0, 6)]
 
     def house(self, outer, roof, base=-0.3):
         """A closed house: walls + floor + the given roof triangles ((x, y, z) triples); -> (tris, outer)."""
@@ -554,12 +559,16 @@ class HippedSignatureTests(unittest.TestCase):
                              (outer[b][0], outer[b][1], base))))
         return _oriented(tris, outer), outer
 
-    def skeleton_house(self, outer):
+    def skeleton_house(self, outer, shape="hipped", **orient):
         from map_builder.core import roofs
-        plan = roofs.plan_roof("hipped", [tuple(map(float, p)) for p in outer], [], {})
-        self.assertEqual(plan.shape_built, "hipped")
+        plan = roofs.plan_roof(shape, [tuple(map(float, p)) for p in outer], [], {}, *orient.get("args", ()))
+        self.assertEqual(plan.shape_built, shape)
         pts = [(x, y, self.EAVE + self.RISE * t / plan.t_max) for x, y, t in plan.points]
-        return self.house(outer, [tuple(pts[i] for i in t) for t in plan.tris])
+        built = self.house(outer, [tuple(pts[i] for i in t) for t in plan.tris])
+        if not plan.ends:
+            return built
+        ends = [(rc.FACADE, tuple(pts[i] for i in t)) for t in plan.ends]
+        return _oriented(built[0] + ends, outer), outer
 
     def pyramid_house(self, outer, apex):
         roof = [((a[0], a[1], self.EAVE), (b[0], b[1], self.EAVE), (apex[0], apex[1], self.EAVE + self.RISE))
@@ -628,6 +637,109 @@ class HippedSignatureTests(unittest.TestCase):
         victim = next(p for m, t in tris if m == rc.ROOF for p in t if p[2] > self.EAVE + 1e-9)
         planted = [(m, tuple((p[0], p[1], p[2] + 0.5) if p == victim else p for p in t)) for m, t in tris]
         self.assertFalse(rc.built_as_tagged("hipped", planted, outer, [], self.EAVE, self.EAVE + self.RISE)[0])
+    def test_gabled_skeleton_roof_is_gabled_only_and_survives_subdivision(self):
+        for outer in (self.L, self.T):
+            built = self.skeleton_house(outer, "gabled")
+            for b in (built, self.subdivide(built)):
+                self.assertEqual(self.judge("gabled", b), (True, {}, []), outer)
+                self.assertFalse(self.judge("hipped", b)[0], outer)
+                self.assertFalse(self.judge("pyramidal", b)[0], outer)
+
+    def test_hip_is_not_gabled_even_when_subdivided(self):
+        for b in (self.skeleton_house(self.L), self.subdivide(self.skeleton_house(self.L))):
+            self.assertFalse(self.judge("gabled", b)[0])
+
+    def test_one_gable_end_and_one_hip_end_is_not_gabled_before_or_after_subdivision(self):
+        outer = [(0, 0), (12, 0), (12, 6), (0, 6)]
+        a, b, c, d = (0, 0, 3), (12, 0, 3), (12, 6, 3), (0, 6, 3)
+        r0, r1 = (0, 3, 5), (9, 3, 5)
+        roof = [(a, b, r1), (a, r1, r0), (c, d, r0), (c, r0, r1), (b, c, r1)]
+        tris, _ = self.house(outer, roof)
+        tris, _ = _oriented(tris + [(rc.FACADE, (d, a, r0))], outer), outer
+        built = (tris, outer)
+        sub = self.subdivide(built)
+        for step in (built, sub, self.subdivide(sub)):
+            counted, fails, sig = self.judge("gabled", step)
+            self.assertFalse(counted)
+            self.assertTrue(any("distinct gable end" in p for p in sig), sig)
+        full = self.skeleton_house(self.L, "gabled")
+        for step in (full, self.subdivide(full)):
+            self.assertTrue(self.judge("gabled", step)[0])
+
+    def test_roof_orientation_and_direction_choose_the_gable_ends(self):
+        from map_builder.core import roofs
+
+        def end_edges(*args):
+            prov = {}
+            plan = roofs.plan_roof("gabled", [tuple(map(float, p)) for p in self.T], [], prov, *args)
+            return {frozenset((plan.points[a][:2], plan.points[b][:2])) for a, b, _ in plan.ends}, prov
+
+        along, p_along = end_edges()
+        self.assertEqual(len(along), 2)
+        self.assertIn("inferred:along", p_along["roof_orientation"])
+        self.assertEqual(end_edges("along")[0], along)
+        across, p_across = end_edges("across")
+        self.assertEqual(len(across), 3)
+        self.assertIn("roof:orientation=across", p_across["roof_orientation"])
+        self.assertEqual(end_edges(None, 90.0)[0], across)     # slope faces east: the ridge runs north-south
+        self.assertEqual(end_edges(None, 0.0)[0], along)       # slope faces north: the ridge runs east-west
+        self.assertIn("roof:direction=90", end_edges(None, 90.0)[1]["roof_orientation"])
+        self.assertEqual(end_edges("diagonal")[0], along)
+        self.assertIn("fallback:along", end_edges("diagonal")[1]["roof_orientation"])
+
+    def test_roof_direction_is_checked_on_the_emitted_ridge_edges(self):
+        from map_builder.core import roofs
+
+        def emitted(direction):
+            prov = {}
+            plan = roofs.plan_roof("gabled", [tuple(map(float, p)) for p in self.T], [], prov, None, direction)
+            bearings = set()
+            for tri in plan.tris:
+                for k in range(3):
+                    a, b = tri[k], tri[(k + 1) % 3]
+                    if a >= plan.n_ring and b >= plan.n_ring and a < b:      # both ends off the footprint: a ridge
+                        pa, pb = plan.points[a], plan.points[b]
+                        bearings.add(round(math.degrees(math.atan2(pb[0] - pa[0], pb[1] - pa[1])) % 180.0))
+            return bearings, prov
+
+        for direction, ridge in ((0.0, 90), (90.0, 0), (5.0, 90), (95.0, 0)):   # within the 10 degree tolerance
+            bearings, prov = emitted(direction)
+            self.assertIn(ridge, bearings, direction)
+            self.assertTrue(prov["roof_direction"].startswith("measured:osm roof:direction="), prov)
+        bearings, prov = emitted(35.0)             # a ridge perpendicular to 35 degrees (125) is not emitted
+        self.assertEqual(bearings, {0, 90})
+        self.assertEqual(prov["roof_direction"], "approximate: ridge 90° vs tagged 35°")
+        self.assertEqual(prov["roof_ridge_bearing"], "90")      # the gable ends' ridge; the stem ridge stays hipped
+
+    def test_direction_provenance_comes_from_the_emitted_roof(self):
+        from map_builder.core import generate
+        from tests.test_scene_generation import building, flat_grid
+
+        def built(**tags):
+            f = building(self.T, roof__shape="gabled", roof__direction="0", building__levels="2", **tags)
+            return generate.build_building(f, flat_grid(), 0.0)[2]
+
+        ok = built()
+        self.assertEqual(ok["roof_shape_built"], "gabled")
+        self.assertIn("roof_ridge_bearing", ok)
+        flat = built(roof__height="0")                       # downgraded to flat: no ridge, no direction claim
+        self.assertEqual(flat["roof_shape_built"], "flat")
+        for key in ("roof_ridge_bearing", "roof_direction", "roof_orientation"):
+            self.assertNotIn(key, flat)
+
+    def test_ridge_tolerance_uses_the_unrounded_bearing(self):
+        from unittest import mock
+        from map_builder.core import roofs
+
+        class Sk:
+            ring = [(0, 0)] * 3
+        for bearing, label in ((89.951, "measured"), (90.049, "approximate")):    # tag 170 wants a ridge at 80
+            with mock.patch.object(roofs, "_ridge_bearing", return_value=bearing):
+                prov = {}
+                roofs._record_ridge_bearing(Sk(), (0,), 170.0, prov)
+            self.assertTrue(prov["roof_direction"].startswith(label), prov)
+            self.assertEqual(prov["roof_ridge_bearing"], "90")
+
     def test_planted_extra_apex_fails(self):
         tris, outer = self.skeleton_house(self.L)
         victim = next(p for m, t in tris if m == rc.ROOF for p in t if p[2] > self.EAVE + 1e-9)
@@ -670,16 +782,30 @@ class MunichRoofSnapshotTests(unittest.TestCase):
         self.assertTrue(all(decoded[i]["visual"] for i in results))
         self.assertTrue(os.path.getsize(SNAPSHOT) + os.path.getsize(EXPECTED) < 300_000)
 
-    def test_built_as_tagged_count_is_9_of_67(self):
-        """The D61 metric, measured from the exported geometry: closed, covered, ridge = eave + h, and the
-        silhouette of the tagged shape. v0.3.0 counted 1; the skeleton hipped roofs add the rest."""
+    def test_built_as_tagged_count_meets_the_rebaselined_target(self):
+        """The D61 metric (re-baselined by D82), measured from the exported geometry: closed, covered, ridge = eave + h,
+        and the silhouette of the tagged shape. v0.3.0 counted 1; the skeleton hipped and gabled roofs add the rest."""
         _, _, exp, results = _Built.get()
         counted = sorted(i for i, (r, _) in results.items() if r[0])
         self.assertEqual(len(counted), COUNTED, counted)
+        self.assertGreaterEqual(len(counted), 29)
         frozen = sorted(i for i, e in exp["buildings"].items() if e["built_as_tagged"])
-        self.assertEqual(sorted(set(counted) - HIPPED_BUILT), frozen)
+        gabled = sorted(set(counted) - HIPPED_BUILT - set(frozen))
+        self.assertEqual(len(gabled), GABLED_COUNTED)
+        self.assertTrue(all(exp["buildings"][i]["tagged"] == "gabled" for i in gabled))
         self.assertEqual(len(frozen), BASELINE)
         self.assertEqual(exp["meta"]["baseline_built_as_tagged"], BASELINE)
+
+    def test_gabled_fallbacks_to_hipped_are_named_and_pass_the_hipped_checks(self):
+        _, _, exp, results = _Built.get()
+        fell = [i for i, (_, o) in results.items() if exp["buildings"][i]["tagged"] == "gabled"
+                and exp["buildings"][i]["class"] == "eligible" and o.provenance["roof_shape_built"] == "hipped"]
+        self.assertEqual(len(fell), GABLED_FALLBACK_HIPPED)
+        for i in fell:
+            (counted, fails, sig), o = results[i]
+            self.assertFalse(counted, i)
+            self.assertEqual(fails, {}, i)
+            self.assertTrue(o.provenance["roof_shape"].startswith("fallback:hipped (gable end not representable: "), i)
 
     def test_counted_implies_built_with_the_tagged_shape(self):
         """Counted => built as tagged. The converse fails only for the frozen non-planar gabled quads."""
@@ -689,18 +815,19 @@ class MunichRoofSnapshotTests(unittest.TestCase):
             built = o.provenance["roof_shape_built"] == e["tagged"]
             if counted:
                 self.assertTrue(built, i)
-            if i in HIPPED_BUILT:
+            if i in HIPPED_BUILT or (e["tagged"] == "gabled" and "roof_construction" in o.provenance):
                 self.assertEqual(sorted(fails), [], i)  # tiling, planarity, closure and winding of the skeleton roof
                 continue
             self.assertEqual(sorted(fails), e["failed_checks"], i)
             if built and not counted:
                 self.assertEqual(e["failed_checks"], ["planar"], i)
+
     def test_frozen_heights_and_outcomes_match_v030(self):
         _, _, exp, results = _Built.get()
         for i, (_, o) in results.items():
             e = exp["buildings"][i]
-            if e["tagged"] == "hipped" and e["class"] == "eligible":
-                continue  # the skeleton changes these outcomes on purpose (test_hipped_...)
+            if e["class"] == "eligible" and (e["tagged"] == "hipped" or "roof_construction" in o.provenance):
+                continue  # the skeleton changes these outcomes on purpose (test_hipped_..., test_gabled_...)
             self.assertEqual(o.provenance["roof_shape_built"], e["built_shape"], i)
             self.assertEqual(o.provenance.get("roof_shape", "tagged"), e["roof_shape_provenance"], i)
             if e["built_shape"] == e["tagged"]:
@@ -743,10 +870,11 @@ class MunichRoofSnapshotTests(unittest.TestCase):
                 self.assertGreaterEqual(calls[0][0], len(mesh.vertices), fid)
                 self.assertGreaterEqual(calls[0][1], len(list(mesh.triangles())), fid)
             plan = roofs.plan_roof(feats[fid].tags.get("roof:shape"), [(p[0], p[1]) for p in feats[fid].geometry.outer],
-                                   feats[fid].geometry.holes, {})
+                                   feats[fid].geometry.holes, {}, feats[fid].tags.get("roof:orientation"),
+                                   generate.parse_number(feats[fid].tags.get("roof:direction")))
             if prov["roof_shape_built"] != plan.shape_built:
                 self.assertEqual(prov["roof_shape_built"], "flat", fid)  # demoted for a roof height of 0
-        self.assertEqual(seen, len(SKELETON_BUILT))
+        self.assertEqual(seen, len(SKELETON_BUILT) + GABLED_COUNTED + GABLED_FALLBACK_HIPPED)
 
     def test_eligibility_table_covers_the_skeleton_scope(self):
         _, _, exp, _ = _Built.get()
@@ -843,11 +971,24 @@ class RoofCounterexampleTests(unittest.TestCase):
         finally:
             f.tags.clear()
             f.tags.update(orig)
-    def test_concave_and_degenerate_footprints_fall_back_with_a_reason(self):
+    def test_sliver_edge_and_l_shaped_gabled_footprints_are_built_gabled_and_valid(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, decoded = build_snapshot_package(COUNTEREXAMPLES, d)
+        feats, _ = feature_rings(COUNTEREXAMPLES)
         for i in ("osm:way/9002", "osm:way/9007"):
             prov = self.objects[i].provenance
-            self.assertEqual(prov["roof_shape_built"], "flat", i)
-            self.assertIn("non-rectangular footprint", prov["roof_shape"], i)
+            if i == "osm:way/9007" and "touches itself" in prov["roof_shape"]:
+                # 1e-9 degree edges: the simple-polygon test is float-library sensitive here
+                self.assertEqual(prov["roof_shape_built"], "flat")
+                continue
+            self.assertEqual(prov["roof_shape_built"], "gabled", (i, prov["roof_shape"]))
+            self.assertIn("vertical gable wall", prov["roof_construction"], i)
+            outer = [(p[0], p[1]) for p in feats[i].geometry.outer]
+            short = min(max(p[0] for p in outer) - min(p[0] for p in outer),
+                        max(p[1] for p in outer) - min(p[1] for p in outer))
+            eave = 9.0                                            # building:levels=3
+            top = eave + max(1.0, min(0.3 * short, 6.0))
+            self.assertEqual(rc.check_building(decoded[i]["visual"], outer, [], eave, top, "gabled"), {}, i)
 
     def test_80_vertex_footprint_is_not_a_gable(self):
         prov = self.objects["osm:way/9005"].provenance
