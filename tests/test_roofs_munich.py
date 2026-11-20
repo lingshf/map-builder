@@ -596,6 +596,38 @@ class HippedSignatureTests(unittest.TestCase):
     def test_pyramidal_tag_on_a_ridge_roof_fails(self):
         self.assertFalse(self.judge("pyramidal", self.skeleton_house(self.L))[0])
 
+    @staticmethod
+    def subdivide(built):
+        """Midpoint-subdivide every triangle into four: the same closed surface with more vertices and edges."""
+        tris, outer = built
+        out = []
+        for m, t in tris:
+            a, b, c = t
+            mid = lambda p, q: tuple((x + y) / 2 for x, y in zip(p, q))
+            ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+            out += [(m, x) for x in ((a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca))]
+        return out, outer
+
+    def test_subdivided_pyramid_keeps_both_verdicts(self):
+        built = self.pyramid_house([(0, 0), (10, 0), (10, 6), (0, 6)], (5, 3))
+        for b in (built, self.subdivide(built)):
+            self.assertTrue(self.judge("pyramidal", b)[0])
+            self.assertFalse(self.judge("hipped", b)[0])
+
+    def test_subdivided_hip_keeps_both_verdicts(self):
+        for outer in (self.L, self.TRAPEZOID):
+            built = self.skeleton_house(outer)
+            for b in (built, self.subdivide(built)):
+                self.assertTrue(self.judge("hipped", b)[0], outer)
+                self.assertFalse(self.judge("pyramidal", b)[0], outer)
+
+    def test_subdivided_point_skeleton_and_planted_apex(self):
+        tri = self.subdivide(self.pyramid_house(self.TRIANGLE, (2, 2)))
+        self.assertTrue(self.judge("hipped", tri)[0] and self.judge("pyramidal", tri)[0])
+        tris, outer = self.subdivide(self.skeleton_house(self.L))
+        victim = next(p for m, t in tris if m == rc.ROOF for p in t if p[2] > self.EAVE + 1e-9)
+        planted = [(m, tuple((p[0], p[1], p[2] + 0.5) if p == victim else p for p in t)) for m, t in tris]
+        self.assertFalse(rc.built_as_tagged("hipped", planted, outer, [], self.EAVE, self.EAVE + self.RISE)[0])
     def test_planted_extra_apex_fails(self):
         tris, outer = self.skeleton_house(self.L)
         victim = next(p for m, t in tris if m == rc.ROOF for p in t if p[2] > self.EAVE + 1e-9)
