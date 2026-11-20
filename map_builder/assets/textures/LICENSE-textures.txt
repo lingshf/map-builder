@@ -17,7 +17,7 @@ Files (SHA-256):
   f94699dd53a6fda89a32836b8a1cbfb501d9fbb3d0b580fbd857ae871e3c7baa  facade_plaster.png
   78c19603b1aeb4248755bc6f90663415a0d3743e2e15da2e69a160fd4024d54e  roof_gravel.png
   dd6af889191c91b3795c65e7444acc212053443503b472265f034094dd57d3ab  roof_tiles.png
-  27eae3ae031d79e30ff5c411c8fe0f3d2c2eeea33c4909b3d34eca4509e849c4  terrain_grass.png
+  8bb85719cf8cc63d777fd511040efd1788aee11e48fc3b66c7eed73bfdec4be3  terrain_detail.png
 
 ------------------------------------------------------------------------
 

@@ -30,7 +30,7 @@ TEXTURES: dict[str, tuple[str, float, float]] = {
     "MB Roof": ("roof_tiles.png", 2.0, 0.7),
     "MB Roof Flat": ("roof_gravel.png", 2.0, 0.9),
     "MB Road": ("asphalt.png", 4.0, 0.9),
-    "MB Terrain": ("terrain_grass.png", 8.0, 0.95),
+    "MB Terrain": ("terrain_detail.png", 8.0, 0.95),
     "MB Concrete": ("concrete.png", 4.0, 0.8),
     "MB Tunnel": ("concrete.png", 4.0, 0.8),
 }
