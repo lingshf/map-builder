@@ -1,6 +1,6 @@
 {
- "status": "RC evidence; Pittsburgh headless Blender export pending S2-F6 (D51)",
- "base_commit": "5867f4c5f967533ebaf9025daa1c4c57fba0d38e",
+ "status": "RC evidence on main f9ef418 (S2-F6 merged); both presets VALID in the CLI and in headless Blender",
+ "base_commit": "f9ef4188d3e39c50004bbdf83e7d606e374ce8e5",
  "inputs": "live Overpass + Copernicus GLO-30 acquisition on 2026-11-20 UTC, then cache-only builds (network forbidden)",
  "options": {
   "seed": 1,
@@ -29,13 +29,14 @@
    "acquire_live_s": 107,
    "build_seconds_plan_package_validate": {
     "runs": [
-     3.628,
-     3.545,
-     3.507
+     3.451,
+     3.499,
+     3.519
     ],
-    "median": 3.545,
+    "median": 3.499,
     "byte_identical_runs": true,
-    "target_max": 120
+    "target_max": 120,
+    "rebuilt_on": "f9ef418 + RC; packages byte-identical to the pre-rebase build"
    },
    "objects": 389,
    "classes": {
@@ -104,9 +105,13 @@
    },
    "headless_blender": {
     "result": "VALID",
+    "summary": "VALID: 0 error(s), 1 warning(s) (55 degenerate triangles)",
     "objects": 385,
-    "export_s": 7.9,
-    "note": "live OSM changed between the CLI and Blender acquisitions"
+    "generate_incl_download_s": 44.7,
+    "export_s": 3.2,
+    "package_id": "sha256:5224a0cb28f97fd037c8fafa6ff4f5ba1f9870328414023d47e8dfb5125513bc",
+    "csharp_reader": "OK, 1/1 passage probes PASS",
+    "note": "fresh live OSM, so objects and probes differ from the cached CLI build"
    },
    "roofs": {
     "buildings": 148,
@@ -146,13 +151,14 @@
    "acquire_live_s": 127,
    "build_seconds_plan_package_validate": {
     "runs": [
-     18.528,
-     18.726,
-     18.954
+     18.402,
+     18.74,
+     18.704
     ],
-    "median": 18.726,
+    "median": 18.704,
     "byte_identical_runs": true,
-    "target_max": 120
+    "target_max": 120,
+    "rebuilt_on": "f9ef418 + RC; packages byte-identical to the pre-rebase build"
    },
    "objects": 3290,
    "classes": {
@@ -300,10 +306,15 @@
     "seconds": 124
    },
    "headless_blender": {
-    "result": "FAIL",
-    "error": "collision: road object #1163 has 1 non-degenerate triangle(s) whose normal does not point up (z <= 0); open surfaces must face +Z",
-    "pre_existing_in": "v0.2.0",
-    "pending": "S2-F6 (D51)"
+    "result": "VALID",
+    "summary": "VALID: 0 error(s), 1 warning(s) (78 degenerate triangles)",
+    "objects": 3313,
+    "generate_incl_download_s": 55.2,
+    "export_s": 22.2,
+    "package_id": "sha256:207ea7056dc26b66cc29e94924cbc7567ad552152b1fb80ea4800e639bd3084b",
+    "csharp_reader": "OK, 14/14 passage probes PASS",
+    "fixed_by": "S2-F6 (#37, D51); before the fix: road object #1163 normal did not point up",
+    "note": "fresh live OSM, so objects and probes differ from the cached CLI build"
    }
   }
  },
@@ -326,5 +337,17 @@
    "package_id": "sha256:dbb5b59712f74001a9e1e46ee60e057537d8bf1208d50da3c4aad339653c1a26",
    "note": "byte-identical members to v0.3.0; only manifest generator.version differs (D50)"
   }
+ },
+ "release_zip": {
+  "file": "map_builder-0.3.0.zip",
+  "bytes": 218374,
+  "sha256": "BD6057EFC446183F32EB7B41E7FDCB627548200636F1702076B24CC4814DB5BB",
+  "extension_validate": "OK",
+  "g4_clean_profile_install": "imports (0, 3, 0); harness OK: 0 failure(s), 169 PASS, 16 s"
+ },
+ "release_assets_sha256": {
+  "munich-altstadt-0.3.0.mbmap": "B6B4A1AF755592D686C31067689771086B14B5369CC373652E3E485388DA723C",
+  "pittsburgh-0.3.0.mbmap": "6FB2E99EAE10963710C8035F869CB99CD014EC7C2E67A19A4E393EAC0A984FF5",
+  "map_builder-0.3.0.zip": "BD6057EFC446183F32EB7B41E7FDCB627548200636F1702076B24CC4814DB5BB"
  }
 }

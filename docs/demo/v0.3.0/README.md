@@ -92,15 +92,15 @@ Machine-readable: [evidence.json](evidence.json). Kit summaries:
 | package_id | `sha256:2caff942c8f528111e229415047f5e926375d94fe2ac4595c3ddf0e7940eea64` | `sha256:094fb730dfd27386d90b8de08682265f96712986b983e29850ca19508e846d16` |
 | Objects | 389: terrain 1, building 148, road 197, tunnel 26, vegetation 17 | 3290: terrain 1, building 987, road 258, bridge 33, tunnel 5, structure 6, vegetation 2000 |
 | Collision triangles | 22,608 (59 degenerate) | 144,108 (76 degenerate) |
-| Build, excluding download (3 runs) | 3.628 / 3.545 / 3.507 s, **median 3.545 s** | 18.528 / 18.726 / 18.954 s, **median 18.726 s** |
+| Build, excluding download (3 runs) | 3.451 / 3.499 / 3.519 s, **median 3.499 s** | 18.402 / 18.740 / 18.704 s, **median 18.704 s** |
 | Python validator (strict) | `VALID: 0 error(s), 1 warning(s)` (degenerate triangles) | `VALID: 0 error(s), 1 warning(s)` (degenerate triangles) |
 | Passage probes | 3 exported, all PASS; 26 blocked and reported | 13 exported, all PASS; 29 blocked and reported |
 | Probe-check visits (capsule work units) | 813 + 493 + 1,342 = 2,648 | 121,457 |
 | C# reference reader | `OK`: 5 members verified, 389 nodes bound 1:1, 3/3 probes PASS | `OK`: 13/13 probes checked and PASS |
 | Live acquisition (Overpass + GLO-30) | 107 s | 127 s |
 | CPU renders, 1280 x 720, 64 samples | 8 renders + panel: 366 s; roofs pair: 78 s | 4 renders: 124 s |
-| Headless Blender, live generate + export | `VALID`, 385 objects (live OSM changed within the hour), export 7.9 s | **fails validation**: one downward-facing road triangle. Pre-existing in v0.2.0; S2-F6 (D51) is pending |
-| Release zip, clean-profile install (G4) | `map_builder-0.3.0.zip` built from the RC and passes `extension validate`. Installed into an empty `BLENDER_USER_RESOURCES`, it imports as (0, 3, 0) and the Blender harness reports `OK: 0 failure(s)` (165 PASS) in 17 s | (same zip) |
+| Headless Blender, live generate + export | `VALID`, 385 objects, export 3.2 s; C# `OK`, 1/1 probes PASS | `VALID`, 3313 objects, export 22.2 s; C# `OK`, 14/14 probes PASS. Failed before S2-F6 (#37) on one downward-facing road triangle |
+| Release zip, clean-profile install (G4) | `map_builder-0.3.0.zip` built from the RC and passes `extension validate`. Installed into an empty `BLENDER_USER_RESOURCES`, it imports as (0, 3, 0) and the Blender harness reports `OK: 0 failure(s)` (169 PASS) in 16 s | (same zip) |
 All renders together took 9 min 28 s on the CPU (budget 30 min). Each package
 was built 3 times from the cached acquisition, and the runs were
 byte-identical. Probe work is the validator's capsule query count (the
@@ -111,8 +111,13 @@ byte-identical. Probe work is the validator's capsule query count (the
 The GitHub Release attaches `munich-altstadt-0.3.0.mbmap` and
 `pittsburgh-0.3.0.mbmap` (GLB inside, `NOTICES.txt` with attribution) next to
 `map_builder-0.3.0.zip`. Only the PNGs, summaries, evidence and this README are
-committed. The assets will be rebuilt after S2-F6, so their final sha256
-values are recorded with the Release.
+committed. Built from the RC on main `f9ef418`, sha256:
+
+| Asset | sha256 |
+|---|---|
+| `munich-altstadt-0.3.0.mbmap` | `B6B4A1AF755592D686C31067689771086B14B5369CC373652E3E485388DA723C` |
+| `pittsburgh-0.3.0.mbmap` | `6FB2E99EAE10963710C8035F869CB99CD014EC7C2E67A19A4E393EAC0A984FF5` |
+| `map_builder-0.3.0.zip` | `BD6057EFC446183F32EB7B41E7FDCB627548200636F1702076B24CC4814DB5BB` |
 
 **Real-data credits:** (c) OpenStreetMap contributors, ODbL 1.0.
 Copernicus DEM GLO-30 / WorldDEM-30: (c) DLR e.V. 2010-2014 and

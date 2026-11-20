@@ -23,11 +23,11 @@ areas: seed 1, DSM correction on, terrain spacing 10 m, heightfield 2 m,
 | Collision triangles (degenerate) | 22,608 (59) | 144,108 (76) |
 | Passage probes exported / blocked | 3 / 26 | 13 / 29 |
 | Probe-check visits (capsule work) | 2,648 | 121,457 |
-| Build, excluding download, median of 3 | **3.545 s** | **18.726 s** |
+| Build, excluding download, median of 3 | **3.499 s** | **18.704 s** |
 | Live acquisition (Overpass + GLO-30) | 107 s | 127 s |
 | Python validator | `VALID`, 1 warning | `VALID`, 1 warning |
 | C# reference reader | `OK`, 3/3 probes PASS | `OK`, 13/13 probes PASS |
-| Headless Blender (live generate + export) | `VALID` | fails on 1 road triangle; S2-F6 pending (D51) |
+| Headless Blender (live generate + export) | `VALID` (385 objects, 1/1 probes PASS in C#) | `VALID` (3313 objects, 14/14 probes PASS in C#); fixed by S2-F6 (#37) |
 
 The build target is 120 s or less, so both areas pass. Probe-check visits are
 the capsule query work units that the validator counts (`WorkBudget`). The C#
@@ -101,9 +101,10 @@ In Blender, use the sidebar (**Area: Centre + size**, the values above,
 **Export Map Package** and **Validate Package**. For a headless run, set the
 same values on `bpy.context.scene.map_builder`, set `export_path`, and call
 `bpy.ops.map_builder.generate()`, `bpy.ops.map_builder.export()` and
-`bpy.ops.map_builder.validate()`. Start Blender with `--online-mode`. Munich
-validates `VALID`. Pittsburgh currently fails on one downward-facing road
-triangle; S2-F6 fixes this before the tag.
+`bpy.ops.map_builder.validate()`. Start Blender with `--online-mode`. Both
+presets validate `VALID`. Pittsburgh failed here before S2-F6 (#37) on one
+downward-facing road triangle. Blender downloads fresh OSM data, so its object
+and probe counts can differ from the cached CLI build.
 
 ## 3. Renders, panel and viewer
 

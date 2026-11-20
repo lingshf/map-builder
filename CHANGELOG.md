@@ -34,7 +34,7 @@ Package schema stays **2.0.0**.
   could turn a needle-thin road face over even though the single-rounding
   check judged it fine. Generation now drops such faces (narrower than a few
   float32 ulps) for both storage paths and records them in the road's
-  `slivers_dropped` provenance. CLI output is unchanged (S2-F6).
+  `slivers_dropped` provenance. CLI output is unchanged (S2-F6, #37).
 
 ### Changed
 
