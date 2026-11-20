@@ -97,8 +97,8 @@ Check `report.json`'s `terrain_correction` for `applied`, `reason`,
 `masked_points`, `lowered_points`, `total_points`, `max_lowering_m` and
 `mean_lowering_m`. `dsm_mask_query` records the optional request in source
 provenance. Applied correction is labelled inferred and receives a processing
-note in package `NOTICES.txt`; raw source hashes are unchanged. Package schema
-remains **2.0.0**.
+note in package `NOTICES.txt`; raw source hashes are unchanged. DSM correction
+does not change the package schema.
 
 **Limits:** this is not survey-quality bare earth or a true DTM. Hidden hills
 and hollows inside large masks are smoothed, fills touching an area edge level
@@ -107,20 +107,47 @@ separately as deck solids.
 
 ## Roof shapes and road-export diagnostics
 
-OSM `roof:shape` supports flat, gabled, hipped, pyramidal and skillion, plus
-half-hipped, gambrel, mansard, round and saltbox on rectangles and dome/onion
-on convex footprints. Roof orientation and direction tags influence supported
-shapes. Unsupported or ill-fitting shapes fall back with `fallback:` provenance;
-inspect the report rather than assuming every tagged roof is reproduced.
-The synthetic sample's way/1043 demonstrates a dome.
+OSM `roof:shape` is built as follows:
 
-On real data, many tagged roofs fall back. In the Munich Altstadt demo, 67
-buildings have a tagged non-flat `roof:shape`. 5 are built as tagged
-(4 gabled, 1 skillion) and 62 fall back (53 to flat, 9 to pyramidal), mostly
-because gabled and hipped roofs need a rectangular footprint. Each building's
-`provenance.roof_shape` in `manifest.json` says which: `measured:osm roof:shape`
-(built as tagged), `fallback:...` with the reason, or `inferred:flat` (no tag).
-See the [v0.3.0 demo](../demo/v0.3.0/README.md#example-2-tagged-roofs).
+| Shape | Footprints |
+|---|---|
+| flat, skillion | any, including courtyards |
+| hipped, gabled | any simple polygon up to 64 vertices, no courtyard (L, T, U, trapezoid...), from the straight skeleton (since v0.4.0; before, rectangles only) |
+| pyramidal, dome, onion | convex |
+| half-hipped, gambrel, mansard, round, saltbox | rectangles only |
+
+A gabled roof on a non-rectangular footprint gets a vertical gable wall on
+each end the skeleton can represent. If an end cannot be represented (the
+ridge would meet the gable edge outside it, or the gable end would be a
+sliver), the roof falls back to **hipped**, not flat. `roof:direction` is the
+direction the slope faces, so the ridge runs across it. Roof orientation and
+direction tags influence supported shapes. Unsupported or ill-fitting shapes
+fall back with `fallback:` provenance; inspect the report rather than assuming
+every tagged roof is reproduced. The synthetic sample's way/1043 demonstrates
+a dome.
+
+On real data, some tagged roofs still fall back. In the Munich Altstadt demo,
+67 buildings have a tagged non-flat `roof:shape`. In v0.4.0, **29** are built
+as tagged (17 of 52 gabled, 11 of 12 hipped, the skillion), 30 gabled roofs
+fall back to hipped, and 4 to flat (courtyard, roof height 0, a
+quadruple_saltbox, a concave pyramidal). 4 near-rectangle gables are built
+analytically but do not pass the planarity check; their provenance gives no
+fallback reason (follow-up S3-F1). Each building's `provenance.roof_shape` in
+`manifest.json` says which: `measured:osm roof:shape` (built as tagged),
+`fallback:...` with the reason, or `inferred:flat` (no tag);
+`provenance.roof_construction` says how it was built. See the
+[v0.4.0 demo](../demo/v0.4.0/README.md).
+
+## Textures
+
+**Content > Textures** (default on) gives the generated buildings, roofs,
+roads and terrain CC0 base-colour textures (facade, roof tiles, flat-roof
+gravel, asphalt, grass, concrete) with world-scaled UVs. The vertex colour
+keeps each object's palette colour on average; the texture adds detail. Turn
+it off for the plain-colour look of earlier versions. Collision is the same
+either way. The panel shows the CC0 attribution while Textures is on, and the
+CLI equivalent is `--textures` / `--no-textures`. What ends up in the package
+is decided at export; see [Export](export.md).
 
 On steep real terrain, a road face thinner than float32 can represent may be
 omitted if storing it would make it non-upward-facing. `slivers_dropped` in the

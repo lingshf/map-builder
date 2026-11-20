@@ -1,7 +1,9 @@
 # Export: final edits to package
 
 No scene modifiers are destructively applied. Validation errors block package
-replacement; warnings require review.
+replacement; warnings require review. The Textures setting at export decides
+materials, UVs, embedded CC0 images and the asset notice together; collision is
+the same either way.
 
 ```mermaid
 flowchart TD
@@ -13,8 +15,13 @@ flowchart TD
   F --> G{Geometry supported?}
   G -->|No| H[Report export error]
   G -->|Yes| I[Bake shared triangles]
-  I --> J[GLB and collision]
-  J --> K[Manifest and notices]
+  I --> T{Textures on at export?}
+  T -->|Yes| U[GLB with UVs and CC0 images]
+  T -->|No| V[Untextured GLB]
+  I --> J[Collision, same either way]
+  U --> K[Manifest, asset notices and NOTICES]
+  V --> K
+  J --> K
   K --> L{Package validates?}
   L -->|No| H
   H --> M[Keep previous package]

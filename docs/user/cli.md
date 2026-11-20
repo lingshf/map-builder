@@ -25,6 +25,12 @@ omits the optional heightfield. `--seed` controls procedural scatter.
 `--dsm-correction` forces correction for a local DSM; `--no-dsm-correction`
 disables it. Auto is off for local elevation.
 
+`--textures` (the default) embeds the CC0 facade, roof, road and terrain
+textures with world-scaled UVs; `--no-textures` writes the plain-colour GLB of
+earlier versions. The collision (`.mbcol`) and heightfield are byte-identical
+either way, so a simulator sees the same physics. Both write package schema
+2.1.0, which v0.3.0 readers still accept.
+
 `--created-utc` fixes the manifest timestamp for reproducible builds with the
 same inputs on the same platform. Without it, the current time is used. Build
 and validate return 0 for valid packages, 1 for invalid validation, and 2 for

@@ -241,8 +241,8 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
   not exported and is listed under `passage_probes_blocked` in `report.json`.
 * Each building is a set of closed, outward-facing, positive-volume shells with no interior
   cavities: no rooms, passages or flyable interiors.
-* The GLB is flat-shaded with face normals and PBR colour factors. It has no textures, UVs or
-  custom normals.
+* The GLB is flat-shaded with face normals and PBR colour factors. With textures on (the default) it also has
+  world-scaled UVs and embedded CC0 base-colour textures; it has no custom normals or normal maps.
 * **DSM correction is an approximation, not a DTM.** It only knows the features mapped in OSM:
   unmapped buildings, trees or hedges stay in the terrain. Inside masked areas the fill is the
   smoothest surface through the surrounding ground. It follows uniform slopes, but it cannot

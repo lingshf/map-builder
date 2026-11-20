@@ -1,0 +1,12 @@
+{
+  "name": "munich-altstadt-v040",
+  "description": "REL-v0.4.0 Munich Altstadt: the preset's overview and roofs views plus S3-REVIEW close-ups (gabled straight skeleton way 91268712, hipped straight skeleton way 79401262, gabled->hipped fallback way 91268710)",
+  "area": {"lat": 48.1395, "lon": 11.5764, "width_m": 400, "height_m": 400},
+  "cameras": [
+    {"name": "overview", "eye": [380, -420, 300], "target": [0, -20, 10], "lens_mm": 28},
+    {"name": "roofs", "eye": [-60, -20, 70], "target": [-125, -80, 20], "lens_mm": 35},
+    {"name": "gabled-skeleton", "eye": [30, 0, 95], "target": [-59.5, 94.6, 18], "lens_mm": 28},
+    {"name": "hipped-skeleton", "eye": [135, -220, 60], "target": [86, -170, 14], "lens_mm": 35},
+    {"name": "gabled-fallback", "eye": [-55, -15, 70], "target": [-108, 39, 14], "lens_mm": 35}
+  ]
+}

@@ -1,0 +1,263 @@
+{
+ "status": "RC evidence for REL-v0.4.0 on main e266a1b + release changes; both presets VALID in the CLI and in headless Blender, textured and untextured",
+ "base_commit": "e266a1b",
+ "inputs": "the frozen v0.3.0 acquisition caches (Overpass + Copernicus GLO-30, acquired 2026-11-20 UTC); every build cache-only with network forbidden; cache hashes unchanged after each Blender build",
+ "options": {
+  "seed": 1,
+  "dsm_correction": true,
+  "terrain_spacing_m": 10.0,
+  "heightfield_spacing_m": 2.0,
+  "created_utc": "2026-11-20T00:00:00Z"
+ },
+ "blender": "4.2.23 LTS (Mesa llvmpipe copy), Cycles CPU, 1280x720, 64 samples",
+ "render_seconds": {
+  "munich-roofs (10 renders + panel)": 328.7,
+  "munich-textures (10 renders)": 305.5,
+  "pittsburgh-textures (8 renders)": 231.2,
+  "total": 865.4
+ },
+ "render_budget_seconds": 1800,
+ "v030_reproduced": "v0.3.0 code on the same caches rebuilds the released assets byte-for-byte (munich B6B4A1AF..., pittsburgh 6FB2E99E...)",
+ "areas": {
+  "munich-altstadt": {
+   "preset": "tools/demo/presets/munich-altstadt.json; close-up cameras in docs/demo/v0.4.0/munich-altstadt-v040.json",
+   "objects": 389,
+   "classes": {
+    "terrain": 1,
+    "building": 148,
+    "road": 197,
+    "tunnel": 26,
+    "vegetation": 17
+   },
+   "collision_triangles": {
+    "v0.3.0": 22608,
+    "v0.4.0": 23378,
+    "degenerate_cli": 59,
+    "degenerate_blender": 58
+   },
+   "passage_probes": {
+    "exported": 3,
+    "blocked": 26,
+    "python": "all PASS",
+    "csharp": "OK, 3/3 PASS, 0 mb_id lines"
+   },
+   "build_s_median_of_3": {
+    "v0.3.0": 3.744,
+    "v0.4.0_textured": 4.304,
+    "v0.4.0_no_textures": 3.596
+   },
+   "build_runs_s": {
+    "v0.3.0": [
+     3.834,
+     3.672,
+     3.744
+    ],
+    "v0.4.0_textured": [
+     4.313,
+     4.304,
+     4.027
+    ],
+    "v0.4.0_no_textures": [
+     3.596,
+     3.585,
+     3.657
+    ]
+   },
+   "byte_identical_runs": true,
+   "roofs": {
+    "tagged_non_flat": 67,
+    "built_as_tagged_v040": 29,
+    "built_as_tagged_v030_same_checker": 1,
+    "per_shape_v040": {
+     "gabled": "17/52",
+     "hipped": "11/12",
+     "skillion": "1/1",
+     "pyramidal": "0/1",
+     "quadruple_saltbox": "0/1"
+    },
+    "provenance_roof_shape_v040": {
+     "inferred:flat": 68,
+     "measured:osm": 46,
+     "fallback:hipped (ridge outside gable edge)": 21,
+     "fallback:hipped (sliver)": 9,
+     "flat (courtyard / concave pyramidal / quadruple_saltbox / roof height 0)": 4
+    },
+    "no_named_reason": "4 analytic near-rectangle gables (S3-F1)",
+    "source": "design/reviews/S3-REVIEW.md section 1.1"
+   },
+   "headless_blender": {
+    "textured": {
+     "result": "VALID, 1 warning",
+     "objects_in_scene": 390,
+     "generate_s": 3.9,
+     "export_s": 5.1
+    },
+    "untextured": {
+     "result": "VALID, 1 warning",
+     "objects_in_scene": 390,
+     "generate_s": 3.9,
+     "export_s": 3.2
+    },
+    "probes": "3/3 PASS in C#, same ids as the CLI"
+   }
+  },
+  "pittsburgh": {
+   "preset": "tools/demo/presets/pittsburgh.json",
+   "objects": 3290,
+   "classes": {
+    "terrain": 1,
+    "building": 987,
+    "road": 258,
+    "bridge": 33,
+    "tunnel": 5,
+    "structure": 6,
+    "vegetation": 2000
+   },
+   "collision_triangles": {
+    "v0.4.0": 144108,
+    "degenerate_cli": 76,
+    "degenerate_blender": 72
+   },
+   "passage_probes": {
+    "exported": 13,
+    "blocked": 29,
+    "python": "all PASS",
+    "csharp": "OK, 13/13 PASS, 0 mb_id lines"
+   },
+   "build_s_median_of_3": {
+    "v0.3.0": 18.919,
+    "v0.4.0_textured": 20.02,
+    "v0.4.0_no_textures": 18.489,
+    "target_max": 120
+   },
+   "build_runs_s": {
+    "v0.3.0": [
+     18.535,
+     18.919,
+     19.198
+    ],
+    "v0.4.0_textured": [
+     19.814,
+     20.02,
+     20.179
+    ],
+    "v0.4.0_no_textures": [
+     18.235,
+     18.489,
+     18.894
+    ]
+   },
+   "byte_identical_runs": true,
+   "no_textures_vs_v030": "GLB, .mbcol, heightfield, report and NOTICES byte-identical; only manifest.json (generator 0.4.0, schema) differs",
+   "headless_blender": {
+    "textured": {
+     "result": "VALID, 1 warning",
+     "objects_in_scene": 3291,
+     "generate_s": 12.5,
+     "export_s": 28.0
+    },
+    "untextured": {
+     "result": "VALID, 1 warning",
+     "objects_in_scene": 3291,
+     "generate_s": 12.8,
+     "export_s": 21.4
+    },
+    "probes": "13/13 PASS in C#, same ids as the CLI"
+   }
+  }
+ },
+ "textures": {
+  "embedded_images": 5,
+  "embedded_image_bytes": 511404,
+  "texture_set_bytes": 654263,
+  "glb_bytes_textured": {
+   "munich": 4378796,
+   "pittsburgh": 15005532
+  },
+  "collision_and_heightfield": "byte-identical with textures on or off (both areas, both paths)",
+  "licence": "CC0 1.0, map_builder/assets/textures/LICENSE-textures.txt"
+ },
+ "zip": {
+  "name": "map_builder-0.4.0.zip",
+  "bytes": 873676,
+  "sha256": "469AA5D7FD340C096A16832829AD16F88DAD9B8216A550C8D9CDB015AD671AAF",
+  "extension_validate": "OK",
+  "g4_clean_profile": "installed as (0, 4, 0); Blender harness OK: 0 failure(s), 239 PASS",
+  "note": "RC build on Windows; the published zip is rebuilt by the release workflow from the tag"
+ },
+ "mypy": "Success: no issues found in 41 source files (mypy 2.4.1, pyproject.toml config)",
+ "release_asset_candidates": [
+  {
+   "name": "munich-altstadt-0.4.0.mbmap",
+   "built_by": "CLI",
+   "textures": "on",
+   "size": 1587709,
+   "sha256": "55655D90ED08E781C9354A7753F0F86F3AE8665FE9BE4BF940F5744C79A006D3",
+   "package_id": "sha256:178c1328e90e3d83a3a38ac2144e12a4c81726a768bd0b62398927647ac3ec3f"
+  },
+  {
+   "name": "munich-altstadt-0.4.0-notex.mbmap",
+   "built_by": "CLI",
+   "textures": "off",
+   "size": 912870,
+   "sha256": "F9EF4EA954FBEC0D55C83C33D07F01DCEC5690A6E4C4676DCE2FFC506B4BDF23",
+   "package_id": "sha256:b4b8a9a0f33b82fc21bdfcef4b59b1b561590baf2b7b5c61f1bcc8a5e9c3a37a"
+  },
+  {
+   "name": "pittsburgh-0.4.0.mbmap",
+   "built_by": "CLI",
+   "textures": "on",
+   "size": 5346074,
+   "sha256": "6D3DCCF74C3A956FB8735F0221C30A4B8F527498238065DF387F8C5118ECEBF7",
+   "package_id": "sha256:c605727a7037d60fde16604526208c5559da267eebc7f45362adabc80c5d1b40"
+  },
+  {
+   "name": "pittsburgh-0.4.0-notex.mbmap",
+   "built_by": "CLI",
+   "textures": "off",
+   "size": 4258810,
+   "sha256": "F8C924B4A352A3F6B86915500029C2EA13426CE2F9674912148DD15C2D070A92",
+   "package_id": "sha256:69cf9a3a84d4c535c0f457587aa632d442a3a63d2b0dff60b1452a6ec0703b45"
+  },
+  {
+   "name": "munich-altstadt-0.4.0-blender.mbmap",
+   "built_by": "headless Blender",
+   "textures": "on",
+   "size": 1656527,
+   "sha256": "047EA375183ED4F604F3F807EFCA2591DCC636468E7D257511FDC8B3525C4754",
+   "package_id": "sha256:667cd8c068ab5ea7a5e72bd44873fb9e2a4cab5eab9fa9d0ac4306893fe4509b"
+  },
+  {
+   "name": "munich-altstadt-0.4.0-blender-notex.mbmap",
+   "built_by": "headless Blender",
+   "textures": "off",
+   "size": 976913,
+   "sha256": "212CA300709D715A6348BE856C6B577F6B64EDF80823ED222C85C643012AAB80",
+   "package_id": "sha256:9892e34f7ea20cc011a9a685b6213da7d27153bed2a27d7fcb3b1132edeec251"
+  },
+  {
+   "name": "pittsburgh-0.4.0-blender.mbmap",
+   "built_by": "headless Blender",
+   "textures": "on",
+   "size": 6673545,
+   "sha256": "CA2641553778A7F8FCA3B299B82F2AEDE1BBEFE614FFD9A4F5923DF7F2BBA253",
+   "package_id": "sha256:95aa5fe1ac3e7a39a6b8ab7504d6316f9cac9946c02dafec2f93bd01f463c63f"
+  },
+  {
+   "name": "pittsburgh-0.4.0-blender-notex.mbmap",
+   "built_by": "headless Blender",
+   "textures": "off",
+   "size": 5582327,
+   "sha256": "DDB921F0B65327593BEF5C4258BF85EE37FA7496D40976B2C133EE19DC87FC6C",
+   "package_id": "sha256:2d19e9a38a2d2ecbb734c613af4546a1fbef20e518c843c8a2d95b0434e962c4"
+  },
+  {
+   "name": "map_builder-0.4.0.zip",
+   "built_by": "extension zip (RC, Windows)",
+   "textures": "-",
+   "size": 873676,
+   "sha256": "469AA5D7FD340C096A16832829AD16F88DAD9B8216A550C8D9CDB015AD671AAF",
+   "package_id": null
+  }
+ ]
+}
