@@ -35,7 +35,7 @@ from .collision import (CLASS_KINDS, CLASSES, DEGENERATE_EPS, KIND_SOLID, KIND_T
                         read_heightfield, strict_json)
 from .errors import LimitError, PackageError
 from .geodesy import gltf_to_map, map_to_gltf, map_to_unity_x_negated
-from .glb import read_glb
+from .glb import glb_image_sha256s, read_glb
 from .query import capsule_hits
 
 PACKAGE_EXTENSION = ".mbmap"
@@ -262,11 +262,11 @@ def secrets_message(where, hits):
 
 def build_manifest(name, area, sources, vertical_datum, files, collision_info, heightfield_info, objects,
                    probes, edits_counts, warnings_count, has_report=True, blender_version=None, created_utc=None,
-                   passage_probes=None):
+                   passage_probes=None, schema_version=PACKAGE_SCHEMA_VERSION, asset_notices=()):
     frame = area.frame
-    return {
+    manifest = {
         "schema": PACKAGE_SCHEMA,
-        "schema_version": PACKAGE_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "name": name,
         "created_utc": created_utc or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "generator": {"name": GENERATOR_NAME, "version": GENERATOR_VERSION, "blender": blender_version},
@@ -295,13 +295,38 @@ def build_manifest(name, area, sources, vertical_datum, files, collision_info, h
         "report": "report.json" if has_report else None,
         "warnings_count": warnings_count,
     }
+    if asset_notices:   # optional (schema 2.1); omitted when empty so 2.0 manifests are unchanged
+        manifest["asset_notices"] = copy.deepcopy(list(asset_notices))
+    return manifest
 
 
 LICENSE_TEXT_KEYS = ("id", "name", "text")   # a source licence declares at least one of these
 LICENSE_NOTICE_KEYS = ("id", "name", "text", "url")   # each one declared must appear in NOTICES.txt
 
 
-def notices_text(sources):
+def asset_notice_problems(notices):
+    """Shape problems of a manifest ``asset_notices`` value (empty list = fine)."""
+    if not isinstance(notices, list):
+        return ["asset_notices must be an array"]
+    out = []
+    for i, a in enumerate(notices):
+        lic = a.get("license") if isinstance(a, dict) else None
+        if not (isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"]
+                and isinstance(a.get("attribution"), str) and a["attribution"] and isinstance(lic, dict)):
+            out.append(f"asset_notices[{i}] needs name, attribution (non-empty strings) and license {{...}}")
+            continue
+        if (not all(isinstance(lic.get(k), str) for k in LICENSE_NOTICE_KEYS if k in lic)
+                or not any(lic.get(k) for k in LICENSE_TEXT_KEYS)):
+            out.append(f"asset_notices[{i}].license must declare a licence identifier, name or text "
+                       f"({'/'.join(LICENSE_TEXT_KEYS)}) and an optional url, all strings")
+        h = a.get("sha256")
+        if not (isinstance(h, list) and h and all(isinstance(x, str) and re.fullmatch(r"[0-9a-f]{64}", x)
+                                                   for x in h)):
+            out.append(f"asset_notices[{i}].sha256 must be a non-empty array of 64 lowercase hex digits")
+    return out
+
+
+def notices_text(sources, asset_notices=()):
     lines = ["Map package data notices", "========================", "",
              "This package contains visual and collision geometry derived from the sources below.",
              "Procedural details (materials, inferred heights/roofs, scattered vegetation) are generated",
@@ -325,6 +350,25 @@ def notices_text(sources):
         if s.get("processing"):
             lines.append(f"  Processing: {s['processing']}")
     lines.append("")
+    if asset_notices:
+        lines += ["Assets", "------", "", "Embedded texture assets (visual/map.glb):", ""]
+        for a in asset_notices:
+            lic = a.get("license") or {}
+            lines.append(f"- {a.get('name')}")
+            if a.get("attribution"):
+                lines.append(f"  Attribution: {a['attribution']}")
+            if lic.get("name"):
+                lines.append(f"  Licence: {lic['name']}")
+            if lic.get("id"):
+                lines.append(f"  Licence identifier: {lic['id']}")
+            if lic.get("url"):
+                lines.append(f"  Licence URL: {lic['url']}")
+            if lic.get("text"):
+                lines.append("  Licence text:")
+                lines.append(lic["text"])
+            for h in a.get("sha256") or []:
+                lines.append(f"  SHA-256: {h}")
+        lines.append("")
     if any((s.get("license") or {}).get("id") == "ODbL-1.0" for s in sources):
         lines += [
             "OpenStreetMap / ODbL: the geometry in this package is a Produced Work derived from the",
@@ -967,15 +1011,27 @@ def file_entry(path, data):
 
 
 def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfield=None, report=None,
-             edits=None, blender_version=None, created_utc=None, passage_probes=None):
+             edits=None, blender_version=None, created_utc=None, passage_probes=None,
+             schema_version=PACKAGE_SCHEMA_VERSION, asset_notices=()):
     """Members + manifest for :func:`write_package`.
 
     ``objects``: manifest object entries ({name, mb_id, class, collision, provenance}).
     ``heightfield``: (mbhf bytes, info dict) or None. ``report``: dict (plan report + diagnostics).
     ``edits``: {"duplicated": [...], "user_added": [...], "removed": [...]} lists (report.json);
     the manifest stores their counts. ``passage_probes``: manifest ``passage_probes`` entries (default none;
-    the key is always written). Returns (members, manifest, probes).
+    the key is always written). ``schema_version``: written to the manifest (default the current constant;
+    must have the supported major). ``asset_notices``: optional texture provenance entries
+    ({name, attribution, license, sha256[]}); written to the manifest and the NOTICES.txt "Assets"
+    section. Returns (members, manifest, probes).
     """
+    mt = _SEMVER.fullmatch(schema_version) if isinstance(schema_version, str) else None
+    if not mt or mt.group(1) != PACKAGE_SCHEMA_VERSION.split(".")[0]:
+        raise PackageError(f"schema_version must be MAJOR.MINOR.PATCH with major "
+                           f"{PACKAGE_SCHEMA_VERSION.split('.')[0]}")
+    asset_notices = list(asset_notices or [])
+    bad = asset_notice_problems(asset_notices)
+    if bad:
+        raise PackageError("invalid asset_notices: " + "; ".join(bad))
     elevation = [s for s in sources if s.get("kind") == "elevation"]
     if not elevation or not elevation[0].get("vertical_datum"):
         raise PackageError("no elevation source with a vertical datum; refusing to write a package whose "
@@ -994,7 +1050,8 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
     report["export"] = dict(report.get("export") or {}, orientation_probes=len(probes))
     edits = {k: list((edits or {}).get(k, [])) for k in EDIT_KEYS}
     report["edits"] = edits
-    secrets = find_secrets({"sources": sources, "report": report, "objects": objects, "name": name})
+    secrets = find_secrets({"sources": sources, "report": report, "objects": objects, "name": name,
+                                "asset_notices": asset_notices})
     if secrets:
         raise PackageError("refusing to write the package: " + secrets_message("package", secrets))
     try:
@@ -1003,7 +1060,7 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
     except (TypeError, ValueError) as e:
         raise PackageError(f"report is not finite JSON: {e}") from None
     members = {"visual/map.glb": glb_bytes, "collision/map.mbcol": collision_bytes,
-               "NOTICES.txt": notices_text(sources).encode("utf-8"), "report.json": report_bytes}
+               "NOTICES.txt": notices_text(sources, asset_notices).encode("utf-8"), "report.json": report_bytes}
     hf_info = None
     if heightfield is not None:
         hf_bytes, hf_meta = heightfield
@@ -1022,7 +1079,8 @@ def assemble(name, area, sources, glb_bytes, collision_bytes, objects, heightfie
     manifest = build_manifest(name, area, sources, elevation[0]["vertical_datum"], files, collision_info, hf_info,
                               objects, probes, {k: len(v) for k, v in edits.items()}, len(report["warnings"]),
                               blender_version=blender_version, created_utc=created_utc,
-                              passage_probes=passage_probes)
+                              passage_probes=passage_probes, schema_version=schema_version,
+                              asset_notices=asset_notices)
     secrets = find_secrets(manifest, "manifest")
     if secrets:
         raise PackageError("refusing to write the package: " + secrets_message("manifest", secrets))
@@ -1329,6 +1387,9 @@ def _check_manifest(m, r):
             if not any(s["kind"] == "elevation" for s in srcs):
                 err("manifest: no elevation source (vertical datum provenance missing)")
     ed = m.get("edits")
+    if "asset_notices" in m:
+        for msg in asset_notice_problems(m["asset_notices"]):
+            err("manifest: " + msg)
     need(isinstance(ed, dict) and all(isinstance(ed.get(k), int) and not isinstance(ed.get(k), bool)
                                       and ed[k] >= 0 for k in EDIT_KEYS),
          "edits must be {duplicated, user_added, removed} counts")
@@ -1378,6 +1439,7 @@ def _validate_payloads(m, blobs, r):
         r.errors.append(str(e))
         return
     _payload_secrets(r, "visual/map.glb JSON chunk", gl)
+    _check_asset_provenance(m, glb_image_sha256s(blobs["visual"]), r)
     _check_binding(m, col, nodes, r)
     if "heightfield" in blobs:
         _check_heightfield(m["heightfield"], blobs["heightfield"], col, r)
@@ -1607,12 +1669,32 @@ def _check_heightfield(info, data, col, r):
                 return
 
 
+def _check_asset_provenance(m, image_hashes, r):
+    listed = {h for a in m.get("asset_notices", []) for h in a["sha256"]}
+    for i, h in enumerate(image_hashes):
+        if h not in listed:
+            r.errors.append(f"glb: texture without provenance: image #{i} (SHA-256 {h}) is not listed in "
+                            "any asset_notices[].sha256")
+    present = set(image_hashes)
+    for k, a in enumerate(m.get("asset_notices", [])):
+        for h in a["sha256"]:
+            if h not in present:
+                r.warnings.append(f"asset_notices[{k}] lists SHA-256 {h}, which is not an image in visual/map.glb")
+
+
 def _check_notices(m, data, r):
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         r.errors.append("NOTICES.txt is not UTF-8")
         return
+    for k, a in enumerate(m.get("asset_notices", [])):
+        if a["attribution"] not in text:
+            r.errors.append(f"NOTICES.txt lacks the attribution of asset_notices[{k}]")
+        for key in LICENSE_NOTICE_KEYS:
+            if a["license"].get(key) and a["license"][key] not in text:
+                r.errors.append(f"NOTICES.txt lacks the licence {key} of asset_notices[{k}] "
+                                f"(asset_notices[{k}].license.{key} must appear verbatim)")
     for k, s in enumerate(m["sources"]):
         if s["attribution"] and s["attribution"] not in text:
             r.errors.append(f"NOTICES.txt lacks the attribution of sources[{k}]")

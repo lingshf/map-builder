@@ -119,5 +119,36 @@ class CsharpCapsuleParityTest(unittest.TestCase):
         self.assertEqual(self.run_reader(str(prefix - 1))[-1], "probe 3 unchecked")      # one unit short of them
 
 
+@unittest.skipUnless(shutil.which("dotnet"), "the .NET SDK is not installed")
+class CsharpTexturedPackageTest(unittest.TestCase):
+    """Schema 2.1: the C# reader accepts the textured fixture and rejects each negative fixture with the same
+    rule as the Python validator (shared message fragment). One --validate-many process covers all packages."""
+
+    @classmethod
+    def setUpClass(cls):
+        from .make_textured_fixture import negative_fixtures
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+        cls.fixtures = negative_fixtures(cls.tmp.name)
+        build = subprocess.run(["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", PROJECT],
+                               capture_output=True, text=True)
+        assert build.returncode == 0, build.stdout + build.stderr
+        run = subprocess.run(["dotnet", os.path.join(PROJECT, "bin", "Release", "net8.0", "MbmapReader.dll"),
+                              "--validate-many", cls.tmp.name], capture_output=True, text=True)
+        cls.verdicts = dict(line.split(": ", 1) for line in run.stdout.splitlines())
+
+    def test_textured_package_is_accepted(self):
+        self.assertEqual(self.verdicts["good.mbmap"], "OK")
+
+    def test_every_negative_fixture_is_rejected_like_python(self):
+        self.assertEqual(len(self.verdicts), len(self.fixtures))
+        for name, (_, fragment, _kind) in self.fixtures.items():
+            if name == "good":
+                continue
+            with self.subTest(name):
+                verdict = self.verdicts[name + ".mbmap"]
+                self.assertTrue(verdict.startswith("INVALID:") and fragment in verdict, verdict)
+
+
 if __name__ == "__main__":
     unittest.main()

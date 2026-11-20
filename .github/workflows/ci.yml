@@ -36,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the frozen-reader step needs the v0.3.0 tag for git archive
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
@@ -59,3 +61,18 @@ jobs:
           code=${PIPESTATUS[0]}
           set -e
           test "$code" = "1" && grep -q "INVALID: collision/map.mbcol: SHA-256 mismatch" "$RUNNER_TEMP/out.txt"
+      - name: Frozen v0.3.0 readers accept a complete textured 2.1.0 package
+        run: |
+          set -e
+          V030="$RUNNER_TEMP/v030"
+          mkdir -p "$V030"
+          git archive v0.3.0 map_builder tools examples/csharp | tar -x -C "$V030"
+          python3 -m tests.make_textured_fixture "$RUNNER_TEMP/textured.mbmap"
+          # the v0.3.0 Python validator: no errors, and no warnings beyond the committed sample's own
+          (cd "$V030" && python3 -m tools.mbmap_cli validate "$RUNNER_TEMP/textured.mbmap") | tee "$RUNNER_TEMP/tex.txt"
+          (cd "$V030" && python3 -m tools.mbmap_cli validate "$GITHUB_WORKSPACE/examples/synthetic_sample.mbmap") | tee "$RUNNER_TEMP/sample.txt"
+          grep -q "^VALID: 0 error(s)" "$RUNNER_TEMP/tex.txt"
+          diff <(grep '^warning:' "$RUNNER_TEMP/tex.txt") <(grep '^warning:' "$RUNNER_TEMP/sample.txt")
+          # the frozen v0.3.0 C# reader: must read the textured package unchanged (texture ignored)
+          dotnet run -c Release --project "$V030/examples/csharp/MbmapReader" -- "$RUNNER_TEMP/textured.mbmap" | tee "$RUNNER_TEMP/tex-cs.txt"
+          test "$(tail -n 1 "$RUNNER_TEMP/tex-cs.txt")" = "OK"

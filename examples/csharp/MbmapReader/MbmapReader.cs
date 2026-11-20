@@ -46,6 +46,9 @@ namespace MapBuilder.Reference
         public const long MaxVisualTriangles = 8_000_000;
         public const long MaxVisualPositions = 3 * MaxVisualTriangles; // decoded POSITION vertices, this reader's cap
         public const int MaxNodes = 1_000_000, MaxNodeDepth = 64;
+        // embedded textures (glb.py, schema 2.1)
+        public const long MaxTextureBytes = 4L * 1024 * 1024;
+        public const long MaxTextureSide = 1024;
         // orientation probes (package.py)
         public const int ProbeMax = 3;
         public const double ProbeMatchM = 0.05, ProbeMinDot = 0.99, ProbeUnitTol = 1e-4, ProbeVertexTolM = 1e-6;
@@ -331,7 +334,11 @@ namespace MapBuilder.Reference
     {
         const uint MagicGlTF = 0x46546C67, ChunkJson = 0x4E4F534A, ChunkBin = 0x004E4942;
 
-        public static List<VisualNode> Read(byte[] data)
+        public static List<VisualNode> Read(byte[] data) => Read(data, out _);
+
+        /// <summary>As <see cref="Read(byte[])"/>; also returns the lowercase hex SHA-256 of every embedded
+        /// image (schema 2.1), in image order, for the asset_notices provenance check.</summary>
+        public static List<VisualNode> Read(byte[] data, out List<string> imageSha256)
         {
             if (data.LongLength > Limits.MaxGlbBytes) throw new MbmapException("glb: file exceeds size limit");
             if (data.Length < 20) throw new MbmapException("glb: too short");
@@ -355,10 +362,26 @@ namespace MapBuilder.Reference
             while (jsonLen > 0 && data[chunks[0].offset + jsonLen - 1] == (byte)' ') jsonLen--;
             int binOff = hasBin ? chunks[1].offset : 0, binLen = hasBin ? chunks[1].length : 0;
             using (var doc = StrictJson.Parse(new ReadOnlyMemory<byte>(data, chunks[0].offset, jsonLen), "glb: JSON chunk"))
-                return ReadNodes(doc.RootElement, data, binOff, binLen, hasBin);
+                return ReadNodes(doc.RootElement, data, binOff, binLen, hasBin, out imageSha256);
         }
 
-        static List<VisualNode> ReadNodes(JsonElement gl, byte[] data, int binOff, int binLen, bool hasBin)
+        static bool IsIndex(JsonElement e, string key, long limit, out long value)
+        {
+            value = 0;
+            return e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out value) && value >= 0 && value < limit;
+        }
+
+        static string HexSha256(byte[] data, int offset, int length)
+        {
+            using (var h = SHA256.Create())
+            {
+                var sb = new StringBuilder();
+                foreach (byte b in h.ComputeHash(data, offset, length)) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
+        }
+
+        static List<VisualNode> ReadNodes(JsonElement gl, byte[] data, int binOff, int binLen, bool hasBin, out List<string> imageSha256)
         {
             if (gl.ValueKind != JsonValueKind.Object) throw new MbmapException("glb: JSON chunk must be an object");
             if (Json.Str(Json.Obj(gl, "asset", "glb"), "version", "glb: asset") != "2.0") throw new MbmapException("glb: asset.version must be 2.0");
@@ -374,9 +397,60 @@ namespace MapBuilder.Reference
                 blen = Json.Long(buffers[0], "byteLength", "glb: buffer");
                 if (blen < 0 || blen > binLen || binLen - blen > 3) throw new MbmapException("glb: buffer byteLength does not match the BIN chunk");
             }
-            foreach (var im in Json.OptObjects(gl, "images", "glb"))
-                if (im.TryGetProperty("uri", out _)) throw new MbmapException("glb: external image URIs are not allowed");
             var views = Json.OptObjects(gl, "bufferViews", "glb");
+
+            // Schema 2.1 textures: PNG headers only (no decode), embedded in the BIN chunk (glb.py _check_textures).
+            var images = Json.OptObjects(gl, "images", "glb");
+            var textures = Json.OptObjects(gl, "textures", "glb");
+            var samplers = Json.OptObjects(gl, "samplers", "glb");
+            var materials = Json.OptObjects(gl, "materials", "glb");
+            imageSha256 = new List<string>();
+            long imageBytes = 0;
+            for (int i = 0; i < images.Count; i++)
+            {
+                var im = images[i];
+                if (im.TryGetProperty("uri", out _)) throw new MbmapException("glb: external image URIs are not allowed");
+                if (!im.TryGetProperty("mimeType", out var mt) || mt.ValueKind != JsonValueKind.String || mt.GetString() != "image/png")
+                    throw new MbmapException($"glb: image #{i} must have mimeType image/png");
+                if (blen == 0 || !IsIndex(im, "bufferView", views.Count, out long vi))
+                    throw new MbmapException($"glb: image #{i} bufferView is missing or out of range");
+                var v = views[(int)vi];
+                long voff = 0, vlen = 0;
+                bool ok = (!v.TryGetProperty("buffer", out var vb) || (vb.ValueKind == JsonValueKind.Number && vb.TryGetInt64(out long bn) && bn == 0))
+                          && (!v.TryGetProperty("byteOffset", out var vo) || (vo.ValueKind == JsonValueKind.Number && vo.TryGetInt64(out voff)))
+                          && v.TryGetProperty("byteLength", out var vl) && vl.ValueKind == JsonValueKind.Number && vl.TryGetInt64(out vlen);
+                if (!ok || voff < 0 || vlen < 0 || voff > blen || vlen > blen - voff)
+                    throw new MbmapException($"glb: image #{i} bufferView points outside the BIN chunk");
+                imageBytes += vlen;
+                if (imageBytes > Limits.MaxTextureBytes) throw new MbmapException($"glb: embedded images exceed {Limits.MaxTextureBytes} bytes in total");
+                int at = (int)(binOff + voff);
+                if (vlen < 33 || Bin.U32(data, at) != 0x474E5089u || Bin.U32(data, at + 4) != 0x0A1A0A0Du
+                    || Bin.U32(data, at + 8) != 0x0D000000u || Bin.U32(data, at + 12) != 0x52444849u)
+                    throw new MbmapException($"glb: image #{i} is not a PNG (signature or IHDR mismatch)");
+                long w = BinaryPrimitives.ReadUInt32BigEndian(new ReadOnlySpan<byte>(data, at + 16, 4));
+                long h = BinaryPrimitives.ReadUInt32BigEndian(new ReadOnlySpan<byte>(data, at + 20, 4));
+                foreach (long side in new[] { w, h })
+                    if (side < 1 || side > Limits.MaxTextureSide || (side & (side - 1)) != 0)
+                        throw new MbmapException($"glb: image #{i} is {w}x{h}; each side must be a power of two <= {Limits.MaxTextureSide}");
+                imageSha256.Add(HexSha256(data, at, (int)vlen));
+            }
+            for (int i = 0; i < textures.Count; i++)
+            {
+                if (!IsIndex(textures[i], "source", images.Count, out _)) throw new MbmapException($"glb: texture #{i} source is missing or out of range");
+                if (textures[i].TryGetProperty("sampler", out _) && !IsIndex(textures[i], "sampler", samplers.Count, out _))
+                    throw new MbmapException($"glb: texture #{i} sampler is out of range");
+            }
+            var texturedMaterials = new HashSet<long>();
+            for (int i = 0; i < materials.Count; i++)
+            {
+                if (!materials[i].TryGetProperty("pbrMetallicRoughness", out var pbr) || pbr.ValueKind != JsonValueKind.Object
+                    || !pbr.TryGetProperty("baseColorTexture", out var bct) || bct.ValueKind == JsonValueKind.Null) continue;
+                if (bct.ValueKind != JsonValueKind.Object || !IsIndex(bct, "index", textures.Count, out _))
+                    throw new MbmapException($"glb: material #{i} baseColorTexture.index is missing or out of range");
+                if (bct.TryGetProperty("texCoord", out var tc) && !(tc.ValueKind == JsonValueKind.Number && tc.TryGetInt64(out long tcv) && tcv == 0))
+                    throw new MbmapException($"glb: material #{i} baseColorTexture.texCoord must be 0");
+                texturedMaterials.Add(i);
+            }
             var accessors = Json.OptObjects(gl, "accessors", "glb");
             var meshes = Json.OptObjects(gl, "meshes", "glb");
             var nodes = Json.OptObjects(gl, "nodes", "glb", Limits.MaxNodes);
@@ -442,6 +516,17 @@ namespace MapBuilder.Reference
                             }
                         posCache[pai] = pv;
                     }
+                    if (p.TryGetProperty("material", out var pmat) && pmat.ValueKind == JsonValueKind.Number && pmat.TryGetInt64(out long pmi)
+                        && texturedMaterials.Contains(pmi))
+                    {
+                        if (!attrs.TryGetProperty("TEXCOORD_0", out _)) throw new MbmapException("glb: a textured primitive is missing TEXCOORD_0");
+                        int uai = Json.Index(attrs, "TEXCOORD_0", accessors.Count, $"{tag}.attributes");
+                        var uv = Locate(uai, false, $"glb: accessor {uai}", true);
+                        if (uv.Count != pos.Count) throw new MbmapException("glb: TEXCOORD_0 count differs from POSITION count");
+                        for (long k = 0; k < uv.Count; k++)
+                            for (int c = 0; c < 2; c++)
+                                if (!float.IsFinite(Bin.F32(data, (int)(uv.Start + k * uv.Stride + 4 * c)))) throw new MbmapException("glb: non-finite TEXCOORD_0");
+                    }
                     int[] ix = new int[nIdx];
                     if (idx.Count == 0) for (int k = 0; k < ix.Length; k++) ix[k] = k;
                     else
@@ -463,18 +548,20 @@ namespace MapBuilder.Reference
             // Validates an accessor (position: float32 VEC3; otherwise unsigned integer scalars) and its
             // bufferView against the BIN chunk, without allocating. Every range check is subtraction-based on
             // values already known to be non-negative, so no untrusted sum can overflow.
-            AccessorView Locate(int ai, bool position, string tag)
+            AccessorView Locate(int ai, bool position, string tag, bool uv = false)
             {
                 var a = accessors[ai];
                 if (a.TryGetProperty("sparse", out _)) throw new MbmapException("glb: sparse accessors are not supported");
                 long ct = Json.Long(a, "componentType", tag);
                 string type = Json.Str(a, "type", tag);
                 int size = ct == 5126 || ct == 5125 ? 4 : ct == 5123 || ct == 5122 ? 2 : ct == 5121 || ct == 5120 ? 1 : 0;
-                int nc = type == "SCALAR" ? 1 : type == "VEC3" ? 3 : 0;
+                int nc = type == "SCALAR" ? 1 : type == "VEC2" ? 2 : type == "VEC3" ? 3 : 0;
                 bool normalized = a.TryGetProperty("normalized", out var nz) && Json.AsBool(nz, $"{tag}.normalized");
                 if (position && (ct != 5126 || nc != 3 || normalized))
                     throw new MbmapException("glb: POSITION must be float32 VEC3");
-                if (!position && (nc != 1 || normalized || !(ct == 5121 || ct == 5123 || ct == 5125)))
+                if (uv && (ct != 5126 || nc != 2 || normalized))
+                    throw new MbmapException("glb: TEXCOORD_0 must be float32 VEC2");
+                if (!position && !uv && (nc != 1 || normalized || !(ct == 5121 || ct == 5123 || ct == 5125)))
                     throw new MbmapException("glb: indices must be unsigned integer scalars");
                 long count = Json.Long(a, "count", tag);
                 if (count < 1) throw new MbmapException($"{tag}.count must be at least 1");
@@ -1063,6 +1150,7 @@ namespace MapBuilder.Reference
         public string Name, SchemaVersion, CreatedUtc, VerticalDatum;
         public double OriginLatDeg, OriginLonDeg, ZOffsetM, WidthM, HeightM;
         public List<SourceInfo> Sources = new List<SourceInfo>();
+        public List<AssetNotice> AssetNotices = new List<AssetNotice>();
 
         internal static ManifestSummary Read(JsonElement m)
         {
@@ -1111,8 +1199,46 @@ namespace MapBuilder.Reference
                 s.Sources.Add(src);
             }
             if (!elevation) throw new MbmapException("manifest: no elevation source (vertical datum provenance missing)");
+            if (m.TryGetProperty("asset_notices", out var an))
+            {
+                if (an.ValueKind != JsonValueKind.Array) throw new MbmapException("manifest: asset_notices must be an array");
+                int k = 0;
+                foreach (var e in an.EnumerateArray())
+                {
+                    string tag = $"manifest.asset_notices[{k++}]";
+                    if (e.ValueKind != JsonValueKind.Object) throw new MbmapException($"{tag} must be an object");
+                    var n = new AssetNotice { Name = Json.NonEmptyStr(e, "name", tag), Attribution = Json.NonEmptyStr(e, "attribution", tag) };
+                    var lic = Json.Obj(e, "license", tag);
+                    bool declares = false;
+                    foreach (var key in new[] { "id", "name", "text", "url" })
+                        if (lic.TryGetProperty(key, out var lv))
+                        {
+                            if (lv.ValueKind != JsonValueKind.String) throw new MbmapException($"{tag}.license.{key} must be a string");
+                            if (lv.GetString().Length > 0) n.LicenseValues.Add((key, lv.GetString()));
+                            declares |= key != "url" && lv.GetString().Length > 0;
+                        }
+                    if (!declares) throw new MbmapException($"{tag}.license must declare a licence identifier, name or text");
+                    var hashes = Json.Array(e, "sha256", tag);
+                    if (hashes.Count == 0) throw new MbmapException($"{tag}.sha256 must be a non-empty array of 64 lowercase hex digits");
+                    foreach (var h in hashes)
+                    {
+                        string hs = h.ValueKind == JsonValueKind.String ? h.GetString() : null;
+                        if (hs == null || !Regex.IsMatch(hs, "^[0-9a-f]{64}\\z")) throw new MbmapException($"{tag}.sha256 must be a non-empty array of 64 lowercase hex digits");
+                        n.Sha256.Add(hs);
+                    }
+                    s.AssetNotices.Add(n);
+                }
+            }
             return s;
         }
+    }
+
+    /// <summary>One schema-2.1 asset_notices[] entry: provenance of the textures whose image SHA-256 it lists.</summary>
+    public sealed class AssetNotice
+    {
+        public string Name, Attribution;
+        public List<(string Key, string Value)> LicenseValues = new List<(string, string)>();
+        public List<string> Sha256 = new List<string>();
     }
 
     public sealed class MbmapPackage : IDisposable
@@ -1155,6 +1281,7 @@ namespace MapBuilder.Reference
         public List<OrientationProbe> Probes = new List<OrientationProbe>();
         public List<PassageProbe> PassageProbes = new List<PassageProbe>();
         public ManifestSummary Info;      // typed, validated manifest fields a consumer displays
+        public List<VisualNode> VisualNodes; // world-space triangles of the visual GLB, parsed during Load
 
         public void Dispose() => ManifestDocument?.Dispose();
 
@@ -1270,6 +1397,32 @@ namespace MapBuilder.Reference
                 if (Json.OptStrOrNull(m, "report", "manifest") != (roles.Contains("report") ? ReportPath : null))
                     throw new MbmapException($"manifest: report must be '{ReportPath}' when {ReportPath} is listed, otherwise null");
                 pkg.Info = ManifestSummary.Read(m);
+
+                // Visual payload and schema-2.1 asset provenance (every embedded image must be listed in
+                // asset_notices[].sha256, and each notice must appear verbatim in NOTICES.txt).
+                pkg.VisualNodes = Glb.Read(pkg.Member(VisualPath, "visual"), out var imageHashes);
+                var listedHashes = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var an in pkg.Info.AssetNotices) listedHashes.UnionWith(an.Sha256);
+                for (int ii = 0; ii < imageHashes.Count; ii++)
+                    if (!listedHashes.Contains(imageHashes[ii]))
+                        throw new MbmapException($"glb: texture without provenance: image #{ii} (SHA-256 {imageHashes[ii]}) is not listed in any asset_notices[].sha256");
+                var presentHashes = new HashSet<string>(imageHashes, StringComparer.Ordinal);
+                for (int ai = 0; ai < pkg.Info.AssetNotices.Count; ai++)
+                    foreach (var h in pkg.Info.AssetNotices[ai].Sha256)
+                        if (!presentHashes.Contains(h)) throw new MbmapException($"asset_notices[{ai}] lists SHA-256 {h}, which is not an image in visual/map.glb (warnings are errors)");
+                if (pkg.Info.AssetNotices.Count > 0)
+                {
+                    string notices;
+                    try { notices = new UTF8Encoding(false, true).GetString(pkg.Member(NoticesPath, "notices")); }
+                    catch (ArgumentException) { throw new MbmapException("NOTICES.txt is not UTF-8"); }
+                    for (int ai = 0; ai < pkg.Info.AssetNotices.Count; ai++)
+                    {
+                        var an = pkg.Info.AssetNotices[ai];
+                        if (!notices.Contains(an.Attribution)) throw new MbmapException($"NOTICES.txt lacks the attribution of asset_notices[{ai}]");
+                        foreach (var (key, value) in an.LicenseValues)
+                            if (!notices.Contains(value)) throw new MbmapException($"NOTICES.txt lacks the licence {key} of asset_notices[{ai}]");
+                    }
+                }
 
                 // 4. Payloads.
                 pkg.Collision = CollisionMesh.Read(pkg.Member(CollisionPath, "collision"));

@@ -2046,5 +2046,76 @@ class PassageProbeTest(TempDirCase):
         self.assertInvalid(self.p("old.mbmap"), "unsupported schema major version 1 (expected 2)")
 
 
+# --- schema 2.1.0: textures, UVs, asset_notices (S3-TEX-FORMAT) --------------------------------
+
+class TexturedPackageTest(TempDirCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from .make_textured_fixture import negative_fixtures
+        cls.fixtures = negative_fixtures(cls.tmp)
+
+    def test_good_textured_package_validates_clean(self):
+        r = validate_package(self.fixtures["good"][0])
+        self.assertTrue(r.ok and not any("texture" in w or "asset" in w for w in r.warnings), r.summary())
+        self.assertEqual(r.manifest["schema_version"], "2.1.0")
+        members, _ = load(self.fixtures["good"][0])
+        from map_builder.core.glb import glb_image_sha256s
+        self.assertEqual(glb_image_sha256s(members["visual/map.glb"]),
+                         r.manifest["asset_notices"][0]["sha256"])
+        self.assertIn("Assets", members["NOTICES.txt"].decode())
+
+    def test_each_negative_fixture_fails_with_its_rule(self):
+        for name, (path, fragment, kind) in self.fixtures.items():
+            if name == "good":
+                continue
+            with self.subTest(name):
+                r = validate_package(path)
+                found = r.errors if kind == "error" else r.warnings
+                self.assertTrue(any(fragment in e for e in found), (found, r.errors))
+                self.assertEqual(r.ok, kind == "warning", r.summary())
+
+    def test_textured_glb_roundtrip_and_untextured_bytes_unchanged(self):
+        from .make_textured_fixture import make_png
+        m = MeshData("quad")
+        for p in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)):
+            m.add_vertex(*p)
+        m.add_face((0, 1, 2), "T", (1, 1, 1), uvs=[(0, 0), (1, 0), (1, 1)])
+        m.add_face((0, 2, 3), "U", (1, 1, 1))
+        node = {"name": "q", "mesh": m, "location": (0, 0, 0), "rotation_z": 0.0, "scale": 1.0, "extras": {}}
+        png = make_png()
+        glb = write_glb([node], {"T": ((1, 1, 1), 0.5, 0.0, png), "U": ((1, 1, 1), 0.5, 0.0)})
+        gl = json.loads(glb[20:20 + struct.unpack_from("<I", glb, 12)[0]])
+        self.assertEqual(len(gl["images"]), 1)
+        prims = [p for me in gl["meshes"] for p in me["primitives"]]
+        self.assertEqual(sorted("TEXCOORD_0" in p["attributes"] for p in prims), [False, True])
+        plain = MeshData("p")
+        for p in ((0, 0, 0), (1, 0, 0), (0, 1, 0)):
+            plain.add_vertex(*p)
+        plain.add_face((0, 1, 2), "U", (1, 1, 1))
+        n2 = dict(node, mesh=plain)
+        self.assertEqual(write_glb([n2], {"U": ((1, 1, 1), 0.5, 0.0)}),
+                         write_glb([n2], {"U": ((1, 1, 1), 0.5, 0.0), "T": ((1, 1, 1), 0.5, 0.0, png)}))
+
+    def test_writer_params(self):
+        objs = scene()
+        for bad in ("3.0.0", "2.x", 2):
+            with self.assertRaises(PackageError):
+                scene_members_v(objs, bad)
+        _, manifest, _ = scene_members_v(objs, "2.0.0")
+        self.assertNotIn("asset_notices", manifest)
+        with self.assertRaises(PackageError):
+            assemble("t", AREA, synthetic_sources(), b"", b"", [], asset_notices=[{"name": "x"}])
+
+
+def scene_members_v(objs, version):
+    col_bytes = write_collision([col_of(o) for o in objs])
+    glb = write_glb([node_of(o) for o in objs], MATERIALS)
+    objects = [{"name": o["name"], "mb_id": o["mb_id"], "class": o["cls"], "collision": True, "provenance": {}}
+               for o in objs]
+    return assemble("test", AREA, synthetic_sources(), glb, col_bytes, objects, created_utc=UTC,
+                    schema_version=version)
+
+
 if __name__ == "__main__":
     unittest.main()

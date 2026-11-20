@@ -24,6 +24,9 @@ MAX_VISUAL_TRIANGLES = 8_000_000
 MAX_NODES = 1_000_000
 MAX_DEPTH = 64
 QUAT_UNIT_TOL = 1e-3
+MAX_TEXTURE_BYTES = 4 * 1024 * 1024   # total embedded image bytes
+MAX_TEXTURE_SIDE = 1024
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 # --- writer -----------------------------------------------------------------
@@ -52,7 +55,10 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
     ``location``/``rotation_z`` (about +Z)/``scale`` (number or per-axis map-frame tuple) are the
     map-frame object transform; they become the node TRS in glTF axes (gltf = (x, z, -y)).
     Shared MeshData instances (same object) become one glTF mesh.
-    materials: {name: (rgb, roughness, metallic)}.
+    materials: {name: (rgb, roughness, metallic[, png_bytes])}. ``png_bytes`` makes the material
+    textured: it is embedded once (identical bytes share one image) as ``baseColorTexture``, and the
+    primitives of that material get ``TEXCOORD_0`` from ``MeshData.face_uvs`` (every face of such a
+    primitive must have UVs). Without textures the output has no images/textures/samplers/UVs.
     """
     gl = {"asset": {"version": "2.0", "generator": generator}, "scenes": [{"nodes": []}], "scene": 0,
           "nodes": [], "meshes": [], "accessors": [], "bufferViews": [], "materials": [], "buffers": []}
@@ -60,19 +66,44 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
         gl["asset"]["extras"] = extras
     binbuf = bytearray()
     mat_index = {}
+    image_index = {}
+
+    def png_of(name):
+        spec = materials.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
+        return spec[3] if len(spec) > 3 else None
+
+    def texture(png):
+        if not isinstance(png, (bytes, bytearray)):
+            raise PackageError("glb: a material texture must be PNG bytes")
+        png = bytes(png)
+        if png not in image_index:
+            if "samplers" not in gl:
+                gl["samplers"] = [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}]
+                gl["images"], gl["textures"] = [], []
+            gl["images"].append({"bufferView": add_view(png, None), "mimeType": "image/png"})
+            gl["textures"].append({"sampler": 0, "source": len(gl["images"]) - 1})
+            image_index[png] = len(gl["textures"]) - 1
+        return image_index[png]
 
     def material(name):
         if name not in mat_index:
-            rgb, rough, metal = materials.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
+            rgb, rough, metal = materials.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))[:3]
+            pbr = {"baseColorFactor": [rgb[0], rgb[1], rgb[2], 1.0], "metallicFactor": metal,
+                   "roughnessFactor": rough}
+            png = png_of(name)
+            if png is not None:
+                pbr["baseColorTexture"] = {"index": texture(png), "texCoord": 0}
             mat_index[name] = len(gl["materials"])
-            gl["materials"].append({"name": name, "pbrMetallicRoughness": {
-                "baseColorFactor": [rgb[0], rgb[1], rgb[2], 1.0], "metallicFactor": metal, "roughnessFactor": rough}})
+            gl["materials"].append({"name": name, "pbrMetallicRoughness": pbr})
         return mat_index[name]
 
     def add_view(data, target):
         while len(binbuf) % 4:
             binbuf.append(0)
-        gl["bufferViews"].append({"buffer": 0, "byteOffset": len(binbuf), "byteLength": len(data), "target": target})
+        view = {"buffer": 0, "byteOffset": len(binbuf), "byteLength": len(data)}
+        if target is not None:
+            view["target"] = target
+        gl["bufferViews"].append(view)
         binbuf.extend(data)
         return len(gl["bufferViews"]) - 1
 
@@ -95,11 +126,20 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
         by_mat = {}
         for f, mi in enumerate(md.face_materials):
             by_mat.setdefault(mi, []).append(f)
+        if md.face_uvs is not None and len(md.face_uvs) != len(md.faces):
+            raise PackageError(f"glb: mesh #{len(gl['meshes'])} face_uvs must be parallel to faces")
         for mi, flist in sorted(by_mat.items()):
-            pos, col, nrm = [], [], []
+            pos, col, nrm, uv = [], [], [], []
+            textured = png_of(md.materials[mi]) is not None
             for f in flist:
                 face = md.faces[f]
                 c = md.face_colors[f]
+                fuv = md.face_uvs[f] if textured and md.face_uvs is not None else None
+                if textured and (fuv is None or len(fuv) != len(face)
+                                 or not all(len(q) == 2 and all(isinstance(x, (int, float)) and math.isfinite(x)
+                                                                 for x in q) for q in fuv)):
+                    raise PackageError(f"glb: mesh #{len(gl['meshes'])}: a face of a textured material lacks "
+                                       "finite UVs")
                 for k in range(1, len(face) - 1):
                     tri = [map_to_gltf(md.vertices[i]) for i in (face[0], face[k], face[k + 1])]
                     a, b, cc = tri
@@ -112,6 +152,9 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
                         pos.extend(p)
                         col.extend(c)
                         nrm.extend(n)
+                    if textured:
+                        for ci in (0, k, k + 1):
+                            uv.extend(fuv[ci])
             cnt = len(pos) // 3
             if cnt == 0:
                 continue
@@ -122,7 +165,10 @@ def write_glb(nodes, materials, generator="map-builder", extras=None):
             ca = add_accessor(add_view(_f32(col), 34962), 5126, cnt, "VEC3")
             idx = struct.pack(f"<{cnt}I", *range(cnt))
             ia = add_accessor(add_view(idx, 34963), 5125, cnt, "SCALAR")
-            prims.append({"attributes": {"POSITION": pa, "NORMAL": na, "COLOR_0": ca}, "indices": ia,
+            attrs = {"POSITION": pa, "NORMAL": na, "COLOR_0": ca}
+            if textured:
+                attrs["TEXCOORD_0"] = add_accessor(add_view(_f32(uv), 34962), 5126, cnt, "VEC2")
+            prims.append({"attributes": attrs, "indices": ia,
                           "material": material(md.materials[mi]), "mode": 4})
         gl["meshes"].append({"name": md.name, "primitives": prims})
         mesh_ids[key] = len(gl["meshes"]) - 1
@@ -276,7 +322,7 @@ def _read_glb(data, max_triangles):
     if buffers and binc is None:
         raise PackageError("glb: buffer declared without a BIN chunk")
     for im in gl.get("images", []):
-        if "uri" in im:
+        if isinstance(im, dict) and "uri" in im:
             raise PackageError("glb: external image URIs are not allowed in packages; embed textures")
     binc = binc or b""
     blen = buffers[0]["byteLength"] if buffers else 0
@@ -284,6 +330,7 @@ def _read_glb(data, max_triangles):
     accessors = gl.get("accessors", [])
     if not isinstance(views, list) or not isinstance(accessors, list):
         raise PackageError("glb: bufferViews/accessors must be arrays")
+    textured = _check_textures(gl, binc, blen, views, bool(buffers))
     budget = {"tris": 0}
 
     def read_acc(ai, want=None):
@@ -300,6 +347,8 @@ def _read_glb(data, max_triangles):
             raise PackageError("glb: POSITION must be float32 VEC3")
         if want == "index" and (a["componentType"] not in _INDEX_TYPES or nc != 1):
             raise PackageError("glb: indices must be unsigned integer scalars")
+        if want == "uv" and (a["componentType"] != 5126 or nc != 2 or a.get("normalized")):
+            raise PackageError("glb: TEXCOORD_0 must be float32 VEC2")
         count = a.get("count")
         if not _is_index(count, len(binc) // (size * nc) + 1 if size else 1) or count < 1:
             raise PackageError("glb: accessor count is invalid or exceeds the buffer")
@@ -368,7 +417,7 @@ def _read_glb(data, max_triangles):
                 if budget["tris"] > max_triangles:
                     raise PackageError(f"glb: more than {max_triangles} visual triangles")
             else:
-                mesh_cache[mi] = _mesh_triangles(meshes[mi], read_acc, budget, max_triangles)
+                mesh_cache[mi] = _mesh_triangles(meshes[mi], read_acc, budget, max_triangles, textured)
             flip = det3(m) < 0  # glTF: negative determinant means clockwise front faces
             for a, b, c in mesh_cache[mi]:
                 wa, wb, wc = (tuple(m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3] for r in range(3))
@@ -387,7 +436,80 @@ def _read_glb(data, max_triangles):
     return gl, result
 
 
-def _mesh_triangles(mesh, read_acc, budget, max_triangles):
+def _check_textures(gl, binc, blen, views, has_buffer):
+    """Validate images, samplers, textures and material bindings (PNG headers only, no decode).
+    Returns the set of material indices that carry a baseColorTexture."""
+    images = gl.get("images", [])
+    textures = gl.get("textures", [])
+    samplers = gl.get("samplers", [])
+    materials = gl.get("materials", [])
+    if not all(isinstance(x, list) for x in (images, textures, samplers, materials)):
+        raise PackageError("glb: images/textures/samplers/materials must be arrays")
+    total = 0
+    for i, im in enumerate(images):
+        if not isinstance(im, dict):
+            raise PackageError(f"glb: image #{i} must be an object")
+        if "uri" in im:
+            raise PackageError("glb: external image URIs are not allowed in packages; embed textures")
+        if im.get("mimeType") != "image/png":
+            raise PackageError(f"glb: image #{i} must have mimeType image/png")
+        v = im.get("bufferView")
+        if not has_buffer or not _is_index(v, len(views)) or not isinstance(views[v], dict):
+            raise PackageError(f"glb: image #{i} bufferView is missing or out of range")
+        voff, vlen = views[v].get("byteOffset", 0), views[v].get("byteLength")
+        if views[v].get("buffer", 0) != 0 or not (_is_index(voff, blen + 1) and _is_index(vlen, blen + 1)
+                                                  and voff + vlen <= blen and voff + vlen <= len(binc)):
+            raise PackageError(f"glb: image #{i} bufferView points outside the BIN chunk")
+        total += vlen
+        if total > MAX_TEXTURE_BYTES:
+            raise PackageError(f"glb: embedded images exceed {MAX_TEXTURE_BYTES} bytes in total")
+        data = binc[voff:voff + vlen]
+        if len(data) < 33 or data[:8] != PNG_SIGNATURE or data[8:16] != b"\x00\x00\x00\rIHDR":
+            raise PackageError(f"glb: image #{i} is not a PNG (signature or IHDR mismatch)")
+        w, h = struct.unpack_from(">II", data, 16)
+        for side in (w, h):
+            if side < 1 or side > MAX_TEXTURE_SIDE or side & (side - 1):
+                raise PackageError(f"glb: image #{i} is {w}x{h}; each side must be a power of two "
+                                   f"<= {MAX_TEXTURE_SIDE}")
+    for i, s in enumerate(samplers):
+        if not isinstance(s, dict):
+            raise PackageError(f"glb: sampler #{i} must be an object")
+    for i, t in enumerate(textures):
+        if not isinstance(t, dict):
+            raise PackageError(f"glb: texture #{i} must be an object")
+        if not _is_index(t.get("source"), len(images)):
+            raise PackageError(f"glb: texture #{i} source is missing or out of range")
+        if "sampler" in t and not _is_index(t["sampler"], len(samplers)):
+            raise PackageError(f"glb: texture #{i} sampler is out of range")
+    textured = set()
+    for i, m in enumerate(materials):
+        pbr = m.get("pbrMetallicRoughness") if isinstance(m, dict) else None
+        bct = pbr.get("baseColorTexture") if isinstance(pbr, dict) else None
+        if bct is None:
+            continue
+        if not isinstance(bct, dict) or not _is_index(bct.get("index"), len(textures)):
+            raise PackageError(f"glb: material #{i} baseColorTexture.index is missing or out of range")
+        tc = bct.get("texCoord", 0)
+        if not isinstance(tc, int) or isinstance(tc, bool) or tc != 0:
+            raise PackageError(f"glb: material #{i} baseColorTexture.texCoord must be 0")
+        textured.add(i)
+    return textured
+
+
+def glb_image_sha256s(data):
+    """SHA-256 hex digests of the embedded images (call only on a GLB that passed :func:`read_glb`)."""
+    import hashlib
+    js, binc = _chunks(data)
+    gl = strict_json(js.rstrip(b" "), "glb: JSON chunk")
+    out = []
+    for im in gl.get("images", []):
+        v = gl["bufferViews"][im["bufferView"]]
+        off = v.get("byteOffset", 0)
+        out.append(hashlib.sha256((binc or b"")[off:off + v["byteLength"]]).hexdigest())
+    return out
+
+
+def _mesh_triangles(mesh, read_acc, budget, max_triangles, textured=frozenset()):
     """Local-space triangles of a mesh (mode 4 only; points/lines carry no triangles)."""
     if not isinstance(mesh, dict) or not isinstance(mesh.get("primitives"), list):
         raise PackageError("glb: mesh without primitives")
@@ -405,6 +527,14 @@ def _mesh_triangles(mesh, read_acc, budget, max_triangles):
         pos = read_acc(p["attributes"]["POSITION"], "position")
         if not all(math.isfinite(c) for q in pos for c in q):
             raise PackageError("glb: non-finite POSITION")
+        if p.get("material") in textured:
+            if "TEXCOORD_0" not in p["attributes"]:
+                raise PackageError("glb: a textured primitive is missing TEXCOORD_0")
+            uvs = read_acc(p["attributes"]["TEXCOORD_0"], "uv")
+            if len(uvs) != len(pos):
+                raise PackageError("glb: TEXCOORD_0 count differs from POSITION count")
+            if not all(math.isfinite(c) for q in uvs for c in q):
+                raise PackageError("glb: non-finite TEXCOORD_0")
         idx = read_acc(p["indices"], "index") if "indices" in p else list(range(len(pos)))
         if len(idx) % 3:
             raise PackageError("glb: triangle index count is not a multiple of 3")

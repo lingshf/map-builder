@@ -190,8 +190,11 @@ validator, the sample and the reference reader.
       (including when there are no probes).
 - [ ] Unity: a single Core↔Unity mapping function `(−x, z, −y)` with the winding flip, shared
       by any debug collision rendering.
-- [ ] Unity/URP: materials for flat-shaded vertex-colour/PBR-factor meshes (no textures or UVs
-      in v1).
+- [ ] Unity/URP: materials for flat-shaded vertex-colour/PBR-factor meshes. Schema 2.1.0 adds
+      optional embedded PNG `baseColorTexture` (+ `TEXCOORD_0`, factor and vertex colour kept):
+      sample it multiplied by `baseColorFactor` × vertex colour with the sampler's REPEAT wrap.
+      Importing via glTFast is enough; a loader that ignores textures stays valid. Show the
+      `asset_notices[]` attributions (they are also in NOTICES.txt "Assets").
 - [ ] UI: show NOTICES.txt / attributions.
 - [ ] Tests: run the reader and the simulator loader against `examples/synthetic_sample.mbmap`
       and against a tampered copy.
