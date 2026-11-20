@@ -5,6 +5,9 @@
    "built_shape": "flat",
    "class": "out_of_scope",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 1,
    "reason": "courtyard (has holes)",
    "ring_vertices": 22,
@@ -17,6 +20,7 @@
    "built_shape": "skillion",
    "class": "already_built",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "built as tagged by v0.3.0",
    "ring_vertices": 8,
@@ -29,6 +33,7 @@
    "built_shape": "gabled",
    "class": "already_built",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "built as tagged by v0.3.0",
    "ring_vertices": 4,
@@ -41,6 +46,7 @@
    "built_shape": "gabled",
    "class": "already_built",
    "eave_m": 18.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "built as tagged by v0.3.0",
    "ring_vertices": 4,
@@ -53,6 +59,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -65,6 +72,7 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 6,
@@ -77,6 +85,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -89,6 +100,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 8 vertices",
    "ring_vertices": 10,
@@ -101,6 +115,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 3.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 4,
@@ -113,6 +128,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 4,
@@ -125,6 +141,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -137,6 +156,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -149,6 +171,7 @@
    "built_shape": "flat",
    "class": "out_of_scope",
    "eave_m": 9.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "other shape (pyramidal)",
    "ring_vertices": 10,
@@ -161,6 +184,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 7,
@@ -173,6 +199,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 9,
@@ -185,6 +214,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 7,
@@ -197,6 +227,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 3.6,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 13 vertices",
    "ring_vertices": 14,
@@ -209,6 +240,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 3.6,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 13 vertices",
    "ring_vertices": 13,
@@ -221,6 +253,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -233,6 +268,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 14 vertices",
    "ring_vertices": 15,
@@ -245,6 +283,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 10 vertices",
    "ring_vertices": 17,
@@ -257,6 +298,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 11 vertices",
    "ring_vertices": 12,
@@ -269,6 +311,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -281,6 +324,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 8,
@@ -293,6 +339,7 @@
    "built_shape": "flat",
    "class": "out_of_scope",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "other shape (quadruple_saltbox)",
    "ring_vertices": 6,
@@ -305,6 +352,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 6,
@@ -317,6 +367,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 7,
@@ -329,6 +382,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 6,
@@ -337,12 +391,15 @@
    "tagged": "gabled"
   },
   "osm:way/80965553": {
-   "built_as_tagged": true,
+   "built_as_tagged": false,
    "built_shape": "gabled",
-   "class": "already_built",
+   "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
-   "reason": "built as tagged by v0.3.0",
+   "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 4,
    "roof_h_m": 2.9964,
    "roof_shape_provenance": "measured:osm roof:shape",
@@ -353,6 +410,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 5.007,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 10 vertices",
    "ring_vertices": 10,
@@ -365,6 +423,7 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -377,6 +436,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 10 vertices",
    "ring_vertices": 12,
@@ -389,6 +451,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 7,
@@ -401,6 +466,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 7,
@@ -413,6 +481,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -425,6 +496,7 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -437,6 +509,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 12 vertices",
    "ring_vertices": 14,
@@ -449,6 +524,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 7,
@@ -461,6 +539,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -473,6 +554,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 10 vertices",
    "ring_vertices": 10,
@@ -485,6 +569,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 10 vertices",
    "ring_vertices": 11,
@@ -497,6 +584,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 4.5477,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 7,
@@ -505,12 +595,15 @@
    "tagged": "hipped"
   },
   "osm:way/80965659": {
-   "built_as_tagged": true,
+   "built_as_tagged": false,
    "built_shape": "gabled",
-   "class": "already_built",
+   "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
-   "reason": "built as tagged by v0.3.0",
+   "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 4,
    "roof_h_m": 3.3179,
    "roof_shape_provenance": "measured:osm roof:shape",
@@ -521,6 +614,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 5,
@@ -533,6 +627,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 9.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 7,
@@ -545,6 +642,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 8,
@@ -557,6 +657,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 10,
@@ -569,6 +672,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 8 vertices",
    "ring_vertices": 10,
@@ -581,6 +687,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 9,
@@ -593,6 +702,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -605,6 +717,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 21 vertices",
    "ring_vertices": 21,
@@ -617,6 +732,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 15 vertices",
    "ring_vertices": 22,
@@ -629,6 +747,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 15 vertices",
    "ring_vertices": 16,
@@ -641,6 +762,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 3.6,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 12 vertices",
    "ring_vertices": 12,
@@ -653,6 +775,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 8 vertices",
    "ring_vertices": 9,
@@ -665,6 +790,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 4 vertices",
    "ring_vertices": 5,
@@ -677,6 +803,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 9,
@@ -689,6 +818,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 8,
@@ -701,6 +833,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 12,
@@ -713,6 +848,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 6,
@@ -725,6 +863,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 8,
@@ -737,6 +878,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 11 vertices",
    "ring_vertices": 14,
@@ -749,6 +893,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 5 vertices",
    "ring_vertices": 6,
@@ -761,6 +908,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 6,
@@ -773,6 +923,9 @@
    "built_shape": "pyramidal",
    "class": "eligible",
    "eave_m": 15.0,
+   "failed_checks": [
+    "planar"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 6 vertices",
    "ring_vertices": 6,
@@ -785,6 +938,9 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 12.0,
+   "failed_checks": [
+    "ridge"
+   ],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 9 vertices",
    "ring_vertices": 10,
@@ -797,6 +953,7 @@
    "built_shape": "flat",
    "class": "eligible",
    "eave_m": 18.0,
+   "failed_checks": [],
    "holes": 0,
    "reason": "gabled/hipped, simple, no holes, 7 vertices",
    "ring_vertices": 10,
@@ -806,9 +963,9 @@
   }
  },
  "meta": {
-  "baseline_built_as_tagged": 5,
+  "baseline_built_as_tagged": 3,
   "collinear_tol_m": 0.01,
-  "eligible": 59,
+  "eligible": 61,
   "skeleton_max_vertices": 64,
   "source": "frozen from v0.3.0 (eb134a1) over a flat DEM (z = 0), PlanOptions(trees=False)",
   "total": 67,

@@ -5,111 +5,19 @@ from unittest import mock
 from map_builder.core import skeleton
 from map_builder.core.errors import LimitError
 from map_builder.core.skeleton import MAX_SKELETON_VERTICES, SkeletonError, straight_skeleton
-from map_builder.core.triangulate import ring_area, triangulate
 
-# Local copy of the independent tiling checks of tests/roof_checks.py (S3-ROOF-CASES). Whichever
-# PR merges second switches this file to the shared module and drops the copy.
+from . import roof_checks as rc
+
 TOL = 1e-9
 
 
-def _clip(subject, clip):
-    """Sutherland-Hodgman: ``subject`` clipped by the convex CCW polygon ``clip``."""
-    out = subject
-    for i in range(len(clip)):
-        a, b = clip[i], clip[(i + 1) % len(clip)]
-        inp, out = out, []
-        if not inp:
-            break
-
-        def side(p):
-            return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
-
-        for j in range(len(inp)):
-            p, q = inp[j - 1], inp[j]
-            sp, sq = side(p), side(q)
-            if sq >= 0:
-                if sp < 0:
-                    out.append(_cross(p, q, sp, sq))
-                out.append(q)
-            elif sp >= 0:
-                out.append(_cross(p, q, sp, sq))
-    return out
-
-
-def _cross(p, q, sp, sq):
-    f = sp / (sp - sq)
-    return (p[0] + f * (q[0] - p[0]), p[1] + f * (q[1] - p[1]))
-
-
-def _area(poly):
-    return ring_area(poly) if len(poly) >= 3 else 0.0
-
-
-def face_triangles(sk):
-    tris = []
-    for face in sk.faces:
-        pts = [sk.nodes[k][:2] for k in face]
-        tris += [[pts[i], pts[j], pts[k]] for i, j, k in triangulate(pts, range(len(pts)))]
-    return tris
-
-
-def check_no_overlap(tris, footprint_area):
-    total = 0.0
-    for i in range(len(tris)):
-        for j in range(i + 1, len(tris)):
-            total += _area(_clip(list(tris[i]), tris[j]))
-    return total / footprint_area
-
-
-def _subtract(piece, tri):
-    """``piece`` (convex) minus the convex CCW ``tri``, as a list of convex pieces."""
-    out = []
-    for i in range(len(tri)):
-        a, b = tri[i], tri[(i + 1) % len(tri)]
-        outside = _halfplane(piece, b, a)
-        if len(outside) >= 3 and _area(outside) > 0:
-            out.append(outside)
-        piece = _halfplane(piece, a, b)
-        if len(piece) < 3:
-            break
-    return out
-
-
-def _halfplane(poly, a, b):
-    """``poly`` clipped to the closed left side of the directed line a -> b."""
-    out = []
-    for j in range(len(poly)):
-        p, q = poly[j - 1], poly[j]
-        sp = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
-        sq = (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0])
-        if sq >= 0:
-            if sp < 0:
-                out.append(_cross(p, q, sp, sq))
-            out.append(q)
-        elif sp >= 0:
-            out.append(_cross(p, q, sp, sq))
-    return out
-
-
-def check_no_gap(tris, ring):
-    """(footprint - union of all triangles) / footprint: the uncovered part of the independently
-    triangulated footprint, computed by subtracting every triangle from every footprint piece."""
-    pts = list(ring)
-    uncovered = 0.0
-    for i, j, k in triangulate(pts, range(len(pts))):
-        pieces = [[pts[i], pts[j], pts[k]]]
-        for t in tris:
-            pieces = [r for p in pieces for r in _subtract(p, t)]
-        uncovered += sum(_area(p) for p in pieces)
-    return uncovered / ring_area(pts)
-
 def assert_tiles(test, ring):
     sk = straight_skeleton(ring)
-    area = ring_area(sk.ring)
-    tris = face_triangles(sk)
-    test.assertLessEqual(abs(check_no_gap(tris, sk.ring)), TOL)
-    test.assertLessEqual(check_no_overlap(tris, area), TOL)
-    test.assertLessEqual(abs(sum(_area(t) for t in tris) - area) / area, TOL)  # nothing outside
+    gap, overlap, outside, lifted = rc.skeleton_tiling(sk)
+    test.assertLessEqual(gap, TOL)
+    test.assertLessEqual(overlap, TOL)
+    test.assertLessEqual(outside, TOL)
+    test.assertEqual(rc.check_planar_faces(lifted), {})
     return sk
 
 
@@ -145,15 +53,6 @@ SHAPES = {"L": L_SHAPE, "L unequal": L_UNEQUAL, "T": T_SHAPE, "T unequal": T_UNE
 
 def regular(n, r=10.0):
     return [(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n)) for k in range(n)]
-
-
-class TestTilingChecks(unittest.TestCase):
-    def test_gap_check_sees_a_duplicated_half_square(self):
-        sq = [(0, 0), (4, 0), (4, 4), (0, 4)]
-        half = [(0, 0), (4, 0), (4, 4)]
-        self.assertAlmostEqual(check_no_gap([half, half], sq), 0.5, places=9)
-        self.assertAlmostEqual(check_no_overlap([half, half], 16.0), 0.5, places=9)
-        self.assertAlmostEqual(check_no_gap([half, [(0, 0), (4, 4), (0, 4)]], sq), 0.0, places=9)
 
 
 class TestSimpleShapes(unittest.TestCase):

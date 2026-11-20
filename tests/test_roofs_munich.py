@@ -32,7 +32,7 @@ SNAPSHOT = os.path.join(FIX, "munich_roofs.osm")
 EXPECTED = os.path.join(FIX, "munich_roofs_expected.json")
 COUNTEREXAMPLES = os.path.join(FIX, "roof_counterexamples.osm")
 AREA_ARGS = (48.1395, 11.5764, 400.0, 400.0)
-BASELINE = 5            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
+BASELINE = 3            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
 TOTAL = 67
 COLLINEAR_TOL_M = 0.01  # a ring vertex closer than this to the line through its neighbours is collinear
 SKELETON_MAX_VERTICES = 64
@@ -234,14 +234,14 @@ def freeze(snapshot_path, out_path):
         outer = [(p[0], p[1]) for p in f.geometry.outer]
         holes = [[(p[0], p[1]) for p in h_] for h_ in f.geometry.holes]
         tris = [t for _, t in decoded[o.mb_id]["visual"]]
-        ok, _, _ = rc.built_as_tagged(tagged, decoded[o.mb_id]["visual"], outer, holes, eave_rel - z_off,
-                                      eave_rel + h - z_off) if tagged in roofs.SUPPORTED_SHAPES else (False, 0, 0)
+        ok, failed, sig = rc.built_as_tagged(tagged, decoded[o.mb_id]["visual"], outer, holes, eave_rel - z_off,
+                                      eave_rel + h - z_off) if tagged in roofs.SUPPORTED_SHAPES else (False, {}, [])
         cls, reason = classify_eligibility(tagged, outer, holes, ok)
         eligible += cls == "eligible"
         entries[o.mb_id] = {"tagged": tagged, "eave_m": round(eave_rel, 4), "roof_h_m": round(h, 4),
                             "built_shape": o.provenance.get("roof_shape_built"),
                             "roof_shape_provenance": o.provenance.get("roof_shape", "tagged"),
-                            "built_as_tagged": ok, "class": cls, "reason": reason,
+                            "built_as_tagged": ok, "failed_checks": sorted(failed) if tagged in roofs.SUPPORTED_SHAPES else [], "class": cls, "reason": reason,
                             "ring_vertices": len(outer), "holes": len(holes)}
     meta = {"source": "frozen from v0.3.0 (eb134a1) over a flat DEM (z = 0), PlanOptions(trees=False)",
             "total": len(entries), "baseline_built_as_tagged": sum(e["built_as_tagged"] for e in entries.values()),
@@ -361,6 +361,11 @@ class RoofCheckerTests(unittest.TestCase):
                           for p in t)) for m, t in self.tris]
         self.assertIn("normals", self.fails(tris))
 
+    def test_warped_roof_slope_is_not_planar(self):
+        tris = [(m, tuple((p[0], p[1], p[2] + 0.004) if (m == rc.ROOF and p[:2] == (10, 0) and p[2] == 3.0) else p
+                          for p in t)) for m, t in self.tris]
+        self.assertIn("planar", self.fails(tris))
+        self.assertEqual(rc.check_planar_faces(rc.roof_slopes(self.tris)), {})
     def test_fan_triangulated_concave_face_overlaps(self):
         outer = [(0, 0), (10, 0), (10, 10), (5, 10), (5, 5), (0, 5)]          # L shape
         fan = [(rc.ROOF, ((0, 0, 3), (outer[i][0], outer[i][1], 3), (outer[i + 1][0], outer[i + 1][1], 3)))
@@ -381,7 +386,7 @@ class MunichRoofSnapshotTests(unittest.TestCase):
         self.assertTrue(all(decoded[i]["visual"] for i in results))
         self.assertTrue(os.path.getsize(SNAPSHOT) + os.path.getsize(EXPECTED) < 300_000)
 
-    def test_built_as_tagged_baseline_is_5_of_67(self):
+    def test_built_as_tagged_baseline_is_3_of_67(self):
         """The D61 metric, measured from the exported geometry: closed, covered, ridge = eave + h, and the
         silhouette of the tagged shape. Raising it is what S3-SKELETON is for."""
         _, _, exp, results = _Built.get()
@@ -390,11 +395,17 @@ class MunichRoofSnapshotTests(unittest.TestCase):
         self.assertEqual(counted, sorted(i for i, e in exp["buildings"].items() if e["built_as_tagged"]))
         self.assertEqual(exp["meta"]["baseline_built_as_tagged"], BASELINE)
 
-    def test_counted_means_built_with_the_tagged_shape(self):
+    def test_counted_implies_built_with_the_tagged_shape(self):
+        """Counted => built as tagged. The converse fails only for the frozen non-planar gabled quads."""
         _, _, exp, results = _Built.get()
         for i, ((counted, fails, sig), o) in results.items():
-            self.assertEqual(counted, o.provenance["roof_shape_built"] == exp["buildings"][i]["tagged"], (i, fails, sig))
-
+            e = exp["buildings"][i]
+            built = o.provenance["roof_shape_built"] == e["tagged"]
+            if counted:
+                self.assertTrue(built, i)
+            self.assertEqual(sorted(fails), e["failed_checks"], i)
+            if built and not counted:
+                self.assertEqual(e["failed_checks"], ["planar"], i)
     def test_frozen_heights_and_outcomes_match_v030(self):
         _, _, exp, results = _Built.get()
         for i, (_, o) in results.items():
@@ -417,6 +428,19 @@ class MunichRoofSnapshotTests(unittest.TestCase):
             if e["class"] == "out_of_scope":
                 self.assertTrue(e["reason"])
 
+    def test_skeleton_roofs_on_eligible_excerpts_tile_the_footprint(self):
+        """S3-SKELETON AC7: core/skeleton.py on every eligible Munich footprint, through the shared checks."""
+        from map_builder.core.skeleton import straight_skeleton
+        feats, _ = feature_rings(SNAPSHOT)
+        exp = rc.load_expected(EXPECTED)["buildings"]
+        eligible = sorted(i for i, e in exp.items() if e["class"] == "eligible")
+        self.assertEqual(len(eligible), rc.load_expected(EXPECTED)["meta"]["eligible"])
+        for i in eligible:
+            sk = straight_skeleton([(p[0], p[1]) for p in feats[fold(i)].geometry.outer])
+            gap, overlap, outside, lifted = rc.skeleton_tiling(sk)
+            self.assertLessEqual(max(gap, overlap, outside), 1e-9, i)
+            self.assertEqual(len(sk.faces), len(sk.ring), i)
+            self.assertEqual(rc.check_planar_faces(lifted), {}, i)
     def test_collision_matches_visual_geometry(self):
         _, decoded, _, results = _Built.get()
         for i in results:

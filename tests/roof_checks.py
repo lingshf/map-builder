@@ -329,9 +329,85 @@ def roof_coverage(roof, ftris, budget=None):
     return total, gap, outside, overlap
 
 
+PLANAR_TOL = MM
+SLOPE_ANGLE = 0.02      # rad: adjacent roof triangles tilted less than this apart belong to one slope
+
+
+def plane_deviation(tris):
+    """Largest distance of any vertex of ``tris`` (3D triangles) from the plane of the largest one."""
+    best = max(tris, key=lambda t: sum(c * c for c in _cross3(*t)))
+    n = _cross3(*best)
+    ln = math.sqrt(sum(c * c for c in n))
+    if ln == 0:
+        return 0.0
+    n = tuple(c / ln for c in n)
+    o = best[0]
+    return max(abs(sum(n[k] * (p[k] - o[k]) for k in range(3))) for t in tris for p in t)
+
+
+def check_planar_faces(faces, tol=PLANAR_TOL):
+    """Faces are lists of 3D triangles that must lie in one plane. -> {face index: deviation} of the failures
+    (every triangle is planar by construction; a face of several triangles is not)."""
+    bad = {}
+    for i, f in enumerate(faces):
+        f = [t for t in f if unit_normal(t) is not None]
+        if f:
+            d = plane_deviation(f)
+            if d > tol:
+                bad[i] = d
+    return bad
+
+
+def roof_slopes(tris):
+    """Sloped roof triangles grouped into slopes: edge-adjacent triangles whose normals differ by less than
+    SLOPE_ANGLE. A smoothly warped slope stays one group, so check_planar_faces reports it."""
+    items = [(t, unit_normal(t)) for m, t in tris if m == ROOF]
+    items = [(t, n) for t, n in items if n is not None and n[2] < 1.0 - 1e-9]
+    key = lambda p: tuple(round(c / WELD_M) for c in p)
+    by_edge = {}
+    for i, (t, _) in enumerate(items):
+        for k in range(3):
+            by_edge.setdefault(frozenset((key(t[k]), key(t[(k + 1) % 3]))), []).append(i)
+    seen, groups = set(), []
+    for s in range(len(items)):
+        if s in seen:
+            continue
+        seen.add(s)
+        stack, grp = [s], []
+        while stack:
+            i = stack.pop()
+            grp.append(items[i][0])
+            t = items[i][0]
+            for k in range(3):
+                for j in by_edge[frozenset((key(t[k]), key(t[(k + 1) % 3])))]:
+                    if j not in seen and sum(a * b for a, b in zip(items[i][1], items[j][1])) > math.cos(SLOPE_ANGLE):
+                        seen.add(j)
+                        stack.append(j)
+        groups.append(grp)
+    return groups
+
+
+def skeleton_tiling(sk):
+    """Independent tiling checks of a ``Skeleton`` (S3-SKELETON AC7) on its explicitly triangulated faces.
+    -> (relative gap, relative overlap, relative area outside the footprint, lifted faces)."""
+    roof, lifted = [], []
+    for face in sk.faces:
+        pts3 = [sk.nodes[k] for k in face]
+        pts = [(p[0], p[1]) for p in pts3]
+        tri_idx = triangulate(pts, list(range(len(pts))))
+        roof += [_ccw([pts[a], pts[b], pts[c]]) for a, b, c in tri_idx]
+        lifted.append([(pts3[a], pts3[b], pts3[c]) for a, b, c in tri_idx])
+    total, gap, outside, overlap = roof_coverage(roof, footprint_triangles(sk.ring))
+    return gap / total, overlap / total, outside / total, lifted
+
+
 def check_building(tris, outer, holes, eave_z, top_z):
     """{check name: detail} of the failed checks of one building. ``eave_z``/``top_z`` are absolute map z."""
     fails = {}
+    planar = check_planar_faces(roof_slopes(tris))
+    if planar:
+        fails["planar"] = f"{len(planar)} roof slope(s) not coplanar within {PLANAR_TOL * 1000:g} mm (max " \
+                          f"{max(planar.values()) * 1000:.3g} mm)"
     segs = [s for r in [outer] + [list(h) for h in holes] for s in _segments(r)]
     for name, detail in (("closed", check_closed(tris)), ("above_eave", check_above_eave(tris, eave_z)),
                          ("ridge", check_ridge(tris, top_z)), ("normals", check_normals(tris, eave_z, segs))):
