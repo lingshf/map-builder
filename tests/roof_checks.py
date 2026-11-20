@@ -376,7 +376,7 @@ def check_building(tris, outer, holes, eave_z, top_z, shape=None):
     """{check name: detail} of the failed checks of one building. ``eave_z``/``top_z`` are absolute map z.
     ``shape`` (the tagged shape) selects the slope model of the planarity check; without it there is none."""
     fails = {}
-    planar = check_planar_faces(roof_slopes(tris, shape, outer, top_z))
+    planar = check_planar_faces(roof_slopes(tris, shape, outer, top_z, eave_z))
     if planar:
         fails["planar"] = f"{len(planar)} roof slope(s) not coplanar within {PLANAR_TOL * 1000:g} mm (max " \
                           f"{max(planar.values()) * 1000:.3g} mm)"
@@ -517,12 +517,13 @@ def _sides(outer):
     return [(corners[i], corners[(i + 1) % len(corners)]) for i in range(len(corners))]
 
 
-def edge_slopes(tris, outer, top_z):
+def edge_slopes(tris, outer, top_z, skip=()):
     """Hipped/pyramidal slopes by footprint side, independent of the triangle order. A side's seed plane is the
     plane of its largest eave triangle (the triangles with an edge on that side; one on several sides belongs
     to the lowest-numbered). Every other sloped triangle joins the side, among those whose eave triangles are
     connected to it across non-ridge edges, whose seed plane is nearest (largest vertex distance, ties to the
-    lower side index). Triangles with no such side are singleton slopes. No angle cutoff, no first-reach rule."""
+    lower side index). Triangles with no such side are singleton slopes. No angle cutoff, no first-reach rule.
+    The sides in ``skip`` (the footprint sides of the gable ends of a gabled roof) have no slope of their own."""
     sides = _sides(outer)
     items = [t for m, t in tris if m == ROOF and (unit_normal(t) or (0, 0, 1))[2] < 1.0 - 1e-6]
     key = lambda p: tuple(round(c / WELD_M) for c in p)
@@ -543,7 +544,7 @@ def edge_slopes(tris, outer, top_z):
     eave_of = {}
     for i, t in enumerate(items):
         for s, seg in enumerate(sides):
-            if any(_edge_overlap(((t[k][0], t[k][1]), (t[(k + 1) % 3][0], t[(k + 1) % 3][1])), seg) > MM
+            if s not in skip and any(_edge_overlap(((t[k][0], t[k][1]), (t[(k + 1) % 3][0], t[(k + 1) % 3][1])), seg) > MM
                    for k in range(3)):
                 eave_of[i] = s
                 break
@@ -551,6 +552,8 @@ def edge_slopes(tris, outer, top_z):
     canon = lambda t: (round(area(t), 9), tuple(sorted(key(p) for p in t)))
     seed = {}
     for s in range(len(sides)):
+        if s in skip:
+            continue
         mine = [items[i] for i, v in eave_of.items() if v == s]
         if mine:
             seed[s] = unit_normal(max(mine, key=canon)), max(mine, key=canon)[0]
@@ -573,10 +576,28 @@ def edge_slopes(tris, outer, top_z):
     return [groups[s] for s in sorted(groups, key=str)]
 
 
-def roof_slopes(tris, shape, outer, top_z):
-    """The slopes of a roof of the tagged ``shape``, from the expected roof topology (none for other shapes)."""
+def _gable_sides(tris, outer, eave_z):
+    """Indices of the footprint sides (:func:`_sides`) that carry a vertical gable-end triangle."""
+    sides = _sides(outer)
+    ends = [t for t in gable_end_triangles(tris, eave_z) if (unit_normal(t) or (0, 0, 1))[2] < UP_EPS]
+    out = set()
+    for t in ends:
+        a, b, c = sorted(t, key=lambda p: p[2])
+        base = ((a[0], a[1]), (b[0], b[1]))
+        for s, seg in enumerate(sides):
+            if _edge_overlap(base, seg) > MM:
+                out.add(s)
+    return out
+
+
+def roof_slopes(tris, shape, outer, top_z, eave_z=None):
+    """The slopes of a roof of the tagged ``shape``, from the expected roof topology (none for other shapes).
+    A gabled roof on the eave ``eave_z`` has one slope per footprint side without a gable end; without
+    ``eave_z`` it is a two-slope ridge roof."""
     if shape == "gabled":
-        return ridge_slopes(tris, top_z)
+        if eave_z is None:
+            return ridge_slopes(tris, top_z)
+        return edge_slopes(tris, outer, top_z, _gable_sides(tris, outer, eave_z))
     if shape in ("hipped", "pyramidal"):
         return edge_slopes(tris, outer, top_z)
     if shape == "skillion":
@@ -584,9 +605,9 @@ def roof_slopes(tris, shape, outer, top_z):
     return []
 
 
-def _slope_topology_problems(shape, tris, outer, top_z):
-    expected = 2 if shape == "gabled" else len(_sides(outer))
-    slopes = roof_slopes(tris, shape, outer, top_z)
+def _slope_topology_problems(shape, tris, outer, top_z, eave_z=None):
+    expected = len(_sides(outer)) - (len(_gable_sides(tris, outer, eave_z)) if shape == "gabled" else 0)
+    slopes = roof_slopes(tris, shape, outer, top_z, eave_z)
     problems = []
     if len(slopes) != expected:
         problems.append(f"{len(slopes)} roof slope(s), a {shape} roof has exactly {expected}")
@@ -628,6 +649,30 @@ def _hip_problems(tris, outer, top_z):
         return ["the roof ends in a single apex on a footprint whose skeleton is not a point (pyramidal, not hipped)"]
     return []
 
+def _apexes_on_two_slopes(ends, slopes):
+    """The highest vertex of every group of gable-end triangles (connected through shared vertices, so a
+    subdivided end is one group) belongs to at least two merged slopes."""
+    key = lambda p: tuple(round(c / WELD_M) for c in p)
+    parent = {}
+
+    def find(k):
+        while parent.setdefault(k, k) != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+    for t in ends:
+        for p in t[1:]:
+            parent[find(key(p))] = find(key(t[0]))
+    top = {}
+    for t in ends:
+        for p in t:
+            g = find(key(p))
+            if g not in top or p[2] > top[g][2]:
+                top[g] = p
+    on = [{key(p) for t in g for p in t} for g in slopes]
+    return all(sum(key(p) in s_ for s_ in on) >= 2 for p in top.values())
+
+
 def signature_problems(shape, tris, outer, eave_z, top_z):
     """Why the emitted geometry does not look like ``shape`` (an empty list if it does)."""
     segs = _segments(outer)
@@ -647,17 +692,12 @@ def signature_problems(shape, tris, outer, eave_z, top_z):
     elif shape == "gabled":
         if len(ends) < 2:
             problems.append(f"{len(ends)} vertical gable-end triangle(s), need >= 2")
-        ridge = _ridge_problem(tops, roof_tris)
-        if ridge:
-            problems.append(ridge)
-        else:
-            chain = _chain(tops)
-            if not all(_same(a, chain[0]) or _same(a, chain[-1])
-                       for e in ends for a in e if abs(a[2] - top_z) <= MM):
-                problems.append("a gable end does not reach a ridge end")
+        slopes = roof_slopes(tris, shape, outer, top_z, eave_z)
+        if not _apexes_on_two_slopes(ends, slopes):
+            problems.append("a gable end does not reach the ridge where two slopes meet")
         if _carried(segs, ends, roof_tris):
             problems.append("a footprint edge outside the gable ends carries no sloped roof triangle")
-        problems += _slope_topology_problems(shape, tris, outer, top_z)
+        problems += _slope_topology_problems(shape, tris, outer, top_z, eave_z)
     elif shape == "skillion":
         if not top:
             problems.append("no roof point reaches the top")

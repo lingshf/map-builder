@@ -175,13 +175,11 @@ class MunichRealDataTest(unittest.TestCase):
             mean = sum(g for sd, g in slopes if sd == side) / 2
             self.assertAlmostEqual(mean, rise / half[side], delta=0.02, msg=mb_id)
 
-    def test_unmodellable_real_roofs_report_their_fallback(self):
-        flat = self.objects["osm:way/85765729"].provenance
-        self.assertEqual(flat["roof_shape_built"], "flat")
-        self.assertEqual(flat["roof_shape"], "fallback:flat (roof:shape=gabled on non-rectangular footprint)")
-        prov = self.objects["osm:way/80965613"].provenance
-        self.assertEqual(prov["roof_shape_built"], "pyramidal")
-        self.assertTrue(prov["roof_shape"].startswith("fallback:pyramidal"), prov["roof_shape"])
+    def test_non_rectangular_gabled_real_roofs_are_built_gabled(self):
+        for i in ("osm:way/85765729", "osm:way/80965613"):       # S3-ROOF-GABLED: straight skeleton + vertical gable walls
+            prov = self.objects[i].provenance
+            self.assertEqual(prov["roof_shape_built"], "gabled", i)
+            self.assertIn("vertical gable wall", prov["roof_construction"], i)
         prov = self.objects["osm:way/80965653"].provenance      # S3-ROOF-HIPPED: now built from the straight skeleton
         self.assertEqual(prov["roof_shape_built"], "hipped")
 

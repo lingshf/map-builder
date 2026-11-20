@@ -444,10 +444,11 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
     roof_src_label = prov.get("roof_height")
     roof_shape_tag = tags.get("roof:shape")
     local_outer = [(p[0] - cx, p[1] - cy) for p in outer]
-    plan = roofs.plan_roof(roof_shape_tag, local_outer, poly.holes, prov)
+    roof_dir = parse_number(tags.get("roof:direction"))
+    plan = roofs.plan_roof(roof_shape_tag, local_outer, poly.holes, prov, tags.get("roof:orientation"), roof_dir)
     roof_shape = plan.shape_built
-    if (roof_src is not None and roof_src <= 1e-6 and roof_shape_tag in ("hipped", "pyramidal")
-            and roof_shape == roof_shape_tag
+    if (roof_src is not None and roof_src <= 1e-6 and (roof_shape_tag in ("hipped", "pyramidal") or plan.skeleton)
+            and (roof_shape == roof_shape_tag or plan.skeleton)
             and prov.get("roof_height", "").startswith("inferred:roof:levels")):
         # roof:levels=0 on a hipped/pyramidal roof gives no height: use the default roof height (D77)
         roof_src = None
@@ -493,10 +494,9 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
         height += roof_h  # building:levels gave the eave; the total includes the roof built on top
     prov["roof_height_m"] = round(roof_h, 2)
 
-    roof_dir = parse_number(tags.get("roof:direction"))
     if plan.skeleton:
         across = False
-        if tags.get("roof:orientation") is not None:
+        if roof_shape == "hipped" and tags.get("roof:orientation") is not None:
             prov["roof_orientation"] = (f"ignored:roof:orientation={tags['roof:orientation']} "
                                         "(every footprint edge slopes on a skeleton roof)")
     else:
@@ -593,7 +593,8 @@ def build_building(feature, terrain, z_offset, seed=0, max_ring_vertices=MAX_RIN
                               "triangles along the shorter diagonal")
     prov["roof_shape_built"] = plan.shape_built
     if plan.skeleton:
-        prov["roof_construction"] = "straight skeleton (a sloped face on every footprint edge)"
+        prov["roof_construction"] = ("straight skeleton (a sloped face on every footprint edge)" if not plan.ends else
+                                     f"straight skeleton, vertical gable wall on {len(plan.ends)} footprint edges")
     prov["height_m"] = round(height, 2)
     prov["eave_height_m"] = round(wall_top_flat, 2)
     if elevated:

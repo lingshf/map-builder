@@ -255,6 +255,36 @@ def run(out_dir):
     check(signed_volume(world_triangles(ob)) > 0, "roofs: L-shaped hipped house is outward-wound")
     check(sp.provenance["roof_height_m"] == 3.0, "roofs: L-shaped hipped house has the tagged roof height")
 
+    # --- a gabled L-shaped house: the ridge-end hips become vertical MB Facade gable walls -----------------
+    scratch = os.path.join(out_dir, "roof_gabled_l.osm")
+    with open(scratch, "w", encoding="utf-8") as f:
+        f.write(HIPPED_L_OSM.replace('v="hipped"', 'v="gabled"'))
+    s4 = bpy.context.scene.map_builder
+    configure(s4, scratch, "roofs_gl", os.path.join(out_dir, "roofs_gl.mbmap"))
+    res, err = run_op(bpy.ops.map_builder.generate)
+    check(res == {"FINISHED"}, f"roofs: generate an L-shaped gabled house ({err or 'ok'})")
+    ob = by_id(s4.export_collection, "osm:way/9101")
+    plan4, _ = pipeline.generate_plan(make_area(s4), make_settings(s4))
+    sp = next(o for o in plan4.objects if o.mb_id == "osm:way/9101")
+    got = world_verts(ob)
+    want = [tuple(c + o for c, o in zip(v, sp.location)) for v in sp.mesh.vertices]
+    check(sp.provenance["roof_shape_built"] == "gabled" and "vertical gable wall" in sp.provenance["roof_construction"],
+          f"roofs: the L-shaped gabled house is built gabled ({sp.provenance['roof_shape']})")
+    check(len(got) == len(want) and matches(got, want), f"roofs: L-shaped gabled vertices equal Python within 1 mm ({len(got)} verts)")
+    check(not [e for e, c in welded_edge_faces(ob).items() if c != 2], "roofs: L-shaped gabled house is closed manifold")
+    check(signed_volume(world_triangles(ob)) > 0, "roofs: L-shaped gabled house is outward-wound")
+    zmin = min(v[2] for v in got)
+    ends = 0
+    for tri in world_triangles(ob):
+        zs = sorted(v[2] for v in tri)
+        u = [tri[1][k] - tri[0][k] for k in range(3)]
+        w = [tri[2][k] - tri[0][k] for k in range(3)]
+        nrm = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+        nl = math.sqrt(sum(c * c for c in nrm))
+        if nl > 1e-9 and abs(nrm[2]) / nl < 1e-3 and zs[0] - zmin > 4.0 and abs(zs[0] - zs[1]) < 1e-3 and zs[2] - zs[1] > 0.1:
+            ends += 1
+    check(ends >= 2, f"roofs: the L-shaped gabled house has vertical gable-end walls ({ends} triangles)")
+
 
 def top_p_dome(plan):
     sp = next(o for o in plan.objects if o.mb_id == "osm:way/1043")
