@@ -39,7 +39,8 @@ from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .structures import (Color, InvalidEntry, Probe, ProbeBlock, Prov, Segment, StageContext, UnsupportedEntry, Vec2,
                          Vec3, finalize_probes, prov_metres, prov_note)
-from .triangulate import DEFAULT_MAX_WORK, TriangulationError, dedupe_ring, triangulate, validate_rings
+from .triangulate import (DEFAULT_MAX_WORK, TriangulationError, clean_ring, dedupe_ring, fan_triangles, triangulate,
+                          validate_rings)
 from .triangulate import _Work as _TopologyWork
 
 if TYPE_CHECKING:
@@ -1172,6 +1173,10 @@ class RoadBudgetExceeded(LimitError):
     """The road's running welded-vertex or triangle count passed the remaining scene budget."""
 
 
+RIBBON_RING_TOL_M = 1e-7  # ring vertices this close to a neighbour or to the line through their neighbours go
+RIBBON_POOR_AREA2 = 1e-4  # a fan triangle with twice-area at most this (m2) makes the polygon be re-fanned
+
+
 class _RibbonWelder:
     """Incremental form of the final road triangles, shared by the budget count and the mesh emitter.
 
@@ -1206,8 +1211,7 @@ class _RibbonWelder:
         index, verts, tris, td = self.index, self.verts, self.tris, self.tol_digits
         mv = self.max_vertices
         for q in polys:
-            for k in range(1, len(q) - 1):
-                tri = (q[0], q[k], q[k + 1])
+            for tri in fan_triangles(clean_ring(q, RIBBON_RING_TOL_M), RIBBON_POOR_AREA2):
                 if _area2(tri) <= _MIN_AREA2:  # sliver from clipping; zero area, nothing visible is lost
                     continue
                 keys = [(round(p[0], td), round(p[1], td)) for p in tri]
@@ -1332,6 +1336,7 @@ def drop_unstorable_slivers(local: Sequence[Vec3], tris: Iterable[tuple[int, ...
     float32 ulps of its world coordinates, i.e. the face is thinner than the storage can represent.
     ``dropped`` lists their ``(width_m, area_m2)``. A wider face that fails is a real fold: ``(None, None)``."""
     from .collision import is_degenerate
+    from .query import triangle_is_degenerate
     lf = [_f32(v) for v in loc]
     stores = ([(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local],
               [(_f32(_f32(x) + lf[0]), _f32(_f32(y) + lf[1]), _f32(_f32(z) + lf[2])) for x, y, z in local])
@@ -1356,6 +1361,9 @@ def drop_unstorable_slivers(local: Sequence[Vec3], tris: Iterable[tuple[int, ...
             if width > SLIVER_ULPS * ulp:
                 return None, None
             dropped.append((width, area2 / 2))
+            continue
+        if all(triangle_is_degenerate(*(W[i] for i in t)) for W in stores):   # no ray can hit it on either path
+            dropped.append((0.0, area2 / 2))
             continue
         keep.append(t)
     return keep, dropped
@@ -1458,9 +1466,13 @@ def build_road(feature: Feature, terrain: ElevationGrid, z_offset: float, reserv
         owners = sorted(removed)
         prov["overlap"] = (f"{sum(removed.values()):.2f} m2 shared with higher-priority at-grade road(s) "
                            f"{_id_list(owners)} left to them (ownership: road class, width, feature id)")
-    if dropped:
-        prov["slivers_dropped"] = (f"{len(dropped)} face(s) thinner than float32 storage (max width "
-                                    f"{max(w for w, _ in dropped):.1e} m, {sum(a for _, a in dropped):.1e} m2) omitted")
+    thin = [d for d in dropped if d[0] > 0.0]
+    if thin:
+        prov["slivers_dropped"] = (f"{len(thin)} face(s) thinner than float32 storage (max width "
+                                    f"{max(w for w, _ in thin):.1e} m, {sum(a for _, a in thin):.1e} m2) omitted")
+    if len(thin) < len(dropped):
+        prov["zero_area_dropped"] = (f"{len(dropped) - len(thin)} face(s) with no area in float32 storage on either "
+                                      "path (no ray can hit them) omitted")
     if clipped:
         prov["terrain_edge"] = "ribbon trimmed at the terrain edge"
     return mesh, (cx, cy, z0), prov

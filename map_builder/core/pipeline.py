@@ -463,6 +463,15 @@ def export_package(path: str | PathLike[str], name: str, area: Area, sources: Se
         objects.append({"name": o.name, "mb_id": o.mb_id, "class": o.cls, "collision": True,
                         "provenance": dict(info.get("provenance") or {})})
     exported: dict[str, object] = copy.deepcopy(dict(report or {}))
+    kept_degenerate: list[dict[str, object]] = []
+    for k, o in enumerate(col_objects):
+        e = col.objects[k]
+        n = sum(1 for t in range(e["tri_start"], e["tri_start"] + e["tri_count"]) if is_degenerate(*col.triangle(t)))
+        if n:
+            kept_degenerate.append({"object": o.name, "mb_id": o.mb_id, "class": o.cls, "triangles": n,
+                                    "reason": "kept: thin sliver from clipping; removing it would remove "
+                                              "surface a ray can hit"})
+    exported["degenerate_objects"] = kept_degenerate
     exported["export"] = {"objects": len(col_objects), "collision_triangles": col.triangle_count,
                         "collision_vertices": len(col.vertices),
                         "degenerate_triangles": sum(1 for t in range(col.triangle_count)
@@ -501,9 +510,13 @@ def plan_to_package(plan: ScenePlan, path: str | PathLike[str], name: str, sourc
     nodes: list[GlbNodeSpec] = []
     col_objects: list[ColObject] = []
     info: dict[str, ObjectInfo] = {}
+    empty_dropped: list[dict[str, object]] = []
     for o in plan.objects:
         md = o.mesh_data(plan.shared_meshes)
         mb_id, cls = ident[o.name]
+        if not any(True for _ in md.triangles()):
+            empty_dropped.append({"object": o.name, "mb_id": mb_id, "reason": "no triangles; not exported"})
+            continue
         vis = md
         if textures:
             if o.mesh is None and uv.textured_materials([md]):
@@ -526,7 +539,10 @@ def plan_to_package(plan: ScenePlan, path: str | PathLike[str], name: str, sourc
         materials = textured
         notices = [tex.asset_notice(used)] if used else ()
     glb_bytes = write_glb(nodes, materials, generator="map-builder headless")
-    return export_package(path, name, plan.area, sources, glb_bytes, col_objects, plan.report, edits=edits,
+    report: Mapping[str, object] = plan.report
+    if empty_dropped:
+        report = {**report, "objects_dropped_empty": empty_dropped}
+    return export_package(path, name, plan.area, sources, glb_bytes, col_objects, report, edits=edits,
                           heightfield_spacing=heightfield_spacing, object_info=info, created_utc=created_utc,
                           passage_probes=getattr(plan, "passage_probes", []), plan_ids=generated_ids,
                           asset_notices=notices)

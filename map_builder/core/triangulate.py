@@ -21,6 +21,7 @@ geometric work is counted against ``max_work`` so pathological input is bounded.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from fractions import Fraction
@@ -151,6 +152,56 @@ def dedupe_ring(points: Iterable[_P], tol: float = 1e-6) -> list[_P]:
     while len(out) > 1 and abs(out[0][0] - out[-1][0]) <= tol and abs(out[0][1] - out[-1][1]) <= tol:
         out.pop()
     return out
+
+
+def clean_ring(points: Sequence[_P], tol: float) -> list[_P]:
+    """Ring without duplicate and collinear vertices, so fanning or triangulating it cannot emit a
+    zero-area triangle. A vertex goes when it is within ``tol`` metres of the previous kept vertex, or
+    within ``tol`` of the line through its two neighbours (a spike counts as collinear); the removal
+    moves the boundary by at most ``tol``. Returns [] when fewer than 3 vertices remain."""
+    ring = list(points)
+    changed = True
+    while changed and len(ring) >= 3:
+        changed = False
+        k = 0
+        while k < len(ring) and len(ring) >= 3:
+            p, a, b = ring[k], ring[k - 1], ring[(k + 1) % len(ring)]
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            span = math.hypot(dx, dy)
+            near = math.hypot(p[0] - a[0], p[1] - a[1]) <= tol
+            off = (abs(dx * (p[1] - a[1]) - dy * (p[0] - a[0])) / span if span > 0.0
+                   else math.hypot(p[0] - a[0], p[1] - a[1]))
+            if near or off <= tol:
+                del ring[k]
+                changed = True
+            else:
+                k += 1
+    return ring if len(ring) >= 3 else []
+
+
+def fan_triangles(ring: Sequence[_P], poor_area2: float) -> list[tuple[_P, _P, _P]]:
+    """Fan triangles of a convex CCW ring. The fan starts at the first vertex unless one of its triangles
+    has twice-area at most ``poor_area2``; then it starts at the vertex whose smallest fan triangle is
+    largest. Every fan of a convex ring covers it exactly, so re-fanning removes thin triangles without
+    changing the covered surface."""
+    n = len(ring)
+
+    def fan(k: int) -> list[tuple[_P, _P, _P]]:
+        return [(ring[k], ring[(k + i) % n], ring[(k + i + 1) % n]) for i in range(1, n - 1)]
+
+    def smallest(tris: Sequence[tuple[_P, _P, _P]]) -> float:
+        return min((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) for a, b, c in tris)
+
+    best = fan(0)
+    if n <= 3 or smallest(best) > poor_area2:
+        return best
+    score = smallest(best)
+    for k in range(1, n):
+        cand = fan(k)
+        s = smallest(cand)
+        if s > score:
+            best, score = cand, s
+    return best
 
 
 def _label(r: int) -> str:
