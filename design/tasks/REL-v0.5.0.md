@@ -18,8 +18,8 @@ Same shape as REL-v0.4.0:
    S4-COL-DEGEN report and disclosed in the release notes; counts are below the v0.4.0 baseline.
    The probe gates match S4-REVIEW checks 2 and 3: the D98 hit equivalence holds on S4-COL-DEGEN's own base →
    head comparison (D111). Every S4-WATER-SURFACE fixed-query difference is in its listed change set (new
-   `water` hits, moved bed, raised decks, extended piers or walls). Every passage id is passable on its
-   regenerated path. Any other warning, or an unlisted degenerate, blocks the RC. The C# reader passes the same probes. Build time is the median of 3 (D32).
+   `water` hits, moved bed, raised decks, extended piers or walls). Every base passage id survives
+   unless it is listed as dropped with its reason, and every survivor is passable on its regenerated path. Any other warning, or an unlisted degenerate, blocks the RC. The C# reader passes the same probes. Build time is the median of 3 (D32).
 2. The release notes state:
    * the roof count against the floor and the stretch, per shape, with the remaining named reasons;
    * the degenerate-triangle counts before and after per package and path, and the kept triangles (D98);

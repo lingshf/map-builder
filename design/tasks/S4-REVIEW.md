@@ -18,8 +18,9 @@ Owner: design · sprint S4 · after all S4 dev tasks · D104
    * AC4: shoreline deviation;
    * AC5: water level;
    * AC6: decks never lowered, and piers reach the bed;
-   * §7 replays (a) and (b): every fixed-query difference is in the listed change set, and every passage id is
-     passable on its regenerated path in Python and C#.
+   * §7 replays (a) and (b): every fixed-query difference is in the listed change set, and every base passage id
+     survives unless it is listed as dropped with its reason, and every survivor is passable on its regenerated path
+     in Python and C#.
    Also spot-render the Pittsburgh river with the demokit cameras, and record the uncovered water tagging
    (§1) as a later S4-Fn.
 4. **Performance (D91):** whole Generate, Pittsburgh and Munich, CLI and headless Blender, median of 3, against
