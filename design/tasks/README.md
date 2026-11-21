@@ -82,7 +82,7 @@ S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touchin
 
 ## Sprint 4 (v0.5.0)
 
-Theme D93; decisions D94–D104, measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+Theme D93; decisions D94–D117 (D112 adds S4-WATER-SURFACE), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
@@ -97,16 +97,17 @@ Theme D93; decisions D94–D104, measured baselines and budgets in [../roadmap.m
 | [S4-TEST-HYGIENE](S4-TEST-HYGIENE.md) | S4 | dev | — | `tests/test_csharp_parity.py`, `tests/test_demo_bundle.py`, `tests/test_bridges.py` (45° test), `NuGet.config` (new), MbmapReader `.csproj` (build props), `ci.yml` (C# job), test bootstrap | ready | |
 | [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | **S4-TEST-HYGIENE** (hard: frozen C# fixture uses its build harness); S4-PERF-PKG only for a `package.py` edit | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections, stale 2.0.0 paragraph), `tests/test_format_policy.py` (new), C# test harness (use; edits serialised after TEST-HYGIENE) | blocked | |
 | [S4-EXT-READY](S4-EXT-READY.md) | S4 | dev | — | `.github/workflows/release.yml`, `tests/test_manifest.py` (new), `docs/PLATFORM_SUBMISSION.md` (new), `blender_manifest.toml` (non-version fields) | ready | |
+| [S4-WATER-SURFACE](S4-WATER-SURFACE.md) | S4 (D112) | dev | S4-COL-DEGEN (shared `blender/bake.py`/`export.py`) | `core/water.py` (new), `core/osm.py` (`area_class`, `classify` waterways; no selector change), `core/generate.py` (terrain/landcover section, coverage), `core/bridges.py` (deck ground rule, piers, under-probe), `blender/scene_build.py`/`bake.py`/`export.py` (water objects), `tests/test_water.py` (new), `tests/test_bridges.py`, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION, `docs/demo/` | blocked | |
 | [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | blocked | |
 | [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW and its blocker S4-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | blocked | |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
 (then FORMAT-POLICY if needed); `core/uv.py` to TEX-WATER, then PERF-UV; `blender/bake.py` and `export.py` to
-BLENDER-HYGIENE, then COL-DEGEN; `tests/test_csharp_parity.py` and the C# harness to TEST-HYGIENE, then
+BLENDER-HYGIENE, then COL-DEGEN, then WATER-SURFACE (which also holds `core/generate.py` terrain and `core/bridges.py` alone); `tests/test_csharp_parity.py` and the C# harness to TEST-HYGIENE, then
 FORMAT-POLICY. Perf tasks keep every package byte-identical (D97). **Sample slot (D103):** output-changing PRs
-(TEX-WATER, COL-DEGEN, and ROOF-NAMED/ENDS only if the fixture's roofs change) regenerate
+(TEX-WATER, COL-DEGEN, WATER-SURFACE, and ROOF-NAMED/ENDS only if the fixture's roofs change) regenerate
 `examples/synthetic_sample.mbmap` only while holding the single exclusive merge-time slot from the coordinator
-(rebase, regenerate, green CI and gate, merge, release); rebasing alone does not serialise writers. Tasks that touch probes or collision (S4-COL-DEGEN) attach the
+(rebase, regenerate, green CI and gate, merge, release); rebasing alone does not serialise writers. Tasks that touch probes or collision (S4-COL-DEGEN, S4-WATER-SURFACE) attach the
 Pittsburgh Python and C# runs (D47).
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
@@ -126,7 +127,7 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
    → **S3-ROOF-HIPPED** ∥ **S3-TEX-UV-CORE** ∥ **S3-PARITY** → **S3-ROOF-GABLED** ∥ **S3-TEX-BLENDER**
    → **S3-REVIEW** → **REL-v0.4.0** → close check → retro → tag `v0.4.0` (D63, **released**)
 6. Wave 6 (sprint 4, D93): lanes **S4-ROOF-SPIKE** → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** ∥ **S4-PERF-PKG**
-   → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** ∥ **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** →
+   → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** → **S4-WATER-SURFACE** (D112) ∥ **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** →
    **S4-FORMAT-POLICY** (hard edge after TEST-HYGIENE) → **S4-EXT-READY** → **S4-REVIEW** → **REL-v0.5.0** → close check → retro → tag 0.5.0 (D104)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks

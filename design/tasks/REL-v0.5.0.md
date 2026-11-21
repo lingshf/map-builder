@@ -8,19 +8,23 @@ Same shape as REL-v0.4.0:
 
 * version 0.5.0 through the D50 drift guard;
 * CHANGELOG, user docs and flows;
-* `docs/demo/v0.5.0/`, with before/after renders against v0.4.0 for roofs, the river and one collision probe;
+* `docs/demo/v0.5.0/`, with before/after renders against v0.4.0 for roofs, the river (colour and the S4-WATER-SURFACE flat surface, Pittsburgh demokit cameras) and one collision probe;
 * `docs/releases/v0.5.0.md`.
 
 ## Acceptance criteria
 
 1. Real-data builds of Munich and Pittsburgh through the CLI **and** headless Blender, VALID (D53.1). The only
    allowed warnings are degenerate-triangle warnings for triangles kept under D98, each listed in the
-   S4-COL-DEGEN report and disclosed in the release notes; counts are below the v0.4.0 baseline and the D98
-   probe set is unchanged. Any other warning, or an unlisted degenerate, blocks the RC. The C# reader passes the same probes. Build time is the median of 3 (D32).
+   S4-COL-DEGEN report and disclosed in the release notes; counts are below the v0.4.0 baseline.
+   The probe gates match S4-REVIEW checks 2 and 3: the D98 hit equivalence holds on S4-COL-DEGEN's own base →
+   head comparison (D111). Every S4-WATER-SURFACE fixed-query difference is in its listed change set (new
+   `water` hits, moved bed, raised decks, extended piers or walls). Every base passage id survives
+   unless it is listed as dropped with its reason, and every survivor is passable on its regenerated path. Any other warning, or an unlisted degenerate, blocks the RC. The C# reader passes the same probes. Build time is the median of 3 (D32).
 2. The release notes state:
    * the roof count against the floor and the stretch, per shape, with the remaining named reasons;
    * the degenerate-triangle counts before and after per package and path, and the kept triangles (D98);
-   * the water fix;
+   * the water fix: the neutral texture (S4-TEX-WATER) and the flat water surfaces on carved beds (S4-WATER-SURFACE, D112),
+     with the new class-5 `water` hits in `.mbcol` and the note that `.mbhf` shows the riverbed (D117);
    * the performance numbers against v0.4.0 (D91);
    * that the format is unchanged at 2.1.0, with a link to the stability policy (draft, D101);
    * the extension reproducibility;
