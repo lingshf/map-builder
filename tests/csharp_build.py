@@ -24,6 +24,7 @@ BUILD_COUNT = 0   # builds run by this process (the "one build per run" check)
 
 _guard = threading.Lock()
 _dll = None
+_failure = None   # a failed build is cached too: one attempt per run
 _outdir = None
 
 
@@ -71,10 +72,12 @@ def _cleanup():
 
 def reader_dll():
     """Path of the built ``MbmapReader.dll``; builds it on the first call of the run. Raises RuntimeError on failure."""
-    global _dll, _outdir, BUILD_COUNT
+    global _dll, _outdir, _failure, BUILD_COUNT
     with _guard:
         if _dll is not None:
             return _dll
+        if _failure is not None:
+            raise RuntimeError(_failure)
         _outdir = tempfile.mkdtemp(prefix="mbmap-reader-")
         atexit.register(_cleanup)
         # a private copy of the sources: the checkout keeps its own bin/obj (from ``dotnet run``), whose generated
@@ -90,7 +93,8 @@ def reader_dll():
                  "-p:UseSharedCompilation=false"],
                 capture_output=True, text=True)
         if build.returncode != 0:
-            raise RuntimeError("dotnet build failed:\n" + build.stdout + build.stderr)
+            _failure = "dotnet build failed:\n" + build.stdout + build.stderr
+            raise RuntimeError(_failure)
         _dll = os.path.join(out, "MbmapReader.dll")
         return _dll
 

@@ -43,8 +43,13 @@ class UnraisableGuardTest(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0, run.stderr)
         self.assertIn("ResourceWarning", run.stderr)
 
+    def test_a_handle_held_by_a_module_global_fails_the_run(self):
+        run = self.run_scratch(SCRATCH.replace("f = open(__file__)\n        del f", "global KEPT\n        KEPT = open(__file__)"))
+        self.assertNotEqual(run.returncode, 0, run.stderr)
+        self.assertIn("ResourceWarning", run.stderr)
+
     def test_a_clean_run_passes(self):
-        run = self.run_scratch(SCRATCH.replace("f = open(__file__)", "with open(__file__) as f:\n                pass"))
+        run = self.run_scratch(SCRATCH.replace("f = open(__file__)", "with open(__file__) as f:\n            pass"))
         self.assertEqual(run.returncode, 0, run.stderr)
 
 
