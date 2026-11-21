@@ -2,15 +2,16 @@
 # Copyright 2026 lingshf
 """S4-WATER-SURFACE checks on an EMITTED package (spec AC3, AC6, AC7); works the same on a CLI or a Blender build.
 
-  py -3.12 tools/water_check.py PACKAGE.mbmap [--min-clearance 0.62]
+  py -3.12 tools/water_check.py PACKAGE.mbmap --pre-carve BASE.mbmap [--min-clearance 0.62]
 
 * Carve invariant (spec section 4) on the emitted ``.mbcol`` triangles: for every pair of a terrain triangle and a
   water triangle whose xy projections overlap, the terrain must not rise above the water over the overlap. The
   maximum (terrain - water, metres; negative = terrain below water) is printed per water body.
 * Wet-probe clearance (AC6): every emitted ``:under`` probe whose capsule footprint touches an emitted water
-  triangle must clear the highest emitted water and terrain surface over the whole footprint by at least
-  ``--min-clearance`` (ROAD_LIFT_M + 0.5). The terrain here is the emitted (carved) one, which is never above the
-  pre-carve ground the generator measures; the pre-carve term is covered by tests/test_water.py.
+  triangle must clear the exact PRE-CARVE ground and the emitted water over the whole footprint by at least
+  ``--min-clearance`` (ROAD_LIFT_M + 0.5). The pre-carve ground is the terrain of ``--pre-carve``, a package of the
+  same inputs built without water (the base commit; its terrain mesh is the uncarved grid). The clearance over the
+  emitted (carved) terrain is printed alongside. Exit 2 if wet probes exist and --pre-carve is missing.
 
 Exit 0 when nothing is violated, 1 otherwise.
 """
@@ -82,9 +83,13 @@ def invariant(col) -> dict[str, float]:
     return out
 
 
-def wet_clearance(col, probes, min_clear: float) -> list[tuple[str, float, bool]]:
-    surf = [(t, "water" if e["class"] == "water" else "terrain") for e in col.objects
-            if e["class"] in ("water", "terrain") for t in col.object_triangles(e)]
+def wet_clearance(col, probes, min_clear: float, pre_col) -> list[tuple[str, float, float, bool]]:
+    """(id, clearance over the exact pre-carve ground and water, clearance over the emitted terrain and water,
+    ok) of each emitted wet ``:under`` probe. The pre-carve ground is the terrain of ``pre_col``: a package of
+    the same inputs built without water (the base commit), whose terrain mesh is the uncarved grid."""
+    surf = [(t, "water") for e in col.objects if e["class"] == "water" for t in col.object_triangles(e)]
+    surf += [(t, "emitted") for e in col.objects if e["class"] == "terrain" for t in col.object_triangles(e)]
+    surf += [(t, "pre") for e in pre_col.objects if e["class"] == "terrain" for t in pre_col.object_triangles(e)]
     tris = [s[0] for s in surf]
     idx = _index(tris)
     kind = {id(s[0]): s[1] for s in surf}
@@ -93,27 +98,30 @@ def wet_clearance(col, probes, min_clear: float) -> list[tuple[str, float, bool]
         if not str(p["id"]).endswith(":under"):
             continue
         (ax, ay, z), (bx, by, _) = p["path_map"]
-        cap = capsule_polygon((ax, ay), (bx, by), p.get("radius_m", PROBE_RADIUS_M))
+        r = p.get("radius_m", PROBE_RADIUS_M)
+        cap = capsule_polygon((ax, ay), (bx, by), r)
         box = (min(q[0] for q in cap), min(q[1] for q in cap), max(q[0] for q in cap), max(q[1] for q in cap))
-        wet, top = False, -math.inf
+        wet, top = False, {"water": -math.inf, "emitted": -math.inf, "pre": -math.inf}
         for t in _near(idx, tris, box):
             clip = _clip_poly_tri(cap, [(q[0], q[1]) for q in t])
             if len(clip) < 3 or abs(_area2(clip)) < AREA_EPS:
                 continue
             pl = _Plane(t)
-            m = max(pl.at(x, y) for x, y in clip)
-            top = max(top, m)
-            wet = wet or kind[id(t)] == "water"
+            k = kind[id(t)]
+            top[k] = max(top[k], max(pl.at(x, y) for x, y in clip))
+            wet = wet or k == "water"
         if wet:
-            clear = z - p.get("radius_m", PROBE_RADIUS_M) - top
-            rows.append((p["id"], clear, clear >= min_clear - 1e-4))
+            pre = z - r - max(top["pre"], top["water"])
+            emitted = z - r - max(top["emitted"], top["water"])
+            rows.append((p["id"], pre, emitted, pre >= min_clear - 1e-4))
     return rows
-
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("package")
     ap.add_argument("--min-clearance", type=float, default=0.62)
+    ap.add_argument("--pre-carve", help="package of the same inputs built without water (base commit): its terrain is "
+                                        "the exact pre-carve ground; required when the package has wet under-probes")
     a = ap.parse_args()
     with zipfile.ZipFile(a.package) as z:
         if z.testzip() is not None:
@@ -128,10 +136,21 @@ def main() -> int:
         print(f"invariant {name}: max terrain-water {worst:+.6f} m {'OK' if ok else 'VIOLATION'}")
     if not inv:
         print("invariant: no water objects")
-    rows = wet_clearance(col, probes, a.min_clearance)
-    for pid, clear, ok in rows:
+    wet = [p for p in probes if str(p["id"]).endswith(":under")]
+    rows = []
+    if wet:
+        if not a.pre_carve:
+            print("FAIL: the package has :under probes; --pre-carve BASE.mbmap is required for the AC6 check")
+            return 2
+        with zipfile.ZipFile(a.pre_carve) as z:
+            pre_col = read_collision(z.read("collision/map.mbcol"))
+        rows = wet_clearance(col, probes, a.min_clearance, pre_col)
+    for pid, pre, emitted, ok in rows:
         bad += not ok
-        print(f"wet probe {pid}: clearance {clear:.4f} m {'OK' if ok else 'BELOW ' + str(a.min_clearance)}")
+        print(f"wet probe {pid}: clearance over pre-carve ground+water {pre:.4f} m, over emitted terrain+water "
+              f"{emitted:.4f} m {'OK' if ok else 'BELOW ' + str(a.min_clearance)}")
+    if rows:
+        print(f"minimum wet clearance over pre-carve ground+water {min(r[1] for r in rows):.4f} m")
     print(f"{len(inv)} water bodies, {len(rows)} wet under-probes, {'FAIL' if bad else 'PASS'}")
     return 1 if bad else 0
 

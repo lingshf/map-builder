@@ -43,7 +43,9 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from col_degen_replay import DOWN, build_probes, csharp, names  # noqa: E402
 from map_builder.core.collision import Collision, read_collision  # noqa: E402
+from map_builder.core.bridges import capsule_polygon  # noqa: E402
 from map_builder.core.query import capsule_hits, ray_cast  # noqa: E402
+from map_builder.core.water import AREA_EPS, _area2, _clip_poly_tri  # noqa: E402
 
 
 class Package:
@@ -118,10 +120,29 @@ class Context:
     """What the HEAD package says about its own changes: the water objects new on HEAD (with their plan boxes) and
     the decks it reports as raised (object name -> raised metres)."""
 
-    def __init__(self, base_names: set[str], head: Any) -> None:
+    def __init__(self, base_names: set[str], head: Any, water_tris: list[Any] | None = None) -> None:
         self.new_water = {e["name"]: e["aabb"] for e in head.col.objects
                           if e["class"] == "water" and e["name"] not in base_names}
         self.raised = dict(head.raised)
+        self.present = set(head.names)
+        self.water_tris = water_tris if water_tris is not None else [
+            [(p[0], p[1]) for p in t] for e in head.col.objects if e["class"] == "water"
+            for t in head.col.object_triangles(e)]
+
+    def over_water(self, path: list[Any], radius: float) -> bool:
+        """True when the capsule of ``path`` overlaps a water triangle of HEAD in plan (bbox prefilter first)."""
+        for a, b in zip(path, path[1:]):
+            cap = capsule_polygon((a[0], a[1]), (b[0], b[1]), radius)
+            lo_x, hi_x = min(q[0] for q in cap), max(q[0] for q in cap)
+            lo_y, hi_y = min(q[1] for q in cap), max(q[1] for q in cap)
+            for t in self.water_tris:
+                if (max(q[0] for q in t) < lo_x or min(q[0] for q in t) > hi_x
+                        or max(q[1] for q in t) < lo_y or min(q[1] for q in t) > hi_y):
+                    continue
+                clip = _clip_poly_tri(cap, t)
+                if len(clip) >= 3 and abs(_area2(clip)) >= AREA_EPS:
+                    return True
+        return False
 
     def near_water(self, x: float, y: float) -> bool:
         return any(b[0] - BLEND_PAD_M <= x <= b[3] + BLEND_PAD_M and b[1] - BLEND_PAD_M <= y <= b[4] + BLEND_PAD_M
@@ -134,6 +155,21 @@ def py_hit(col: Collision, o: tuple[float, float, float], dist: float) -> Hit | 
         return None
     e = col.objects[h.object]
     return (h.t, e["name"], e["class"])
+
+
+def py_hits(col: Collision, o: tuple[float, float, float], dist: float) -> list[Hit]:
+    """Every downward hit of the ray in order, nearest first: the ray is restarted just below each hit."""
+    out: list[Hit] = []
+    z, travelled = o[2], 0.0
+    while len(out) < 64:
+        h = ray_cast(col, (o[0], o[1], z), DOWN, dist - travelled)
+        if h is None:
+            break
+        e = col.objects[h.object]
+        out.append((travelled + h.t, e["name"], e["class"]))
+        z -= h.t + 1e-6
+        travelled += h.t + 1e-6
+    return out
 
 
 def csharp_rays(col_bytes: bytes, rays: list[tuple[float, float, float]], dist: float, work: str) -> list[Hit | None]:
@@ -178,44 +214,64 @@ def ray_disagreement(py_h: Hit | None, cs: Hit | None, col: Collision) -> str:
     return ""
 
 
-def ray_label(b: Hit | None, h: Hit | None, xy: tuple[float, float], ctx: Context) -> str | None:
-    """None when equivalent, else the change-set label of this ray, or ``unlisted``. A label is given only when
-    the hit object, its class and the direction of the change all match the label."""
+def _terrain_moved_down(name: str, t: float, h_hits: list[Hit]) -> bool:
+    """HEAD hits the same terrain object farther down on this ray (the carve lowered it)."""
+    return any(hn == name and hc == "terrain" and ht > t + DIST_TOL_M for ht, hn, hc in h_hits)
+
+
+def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
+    """None when the nearest hits are equivalent, else the change-set label, or ``unlisted``. ``b_hits``/``h_hits``
+    are every hit of the ray, nearest first. A difference is accepted only when each BASE object nearer than the
+    new nearest hit is explained: terrain near new water that HEAD hits again farther down (the bed moved), or
+    nothing else. The new nearest hit must itself be a new water body, an object the base ray also hit, or
+    terrain. A deck raise needs the same reported bridge on both sides, near water, lowered by at most the raise."""
+    b = b_hits[0] if b_hits else None
+    h = h_hits[0] if h_hits else None
     if b is None and h is None:
         return None
     if b is not None and h is not None and b[1] == h[1] and b[2] == h[2] and abs(b[0] - h[0]) <= DIST_TOL_M:
         return None
-    if h is not None and h[2] == "water" and h[1] in ctx.new_water and (b is None or b[2] == "terrain"):
-        return "new water hit"
-    if (b is not None and h is not None and b[2] == "terrain" and h[2] == "bridge" and h[0] > b[0] + DIST_TOL_M
-            and ctx.near_water(*xy)):
-        return "bed moved"     # the carved terrain dropped below a deck that the old surface had covered
-    if b is not None and h is not None and b[1] == h[1]:
-        if b[2] == h[2] == "terrain" and h[0] > b[0] + DIST_TOL_M and ctx.near_water(*xy):
-            return "bed moved"
+    if h is None:
+        return "unlisted"
+    if b is not None and b[1] == h[1] and b[2] == h[2] == "bridge":
         raise_m = ctx.raised.get(h[1], 0.0)
-        if b[2] == h[2] == "bridge" and raise_m > 0 and 0 < b[0] - h[0] <= raise_m + DIST_TOL_M:
+        if raise_m > 0 and ctx.near_water(*xy) and 0 < b[0] - h[0] <= raise_m + DIST_TOL_M:
             return "deck raised"
+        return "unlisted"
+    nearer = [x for x in b_hits if x[0] < h[0] - DIST_TOL_M]
+    label = None
+    for t, name, cls_ in nearer:
+        if cls_ == "terrain" and ctx.near_water(*xy) and _terrain_moved_down(name, t, h_hits):
+            label = "bed moved"
+        else:
+            return "unlisted"
+    base_names = {x[1] for x in b_hits}
+    if h[2] == "water" and h[1] in ctx.new_water:
+        return "new water hit"
+    if h[2] == "terrain" or h[1] in base_names:
+        return label or "unlisted"
     return "unlisted"
 
 
-def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]], xy: tuple[float, float],
+def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]], path: list[Any], radius: float,
                    ctx: Context) -> list[str]:
     """One label per object that entered or left the capsule's hit set. Only a water object new on HEAD may
-    enter; only terrain near a new water body (bed moved) or a bridge HEAD reports as raised may leave. Piers
-    and building walls that extend keep their object names, so they do not change a hit set."""
+    enter; only terrain near a new water body (bed moved) or a bridge that HEAD reports as raised, still has in
+    its collision and whose capsule really overlaps HEAD water may leave. Piers and building walls that extend
+    keep their object names, so they do not change a hit set."""
+    xy = (path[0][0], path[0][1])
     out = []
     for name, cls_ in sorted(set(h) - set(b)):
         out.append("new water hit" if cls_ == "water" and name in ctx.new_water else "unlisted")
     for name, cls_ in sorted(set(b) - set(h)):
         if cls_ == "terrain" and ctx.near_water(*xy):
             out.append("bed moved")
-        elif cls_ == "bridge" and ctx.raised.get(name, 0.0) > 0:
+        elif (cls_ == "bridge" and ctx.raised.get(name, 0.0) > 0 and name in ctx.present
+              and ctx.over_water(path, radius)):
             out.append("deck raised")
         else:
             out.append("unlisted")
     return out
-
 
 def pairs(spec: list[str]) -> dict[str, str]:
     out = {}
@@ -269,7 +325,7 @@ def passage_check(base: Any, head: Any, drop: dict[str, str], new: dict[str, str
                     problems.append(f"passage {pid}: listed reason {listed[pid]!r} does not quote HEAD's D21 text {text!r}")
 
     check("dropped", b - h, drop, True)
-    check("new", h - b, new, False)
+    check("new", h - b, new, True)
     check("newly blocked", head_blocked - base_blocked, blocked, True)
     return problems
 
@@ -321,12 +377,15 @@ def main() -> int:
 
     for i, o in enumerate(all_rays):
         bh, hh = py_rays["base"][i], py_rays["head"][i]
-        lab = ray_label(bh, hh, (o[0], o[1]), ctx)
+        if (bh is None and hh is None) or (bh and hh and bh[1] == hh[1] and bh[2] == hh[2]
+                                           and abs(bh[0] - hh[0]) <= DIST_TOL_M):
+            continue
+        lab = ray_label(py_hits(base.col, o, dist), py_hits(head.col, o, dist), (o[0], o[1]), ctx)
         if lab:
             record("ray", i, (o[0], o[1]), bh, hh, lab)
-    for i, (path, _r) in enumerate(queries):
+    for i, (path, qr) in enumerate(queries):
         kind = "capsule" if i < len(caps) else "base passage"
-        for lab in capsule_labels(py["base"][i], py["head"][i], (path[0][0], path[0][1]), ctx):
+        for lab in capsule_labels(py["base"][i], py["head"][i], path, qr, ctx):
             record(kind, i, (path[0][0], path[0][1]), py["base"][i], py["head"][i], lab)
     bad = [d for d in diffs if d["label"] == "unlisted"]
     fails += [f"unlisted difference: {d}" for d in bad[:20]]

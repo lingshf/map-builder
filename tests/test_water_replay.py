@@ -18,6 +18,9 @@ WATER = "water:osm:way/1"
 DECK = "bridge_way_7"
 
 
+WTRI = [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)]
+
+
 def head_pkg(report: dict | None = None, probes: list | None = None, raised: dict | None = None) -> SimpleNamespace:
     objects = [{"name": "terrain", "class": "terrain", "aabb": [-500, -500, 0, 500, 500, 9]},
                {"name": WATER, "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
@@ -27,53 +30,86 @@ def head_pkg(report: dict | None = None, probes: list | None = None, raised: dic
                            mbids={"osm:way/9"}, probes=probes or [], report=report or {})
 
 
-def ctx() -> wr.Context:
-    return wr.Context({"terrain", DECK}, head_pkg())
+def ctx(**kw) -> wr.Context:
+    c = wr.Context({"terrain", DECK}, head_pkg(), [WTRI])
+    for k, v in kw.items():
+        setattr(c, k, v)
+    return c
+
+
+T0, T1 = (10.0, "terrain", "terrain"), (11.0, "terrain", "terrain")
+W = (8.5, WATER, "water")
 
 
 class RayLabelTest(unittest.TestCase):
-    def test_water_over_old_bed_is_labelled(self) -> None:
-        self.assertEqual(wr.ray_label((10.0, "terrain", "terrain"), (8.5, WATER, "water"), (50, 50), ctx()),
-                         "new water hit")
+    def test_water_over_old_bed_is_labelled_when_the_terrain_went_down(self) -> None:
+        self.assertEqual(wr.ray_label([T0], [W, T1], (50, 50), ctx()), "new water hit")
+
+    def test_farther_water_must_not_hide_lost_nearer_terrain(self) -> None:
+        # the base terrain is gone on HEAD (no terrain hit below the water): not explained
+        self.assertEqual(wr.ray_label([T0], [(12.0, WATER, "water")], (50, 50), ctx()), "unlisted")
+        # a nearer base building lost under the water is not explained either
+        self.assertEqual(wr.ray_label([(9.0, "bld", "building"), T0], [(9.5, WATER, "water"), T1], (50, 50), ctx()), "unlisted")
+        # terrain far from any new water cannot have been carved
+        self.assertEqual(wr.ray_label([T0], [(12.0, WATER, "water"), (13.0, "terrain", "terrain")], (400, 400), ctx()),
+                         "unlisted")
 
     def test_bed_moved_needs_terrain_on_both_sides_near_water(self) -> None:
         c = ctx()
-        self.assertEqual(wr.ray_label((10.0, "terrain", "terrain"), (11.0, "terrain", "terrain"), (120, 50), c),
-                         "bed moved")
-        self.assertEqual(wr.ray_label((10.0, "terrain", "terrain"), (11.0, "terrain", "terrain"), (400, 400), c),
-                         "unlisted")
+        self.assertEqual(wr.ray_label([T0], [T1], (120, 50), c), "bed moved")
+        self.assertEqual(wr.ray_label([T0], [T1], (400, 400), c), "unlisted")
+        self.assertEqual(wr.ray_label([T1], [T0], (120, 50), c), "unlisted")     # terrain rose
+
+    def test_terrain_replaced_by_bridge_needs_the_terrain_to_go_down(self) -> None:
+        c = ctx()
+        deck = (12.0, DECK, "bridge")
+        self.assertEqual(wr.ray_label([T0, deck], [deck, (14.0, "terrain", "terrain")], (120, 50), c), "bed moved")
+        self.assertEqual(wr.ray_label([T0, deck], [deck], (120, 50), c), "unlisted")   # terrain vanished
 
     def test_farther_building_replacing_terrain_is_not_a_bed_move(self) -> None:
-        self.assertEqual(wr.ray_label((10.0, "terrain", "terrain"), (12.0, "bld", "building"), (50, 50), ctx()),
-                         "unlisted")
+        self.assertEqual(wr.ray_label([T0], [(12.0, "bld", "building")], (50, 50), ctx()), "unlisted")
 
     def test_deleted_dry_bridge_hit_is_not_a_deck_raise(self) -> None:
         c = ctx()
-        self.assertEqual(wr.ray_label((5.0, "bridge_way_dry", "bridge"), (9.0, "terrain", "terrain"), (230, 5), c),
-                         "unlisted")
-        self.assertEqual(wr.ray_label((5.0, "bridge_way_dry", "bridge"), None, (230, 5), c), "unlisted")
+        dry = (5.0, "bridge_way_dry", "bridge")
+        self.assertEqual(wr.ray_label([dry], [(9.0, "terrain", "terrain")], (230, 5), c), "unlisted")
+        self.assertEqual(wr.ray_label([dry], [], (230, 5), c), "unlisted")
 
-    def test_deck_raise_must_be_reported_and_bounded(self) -> None:
+    def test_deck_raise_must_be_reported_bounded_and_near_water(self) -> None:
         c = ctx()
-        self.assertEqual(wr.ray_label((5.0, DECK, "bridge"), (4.6, DECK, "bridge"), (230, 5), c), "deck raised")
-        self.assertEqual(wr.ray_label((5.0, DECK, "bridge"), (3.0, DECK, "bridge"), (230, 5), c), "unlisted")
-        self.assertEqual(wr.ray_label((5.0, DECK, "bridge"), (5.4, DECK, "bridge"), (230, 5), c), "unlisted")
+        d = lambda t: (t, DECK, "bridge")  # noqa: E731
+        self.assertEqual(wr.ray_label([d(5.0)], [d(4.6)], (50, 50), c), "deck raised")
+        self.assertEqual(wr.ray_label([d(5.0)], [d(3.0)], (50, 50), c), "unlisted")
+        self.assertEqual(wr.ray_label([d(5.0)], [d(5.4)], (50, 50), c), "unlisted")
+        self.assertEqual(wr.ray_label([d(5.0)], [d(4.6)], (400, 400), c), "unlisted")   # dry
 
     def test_distance_change_under_1mm_is_equal_and_above_is_not(self) -> None:
         c = ctx()
-        self.assertIsNone(wr.ray_label((5.0, DECK, "bridge"), (5.0005, DECK, "bridge"), (230, 5), c))
-        self.assertEqual(wr.ray_label((5.0, "bld", "building"), (5.002, "bld", "building"), (230, 5), c), "unlisted")
+        d = lambda t: (t, DECK, "bridge")  # noqa: E731
+        self.assertIsNone(wr.ray_label([d(5.0)], [d(5.0005)], (230, 5), c))
+        self.assertEqual(wr.ray_label([(5.0, "bld", "building")], [(5.002, "bld", "building")], (230, 5), c),
+                         "unlisted")
 
 
 class CapsuleLabelTest(unittest.TestCase):
+    WET = [[10, 10, 5], [30, 10, 5]]
+    DRY = [[300, 300, 5], [320, 300, 5]]
+
     def test_only_new_water_may_enter_and_only_reported_things_leave(self) -> None:
         c = ctx()
-        self.assertEqual(wr.capsule_labels([], [(WATER, "water")], (10, 10), c), ["new water hit"])
-        self.assertEqual(wr.capsule_labels([], [("bld", "building")], (10, 10), c), ["unlisted"])
-        self.assertEqual(wr.capsule_labels([("bridge_way_dry", "bridge")], [], (10, 10), c), ["unlisted"])
-        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], (10, 10), c), ["deck raised"])
-        self.assertEqual(wr.capsule_labels([("terrain", "terrain")], [], (400, 400), c), ["unlisted"])
+        self.assertEqual(wr.capsule_labels([], [(WATER, "water")], self.WET, 1.0, c), ["new water hit"])
+        self.assertEqual(wr.capsule_labels([], [("bld", "building")], self.WET, 1.0, c), ["unlisted"])
+        self.assertEqual(wr.capsule_labels([("bridge_way_dry", "bridge")], [], self.WET, 1.0, c), ["unlisted"])
+        self.assertEqual(wr.capsule_labels([("terrain", "terrain")], [], self.DRY, 1.0, c), ["unlisted"])
 
+    def test_deck_raise_needs_overlap_with_water_a_reported_raise_and_a_present_bridge(self) -> None:
+        c = ctx()
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], self.WET, 1.0, c), ["deck raised"])
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], self.DRY, 1.0, c), ["unlisted"])     # dry
+        c.present = c.present - {DECK}
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], self.WET, 1.0, c), ["unlisted"])     # gone
+        c = ctx(raised={})
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], self.WET, 1.0, c), ["unlisted"])     # unreported
 
 class PassageReasonTest(unittest.TestCase):
     BASE = SimpleNamespace(probes=[{"id": "a:deck"}, {"id": "a:under"}], report={"passage_probes_blocked": []})
