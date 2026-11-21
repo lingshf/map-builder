@@ -20,7 +20,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from ..core.geodesy import DEFAULT_MAX_SIDE_M, MIN_SIDE_M
-from .sources import ENV_OVERPASS_URL, FIELD_LABELS, has_credential, migrate_legacy_centre
+from .sources import ENV_OVERPASS_URL, FIELD_LABELS, has_credential, migrate_legacy_bbox, migrate_legacy_centre
 
 if TYPE_CHECKING:
     import bpy.types
@@ -48,7 +48,8 @@ class MB_Settings(bpy.types.PropertyGroup):
         ("CENTER", "Centre + size", "WGS84 centre latitude/longitude and width/height in metres"),
         ("BBOX", "Bounding box", "South, west, north, east in WGS84 degrees"),
     ], default="CENTER")
-    # the centre is text, not FloatProperty: Blender stores floats as float32 (centimetre error at 40 N), which
+    # the centre and the bbox edges are text, not FloatProperty: Blender stores floats as float32 (centimetre to
+    # decimetre error at 40-50 N), which
     # moves the area and changes terrain and probes against the CLI. ``lat``/``lon`` are the legacy float
     # properties of older .blend files: registered (so the saved value stays readable), hidden, migrated into
     # ``centre_lat``/``centre_lon`` on load and at Generate.
@@ -64,10 +65,17 @@ class MB_Settings(bpy.types.PropertyGroup):
                          min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
     height: FloatProperty(name="Height (m)", description="North-south extent in metres", default=1000.0,
                           min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
-    bbox_south: FloatProperty(name="South", min=-85.0, max=85.0, precision=6)
-    bbox_west: FloatProperty(name="West", min=-180.0, max=180.0, precision=6)
-    bbox_north: FloatProperty(name="North", min=-85.0, max=85.0, precision=6)
-    bbox_east: FloatProperty(name="East", min=-180.0, max=180.0, precision=6)
+    bbox_south_deg: StringProperty(name="South", description="Bounding box south edge (degrees, full precision)", default="")
+    bbox_west_deg: StringProperty(name="West", description="Bounding box west edge (degrees, full precision)", default="")
+    bbox_north_deg: StringProperty(name="North", description="Bounding box north edge (degrees, full precision)", default="")
+    bbox_east_deg: StringProperty(name="East", description="Bounding box east edge (degrees, full precision)", default="")
+    # legacy float32 bbox of older .blend files: registered (so the saved value stays readable), hidden, migrated
+    # into the ``bbox_*_deg`` text fields on load and at Generate
+    bbox_south: FloatProperty(name="South (legacy)", min=-85.0, max=85.0, precision=6, options={"HIDDEN"})
+    bbox_west: FloatProperty(name="West (legacy)", min=-180.0, max=180.0, precision=6, options={"HIDDEN"})
+    bbox_north: FloatProperty(name="North (legacy)", min=-85.0, max=85.0, precision=6, options={"HIDDEN"})
+    bbox_east: FloatProperty(name="East (legacy)", min=-180.0, max=180.0, precision=6, options={"HIDDEN"})
+    bbox_migrated: BoolProperty(name="Legacy bbox migrated", default=False, options={"HIDDEN"})
 
     elevation_source: EnumProperty(name="Elevation", items=[
         ("copernicus", "Copernicus GLO-30 (online)", "Copernicus DEM GLO-30 from AWS Open Data; public, no account"),
@@ -130,6 +138,7 @@ class MB_Settings(bpy.types.PropertyGroup):
 def _migrate_on_load(*_: object) -> None:
     for scene in bpy.data.scenes:
         migrate_legacy_centre(scene.map_builder)
+        migrate_legacy_bbox(scene.map_builder)
 
 
 def register() -> None:

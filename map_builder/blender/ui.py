@@ -36,10 +36,10 @@ class MB_PT_main(bpy.types.Panel):
         box.prop(s, "area_mode", expand=True)
         col = box.column(align=True)
         if s.area_mode == "BBOX":
-            col.prop(s, "bbox_south")
-            col.prop(s, "bbox_west")
-            col.prop(s, "bbox_north")
-            col.prop(s, "bbox_east")
+            col.prop(s, "bbox_south_deg")
+            col.prop(s, "bbox_west_deg")
+            col.prop(s, "bbox_north_deg")
+            col.prop(s, "bbox_east_deg")
         else:
             col.prop(s, "centre_lat")
             col.prop(s, "centre_lon")

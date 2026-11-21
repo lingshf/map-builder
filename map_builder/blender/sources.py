@@ -115,6 +115,23 @@ def migrate_legacy_centre(s: MB_Settings) -> bool:
     return True
 
 
+BBOX_EDGES = ("south", "west", "north", "east")
+
+
+def migrate_legacy_bbox(s: MB_Settings) -> bool:
+    """Copy the legacy float32 ``bbox_<edge>`` of a .blend saved before the text bbox into empty
+    ``bbox_<edge>_deg``, once and as stored (``repr`` of the float): all four edges together whenever any legacy
+    edge is set. ``bbox_migrated`` then stops any later migration, so a field the user clears is never revived.
+    Returns True if migrated."""
+    if s.bbox_migrated or not any(s.is_property_set(f"bbox_{e}") for e in BBOX_EDGES):
+        return False
+    for e in BBOX_EDGES:
+        if not getattr(s, f"bbox_{e}_deg").strip():
+            setattr(s, f"bbox_{e}_deg", repr(float(getattr(s, f"bbox_{e}"))))
+    s.bbox_migrated = True
+    return True
+
+
 def has_credential(value: object) -> bool:
     """True if the string ``value`` is credential-like under the core credential policy."""
     return isinstance(value, str) and bool(find_secrets(value))
