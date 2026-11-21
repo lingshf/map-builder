@@ -30,8 +30,12 @@ def head_pkg(report: dict | None = None, probes: list | None = None, raised: dic
                            mbids={"osm:way/9"}, probes=probes or [], report=report or {})
 
 
-def ctx(**kw) -> wr.Context:
-    c = wr.Context({"terrain", DECK}, head_pkg(), [WTRI])
+BOX = (200.0, 0.0, 260.0, 10.0)
+
+
+def ctx(base_top: float = 9.0, head_top: float = 9.0, head_box: tuple = BOX, **kw) -> wr.Context:
+    c = wr.Context({"terrain", DECK}, head_pkg(), [WTRI],
+                   ({DECK: (BOX, base_top)}, {DECK: (head_box, head_top)}))
     for k, v in kw.items():
         setattr(c, k, v)
     return c
@@ -110,6 +114,23 @@ class CapsuleLabelTest(unittest.TestCase):
         self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], self.WET, 1.0, c), ["unlisted"])     # gone
         c = ctx(raised={})
         self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], self.WET, 1.0, c), ["unlisted"])     # unreported
+
+class BridgeGeometryTest(unittest.TestCase):
+    """A bridge name match is not evidence; its collision geometry must have changed only as reported."""
+
+    def test_bridge_revealed_but_risen_more_than_reported(self) -> None:
+        base = [(1.0, "terrain", "terrain"), (9.0, DECK, "bridge")]
+        head = [(2.0, DECK, "bridge"), (10.0, "terrain", "terrain")]
+        self.assertEqual(wr.ray_label(base, head, (120, 50), ctx(head_top=16.0)), "unlisted")
+        self.assertNotEqual(wr.ray_label(base, head, (120, 50), ctx()), "unlisted")
+
+    def test_sideways_moved_bridge_is_not_a_deck_raise(self) -> None:
+        wet = [[10, 10, 5], [30, 10, 5]]
+        moved = ctx(head_box=(300.0, 0.0, 360.0, 10.0))
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], wet, 1.0, moved), ["unlisted"])
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], wet, 1.0, ctx(head_top=9.4)), ["deck raised"])
+        self.assertEqual(wr.capsule_labels([(DECK, "bridge")], [], wet, 1.0, ctx(head_top=9.6)), ["unlisted"])
+
 
 class PassageReasonTest(unittest.TestCase):
     BASE = SimpleNamespace(probes=[{"id": "a:deck"}, {"id": "a:under"}], report={"passage_probes_blocked": []})

@@ -120,14 +120,27 @@ class Context:
     """What the HEAD package says about its own changes: the water objects new on HEAD (with their plan boxes) and
     the decks it reports as raised (object name -> raised metres)."""
 
-    def __init__(self, base_names: set[str], head: Any, water_tris: list[Any] | None = None) -> None:
+    def __init__(self, base_names: set[str], head: Any, water_tris: list[Any] | None = None,
+                 bridges: tuple[dict[str, Any], dict[str, Any]] | None = None) -> None:
         self.new_water = {e["name"]: e["aabb"] for e in head.col.objects
                           if e["class"] == "water" and e["name"] not in base_names}
         self.raised = dict(head.raised)
         self.present = set(head.names)
+        self.base_bridge, self.head_bridge = bridges if bridges is not None else ({}, {})
         self.water_tris = water_tris if water_tris is not None else [
             [(p[0], p[1]) for p in t] for e in head.col.objects if e["class"] == "water"
             for t in head.col.object_triangles(e)]
+
+    def bridge_ok(self, name: str) -> bool:
+        """The bridge's collision geometry changed only as the generator reports: same plan footprint (vertex bbox
+        within 1 mm) and top z unchanged, or raised by between 0 and its reported ``raised_m`` (within 1 mm).
+        Underside and pier depth may change (piers reach the carved bed). Unknown on either side: not ok."""
+        b, h = self.base_bridge.get(name), self.head_bridge.get(name)
+        if b is None or h is None:
+            return False
+        if any(abs(x - y) > DIST_TOL_M for x, y in zip(b[0], h[0])):
+            return False
+        return -DIST_TOL_M <= h[1] - b[1] <= self.raised.get(name, 0.0) + DIST_TOL_M
 
     def over_water(self, path: list[Any], radius: float) -> bool:
         """True when the capsule of ``path`` overlaps a water triangle of HEAD in plan (bbox prefilter first)."""
@@ -147,6 +160,19 @@ class Context:
     def near_water(self, x: float, y: float) -> bool:
         return any(b[0] - BLEND_PAD_M <= x <= b[3] + BLEND_PAD_M and b[1] - BLEND_PAD_M <= y <= b[4] + BLEND_PAD_M
                    for b in self.new_water.values())
+
+
+def bridge_geometry(col: Collision) -> dict[str, Any]:
+    """Bridge object name -> ((xmin, ymin, xmax, ymax), top z) of its collision vertices."""
+    out: dict[str, Any] = {}
+    for e in col.objects:
+        if e["class"] != "bridge":
+            continue
+        pts = [p for t in col.object_triangles(e) for p in t]
+        if pts:
+            out[e["name"]] = ((min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts),
+                               max(p[1] for p in pts)), max(p[2] for p in pts))
+    return out
 
 
 def py_hit(col: Collision, o: tuple[float, float, float], dist: float) -> Hit | None:
@@ -233,12 +259,15 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
         return None
     if h is None:
         return "unlisted"
+    nearer = [x for x in b_hits if x[0] < h[0] - DIST_TOL_M]
+    for _t, name, cls_ in [h, *nearer] + ([b] if b else []):
+        if cls_ == "bridge" and not ctx.bridge_ok(name):
+            return "unlisted"     # the bridge moved sideways or by more than its reported raise
     if b is not None and b[1] == h[1] and b[2] == h[2] == "bridge":
         raise_m = ctx.raised.get(h[1], 0.0)
         if raise_m > 0 and ctx.near_water(*xy) and 0 < b[0] - h[0] <= raise_m + DIST_TOL_M:
             return "deck raised"
         return "unlisted"
-    nearer = [x for x in b_hits if x[0] < h[0] - DIST_TOL_M]
     label = None
     for t, name, cls_ in nearer:
         if cls_ == "terrain" and ctx.near_water(*xy) and _terrain_moved_down(name, t, h_hits):
@@ -262,9 +291,12 @@ def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]], path: lis
     xy = (path[0][0], path[0][1])
     out = []
     for name, cls_ in sorted(set(h) - set(b)):
-        out.append("new water hit" if cls_ == "water" and name in ctx.new_water else "unlisted")
+        out.append("new water hit" if cls_ == "water" and name in ctx.new_water
+                   and not any(c == "bridge" and not ctx.bridge_ok(n) for n, c in set(b) | set(h)) else "unlisted")
     for name, cls_ in sorted(set(b) - set(h)):
-        if cls_ == "terrain" and ctx.near_water(*xy):
+        if cls_ == "bridge" and not ctx.bridge_ok(name):
+            out.append("unlisted")
+        elif cls_ == "terrain" and ctx.near_water(*xy):
             out.append("bed moved")
         elif (cls_ == "bridge" and ctx.raised.get(name, 0.0) > 0 and name in ctx.present
               and ctx.over_water(path, radius)):
@@ -272,6 +304,7 @@ def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]], path: lis
         else:
             out.append("unlisted")
     return out
+
 
 def pairs(spec: list[str]) -> dict[str, str]:
     out = {}
@@ -355,7 +388,7 @@ def main() -> int:
     passages_base = [(p["path_map"], float(p["radius_m"])) for p in base.probes]
     queries: list[tuple[list, float]] = caps + passages_base
     head_passages = [(p["path_map"], float(p["radius_m"])) for p in head.probes]
-    ctx = Context(base.names, head)
+    ctx = Context(base.names, head, bridges=(bridge_geometry(base.col), bridge_geometry(head.col)))
 
     py = {}
     for key, pkg in (("base", base), ("head", head)):
