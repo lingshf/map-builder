@@ -556,7 +556,7 @@ covered by a fixture, so it is not yet allowed.
 | Another major rejected | same file: Python and current C# (`unsupported schema major version 3`) |
 | Unknown `.mbcol` format number rejected | same file: Python and current C# |
 | Extra listed member is an error in C# | same file: documents today's behaviour |
-| Frozen-reader fixture before a minor ships | CI `Frozen v0.3.0 readers accept a complete textured 2.1.0 package` step |
+| Frozen-reader fixture before a minor ships | CI steps `Format policy fixtures ...` and `Frozen v0.3.0 readers accept a complete textured 2.1.0 package` |
 | Limits above | `tests/test_package.py` (entries, ratio, unlisted file, buffer and image `uri`); the other limits are documentation only |
 | Writer default stays 2.1.0 | `tests/test_format_policy.py` |
 | Deprecation period | documentation only |

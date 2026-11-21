@@ -50,6 +50,8 @@ jobs:
         run: dotnet run -c Release --project examples/csharp/MbmapReader -- examples/synthetic_sample.mbmap
       - name: Capsule check parity with Python (hit/clear and work units per probe)
         run: python3 -m unittest tests.test_csharp_parity -v
+      - name: Format policy fixtures (future minor, major 3, frozen v0.3.0 readers)
+        run: python3 -m unittest tests.test_format_policy -v
       - name: A tampered copy must be rejected
         run: |
           python3 - "$RUNNER_TEMP/tampered.mbmap" <<'PY'
