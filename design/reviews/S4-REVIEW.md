@@ -100,25 +100,55 @@ Validator degenerate-triangle warnings at head:
   * Sample: way/1087 is at −1.5 m.
   * way/1037461399 is named `fallback(no shore samples)`, with the note "no part inside the terrain extent".
     It has no surface mesh and no carve, so it is outside AC3–AC6.
-* **AC4 shoreline and AC5 level**, measured on main (CLI, Pittsburgh, frozen cache; my own run, cross-checked
-  against the #72 PR body):
+* **AC4–AC6 on both export paths**, Pittsburgh at d38d4e8 from the frozen cache (my own runs). Each path is
+  measured on its own output:
+  * **CLI:** on the generated plan, which is what the CLI writes. Script:
+    [bench/water_ac.py](../bench/water_ac.py); raw output:
+    [data/S4-REVIEW-water-ac-cli.json](data/S4-REVIEW-water-ac-cli.json).
+  * **Blender:** on the **emitted** package of the headless Blender Generate+Export (`bl_time.py` round 1,
+    run 0; SHA-256 `81396E8D…6467C319`). It reads the `collision/map.mbcol` triangles and `report.json` against
+    the Blender base package at 70d93c7 (`56907AE0…46411DFE`). Script:
+    [bench/water_ac_pkg.py](../bench/water_ac_pkg.py); raw output:
+    [data/S4-REVIEW-water-ac-blender.json](data/S4-REVIEW-water-ac-blender.json) and
+    [data/S4-REVIEW-water-check-blender.txt](data/S4-REVIEW-water-check-blender.txt) (`tools/water_check.py`).
+* **AC4 shoreline and AC5 level** (areas in m²; the AC0.2 metric is the 2 m raster symmetric difference between
+  the mesh and the clipped polygon):
 
-  | Body | Outcome | Polygon / mesh area (m²) | Hausdorff mesh→poly / poly→mesh | AC0.2 on the mesh (2 m raster) | Level (m) | p5 / p50 of shore band | `sanity_miss` |
-  |---|---|---|---|---|---|---|---|
-  | relation/1080 | built(flat) | 18 689.371 / 18 689.371 | 0.0 / 0.0 m | 0 of 9 241 cells → **0.0 m** | 218.9268 | 218.015 / 220.016 | no |
-  | relation/7937544 | built(flat), "profile slope > 1 %" | 75 538.080 / 75 538.080 | 0.0 / 0.0 m | 0 of 37 664 cells → **0.0 m** | 214.1489 | 213.000 / 218.248 | no |
-  | way/379511900 | built(flat) | 315.641 / 315.641 | 0.0 / 0.0 m | 0 of 146 cells → **0.0 m** | 220.7617 | 220.607 / 221.145 | no |
+  | Body | Path | Outcome | Polygon / mesh area | Hausdorff mesh→poly / poly→mesh | AC0.2 (2 m raster) | Level (m) | p5 / p50 | `sanity_miss` |
+  |---|---|---|---|---|---|---|---|---|
+  | relation/1080 | CLI | built(flat) | 37 378.742 / 37 378.742 | 0.0 / 0.0 m | 0 of 9 241 cells → **0.0 m** | 218.9268 | 218.015 / 220.016 | no |
+  | relation/1080 | **Blender** | built(flat) | 37 378.742 / 37 378.744 | 1.4·10⁻⁵ / 1.4·10⁻⁵ m | 0 of 9 241 cells → **0.0 m** | 218.9268 (= CLI) | 218.015 / 220.016 | no |
+  | relation/7937544 | CLI | built(flat), "profile slope > 1 %" | 151 076.161 / 151 076.161 | 0.0 / 0.0 m | 0 of 37 664 cells → **0.0 m** | 214.1489 | 213.000 / 218.248 | no |
+  | relation/7937544 | **Blender** | built(flat) | 151 076.161 / 151 076.162 | 2.0·10⁻⁵ / 2.0·10⁻⁵ m | 0 of 37 664 cells → **0.0 m** | 214.1489 (= CLI) | 213.000 / 218.248 | no |
+  | way/379511900 | CLI | built(flat) | 631.281 / 631.281 | 0.0 / 0.0 m | 0 of 146 cells → **0.0 m** | 220.7617 | 220.607 / 221.145 | no |
+  | way/379511900 | **Blender** | built(flat) | 631.281 / 631.282 | 1.3·10⁻⁵ / 0.8·10⁻⁵ m | 0 of 146 cells → **0.0 m** | 220.7617 (= CLI) | 220.607 / 221.145 | no |
 
-  * AC4: Hausdorff 0.0 ≤ 1 mm both ways, and the AC0.2 staircase metric is 0.0 m ≤ 0.5 m on every built body.
-  * AC5: every level lies inside its p5–p50 window, and there are **0** sanity misses (no `sanity_miss` in
-    `report.json` `water_bodies`). The mesh vertices sit at the level within 5·10⁻⁵ m (float32 local z).
-* **AC6, decks and piers**, measured on main against 70d93c7 (same script, same cache):
-  * **Decks:** 33 bridges compared vertex by vertex. The minimum head − base delta is **0.000 m** (≥ −1 mm), so
-    no deck is lowered. Two decks are raised and both are listed in `report.json` `water_decks_raised`:
-    way/11950069 by +0.231 m and way/173225719 by +1.149 m. The §7 change set counts one "deck raised" because
-    only way/173225719 sits on a fixed query.
-  * **Piers:** 20 piers, of which 13 are wet (way/173225719 ×7, way/11950069 ×3, way/121593794 ×3). Every pier
-    bottom is **1.000 m below** the minimum of the carved bed under its footprint, so every pier reaches the bed.
+  * AC4, both paths: Hausdorff ≤ 2·10⁻⁵ m ≤ 1 mm in both directions. The Blender residue is float32 storage in
+    `.mbcol`. The AC0.2 staircase metric is 0.0 m ≤ 0.5 m on every built body.
+  * AC5, both paths: every level lies inside its p5–p50 window, and there are **0** sanity misses. The Blender
+    `report.json` levels equal the CLI ones exactly. The emitted water vertices sit at the level within
+    5·10⁻⁵ m.
+  * Correction to R1: the R1 table gave half these areas, copied from the #72 PR body. The 2 m raster confirms
+    the values above: for example, 9 241 cells × 4 m² ≈ 36 964 m² for relation/1080.
+* **AC6, decks, piers and wet clearance**, head d38d4e8 against base 70d93c7 on the same path:
+
+  | Measure | CLI (plan) | **Blender (emitted `.mbcol`)** |
+  |---|---|---|
+  | Decks compared vertex by vertex | 33 | 33 |
+  | Minimum deck change, head − base | **0.000 m** | **0.000 m** |
+  | Raised decks (all listed in `report.json` `water_decks_raised`) | way/11950069 +0.231 m, way/173225719 +1.149 m | way/11950069 +0.231 m, way/173225719 +1.149 m |
+  | Piers / wet piers | 20 / 13 (173225719 ×7, 11950069 ×3, 121593794 ×3) | 20 / 13 (same bridges) |
+  | Maximum of pier bottom − bed under its footprint | **−1.000 m** (carved grid) | **−1.000 m** (emitted terrain triangles) |
+  | Wet under-probe clearance over pre-carve ground + water (D116, ≥ 0.62 m) | 0.6200 m (`121593794:under`, `173225719:under`) | **0.6200 m** (same two probes; `water_check.py` PASS, AC3 −1.500000 m on all 3 bodies) |
+
+  * Decks are never lowered on either path. The §7 change set counts one "deck raised" because only
+    way/173225719 sits on a fixed query.
+  * On both raised bridges, one pier moved about 0.5 m in xy between base and head. Its corners are compared as a
+    pier, not as deck vertices.
+  * **Parity evidence:** the Blender and CLI `collision/terrain.mbhf` are byte-identical (SHA-256
+    `45aed583…a2add2fa`). The terrain and all 3 water objects in `.mbcol` have identical triangle sets on the two
+    paths. 2 of the 33 bridges are identical too. The other 31 have the same triangle counts, but some quads are split
+    on the other diagonal in Blender, so the bridge AC6 numbers above are measured directly on the Blender output.
   * **Probes:** wet under-probes `121593794:under` and `173225719:under` clear by **0.6200 m** (≥ 0.62, D116).
 * **§7 replays:**
 

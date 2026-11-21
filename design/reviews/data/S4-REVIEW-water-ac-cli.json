@@ -1,0 +1,158 @@
+{
+ "decks_compared": 33,
+ "deck_min_delta_m": 0.0,
+ "decks_raised": [
+  [
+   "osm:way/11950069",
+   0.231
+  ],
+  [
+   "osm:way/173225719",
+   1.149
+  ]
+ ],
+ "decks_skipped": [],
+ "piers": 20,
+ "pier_max_bottom_minus_carved_min_m": -1.0,
+ "wet_piers": [
+  [
+   "osm:way/11950069",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/11950069",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/11950069",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/121593794",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/121593794",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/121593794",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ],
+  [
+   "osm:way/173225719",
+   211.649,
+   212.649,
+   -1.0
+  ]
+ ],
+ "bodies": [
+  {
+   "id": "osm:relation/1080",
+   "outcome": "built(flat)",
+   "sanity_miss": false,
+   "polygon_area": 37378.742,
+   "mesh_area": 37378.742,
+   "hausdorff_mesh_to_poly": 0.0,
+   "hausdorff_poly_to_mesh": 0.0,
+   "raster2m_cells": 9241,
+   "raster2m_symdiff": 0,
+   "level_m": 218.9268,
+   "p5": 218.015,
+   "p50": 220.016,
+   "mesh_z": [
+    -3.4e-05,
+    -3.4e-05
+   ]
+  },
+  {
+   "id": "osm:relation/7937544",
+   "outcome": "built(flat)",
+   "sanity_miss": false,
+   "polygon_area": 151076.161,
+   "mesh_area": 151076.161,
+   "hausdorff_mesh_to_poly": 0.0,
+   "hausdorff_poly_to_mesh": 0.0,
+   "raster2m_cells": 37664,
+   "raster2m_symdiff": 0,
+   "level_m": 214.1489,
+   "p5": 213.0,
+   "p50": 218.248,
+   "mesh_z": [
+    1e-05,
+    1e-05
+   ]
+  },
+  {
+   "id": "osm:way/1037461399",
+   "outcome": "fallback(no shore samples)",
+   "sanity_miss": false
+  },
+  {
+   "id": "osm:way/379511900",
+   "outcome": "built(flat)",
+   "sanity_miss": false,
+   "polygon_area": 631.281,
+   "mesh_area": 631.281,
+   "hausdorff_mesh_to_poly": 0.0,
+   "hausdorff_poly_to_mesh": 0.0,
+   "raster2m_cells": 146,
+   "raster2m_symdiff": 0,
+   "level_m": 220.7617,
+   "p5": 220.607,
+   "p50": 221.145,
+   "mesh_z": [
+    -4.9e-05,
+    -4.9e-05
+   ]
+  }
+ ]
+}
