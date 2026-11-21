@@ -1801,13 +1801,17 @@ def _water_stage(terrain: ElevationGrid, z_offset: float, areas: Sequence[Featur
         charge=lambda fid, v, t: budget.charge(fid, v, t), refund=refund)
 
 
-def _water_objects(plan: ScenePlan, model: water.WaterModel, add: Callable[[ObjectSpec], None]) -> None:
+def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classified,
+                   add: Callable[[ObjectSpec], None]) -> None:
     """One ``water:<id>`` object per built body, and the per-body outcome list of the report."""
     rows: list[dict[str, object]] = []
+    over = water.at_grade_roads(model, [(r.id, r.geometry) for r in classified.roads], ROAD_LIFT_M)
     for b in model.bodies:
         row: dict[str, object] = {"id": b.id, "outcome": b.outcome}
         if b.notes:
             row["notes"] = list(b.notes)
+        if b.id in over:
+            row["at_grade_roads"] = over[b.id]
         row.update(b.info)
         rows.append(row)
         if b.built:
@@ -1900,7 +1904,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                                "spacing_m": terrain.spacing,
                                "surface": DSM_CORRECTED_SURFACE if correction["applied"] else TERRAIN_SURFACE}))
     if wmodel is not None:
-        _water_objects(plan, wmodel, add)
+        _water_objects(plan, wmodel, classified, add)
     for a in areas:
         if not coverage.get(a.id) and not (wmodel is not None and any(b.id == a.id and b.built
                                                                       for b in wmodel.bodies)):

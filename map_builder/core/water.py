@@ -1153,5 +1153,39 @@ class _CarveContext:
             victim.tris, victim.carve, victim.blend, victim.level = [], {}, {}, None
 
 
+def at_grade_roads(model: WaterModel, roads: Iterable[tuple[str, Sequence[Pt]]], lift: float,
+                   step: float = 2.0) -> dict[str, list[str]]:
+    """Per built body, ``at-grade road over water: <id>, <n> m inside, <m> m below L`` for every at-grade road
+    (not a bridge or tunnel) whose centreline runs inside it. The road stays draped on the pre-carve ground at
+    ``lift`` (D115); this only reports it, as an OSM data issue (ford, untagged causeway)."""
+    out: dict[str, list[str]] = {}
+    for b in model.active():
+        if b.level is None:
+            continue
+        x0, y0, x1, y1 = _body_box(b)
+        rows: list[str] = []
+        for rid, pts in sorted(roads, key=lambda r: r[0]):
+            if len(pts) < 2 or max(p[0] for p in pts) < x0 or min(p[0] for p in pts) > x1 \
+                    or max(p[1] for p in pts) < y0 or min(p[1] for p in pts) > y1:
+                continue
+            inside = below = 0.0
+            for a, c in zip(pts, pts[1:]):
+                seg = math.hypot(c[0] - a[0], c[1] - a[1])
+                for t0, t1 in _segment_inside(a, c, b.pieces):
+                    n = max(1, math.ceil((t1 - t0) * seg / step))
+                    for k in range(n):
+                        t = t0 + (t1 - t0) * (k + 0.5) / n
+                        x, y = a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t
+                        part = (t1 - t0) * seg / n
+                        inside += part
+                        if _ground(model.grid, x, y) + lift < b.level.at(x, y):
+                            below += part
+            if inside > 0.0:
+                rows.append(f"at-grade road over water: {rid}, {inside:.1f} m inside, {below:.1f} m below L")
+        if rows:
+            out[b.id] = rows
+    return out
+
+
 class WaterError(MapBuilderError):
     """Internal inconsistency in the water stage."""

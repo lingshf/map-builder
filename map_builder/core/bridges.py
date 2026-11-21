@@ -465,6 +465,7 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
     z_a, z_b = samples[0][3] + g.ROAD_LIFT_M, samples[-1][3] + g.ROAD_LIFT_M
     line = [z_a + (z_b - z_a) * si / total for si in s]
     ground = [_ground_max(tz, x, y, d, half) for (x, y), d in zip(xy, dirs)]
+    dry_ground = list(ground)
     if ctx.water is not None:   # decks never drop into water: the highest surface a drone can hit (D116)
         for k, ((x, y), d) in enumerate(zip(xy, dirs)):
             wm = ctx.water.wmax_segment((x + d[1] * half, y - d[0] * half), (x - d[1] * half, y + d[0] * half))
@@ -472,6 +473,7 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
                 ground[k] = max(ground[k], wm)
     ground = [gr + g.ROAD_LIFT_M for gr in ground]
     lower = [gr + clearance + DECK_THICKNESS_M for gr in ground]
+    dry_lower = [gr + g.ROAD_LIFT_M + clearance + DECK_THICKNESS_M for gr in dry_ground]
 
     # the ends sink into the abutting ground/road (not past the terrain edge)
     path_xy = list(xy)
@@ -535,7 +537,9 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
         for m, w in zip(nodes, wd):
             if w > 1e-9:
                 lower[node(m)] = max(lower[node(m)], need)
+                dry_lower[node(m)] = max(dry_lower[node(m)], need)
     top = deck_profile(s, lower, z_a, z_b)
+    water_raise = max(t - d for t, d in zip(top, deck_profile(s, dry_lower, z_a, z_b))) if ctx.water is not None else 0.0
     max_raise = max(t - ln for t, ln in zip(top, line))
     grade = max(abs(top[i + 1] - top[i]) / (s[i + 1] - s[i]) for i in range(len(s) - 1))
 
@@ -596,6 +600,9 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
             "length_m": round(total, 2)}
     if checked is not None:
         prov["clearance_m"] = round(checked, 2)
+    if water_raise > 1e-3:   # raised above the dry baseline only because of the water surface (D116); listed in the report
+        prov["water_raise_m"] = round(water_raise, 3)
+        plan.report.setdefault("water_decks_raised", []).append({"id": f.id, "raised_m": round(water_raise, 3)})
     for key, nid in (("start", deck_nodes[0]), ("end", deck_nodes[1])):
         joined = next((r for r in roads.get(nid, ()) if r != f.id), None) if nid is not None else None
         prov[f"{key}_joint"] = f"joins at-grade road {joined}" if joined else "free end: terrain + road lift"

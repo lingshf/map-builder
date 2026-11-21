@@ -176,6 +176,122 @@ class LakeStructuresTest(unittest.TestCase):
         top = max(v[2] for r in roads for v in r.mesh.vertices)
         self.assertGreater(top, objects(self.plan, "terrain")[0].mesh.vertices[0][2] - 100)
 
+    def test_at_grade_road_over_water_is_reported(self):
+        row = bodies(self.plan)[self.ids[0]]
+        (line,) = row["at_grade_roads"]
+        self.assertEqual(line.split(",")[0], f"at-grade road over water: {self.ids[2]}")
+        self.assertIn("80.0 m inside", line)
+        self.assertRegex(line, r"[0-9.]+ m below L$")
+
+
+def boundary_edges(mesh):
+    count = {}
+    for f in mesh.faces:
+        for k in range(3):
+            a, b = f[k], f[(k + 1) % 3]
+            count.setdefault((min(a, b), max(a, b)), []).append((a, b))
+    return [(mesh.vertices[e[0]][:2], mesh.vertices[e[1]][:2]) for e, uses in count.items() if len(uses) == 1]
+
+
+def seg_dist(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    ll = dx * dx + dy * dy
+    u = 0.0 if ll == 0 else min(1.0, max(0.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll))
+    return math.hypot(p[0] - a[0] - u * dx, p[1] - a[1] - u * dy)
+
+
+def hausdorff(mesh, rings):
+    """Both directions between the mesh's boundary edges and the polygon rings (endpoints and midpoints)."""
+    edges = boundary_edges(mesh)
+    ring_edges = [(r[k], r[(k + 1) % len(r)]) for r in rings for k in range(len(r))]
+    mid = lambda e: ((e[0][0] + e[1][0]) / 2, (e[0][1] + e[1][1]) / 2)   # noqa: E731
+    to_ring = max(seg_dist(p, *re_) for e in edges for p in (*e, mid(e))
+                  for re_ in [min(ring_edges, key=lambda r: seg_dist(p, *r))])
+    to_mesh = max(min(seg_dist(p, *e) for e in edges) for r in rings for k, p in enumerate(r))
+    return max(to_ring, to_mesh)
+
+
+class RiverBoundaryTest(unittest.TestCase):
+    def build(self, length, hole=False):
+        ring = [(-length / 2, -20.0), (length / 2, -20.0), (length / 2, 20.0), (-length / 2, 20.0)]
+        ways = [([(-240.0, 0.0), (240.0, 0.0)], {"waterway": "river"}), (ring, {"natural": "water"}, True)]
+        if hole:
+            ways.append(([(-8.0, -6.0), (8.0, -6.0), (8.0, 6.0), (-8.0, 6.0)], {"natural": "water"}, True))
+        return make_scene(ways, river_ground, width=W, height=H)
+
+    def test_a_299_m_river_is_flat_and_a_301_m_river_is_profiled(self):
+        plan, ids, _ = self.build(299.0)
+        self.assertEqual(bodies(plan)[ids[1]]["outcome"], "built(flat)")
+        plan, ids, _ = self.build(301.0)
+        self.assertTrue(bodies(plan)[ids[1]]["outcome"].startswith("built(profile"), bodies(plan)[ids[1]])
+
+    def test_island_hole_boundary_matches_the_polygon_within_a_millimetre(self):
+        poly = water.Polygon(RIVER_RING, [[(-8.0, -6.0), (-8.0, 6.0), (8.0, 6.0), (8.0, -6.0)]])
+        pieces = water.clip_polygon(poly, (-W / 2, -H / 2, W / 2, H / 2))
+        body = water.Body("osm:way/1", poly, "area", pieces=pieces)
+        body.level = water.Level(flat=10.0)
+        water._triangulate_body(body)
+        mesh = water.WaterModel(None, None, [body]).mesh(body)
+        [(outer, holes)] = pieces
+        self.assertLess(hausdorff(mesh, [outer, *holes]), 1e-3)
+        self.assertEqual(len(boundary_edges(mesh)), len(outer) + 4)
+
+    def test_level_is_the_p20_of_the_shore_band_for_a_lake(self):
+        plan, ids, _ = lake_scene()
+        row = bodies(plan)[ids[0]]
+        self.assertEqual(row["level_m"], row["shore_percentiles"][20])
+
+
+class SamplesAndBudgetTest(unittest.TestCase):
+    def test_too_few_samples_widen_the_band_then_fall_back(self):
+        plan, ids, _ = lake_scene()
+        n = bodies(plan)[ids[0]]["samples"]
+        with mock.patch.object(water, "N_MIN", n + 1):
+            plan, ids, _ = lake_scene()
+        row = bodies(plan)[ids[0]]
+        self.assertEqual((row["outcome"], row["band_cells"]), ("built(flat)", 4))
+        with mock.patch.object(water, "N_MIN", 10 ** 6):
+            plan, ids, _ = lake_scene()
+        row = bodies(plan)[ids[0]]
+        self.assertEqual(row["outcome"], "fallback(no shore samples)")
+        self.assertEqual(objects(plan, "water"), [])
+        self.assertIn("shore samples", " ".join(row["notes"]))
+
+    def test_budget_refusal_keeps_the_painted_cells(self):
+        from map_builder.core.errors import LimitError
+        real = generate.SceneBudget.charge
+
+        def refuse(self, fid, v, t):
+            if fid.startswith("water:"):
+                raise LimitError(f"{fid} needs too much")
+            return real(self, fid, v, t)
+        with mock.patch.object(generate.SceneBudget, "charge", refuse):
+            plan, ids, _ = lake_scene()
+        self.assertEqual(bodies(plan)[ids[0]]["outcome"], "fallback(budget)")
+        self.assertEqual(objects(plan, "water"), [])
+        z_off = plan.report["z_offset_m"]
+        near = [v for v in objects(plan, "terrain")[0].mesh.vertices if abs(v[0]) < 1 and abs(v[1]) < 1]
+        self.assertTrue(near)
+        self.assertTrue(all(abs(v[2] + z_off - lake_ground(v[0], v[1])) < 1e-6 for v in near))
+
+
+class DeckRaiseListTest(unittest.TestCase):
+    def test_a_deck_raised_by_the_water_is_listed_and_never_lowered(self):
+        cross = ([(0.0, -60.0), (0.0, 0.0), (0.0, 60.0)], {"highway": "secondary", "bridge": "yes"})
+        plan, ids, _ = make_scene(river_ways([cross]), river_ground, width=W, height=H)
+        (row,) = plan.report["water_decks_raised"]
+        (bridge,) = objects(plan, "bridge")
+        self.assertEqual(row["id"], ids[2])
+        self.assertEqual(row["raised_m"], bridge.provenance["water_raise_m"])
+        self.assertGreater(row["raised_m"], 0.0)
+        dry, _, _ = make_scene([([(-250.0, 0.0), (250.0, 0.0)], {"waterway": "river"}), cross], river_ground,
+                               width=W, height=H)
+        self.assertNotIn("water_decks_raised", dry.report)
+        (dry_bridge,) = objects(dry, "bridge")
+        top = lambda o: max(v[2] + o.location[2] for v in o.mesh.vertices)   # noqa: E731
+        self.assertGreaterEqual(top(bridge), top(dry_bridge) - 1e-3)
+
+
 class CapsuleTest(unittest.TestCase):
     def test_polygon_is_convex_ccw_and_contains_the_capsule(self):
         poly = bridges.capsule_polygon((0.0, 0.0), (10.0, 0.0), 1.0)
