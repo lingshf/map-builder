@@ -64,20 +64,19 @@ The inputs are narrowed to what the current selectors already fetch, so the froz
   * `landuse=reservoir|basin` ways and relations;
   * any fetched way or relation carrying `water=*`.
   
-  **One classification edit, in two places:** closed `waterway=riverbank` ways are already fetched by
-  `("way", "waterway")`, but today `_is_area_tagged` (`core/osm.py:767`) rejects them. `classify` therefore
-  never forms an area, and the way falls through to the "waterway lines are not generated" report. The edit:
-  * `osm.area_class` (`core/osm.py:1656`) returns `water` for `waterway=riverbank`. `_area_family` follows,
-    so a riverbank way that is also the outer of a water multipolygon is still de-duplicated.
-  * The area test in `classify`'s way loop (`core/osm.py:1155`) becomes
-    `closed and (_is_area_tagged(tags) or _is_riverbank(tags)) and tags.get("area") != "no"`, where
-    `_is_riverbank` is `tags.get("waterway") == "riverbank"`.
-  * `_is_area_tagged` itself is **not** changed. Its other caller is the margin-only DSM mask scan
-    (`core/osm.py:957`), and widening it there would assemble riverbank rings and charge them to the shared mask
-    work budget. The DSM correction inputs and budget therefore stay byte-identical.
-  * Report delta: a closed riverbank way leaves the "waterway lines" unsupported list and becomes a water area.
-    Open riverbank ways stay in that list. The frozen Pittsburgh and Munich data contain no riverbank way, so
-    neither preset changes. A unit test covers both the closed and the open case.
+  **Riverbanks (D118): water-body assembly only.** Closed `waterway=riverbank` ways are already fetched by
+  `("way", "waterway")`. They are recognised **only** in the water-body content assembly, through a new
+  `_is_riverbank(tags)` = `tags.get("waterway") == "riverbank"`:
+  * `osm.classify` keeps the clipped polygon of each closed riverbank way (`area` not `no`) in a new,
+    separate `ClassifiedOSM.riverbanks` list. It is read by `core/water.py` only.
+  * A riverbank way that is an outer member of a water multipolygon already in the water areas is skipped
+    there by way id.
+  * **Unchanged, byte-identical:** `_is_area_tagged`, `area_class` and `_area_family`; the way-loop area test;
+    DSM mask classification and its work budget; same-family outer suppression; and every existing report.
+    In particular, a riverbank way still appears in the "waterway lines are not generated" unsupported list,
+    exactly as today.
+  * The frozen Pittsburgh and Munich data contain no riverbank way, so neither preset changes. A unit test
+    covers a closed and an open riverbank way.
 * **Centrelines.** `waterway=river|canal` ways are already fetched and today are only reported as unsupported
   (`core/osm.py:1187`). `osm.classify` additionally keeps their clipped polylines, with node order (the way
   direction is downstream), in a new `ClassifiedOSM.waterways` list. The unsupported report entry stays
@@ -215,16 +214,18 @@ reported.
 1. If the check fails, for example through float rounding, lower the three vertices of each offending terrain
    triangle by (violation + 0.01 m), then re-check. Do this at most 2 times.
 2. If the check still fails, the body becomes `fallback(carve invariant)`, and it is removed from the active set.
-3. **The carve is recomputed, not restored.** The carved grid is a pure function of the active body set:
-   z_v = min(pre-carve z_v, carve_b(v), blend_b(v), remedy_b(v) over the active bodies b). Each body's carve,
-   blend and remedy deltas are recorded per body, and a remedy lowering belongs to the body whose check
-   triggered it. When a body falls back, every vertex in its footprint (carve, blend and remedy) is recomputed
-   from the bodies that remain. A vertex shared with a neighbouring active body therefore keeps that body's carve.
-   It is neither reset to the pre-carve height nor left at the dropped body's depth.
-4. The invariant is then re-run for every active body that touches a recomputed vertex. A new failure goes
-   through steps 1–3 again. Each round removes at least one body, so the loop ends after at most as many rounds
-   as there are bodies. The final check runs on the final geometry, and the order is deterministic (ascending
-   body id).
+3. **After any fallback, everything is recomputed from the pre-carve ground (D118).** Every per-body
+   carve and blend is a function of the pre-carve ground and that body's level only, and it is recorded per
+   body. After a body falls back:
+   * the grid is rebuilt from the pre-carve ground plus only the carves and blends of the active bodies:
+     z_v = min(pre-carve z_v, carve_b(v), blend_b(v) over active b);
+   * every surviving body's remedy is discarded and recomputed on that rebuilt grid, by steps 1–2. It is
+     never computed from the already-carved or already-remedied grid;
+   * a vertex shared with a surviving body keeps that body's carve, and a vertex touched only by the dropped
+     body returns to the pre-carve height.
+4. Bodies are processed in ascending body id. A body that fails again falls back and the round repeats from
+   step 3. Each round removes at least one body, so there are at most as many rounds as bodies. The
+   invariant is then rechecked for all active bodies on the final grid.
 
 The same check runs on Blender's baked triangles (AC7).
 
@@ -241,25 +242,22 @@ The same check runs on Blender's baked triangles (AC7).
   highest surface a drone can hit.
 * **Piers** take their top from the deck and their base from the carved bed: the lowest carved terrain under the
   footprint minus `PIER_SINK_M`. `PIER_MIN_CLEARANCE_M` uses the same `ground` as the deck.
-* **Under-bridge probe.** Its height is the highest surface under the **whole capsule footprint** plus a margin.
-  The footprint F is the xy projection of the swept capsule: the probe segment's projection dilated by the
-  radius r = `PROBE_RADIUS_M` (1.0 m). It is represented conservatively by a polygon that contains it, with
-  each round end replaced by a circumscribed 8-segment half-polygon. For a probe whose F intersects a built water
-  body:
-
-  `z = max(_ground_max(pre-carve, reach), Gmax(F), Wmax(F)) + UNDER_PROBE_HEIGHT_M`
-
-  * Gmax(F) is the exact maximum of the **pre-carve** terrain triangles over F. It is evaluated at the vertices
-    of each triangle ∩ F clip; this is exact because each triangle is planar.
-  * Wmax(F) is the same exact maximum over the water triangles ∩ F.
-  * The pre-carve ground is used because it is never lower than the carved terrain mesh, and it bounds the
-    building and road bases, which stay on it.
-
-  The capsule's lowest point is z − r. With `UNDER_PROBE_HEIGHT_M = 1.5 m` and r = 1.0 m, the capsule is
-  therefore at least **0.5 m** above both water and ground **everywhere over F**, not only along the centre
-  segment. A probe whose F touches no water keeps today's rule, `max(_ground_max(pre-carve, reach))` + 1.5 m,
-  so no-water packages stay byte-identical (AC10). The 4 m
-  `UNDER_PROBE_MIN_CLEARANCE_M` rule is evaluated against the same height. Blocked probes stay listed and are
+* **Under-bridge probe.** Two branches, chosen by the capsule footprint F. F is the xy projection of the swept
+  capsule: the probe segment's projection dilated by r = `PROBE_RADIUS_M` (1.0 m), represented conservatively
+  by a containing polygon with each round end replaced by a circumscribed 8-segment half-polygon.
+  * **Dry probe (F touches no built water body): today's formula, unchanged and in full (D118),**
+    `z = round(_ground_max(pre-carve, reach) + ROAD_LIFT_M + UNDER_PROBE_HEIGHT_M − z_off, 4)`,
+    including `ROAD_LIFT_M` (0.12 m). No-water packages therefore stay byte-identical (AC10).
+  * **Wet probe (F touches water):**
+    `z = round(max(_ground_max(pre-carve, reach), Gmax(F), Wmax(F)) + ROAD_LIFT_M + UNDER_PROBE_HEIGHT_M − z_off, 4)`.
+    `ROAD_LIFT_M` is applied to the maximum exactly where today's rule applies it to the ground term.
+    * Gmax(F) is the exact maximum of the **pre-carve** terrain triangles over F, evaluated at the vertices of
+      each triangle ∩ F clip. This is exact because each triangle is planar. The pre-carve ground is never lower
+      than the carved mesh, and it bounds the road and building bases, which stay on it.
+    * Wmax(F) is the same exact maximum over the water triangles ∩ F.
+    * The capsule's lowest point is z − r, so it clears both water and ground by at least
+      `ROAD_LIFT_M` + 0.5 m (0.62 m) **everywhere over F**, not only along the centre segment.
+  The 4 m `UNDER_PROBE_MIN_CLEARANCE_M` rule is evaluated against the same height. Blocked probes stay listed and are
   not emitted (D21).
 
 ### 6. Collision and query semantics (D117)
@@ -296,7 +294,8 @@ The same check runs on Blender's baked triangles (AC7).
    * Every deck vertex is ≥ its base-commit height − 1 mm, so decks are never lowered. Raised decks are listed.
    * Piers reach the carved bed.
    * Every emitted under-probe whose footprint touches water clears the exact pre-carve ground and water
-     maximum over its whole capsule footprint by ≥ 0.5 m (§5), checked on the emitted package.
+     maximum over its whole capsule footprint by ≥ `ROAD_LIFT_M` + 0.5 m (§5), checked on the emitted package. Dry
+     probes keep today's heights bit for bit.
    * Both replays (§7) pass.
 7. **Both paths.** CLI and headless Blender builds of both presets are VALID (D53.1), and the C# reader reads
    them. Blender emits the water objects with class `water` and the same triangle counts as the CLI plan. The
@@ -374,15 +373,16 @@ All focused tests are synthetic and their timings are reported (AC11).
   * the blend only lowers terrain and skips road, building and abutment vertices;
   * a forced invariant failure, giving the bounded remedy and then `fallback(carve invariant)`;
   * **two adjacent bodies sharing grid vertices**, one forced to fall back: the shared vertices keep the
-    remaining body's carve, its invariant still passes, and vertices touched only by the dropped body return to
+    remaining body's carve, its remedy is recomputed from the pre-carve ground plus the active carves and blends
+    (equal to a fresh build without the dropped body), and vertices touched only by the dropped body return to
     the pre-carve height;
-  * `osm.classify` on a closed riverbank way (a water area, not in the unsupported list) and an open one
-    (unchanged unsupported entry), with the DSM mask candidate list unchanged.
+  * `osm.classify` on a closed and an open riverbank way: only the closed one is in `riverbanks`, and the
+    areas, the unsupported list and the DSM mask candidates are identical to a run without the edit.
 * `tests/test_bridges.py` (≤ 1 s):
   * a bridge over a synthetic river: the deck is not lowered and the piers reach the carved bed;
   * a **mixed bank/water span** where water lies between `_ground_max` samples, and a bank peak lies under
-    the capsule's edge but off the centre segment: the height is max(Gmax(F), Wmax(F)) + 1.5 m, with Gmax
-    and Wmax exact over the footprint, and the capsule clears both by ≥ 0.5 m everywhere over F;
+    the capsule's edge but off the centre segment: the height is max(…, Gmax(F), Wmax(F)) + `ROAD_LIFT_M` + 1.5 m, with Gmax
+    and Wmax exact over the footprint, and the capsule clears both by ≥ 0.62 m everywhere over F;
   * a probe that touches no water keeps today's height bit for bit.
 * `.mbcol` traversal (≤ 1 s): a downward ray over water hits class 5 at L, and a ray started below L hits the
   bed; Python and C# agree.
@@ -396,7 +396,7 @@ All focused tests are synthetic and their timings are reported (AC11).
 Hard:
 * `core/generate.py` (build_terrain, build_plan landcover/terrain section, coverage);
 * `core/water.py` (new: samples, level, mesh, carve, invariant);
-* `core/osm.py` (`area_class` riverbank rule; `classify` area test and `waterways`; `_is_area_tagged` and selectors unchanged);
+* `core/osm.py` (`_is_riverbank`; `classify` adds the separate `riverbanks` and `waterways` lists; `_is_area_tagged`, `area_class`, `_area_family`, reports and selectors unchanged);
 * `core/bridges.py` (deck ground rule with exact Wmax, piers, `_under_probe` height);
 * `blender/scene_build.py` / `blender/bake.py` / `blender/export.py` (water objects, class mapping);
 * `tests/test_water.py` (new), `tests/test_bridges.py`;
