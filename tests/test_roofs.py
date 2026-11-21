@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 lingshf
 import math
+import random
 import unittest
 
 from map_builder.core import roofs
@@ -76,26 +77,64 @@ class RoofShapeTest(unittest.TestCase):
             self.assertLessEqual(roof_tris, roofs.MAX_ROOF_TRIANGLES, shape)
             self.assertEqual(prov["roof_shape_built"], shape)
 
-    def test_budget_matches_generated_geometry(self):
-        for shape in ("dome", "onion", "gambrel", "mansard"):
-            outer = RECT
-            mesh, _ = build(outer, roof__shape=shape)
-            extra_v, extra_t = roofs.shape_budget(shape, 4)
-            self.assertLessEqual(len(mesh.vertices), 2 * 4 + 2 + extra_v, shape)
-            self.assertLessEqual(len(list(mesh.triangles())), 2 * 4 + 2 * 2 + 4 + extra_t, shape)
-
-
-    def test_unchanged_roofs_reserve_exactly_what_they_emit(self):
-        for shape in ("gabled", "hipped", "pyramidal"):
+    def test_reservation_is_exact_for_every_roof_kind(self):
+        """S4-ROOF-NAMED AC5: reserved == emitted (vertices and triangles) for every roof kind, so it never undercounts
+        and stays within RESERVE_MARGIN of the emitted geometry."""
+        round_ring = [(8 * math.cos(2 * math.pi * k / 12), 8 * math.sin(2 * math.pi * k / 12)) for k in range(12)]
+        cases = [(s, RECT) for s in ("flat", "skillion", "pyramidal", "gabled", "hipped", "half-hipped", "gambrel",
+                                     "mansard", "round", "saltbox", "dome", "onion")]
+        cases += [(s, round_ring) for s in ("flat", "pyramidal", "dome", "onion")]
+        for shape, ring in cases:
             calls = []
-            feature = building(RECT, height=str(HEIGHT), roof__height=str(ROOF_H), roof__shape=shape)
+            feature = building(ring, height=str(HEIGHT), roof__height=str(ROOF_H), roof__shape=shape)
             mesh, _, prov = build_building(feature, flat_grid(), 0.0, reserve=lambda v, t: calls.append((v, t)))
             self.assertEqual(prov["roof_shape_built"], shape)
-            self.assertEqual(roofs.shape_budget(shape, 4), (0, 0), shape)
             self.assertEqual(len(calls), 1)
-            self.assertLessEqual(calls[0][0] - len(mesh.vertices), 2, (shape, calls))
-            self.assertLessEqual(calls[0][1] - len(list(mesh.triangles())), 4, (shape, calls))
+            emitted = (len(mesh.vertices), len(list(mesh.triangles())))
+            for got, want in zip(calls[0], emitted):
+                self.assertGreaterEqual(got, want, (shape, calls, emitted))
+                self.assertLessEqual(got, want * (1 + roofs.RESERVE_MARGIN), (shape, calls, emitted))
 
+    def test_near_rectangle_gable_with_unequal_ends_is_a_planar_skeleton_roof(self):
+        """S4-ROOF-NAMED AC3: the analytic gable's slopes are quads that are not planar unless the eave edges are
+        parallel; such a footprint is built from the skeleton (or named), and the emitted slopes are planar."""
+        skew = [(-10, -6), (10, -6), (11, 6), (-10, 5.5)]
+        _, prov = build(skew, roof__shape="gabled")
+        self.assertIn("roof_construction", prov)
+        self.assertEqual(prov["roof_shape_built"], "gabled")
+        mesh, prov = build(rect_ccw(-10, -6, 10, 6), roof__shape="gabled")
+        self.assertEqual(prov["roof_shape"], "measured:osm roof:shape")
+        self.assertNotIn("roof_faces", prov)
+
+    def test_analytic_gable_slope_error_judges_parallel_eaves(self):
+        self.assertIsNone(roofs.analytic_gable_slope_error(rect_ccw(-10, -6, 10, 6), False))
+        self.assertIsNone(roofs.analytic_gable_slope_error([(-10, -6), (10, -6), (10, 6), (-10, 6 + 1e-7)], False))
+        self.assertIn("off parallel", roofs.analytic_gable_slope_error([(-10, -6), (10, -6), (11, 6), (-10, 5.5)], False))
+
+    def test_a_plain_skeleton_gable_is_not_downgraded_by_the_node_repair(self):
+        """R1: this heptagon is a gable on the plain skeleton; merging its close nodes would make a ridge node of
+        more than three faces and a hipped roof, so the merge is only a repair."""
+        ring = [(9.00019601723119, 0), (5.6113767927687, 7.036750926744197), (-2.0027002464196415, 8.774357319810488),
+                (-8.10876776784019, 3.904833874695344), (-8.108829230483774, -3.9048526443272222),
+                (-2.0026605776245576, -8.774341824246491), (5.611624620039219, -7.036721056278658)]
+        prov: dict = {}
+        plan = roofs.plan_roof("gabled", ring, [], prov)
+        self.assertEqual(plan.shape_built, "gabled", prov["roof_shape"])
+        self.assertTrue(plan.ends)
+
+    def test_skeleton_gable_survives_a_hair_of_noise_on_a_noisy_l_footprint(self):
+        """A noisy L splits its ridge into two nodes 2e-4 m apart; they are merged, so the gable never depends on
+        float noise (S4-ROOF-NAMED: CI-only 9007 failure)."""
+        l_ring = [(-10.000001477974797, -10.000014143973283), (13.999977313955497, -10.00003311884352),
+                  (14.000016107356643, -3.999945795143959), (-4.000023546915706, -4.000024391166052),
+                  (-3.9999994245597428, 14.00001553617018), (-9.999968971861902, 14.000001912956636)]
+        rng = random.Random(1)
+        for _ in range(60):
+            ring = [(x + rng.uniform(-1e-10, 1e-10), y + rng.uniform(-1e-10, 1e-10)) for x, y in l_ring]
+            prov: dict = {}
+            plan = roofs.plan_roof("gabled", ring, [], prov)
+            self.assertEqual(plan.shape_built, "gabled", prov["roof_shape"])
+            self.assertTrue(plan.skeleton)
 
 def build_big(ring, shape):
     feature = building(ring, height=str(HEIGHT), roof__height=str(ROOF_H), roof__shape=shape)

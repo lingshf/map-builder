@@ -155,24 +155,90 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
     falls back to the hipped skeleton roof and a skeleton failure to the v0.3.0 outcome, with the reason
     appended."""
     shape = resolve_shape(shape_tag, outer, holes, prov, skeleton_hipped=True)
-    if shape not in ("hipped", "gabled") or rect_check(outer):
+    analytic_gable = shape == "gabled" and rect_check(outer)
+    if analytic_gable:
+        across = resolve_orientation("gabled", {"roof:orientation": orientation} if orientation else {}, {},
+                                     outer, direction)
+        analytic_gable = analytic_gable_slope_error(outer, across) is None
+    if shape not in ("hipped", "gabled") or (rect_check(outer) and (shape == "hipped" or analytic_gable)):
         return RoofPlan(shape)
-    try:
+    near_rect = rect_check(outer)
+
+    def run(merge: bool, p: Prov) -> RoofPlan:
         sk = straight_skeleton(outer)
+        if merge:
+            _merge_close_nodes(sk.nodes, sk.faces, len(sk.ring), set(), set())
         if shape == "gabled":
             try:
-                return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, prov))
+                return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, p))
             except _GableError as exc:
-                prov["roof_shape"] = f"fallback:hipped (gable end not representable: {exc})"
-                prov.pop("roof_orientation", None)
+                p["roof_shape"] = f"fallback:hipped (gable end not representable: {exc})"
+                p.pop("roof_orientation", None)
         return _skeleton_plan(outer, sk)
-    except (SkeletonError, LimitError, TriangulationError) as exc:
-        convex = is_convex(outer)
-        shape = "pyramidal" if convex else "flat"
-        prov["roof_shape"] = (f"fallback:{shape} (roof:shape={shape_tag} on non-rectangular footprint; "
-                              f"straight skeleton: {exc})")
-        prov.pop("roof_orientation", None)
-        return RoofPlan(shape)
+
+    # The plain skeleton is kept when it gives the wanted roof; nodes a hair apart are merged only to repair it.
+    errors = (SkeletonError, LimitError, TriangulationError)
+    try:
+        p1 = dict(prov)
+        plan = run(False, p1)
+        if plan.ends or shape != "gabled":
+            prov.clear()
+            prov.update(p1)
+            return plan
+        first: tuple[RoofPlan, Prov] | None = (plan, p1)
+    except errors as exc:
+        first = None
+        failure = exc
+    try:
+        p2 = dict(prov)
+        plan = run(True, p2)
+        if first is None or plan.ends:
+            prov.clear()
+            prov.update(p2)
+            return plan
+    except errors as exc:
+        if first is None:
+            failure = exc
+    if first is not None:
+        prov.clear()
+        prov.update(first[1])
+        return first[0]
+    if near_rect:
+        prov["roof_shape"] = (f"approximate:gabled (the two slopes of a near-rectangular footprint are not "
+                              f"coplanar: {analytic_gable_slope_error(outer, across)}; straight skeleton: {failure})")
+        return RoofPlan("gabled")
+    convex = is_convex(outer)
+    shape = "pyramidal" if convex else "flat"
+    prov["roof_shape"] = (f"fallback:{shape} (roof:shape={shape_tag} on non-rectangular footprint; "
+                          f"straight skeleton: {failure})")
+    prov.pop("roof_orientation", None)
+    return RoofPlan(shape)
+
+
+def analytic_gable_slope_error(outer: Ring, across: bool, ref_height: float = 10.0,
+                               tol: float = 5e-4) -> str | None:
+    """None if the two slopes of the analytic gable on the near-rectangle ``outer`` are planar quads, else why not.
+    Each slope joins an eave edge to the ridge between the midpoints of the end edges; it is planar only if the
+    eave edges are parallel. The deviation is judged for a roof ``ref_height`` high (the real height is not known
+    in the preflight) against ``tol`` metres, inside the 1 mm of the roof checker."""
+    a, b, c, d = _frame(outer, across)
+    ux, uy = _sub(a, b)
+    ln = math.hypot(ux, uy)
+    ux, uy = ux / ln, uy / ln
+
+    def side(p: Point, q: Point) -> float:
+        return (q[0] - p[0]) * uy - (q[1] - p[1]) * ux
+
+    s1 = abs(side(a, ((b[0] + c[0]) / 2, (b[1] + c[1]) / 2)))   # distance of the ridge end from the a-b eave
+    s2 = abs(side(a, ((d[0] + a[0]) / 2, (d[1] + a[1]) / 2)))
+    dev = ref_height * abs(s2 - s1) / max(s1, 1e-9)
+    if dev <= tol:
+        return None
+    return f"the eave edges are {math.degrees(math.asin(min(1.0, abs(_cross2(_sub(a, b), _sub(d, c))) / (math.dist(a, b) * math.dist(d, c))))):.2g} degrees off parallel"
+
+
+def _cross2(p: Pt, q: Pt) -> float:
+    return p[0] * q[1] - p[1] * q[0]
 
 
 def _min_area_axes(ring: Sequence[Pt]) -> tuple[Pt, Pt]:
@@ -368,6 +434,32 @@ def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofP
     return RoofPlan("gabled" if ends else "hipped", n, points, tris, t_max, gable_tris)
 
 
+MERGE_NODE_M = 5e-4  # inside the 1 mm planarity tolerance of the roof checker
+
+
+def _merge_close_nodes(nodes: list[Node], faces: list[list[int]], n_ring: int, keep: set[int],
+                       keep_faces: set[int]) -> None:
+    """Merge interior skeleton nodes closer than ``MERGE_NODE_M`` (two events a hair apart on a nearly regular
+    footprint) so no face has a zero-width pinch, which the triangulator rejects. Ring and gable apex nodes are
+    kept; a face reduced to a repeated node loses it, and every face sharing the node gets the same one."""
+    rep: dict[int, int] = {}
+    for k in range(n_ring, len(nodes)):
+        if k in keep:
+            continue
+        for j in range(n_ring, k):
+            if j not in rep and j not in keep and math.dist(nodes[k], nodes[j]) <= MERGE_NODE_M:
+                rep[k] = j
+                break
+    if not rep:
+        return
+    for i, f in enumerate(faces):
+        if i in keep_faces:
+            continue
+        g = [rep.get(k, k) for k in f]
+        g = [k for j, k in enumerate(g) if k != g[j - 1]]
+        faces[i] = g if len(g) >= 3 else f
+
+
 def _signed(a: Point, b: Point, c: Point) -> float:
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 
@@ -382,15 +474,29 @@ def _along(p: Point, a: Point, b: Point, tol: float = 1e-5) -> float | None:
     return None
 
 
+# Vertices and triangles (a quad counts as two) the analytic roofs add on a rectangular footprint beyond the wall ring
+# and the footprint triangulation (flat, skillion, pyramidal, dome and onion scale with the ring); the geometry of ``build_roof`` is fixed, so these are exact (S4-ROOF-NAMED).
+ANALYTIC_ROOF_COUNTS = {"gabled": (2, 6), "hipped": (2, 6), "half-hipped": (6, 14),
+                        "gambrel": (6, 14), "mansard": (8, 18), "round": (14, 30), "saltbox": (2, 6)}
+RESERVE_MARGIN = 0.0  # the reservation is exact: reserved / emitted == 1 for every roof kind (tests/test_roofs.py)
+
+
 def roof_budget(plan: RoofPlan, n_ring: int, n_footprint_tris: int) -> tuple[int, int]:
     """Exact ``(vertices, triangles)`` the roof adds on top of the wall ring (2 n vertices, 2 n wall and
-    ``n_footprint_tris`` floor triangles): for a skeleton roof what the plan will emit, otherwise the
-    per-shape upper bound of :func:`shape_budget` plus the fixed apex/ridge and flat-top allowance."""
+    ``n_footprint_tris`` floor triangles): what the plan will emit. A skeleton roof is counted from its plan;
+    a flat or skillion roof reuses the wall-top vertices and triangulates the footprint; the other shapes
+    add a fixed number of vertices (:data:`ANALYTIC_ROOF_COUNTS`), a dome or onion one ring per profile step."""
     if plan.points is not None and plan.tris is not None:
         return len(plan.points) - plan.n_ring, len(plan.tris) + len(plan.ends or ())
-    extra_v, extra_t = shape_budget(plan.shape_built, n_ring)
-    return 2 + extra_v, n_footprint_tris + 4 + extra_t
-
+    shape = plan.shape_built
+    if shape in ("flat", "skillion"):
+        return 0, n_footprint_tris
+    if shape in ("dome", "onion"):
+        rings = dome_rings(n_ring, DOME_SEGMENTS if shape == "dome" else len(ONION) - 1)
+        return n_ring * rings + 1, n_ring * (2 * rings + 1)
+    if shape == "pyramidal":
+        return 1, n_ring
+    return ANALYTIC_ROOF_COUNTS[shape]
 
 def resolve_orientation(shape: str, tags: Mapping[str, str], prov: Prov, outer: Ring | None = None,
                         direction: float | None = None) -> bool:
@@ -473,17 +579,6 @@ def dome_rings(n_ring: int, segments: int) -> int:
     """Intermediate rings used for ``segments`` (fewer for a huge footprint so the roof stays
     within MAX_ROOF_TRIANGLES: n x (2 x rings + 1) triangles)."""
     return max(0, min(segments - 1, (MAX_ROOF_TRIANGLES // max(n_ring, 1) - 1) // 2))
-
-
-def shape_budget(shape: str, n_ring: int) -> tuple[int, int]:
-    """(vertices, triangles) a roof of ``shape`` adds beyond what ``build_building`` reserves
-    for the wall ring, the footprint and the apex (2 n + 2 vertices, 2 n + 2 tris + 4)."""
-    if shape in ("dome", "onion"):
-        rings = dome_rings(n_ring, DOME_SEGMENTS if shape == "dome" else len(ONION) - 1)
-        return n_ring * rings, n_ring * 2 * rings
-    if shape in RECT_SHAPES and shape not in ("gabled", "hipped"):
-        return 24, 40
-    return 0, 0
 
 
 def _dome_profile(n_ring: int, shape: str) -> list[Pt]:
