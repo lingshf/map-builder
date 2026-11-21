@@ -38,7 +38,7 @@ from ..core.geodesy import HARD_MAX_SIDE_M, Area
 from ..core import textures as tex
 from ..core import uv as core_uv
 from ..core.pipeline import filter_passage_probes, merge_dropped
-from .bake import (DEFAULT_MATERIAL, WHITE, BakedObject, Edits, ExportError, MaterialSpec, SocketInfo, SocketValue,
+from .bake import (DEFAULT_MATERIAL, DEFAULT_MATERIAL_SPEC, WHITE, BakedObject, Edits, ExportError, MaterialSpec, SocketInfo, SocketValue,
                    TriUV, bake_object, degenerate_count, export_baked, export_name_clashes, outside_area,
                    principled_omissions)
 from .scene_build import COLOR_ATTR, META_KEY
@@ -210,14 +210,20 @@ def _material_key(base: str, spec: MaterialSpec) -> str:
 
 def _final_names(registry: dict[str, tuple[str, MaterialSpec]]) -> dict[str, str]:
     """Unique display name per material key: the base name, plus an 8-hex suffix of the key when the base name is
-    used by another material of the export (user materials included) or is the reserved default name."""
+    used by another material of the export (user materials included) or is the reserved default name. The
+    unmodified default (its key equals the key of ``DEFAULT_MATERIAL_SPEC``) is the one material that keeps the
+    plain reserved name."""
     count: dict[str, int] = {}
     for base, _ in registry.values():
         count[base] = count.get(base, 0) + 1
     names: dict[str, str] = {}
     taken = {DEFAULT_MATERIAL} | {b for b, n in count.items() if n == 1 and b != DEFAULT_MATERIAL}
+    default_key = _material_key(DEFAULT_MATERIAL, DEFAULT_MATERIAL_SPEC)
     for key in sorted(registry):
         base = registry[key][0]
+        if key == default_key:
+            names[key] = DEFAULT_MATERIAL
+            continue
         if count[base] == 1 and base != DEFAULT_MATERIAL:
             names[key] = base
             continue

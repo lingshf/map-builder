@@ -48,7 +48,8 @@ class MB_Settings(bpy.types.PropertyGroup):
         ("CENTER", "Centre + size", "WGS84 centre latitude/longitude and width/height in metres"),
         ("BBOX", "Bounding box", "South, west, north, east in WGS84 degrees"),
     ], default="CENTER")
-    # the centre is text, not FloatProperty: Blender stores floats as float32 (centimetre error at 40 N), which
+    # the centre and the bbox edges are text, not FloatProperty: Blender stores floats as float32 (centimetre to
+    # decimetre error at 40-50 N), which
     # moves the area and changes terrain and probes against the CLI. ``lat``/``lon`` are the legacy float
     # properties of older .blend files: registered (so the saved value stays readable), hidden, migrated into
     # ``centre_lat``/``centre_lon`` on load and at Generate.
@@ -64,10 +65,10 @@ class MB_Settings(bpy.types.PropertyGroup):
                          min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
     height: FloatProperty(name="Height (m)", description="North-south extent in metres", default=1000.0,
                           min=MIN_SIDE_M, max=DEFAULT_MAX_SIDE_M)
-    bbox_south: FloatProperty(name="South", min=-85.0, max=85.0, precision=6)
-    bbox_west: FloatProperty(name="West", min=-180.0, max=180.0, precision=6)
-    bbox_north: FloatProperty(name="North", min=-85.0, max=85.0, precision=6)
-    bbox_east: FloatProperty(name="East", min=-180.0, max=180.0, precision=6)
+    bbox_south: StringProperty(name="South", description="Bounding box south edge (degrees, full precision)", default="")
+    bbox_west: StringProperty(name="West", description="Bounding box west edge (degrees, full precision)", default="")
+    bbox_north: StringProperty(name="North", description="Bounding box north edge (degrees, full precision)", default="")
+    bbox_east: StringProperty(name="East", description="Bounding box east edge (degrees, full precision)", default="")
 
     elevation_source: EnumProperty(name="Elevation", items=[
         ("copernicus", "Copernicus GLO-30 (online)", "Copernicus DEM GLO-30 from AWS Open Data; public, no account"),

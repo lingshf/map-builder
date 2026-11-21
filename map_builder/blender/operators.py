@@ -67,7 +67,8 @@ def make_settings(s: MB_Settings) -> Settings:
 
 def make_area(s: MB_Settings) -> Area:
     if s.area_mode == "BBOX":
-        return Area.from_bbox(s.bbox_south, s.bbox_west, s.bbox_north, s.bbox_east)
+        return Area.from_bbox(*(parse_degrees(getattr(s, f"bbox_{edge}"), edge.capitalize())
+                               for edge in ("south", "west", "north", "east")))
     migrate_legacy_centre(s)
     return Area(parse_degrees(s.centre_lat, "Latitude"), parse_degrees(s.centre_lon, "Longitude"), s.width, s.height)
 
