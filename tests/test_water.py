@@ -329,5 +329,57 @@ class RiverbankTest(unittest.TestCase):
         self.assertEqual(cl.areas, [])
 
 
+class BankColourTest(unittest.TestCase):
+    """S4-WATER-BANK: a built water surface does not paint the terrain cells under it."""
+    WATER = generate.LANDCOVER_COLORS["water"]
+    FOREST = generate.LANDCOVER_COLORS["forest"]
+
+    @staticmethod
+    def cell_colours(plan, tmesh_obj):
+        _, _, x0, y0, sp = tmesh_obj.mesh.grid_layout
+        nx = tmesh_obj.mesh.grid_layout[0]
+        out = {}
+        for k, col in enumerate(tmesh_obj.mesh.face_colors[::2]):
+            out[(k % (nx - 1), k // (nx - 1))] = (x0 + (k % (nx - 1) + 0.5) * sp, y0 + (k // (nx - 1) + 0.5) * sp, col)
+        return out
+
+    def test_built_body_paints_no_water_colour_and_other_landcover_wins(self):
+        lake = [(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)]
+        wood = [(-60.0, -30.0), (0.0, -30.0), (0.0, 30.0), (-60.0, 30.0)]
+        plan, ids, _ = make_scene([(lake, {"natural": "water"}, True), (wood, {"landuse": "forest"}, True)],
+                                  lake_ground, width=W, height=H)
+        self.assertTrue(bodies(plan)[ids[0]]["outcome"].startswith("built"))
+        cells = self.cell_colours(plan, objects(plan, "terrain")[0])
+        self.assertNotIn(self.WATER, [c for _, _, c in cells.values()])
+        inside_both = [c for x, y, c in cells.values() if -35 < x < -5 and abs(y) < 25]
+        self.assertTrue(inside_both)
+        self.assertTrue(all(c == self.FOREST for c in inside_both))
+
+    def test_fallback_body_keeps_water_colour(self):
+        from map_builder.core.dem import ElevationGrid
+        from map_builder.core.generate import build_terrain
+        from map_builder.core.osm import Feature, Polygon
+        poly = Polygon([(-8.0, -8.0), (8.0, -8.0), (8.0, 8.0), (-8.0, 8.0)], [])
+        a = Feature("osm:way/1", "area", {"_class": "water"}, poly)
+        grid = ElevationGrid(-20.0, -20.0, 5.0, 9, 9, [[0.0] * 9 for _ in range(9)], {})
+        cov = {}
+        kept = build_terrain(grid, 0.0, [a], cov)
+        skipped = build_terrain(grid, 0.0, [a], {}, frozenset({a.id}))
+        self.assertIn(self.WATER, kept.face_colors)
+        self.assertNotIn(self.WATER, skipped.face_colors)
+        self.assertGreater(cov[a.id], 0)
+        built = Feature("osm:way/2", "area", {"_class": "water"},
+                        Polygon([(-4.0, -4.0), (4.0, -4.0), (4.0, 4.0), (-4.0, 4.0)], []))
+        both = build_terrain(grid, 0.0, [a, built], {}, frozenset({built.id}))
+        centre = [c for k, c in enumerate(both.face_colors) if k // 2 in (4 * 8 + 4,)]
+        self.assertEqual(centre, [generate.LANDCOVER_COLORS[None]] * 2)
+
+    def test_riverbank_only_body_changes_nothing(self):
+        ring = [(-50.0, -20.0), (50.0, -20.0), (50.0, 20.0), (-50.0, 20.0)]
+        plan, _, _ = make_scene([(ring, {"waterway": "riverbank"}, True)], river_ground, width=W, height=H)
+        colours = set(objects(plan, "terrain")[0].mesh.face_colors)
+        self.assertEqual(colours, {generate.LANDCOVER_COLORS[None]})
+
+
 if __name__ == "__main__":
     unittest.main()

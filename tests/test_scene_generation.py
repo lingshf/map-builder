@@ -1453,7 +1453,9 @@ class LandcoverTopologyTest(unittest.TestCase):
                 if all(-30 < terrain.vertices[i][0] < 30 and -30 < terrain.vertices[i][1] < 30 for i in f)}
         self.assertNotIn(water, cols)  # old code coloured the invalid lake
         self.assertNotIn(gen.LANDCOVER_COLORS["forest"], cols)
-        self.assertIn(water, set(terrain.face_colors))  # the valid lake is still used
+        # the valid lake is still used: as a built surface, so it no longer paints the terrain (S4-WATER-BANK)
+        self.assertTrue(any(o.mb_id.startswith("water:") and str(ok) in o.mb_id for o in plan.objects))
+        self.assertNotIn(water, set(terrain.face_colors))
         self.assertFalse(any(o.mb_id.startswith(f"scatter:osm:relation/{fid}") for o in plan.objects))
 
     def test_validation_is_work_bounded(self):
