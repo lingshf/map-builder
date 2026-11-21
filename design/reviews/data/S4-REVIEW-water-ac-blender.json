@@ -1,0 +1,451 @@
+{
+ "packages": {
+  "head_blender": "C:\\Users\\shaoling\\AppData\\Local\\Temp\\mb-s4review\\out-head-r1\\head-r1-pittsburgh-0.mbmap",
+  "base_blender": "C:\\Users\\shaoling\\AppData\\Local\\Temp\\mb-s4review\\out-base\\base-pittsburgh-0.mbmap",
+  "head_cli": "C:\\Users\\shaoling\\AppData\\Local\\Temp\\mb-s4review\\out-head-r1\\cli-head-r1-pittsburgh.mbmap"
+ },
+ "z_offset_m": {
+  "head_blender": 213,
+  "base_blender": 213,
+  "head_cli": 213
+ },
+ "ac4_ac5_bodies": [
+  {
+   "id": "osm:relation/1080",
+   "outcome_blender": "built(flat)",
+   "sanity_miss_blender": false,
+   "triangles": 10,
+   "polygon_area": 37378.742,
+   "mesh_area": 37378.744,
+   "hausdorff_mesh_to_poly_m": 1.4e-05,
+   "hausdorff_poly_to_mesh_m": 1.4e-05,
+   "raster2m_cells": 9241,
+   "raster2m_symdiff": 0,
+   "level_m": 218.9268,
+   "p5": 218.015,
+   "p50": 220.016,
+   "level_in_p5_p50": true,
+   "mesh_z_minus_level_m": [
+    -3.4e-05,
+    -3.4e-05
+   ],
+   "level_equal_cli": true
+  },
+  {
+   "id": "osm:relation/7937544",
+   "outcome_blender": "built(flat)",
+   "sanity_miss_blender": false,
+   "triangles": 31,
+   "polygon_area": 151076.161,
+   "mesh_area": 151076.162,
+   "hausdorff_mesh_to_poly_m": 2e-05,
+   "hausdorff_poly_to_mesh_m": 2e-05,
+   "raster2m_cells": 37664,
+   "raster2m_symdiff": 0,
+   "level_m": 214.1489,
+   "p5": 213.0,
+   "p50": 218.248,
+   "level_in_p5_p50": true,
+   "mesh_z_minus_level_m": [
+    1e-05,
+    1e-05
+   ],
+   "level_equal_cli": true
+  },
+  {
+   "id": "osm:way/1037461399",
+   "outcome_blender": "fallback(no shore samples)",
+   "sanity_miss_blender": false
+  },
+  {
+   "id": "osm:way/379511900",
+   "outcome_blender": "built(flat)",
+   "sanity_miss_blender": false,
+   "triangles": 2,
+   "polygon_area": 631.281,
+   "mesh_area": 631.282,
+   "hausdorff_mesh_to_poly_m": 1.3e-05,
+   "hausdorff_poly_to_mesh_m": 8e-06,
+   "raster2m_cells": 146,
+   "raster2m_symdiff": 0,
+   "level_m": 220.7617,
+   "p5": 220.607,
+   "p50": 221.145,
+   "level_in_p5_p50": true,
+   "mesh_z_minus_level_m": [
+    -4.9e-05,
+    -4.9e-05
+   ],
+   "level_equal_cli": true
+  }
+ ],
+ "piers_moved_xy": [
+  [
+   "bridge_way_11950069",
+   1
+  ],
+  [
+   "bridge_way_173225719",
+   1
+  ]
+ ],
+ "ac6_decks": {
+  "compared": 33,
+  "min_delta_head_minus_base_m": 0.0,
+  "raised": [
+   [
+    "bridge_way_11950069",
+    0.231
+   ],
+   [
+    "bridge_way_173225719",
+    1.149
+   ]
+  ],
+  "skipped": [],
+  "water_decks_raised_report": [
+   {
+    "id": "osm:way/11950069",
+    "raised_m": 0.231
+   },
+   {
+    "id": "osm:way/173225719",
+    "raised_m": 1.149
+   }
+  ]
+ },
+ "ac6_piers": {
+  "piers": 20,
+  "wet": 13,
+  "max_bottom_minus_emitted_bed_m": -1.0,
+  "rows": [
+   [
+    "bridge_way_11950069",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_11950069",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_11950069",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_121593794",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_121593794",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_121593794",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    true,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ],
+   [
+    "bridge_way_173225719",
+    false,
+    -1.0
+   ]
+  ]
+ },
+ "parity_blender_vs_cli": {
+  "objects": 37,
+  "identical_sets": 6,
+  "differing": {
+   "bridge_way_11950069": {
+    "class": "bridge",
+    "blender_tris": 432,
+    "cli_tris": 432,
+    "only_blender": 163,
+    "only_cli": 163
+   },
+   "bridge_way_121593794": {
+    "class": "bridge",
+    "blender_tris": 432,
+    "cli_tris": 432,
+    "only_blender": 93,
+    "only_cli": 93
+   },
+   "bridge_way_121593795": {
+    "class": "bridge",
+    "blender_tris": 332,
+    "cli_tris": 332,
+    "only_blender": 87,
+    "only_cli": 87
+   },
+   "bridge_way_121593802": {
+    "class": "bridge",
+    "blender_tris": 252,
+    "cli_tris": 252,
+    "only_blender": 83,
+    "only_cli": 83
+   },
+   "bridge_way_137766148": {
+    "class": "bridge",
+    "blender_tris": 76,
+    "cli_tris": 76,
+    "only_blender": 10,
+    "only_cli": 10
+   },
+   "bridge_way_137766151": {
+    "class": "bridge",
+    "blender_tris": 60,
+    "cli_tris": 60,
+    "only_blender": 10,
+    "only_cli": 10
+   },
+   "bridge_way_173225719": {
+    "class": "bridge",
+    "blender_tris": 1492,
+    "cli_tris": 1492,
+    "only_blender": 433,
+    "only_cli": 433
+   },
+   "bridge_way_24957029": {
+    "class": "bridge",
+    "blender_tris": 300,
+    "cli_tris": 300,
+    "only_blender": 28,
+    "only_cli": 28
+   },
+   "bridge_way_24957033": {
+    "class": "bridge",
+    "blender_tris": 124,
+    "cli_tris": 124,
+    "only_blender": 10,
+    "only_cli": 10
+   },
+   "bridge_way_264591820": {
+    "class": "bridge",
+    "blender_tris": 124,
+    "cli_tris": 124,
+    "only_blender": 75,
+    "only_cli": 75
+   },
+   "bridge_way_264591932": {
+    "class": "bridge",
+    "blender_tris": 236,
+    "cli_tris": 236,
+    "only_blender": 10,
+    "only_cli": 10
+   },
+   "bridge_way_264591970": {
+    "class": "bridge",
+    "blender_tris": 188,
+    "cli_tris": 188,
+    "only_blender": 19,
+    "only_cli": 19
+   },
+   "bridge_way_323231442": {
+    "class": "bridge",
+    "blender_tris": 300,
+    "cli_tris": 300,
+    "only_blender": 71,
+    "only_cli": 71
+   },
+   "bridge_way_379511882": {
+    "class": "bridge",
+    "blender_tris": 76,
+    "cli_tris": 76,
+    "only_blender": 47,
+    "only_cli": 47
+   },
+   "bridge_way_43082522": {
+    "class": "bridge",
+    "blender_tris": 92,
+    "cli_tris": 92,
+    "only_blender": 17,
+    "only_cli": 17
+   },
+   "bridge_way_54210140": {
+    "class": "bridge",
+    "blender_tris": 92,
+    "cli_tris": 92,
+    "only_blender": 72,
+    "only_cli": 72
+   },
+   "bridge_way_54210143": {
+    "class": "bridge",
+    "blender_tris": 92,
+    "cli_tris": 92,
+    "only_blender": 60,
+    "only_cli": 60
+   },
+   "bridge_way_54210147": {
+    "class": "bridge",
+    "blender_tris": 60,
+    "cli_tris": 60,
+    "only_blender": 35,
+    "only_cli": 35
+   },
+   "bridge_way_54210148": {
+    "class": "bridge",
+    "blender_tris": 92,
+    "cli_tris": 92,
+    "only_blender": 53,
+    "only_cli": 53
+   },
+   "bridge_way_54210154": {
+    "class": "bridge",
+    "blender_tris": 204,
+    "cli_tris": 204,
+    "only_blender": 55,
+    "only_cli": 55
+   },
+   "bridge_way_54210156": {
+    "class": "bridge",
+    "blender_tris": 76,
+    "cli_tris": 76,
+    "only_blender": 35,
+    "only_cli": 35
+   },
+   "bridge_way_54210157": {
+    "class": "bridge",
+    "blender_tris": 316,
+    "cli_tris": 316,
+    "only_blender": 90,
+    "only_cli": 90
+   },
+   "bridge_way_54210161": {
+    "class": "bridge",
+    "blender_tris": 300,
+    "cli_tris": 300,
+    "only_blender": 40,
+    "only_cli": 40
+   },
+   "bridge_way_54210162": {
+    "class": "bridge",
+    "blender_tris": 140,
+    "cli_tris": 140,
+    "only_blender": 52,
+    "only_cli": 52
+   },
+   "bridge_way_54210163": {
+    "class": "bridge",
+    "blender_tris": 300,
+    "cli_tris": 300,
+    "only_blender": 105,
+    "only_cli": 105
+   },
+   "bridge_way_54223852": {
+    "class": "bridge",
+    "blender_tris": 140,
+    "cli_tris": 140,
+    "only_blender": 44,
+    "only_cli": 44
+   },
+   "bridge_way_550018192": {
+    "class": "bridge",
+    "blender_tris": 44,
+    "cli_tris": 44,
+    "only_blender": 18,
+    "only_cli": 18
+   },
+   "bridge_way_550018203": {
+    "class": "bridge",
+    "blender_tris": 316,
+    "cli_tris": 316,
+    "only_blender": 20,
+    "only_cli": 20
+   },
+   "bridge_way_550018206": {
+    "class": "bridge",
+    "blender_tris": 172,
+    "cli_tris": 172,
+    "only_blender": 29,
+    "only_cli": 29
+   },
+   "bridge_way_550018211": {
+    "class": "bridge",
+    "blender_tris": 60,
+    "cli_tris": 60,
+    "only_blender": 28,
+    "only_cli": 28
+   },
+   "bridge_way_625362030": {
+    "class": "bridge",
+    "blender_tris": 108,
+    "cli_tris": 108,
+    "only_blender": 32,
+    "only_cli": 32
+   }
+  },
+  "terrain_mbhf_sha256": {
+   "blender": "45aed583656456b25e668317c93c5a7c4663186a0745473651da121ed2add2fa",
+   "cli": "45aed583656456b25e668317c93c5a7c4663186a0745473651da121ed2add2fa"
+  }
+ }
+}
