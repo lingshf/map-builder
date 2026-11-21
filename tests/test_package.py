@@ -11,12 +11,14 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import struct
 import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from unittest import mock
 
 from map_builder.core import package as pkg
@@ -1137,6 +1139,108 @@ class PipelineTest(TempDirCase):
             scene_members(scene(), sources=sources)
         with self.assertRaises(PackageError):
             scene_members(scene(), sources=[s for s in synthetic_sources() if s["kind"] != "elevation"])
+
+
+class PerfIdentityTest(TempDirCase):
+    """S4-PERF-PKG: the faster writer and validator internals give the same bytes and verdicts."""
+
+    def test_members_are_deflated_once_and_bytes_match_zipfile(self):
+        members = {"a.bin": os.urandom(5000) + b"abc" * 4000, "zeros.bin": bytes(200_000), "empty.bin": b"",
+                   "b.json": b'{"k": [1, 2, 3]}' * 300}
+        path = self.p("w.mbmap")
+        calls = []
+        real = pkg.zlib.compressobj
+        with mock.patch.object(pkg.zlib, "compressobj", side_effect=lambda *a, **k: calls.append(a) or real(*a, **k)):
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+                for name in sorted(members):
+                    pkg._write_member(z, name, members[name])
+        self.assertEqual(len(calls), 3 + 1)   # three non-empty members once each; zipfile itself for the empty one
+        ref_path = self.p("ref.mbmap")
+        with zipfile.ZipFile(ref_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            for name in sorted(members):
+                zi = pkg._zinfo(name)
+                data = members[name]
+                if data and len(data) > pkg.MAX_RATIO * len(zlib.compress(data, 6)[2:-4]):
+                    zi.compress_type = zipfile.ZIP_STORED
+                z.writestr(zi, data)
+        self.assertEqual(read_bytes(path), read_bytes(ref_path))
+        with zipfile.ZipFile(path) as z:
+            self.assertIsNone(z.testzip())
+            self.assertEqual(z.getinfo("zeros.bin").compress_type, zipfile.ZIP_STORED)
+            self.assertEqual({n: z.read(n) for n in members}, members)
+
+    def test_correspondence_matches_reference(self):
+        def reference(tri, v, tol):
+            d = [[pkg._dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
+            best = [math.inf, math.inf]
+            for k, perm in enumerate(pkg._PERMUTATIONS):
+                dd = (d[0][perm[0]], d[1][perm[1]], d[2][perm[2]])
+                if max(dd) <= tol:
+                    best[k >= 3] = min(best[k >= 3], sum(dd))
+            return best[0], best[1]
+        rng = random.Random(7)
+        tol = 0.05
+        for _ in range(3000):
+            tri = tuple(tuple(rng.uniform(-1, 1) for _ in range(3)) for _ in range(3))
+            v = tuple(tuple(c + rng.uniform(-0.06, 0.06) for c in p) for p in rng.sample(tri, 3))
+            if rng.random() < 0.2:
+                v = tuple(tuple(c + rng.uniform(-1, 1) for c in p) for p in v)
+            self.assertEqual(pkg._correspondence(tri, v, tol), reference(tri, v, tol))
+
+    def test_correspondence_five_mm_boundary_matches_reference(self):
+        tri = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        shift = (0.00018306960736326301, 0.0027530098943223122, 0.004169822782879785)
+        v = ((shift[0], shift[1], shift[2]), tri[1], tri[2])
+        d = [[pkg._dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
+        want = (d[0][0] + d[1][1] + d[2][2], math.inf) if max(d[0][0], d[1][1], d[2][2]) <= 0.005 else (math.inf, math.inf)
+        self.assertEqual(pkg._correspondence(tri, v, 0.005), want)   # pow() rounding differs per platform
+
+    def test_oversize_member_still_honours_max_ratio(self):
+        path = self.p("big.mbmap")
+        with mock.patch.object(pkg, "_ZIP64_MEMBER", 1000):
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+                pkg._write_member(z, "zeros.bin", bytes(200_000))
+                pkg._write_member(z, "rnd.bin", os.urandom(5000))
+        with zipfile.ZipFile(path) as z:
+            self.assertEqual(z.getinfo("zeros.bin").compress_type, zipfile.ZIP_STORED)
+            self.assertEqual(z.getinfo("rnd.bin").compress_type, zipfile.ZIP_DEFLATED)
+
+    def test_validator_messages_match_reference_in_order(self):
+        def ref_corr(tri, v, tol):
+            d = [[pkg._dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
+            best = [math.inf, math.inf]
+            for k, perm in enumerate(pkg._PERMUTATIONS):
+                dd = (d[0][perm[0]], d[1][perm[1]], d[2][perm[2]])
+                if max(dd) <= tol:
+                    best[k >= 3] = min(best[k >= 3], sum(dd))
+            return best[0], best[1]
+        members, manifest, _ = scene_members(scene(), heightfield_spacing=10.0)
+        cases = {"valid": lambda m, mf: None,
+                 "hash": lambda m, mf: m.__setitem__("collision/map.mbcol", m["collision/map.mbcol"][:100]
+                                                      + bytes([m["collision/map.mbcol"][100] ^ 1])
+                                                      + m["collision/map.mbcol"][101:]),
+                 "extra": lambda m, mf: m.__setitem__("extra.bin", b"x"),
+                 "secret": lambda m, mf: mf.__setitem__("note", "https://u:p@h/x?token=abc"),
+                 "glb": lambda m, mf: m.__setitem__("visual/map.glb", m["visual/map.glb"][:-8] + bytes(8))}
+        for name, change in cases.items():
+            ms, mf = copy.deepcopy(members), copy.deepcopy(manifest)
+            change(ms, mf)
+            if name not in ("hash", "extra"):
+                rehash(ms, mf)
+            path = self.p(name + ".mbmap")
+            raw_write(path, ms, mf)
+            fast = validate_package(path, strict=True)
+            with mock.patch.object(pkg, "_correspondence", ref_corr), \
+                    mock.patch.object(pkg, "_SECRET_HINT", re.compile(r"")):
+                ref = validate_package(path, strict=True)
+            self.assertEqual((fast.errors, fast.warnings), (ref.errors, ref.warnings), name)
+            self.assertEqual(bool(fast.errors), name != "valid", name)
+
+    def test_secret_prefilter_keeps_every_hit(self):
+        samples = ["plain", "a=b", "key=1", "https://u:p@host/x", "Authorization: x", "bearer abcdefghij",
+                   "Basic QWxhZGRpbjpvcGVu", "x\tbearer\u00a0abcdefghij", "token", "ok:fine", "a b"]
+        for s in samples:
+            self.assertEqual(bool(pkg._SECRET_HINT.search(s) and pkg._SECRET.search(s)), bool(pkg._SECRET.search(s)), s)
 
 
 class CliTest(TempDirCase):

@@ -283,6 +283,8 @@ _SECRET_KEY = re.compile(r"(?i)(?:x-)?(?:api[_-]?key|apikey|access[_-]?key|secre
                          r"|refresh[_-]?token|id[_-]?token|auth|authorization|password|passwd|pwd|secret"
                          r"|client[_-]?secret|signature|credentials?)")
 _SAFE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+# Every _SECRET alternative needs "=", ":" or whitespace, so strings without any of them skip the big regex.
+_SECRET_HINT = re.compile(r"[=:\s]")
 
 
 def manifest_bytes(manifest: Mapping[str, object]) -> bytes:
@@ -394,7 +396,7 @@ def find_secrets(obj: object, path: str = "$") -> list[str]:
             children: list[tuple[object, str]] = []
             for i, (k, v) in enumerate(obj.items()):
                 where = _key_label(path, k, i)
-                if isinstance(k, str) and _SECRET.search(k):
+                if isinstance(k, str) and _SECRET_HINT.search(k) and _SECRET.search(k):
                     hits.append(f"{path}[key #{i}]")
                 if isinstance(k, str) and _SECRET_KEY.fullmatch(k) and isinstance(v, str) and v.strip():
                     hits.append(where)
@@ -403,7 +405,7 @@ def find_secrets(obj: object, path: str = "$") -> list[str]:
             stack.extend(reversed(children))
         elif isinstance(obj, (list, tuple)):
             stack.extend((obj[i], f"{path}[{i}]") for i in range(len(obj) - 1, -1, -1))
-        elif isinstance(obj, str) and _SECRET.search(obj):
+        elif isinstance(obj, str) and _SECRET_HINT.search(obj) and _SECRET.search(obj):
             hits.append(path)
     return hits
 
@@ -664,7 +666,24 @@ def _centroid_cells(tri: Tri, tol: float) -> list[Cell]:
 def _correspondence(tri: Tri, v: Tri, tol: float) -> tuple[float, float]:
     """(best same-orientation, best reversed) total vertex distance over the vertex correspondences whose
     every pair is within ``tol``; ``inf`` where no correspondence of that orientation fits."""
-    d = [[_dist(tri[i], v[j]) for j in range(3)] for i in range(3)]
+    # Squared-distance prefilter (with slack so the sqrt comparison below stays authoritative): a vertex of
+    # ``tri`` with no visual vertex in range rules out every correspondence. Distances beyond tol become
+    # inf, which no ``max(dd) <= tol`` test can accept, so results are identical to the full 3x3 table.
+    lim = tol * tol * 1.000001
+    d: list[list[float]] = []
+    for a in tri:
+        row = []
+        near = False
+        for b in v:
+            dx, dy, dz = a[0] - b[0], a[1] - b[1], a[2] - b[2]
+            if dx * dx + dy * dy + dz * dz <= lim:
+                near = True
+                row.append(_dist(a, b))   # the original arithmetic stays authoritative for retained pairs
+            else:
+                row.append(math.inf)
+        if not near:
+            return math.inf, math.inf
+        d.append(row)
     best = [math.inf, math.inf]
     for k, perm in enumerate(_PERMUTATIONS):
         dd = (d[0][perm[0]], d[1][perm[1]], d[2][perm[2]])
@@ -1127,18 +1146,41 @@ def collision_orientation_problems(col: Collision) -> list[str]:
 
 # --- writing --------------------------------------------------------------------------
 
-def _zinfo(name: str, data: bytes = b"") -> zipfile.ZipInfo:
-    """Deterministic entry. Deflated unless deflate would compress ``data`` beyond the validator's MAX_RATIO
-    (e.g. a constant heightfield): such members are stored, so every written entry passes the ratio check."""
+def _zinfo(name: str) -> zipfile.ZipInfo:
     zi = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))  # deterministic archive
     zi.compress_type = zipfile.ZIP_DEFLATED
-    if data:
-        co = zlib.compressobj(6, zlib.DEFLATED, -15)   # the raw deflate stream zipfile writes at level 6
-        size = len(co.compress(data)) + len(co.flush())
-        if len(data) > MAX_RATIO * size:
-            zi.compress_type = zipfile.ZIP_STORED
     zi.external_attr = (stat.S_IFREG | 0o644) << 16
     return zi
+
+
+_ZIP64_MEMBER = 1 << 30
+
+
+def _write_member(z: zipfile.ZipFile, name: str, data: bytes) -> None:
+    """Append a deterministic member, deflating ``data`` once. Deflated unless deflate would compress it
+    beyond the validator's MAX_RATIO (e.g. a constant heightfield): such members are stored, so every
+    written entry passes the ratio check. The raw level-6 stream is computed once and written as is, which
+    is the same stream and header ``ZipFile.writestr`` would produce."""
+    zi = _zinfo(name)
+    if not data:
+        z.writestr(zi, data)
+        return
+    co = zlib.compressobj(6, zlib.DEFLATED, -15)   # the raw deflate stream zipfile writes at level 6
+    raw = co.compress(data) + co.flush()
+    fp = z.fp
+    if len(data) > MAX_RATIO * len(raw):
+        z.writestr(zi, data, compress_type=zipfile.ZIP_STORED)
+        return
+    if fp is None or len(data) >= _ZIP64_MEMBER:   # zip64 sizes: let zipfile write it (deflates again)
+        z.writestr(zi, data)
+        return
+    zi.file_size, zi.compress_size, zi.CRC = len(data), len(raw), zlib.crc32(data)
+    zi.header_offset = fp.tell()
+    fp.write(zi.FileHeader(False))
+    fp.write(raw)
+    z.filelist.append(zi)
+    z.NameToInfo[zi.filename] = zi
+    z.start_dir = fp.tell()
 
 
 def write_package(path: str | PathLike[str], members: Mapping[str, bytes],
@@ -1160,9 +1202,9 @@ def write_package(path: str | PathLike[str], members: Mapping[str, bytes],
     try:
         with os.fdopen(fd, "wb") as fh:
             with zipfile.ZipFile(fh, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-                z.writestr(_zinfo(MANIFEST, data), data)
+                _write_member(z, MANIFEST, data)
                 for name in sorted(members):
-                    z.writestr(_zinfo(name, members[name]), members[name])
+                    _write_member(z, name, members[name])
             fh.flush()
             os.fsync(fh.fileno())
         result = validate_package(tmp, strict=True)
