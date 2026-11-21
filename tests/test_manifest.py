@@ -34,8 +34,25 @@ def _shipped(build):
                 yield rel, os.path.join(root, name)
 
 
-def _is_binary(name, head):
-    return name.lower().endswith(NATIVE_SUFFIXES) or head.startswith(NATIVE_MAGIC)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _tagline_ok(t):
+    """Blender 4.2: non-empty, at most 64 characters, ending in an alphanumeric character or ) ] }."""
+    return 0 < len(t) <= 64 and (t[-1].isalnum() or t[-1] in ")]}")
+
+
+def _forbidden(name, data):
+    """Why an entry may not ship, or None. A .png must carry the PNG signature in its own bytes; native
+    binaries and bytecode are rejected by name or content in every directory."""
+    low = name.lower()
+    if "__pycache__" in low.split("/") or low.endswith((".pyc", ".pyo")):
+        return "bytecode"
+    if low.endswith(NATIVE_SUFFIXES) or data.startswith(NATIVE_MAGIC):
+        return "native binary"
+    if low.endswith(".png") and not data.startswith(PNG_SIGNATURE):
+        return "not a PNG"
+    return None
 
 
 class ManifestTest(unittest.TestCase):
@@ -45,8 +62,13 @@ class ManifestTest(unittest.TestCase):
 
     def test_tagline(self):
         t = self.m["tagline"]
-        self.assertLessEqual(len(t), 64)
-        self.assertNotRegex(t, r"[.,;:!?\s]$")
+        self.assertTrue(_tagline_ok(t), t)
+
+    def test_tagline_rule_matches_blender(self):
+        for ok in ("Build maps", "Build maps (OSM)", "Maps [v2]", "x" * 64):
+            self.assertTrue(_tagline_ok(ok), ok)
+        for bad in ("", "Build maps.", "Build maps\u2014", "Build maps -", "Build maps ", "Maps!", "x" * 65):
+            self.assertFalse(_tagline_ok(bad), bad)
 
     def test_id_version_schema_formats(self):
         self.assertRegex(self.m["id"], r"^[a-z][a-z0-9_]*$")
@@ -88,13 +110,28 @@ class ManifestTest(unittest.TestCase):
     def test_shipped_files_have_no_binaries(self):
         shipped = list(_shipped(self.m.get("build")))
         self.assertIn("blender_manifest.toml", [r for r, _ in shipped])
+        self.assertTrue(any(r.startswith("assets/textures/") for r, _ in shipped))
         for rel, path in shipped:
-            if rel.startswith("assets/textures/") and rel.endswith(".png"):
-                continue   # the CC0 texture set is data, not a binary executable
             with open(path, "rb") as f:
-                head = f.read(4)
+                data = f.read(8)
             with self.subTest(rel=rel):
-                self.assertFalse(_is_binary(rel, head))
+                self.assertIsNone(_forbidden(rel, data))
+
+    def test_binary_rule_covers_textures(self):
+        png = PNG_SIGNATURE + b"rest"
+        self.assertIsNone(_forbidden("assets/textures/a.png", png))
+        for name, data in (
+            ("assets/textures/example.dll", png),
+            ("assets/textures/a.so", b"x"),
+            ("assets/textures/a.png", b"\x7fELFrest"),
+            ("assets/textures/a.png", b"MZ\x90\x00"),
+            ("assets/textures/fake.png", b"not a png"),
+            ("assets/textures/a.pyc", png),
+            ("assets/textures/__pycache__/a.dat", b"x"),
+            ("core/tool", b"\x7fELF"),
+        ):
+            with self.subTest(name=name):
+                self.assertIsNotNone(_forbidden(name, data))
 
     def test_built_zip_has_no_binaries(self):
         path = os.environ.get("MB_EXTENSION_ZIP")
@@ -102,12 +139,10 @@ class ManifestTest(unittest.TestCase):
             self.skipTest("MB_EXTENSION_ZIP not set (release.yml sets it)")
         with zipfile.ZipFile(path) as z:
             for info in z.infolist():
-                if info.filename.endswith("/") or info.filename.startswith("assets/textures/"):
+                if info.filename.endswith("/"):
                     continue
                 with self.subTest(entry=info.filename):
-                    self.assertFalse(_is_binary(info.filename, z.read(info)[:4]))
-                    self.assertNotIn("__pycache__", info.filename)
-                    self.assertFalse(info.filename.endswith(".pyc"))
+                    self.assertIsNone(_forbidden(info.filename, z.read(info)[:8]))
 
 
 if __name__ == "__main__":
