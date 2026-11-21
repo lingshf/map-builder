@@ -19,6 +19,7 @@ from checks_core import check
 
 SMALLEST_FEATURE_M = 0.5
 MAX_EDGE_ERROR_M = 0.05
+BOUNDARY_M = 0.02
 M_PER_DEG = 111_320.0
 # (name, south, west, north, east) as typed, in degrees
 BBOXES = (("munich", 48.13701, 11.57391, 48.14199, 11.57889),
@@ -29,7 +30,12 @@ BBOXES = (("munich", 48.13701, 11.57391, 48.14199, 11.57889),
 def set_bbox(s, values):
     """Type the bbox the way the panel does: text, full precision."""
     for edge, v in zip(("south", "west", "north", "east"), values):
-        setattr(s, f"bbox_{edge}_deg", repr(v))
+        if hasattr(s, f"bbox_{edge}_deg"):
+            setattr(s, f"bbox_{edge}_deg", repr(v))
+        else:                                       # float32 properties of versions before S4-BLENDER-HYGIENE
+            setattr(s, f"bbox_{edge}", v)
+
+
 
 def edge_errors_m(values):
     """Per-edge (south, west, north, east) distance in metres between the Blender-derived area and the area built
@@ -53,6 +59,41 @@ def check_bbox():
         check(max(errs) <= MAX_EDGE_ERROR_M < SMALLEST_FEATURE_M,
               f"hygiene: {name} bbox edges within {MAX_EDGE_ERROR_M} m of the double-precision area "
               f"(worst {max(errs):.4f} m)")
+
+
+def edge_feature_object(name, x_max, y_max):
+    """A 0.5 m wide baked object whose +X and +Y extremes are ``x_max`` and ``y_max`` (map metres)."""
+    from map_builder.blender.bake import bake_object
+
+    w = SMALLEST_FEATURE_M
+    verts = [(x_max - w, y_max - w, 0.0), (x_max, y_max - w, 0.0), (x_max, y_max, 0.0), (x_max - w, y_max, 0.0)]
+    identity = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    return bake_object(name, verts, [(0, 1, 2), (0, 2, 3)], identity)
+
+
+def check_edge_feature_classification():
+    """A 0.5 m feature whose far edge lies BOUNDARY_M inside / outside the true outside-area limit (half size plus the
+    1 m margin) is classified by the Blender-derived area exactly as by the double-precision area. Float32 bbox
+    edges move the limit by up to 0.24 m, which flips one of the two."""
+    from map_builder.blender.bake import outside_area
+    from map_builder.blender.operators import make_area
+    from map_builder.core.geodesy import Area
+
+    s = bpy.context.scene.map_builder
+    s.area_mode = "BBOX"
+    for name, *values in BBOXES:
+        set_bbox(s, values)
+        got, want = make_area(s), Area.from_bbox(*values)
+        hx, hy = want.half
+        wrong = []
+        for label, dx, dy, expect in (("inside", -BOUNDARY_M, -BOUNDARY_M, False),
+                                      ("outside x", BOUNDARY_M, -BOUNDARY_M, True),
+                                      ("outside y", -BOUNDARY_M, BOUNDARY_M, True)):
+            obj = edge_feature_object(f"mb_edge_{label}", hx + 1.0 + dx, hy + 1.0 + dy)
+            if outside_area(obj, got) != expect or outside_area(obj, want) != expect:
+                wrong.append(label)
+        check(not wrong, f"hygiene: 0.5 m feature {BOUNDARY_M} m from the area limit is classified correctly "
+                         f"for {name} (misclassified: {wrong})")
 
 
 def check_bbox_migration():
@@ -107,5 +148,6 @@ def check_default_material_name(out_dir):
 
 def run(out_dir):
     check_bbox()
+    check_edge_feature_classification()
     check_bbox_migration()
     check_default_material_name(out_dir)
