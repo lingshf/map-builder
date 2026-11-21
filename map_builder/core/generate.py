@@ -1340,7 +1340,9 @@ def drop_unstorable_slivers(local: Sequence[Vec3], tris: Iterable[tuple[int, ...
     lf = [_f32(v) for v in loc]
     stores = ([(_f32(x + loc[0]), _f32(y + loc[1]), _f32(z + loc[2])) for x, y, z in local],
               [(_f32(_f32(x) + lf[0]), _f32(_f32(y) + lf[1]), _f32(_f32(z) + lf[2])) for x, y, z in local])
-    keep: list[tuple[int, ...]] = []
+    kept: list[tuple[int, ...]] = []
+    flat: list[tuple[int, ...]] = []   # no ray can hit them on either path; dropped only when a kept face covers them
+    flat_area: dict[tuple[int, ...], float] = {}
     dropped: list[tuple[float, float]] = []
     for t in tris:
         la, lb, lc = (local[i] for i in t)
@@ -1362,8 +1364,26 @@ def drop_unstorable_slivers(local: Sequence[Vec3], tris: Iterable[tuple[int, ...
                 return None, None
             dropped.append((width, area2 / 2))
             continue
-        if all(triangle_is_degenerate(*(W[i] for i in t)) for W in stores):   # no ray can hit it on either path
-            dropped.append((0.0, area2 / 2))
+        if all(triangle_is_degenerate(*(W[i] for i in t)) for W in stores):
+            flat.append(t)
+            flat_area[t] = area2 / 2
+        kept.append(t)
+    # A capsule still touches a flat face, so it goes only when each of its points (one) or its two distinct
+    # points (an edge) is also a vertex or edge of a face that stays, on both storage paths: no probe loses contact.
+    solid = [t for t in kept if t not in flat_area]
+    stays: set[tuple[int, ...]] = set()
+    for W in stores:
+        verts = {W[i] for t in solid for i in t}
+        edges = {frozenset((W[t[k]], W[t[(k + 1) % 3]])) for t in solid for k in range(3)}
+        for t in flat:
+            pts = {W[i] for i in t}
+            ok = pts <= verts if len(pts) == 1 else len(pts) == 2 and frozenset(pts) in edges
+            if not ok:
+                stays.add(t)
+    keep: list[tuple[int, ...]] = []
+    for t in kept:
+        if t in flat_area and t not in stays:
+            dropped.append((0.0, flat_area[t]))
             continue
         keep.append(t)
     return keep, dropped

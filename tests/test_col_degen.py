@@ -71,6 +71,27 @@ class MillimetreTriangleTest(unittest.TestCase):
         self.assertIn("probe 0 hits=0 ", run.stdout)
 
 
+class FlatFaceDropTest(unittest.TestCase):
+    LOC = (100.0, 100.0, 0.0)   # float32 spacing there is 7.6e-6 m, so a 1e-9 m offset vanishes in storage
+
+    def run_drop(self, extra_vertex):
+        from map_builder.core.generate import drop_unstorable_slivers
+        local = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1e-9, 1e-9, 0.0)]
+        if extra_vertex is None:
+            return drop_unstorable_slivers(local, [(0, 1, 2), (0, 1, 3)], self.LOC)
+        return drop_unstorable_slivers([*local, extra_vertex], [(0, 1, 2), (0, 4, 3)], self.LOC)
+
+    def test_flat_face_on_an_edge_of_a_kept_face_is_dropped(self):
+        kept, dropped = self.run_drop(None)
+        self.assertEqual(kept, [(0, 1, 2)])
+        self.assertEqual(len(dropped), 1)
+
+    def test_flat_face_off_every_kept_edge_stays(self):
+        kept, dropped = self.run_drop((2.0, 0.0, 0.0))
+        self.assertEqual(kept, [(0, 1, 2), (0, 4, 3)])
+        self.assertEqual(dropped, [])
+
+
 class ExportReportTest(unittest.TestCase):
     def test_empty_object_is_dropped_and_reported(self):
         with tempfile.TemporaryDirectory() as d:

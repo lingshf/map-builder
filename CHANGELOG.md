@@ -6,6 +6,12 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+* **Fewer degenerate collision triangles** (S4-COL-DEGEN, D98, D111). Road ribbon polygons drop duplicate and collinear
+  vertices and are re-fanned so no thin triangle is emitted where a better fan covers the same surface; faces with no
+  area in float32 storage on either path are omitted. No ray or capsule probe changes. The remaining slivers are real
+  surface (a ray can hit them), so they stay; `report.json` lists them per object (`degenerate_objects`) and an object
+  with no triangles is dropped and listed (`objects_dropped_empty`). The validator rule and warning are unchanged.
+
 * Blender: the bounding-box edges (South/West/North/East) are text fields read in double precision; the old float32 fields moved an edge by up to 0.24 m (S3-F6). A bbox saved by an earlier version migrates automatically, with the precision it was stored at.
 * Blender export: an unmodified default material is named "MB Default"; any parameter variant keeps its digest suffix (S3-F11).
 * **Gabled roofs on chamfered and angled ends** (S4-ROOF-ENDS). A gable end that the plain cut could not represent
