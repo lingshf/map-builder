@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unittest
 
+from . import csharp_build
 from map_builder.core.collision import ColObject, read_collision, write_collision
 from map_builder.core.errors import LimitError
 from map_builder.core.query import capsule_hits
@@ -67,13 +68,9 @@ class CsharpCapsuleParityTest(unittest.TestCase):
             f.write(write_collision(cls.objs))
         with open(os.path.join(cls.tmp.name, "p.json"), "w") as f:
             json.dump([{"path": path, "radius": r} for path, r in cls.probes], f)
-        build = subprocess.run(["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", PROJECT],
-                               capture_output=True, text=True)
-        assert build.returncode == 0, build.stdout + build.stderr
 
     def run_reader(self, *extra):
-        run = subprocess.run(["dotnet", os.path.join(PROJECT, "bin", "Release", "net8.0", "MbmapReader.dll"),
-                              "--probe-work", os.path.join(self.tmp.name, "c.mbcol"),
+        run = subprocess.run([*csharp_build.reader_command(), "--probe-work", os.path.join(self.tmp.name, "c.mbcol"),
                               os.path.join(self.tmp.name, "p.json"), *extra], capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         return run.stdout.splitlines()
@@ -132,11 +129,7 @@ class CsharpTexturedPackageTest(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.tmp.cleanup)
         cls.fixtures = negative_fixtures(cls.tmp.name)
-        build = subprocess.run(["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", PROJECT],
-                               capture_output=True, text=True)
-        assert build.returncode == 0, build.stdout + build.stderr
-        run = subprocess.run(["dotnet", os.path.join(PROJECT, "bin", "Release", "net8.0", "MbmapReader.dll"),
-                              "--validate-many", cls.tmp.name], capture_output=True, text=True)
+        run = subprocess.run([*csharp_build.reader_command(), "--validate-many", cls.tmp.name], capture_output=True, text=True)
         cls.verdicts = dict(line.split(": ", 1) for line in run.stdout.splitlines())
 
     def test_textured_package_is_accepted(self):
@@ -150,6 +143,44 @@ class CsharpTexturedPackageTest(unittest.TestCase):
             with self.subTest(name):
                 verdict = self.verdicts[name + ".mbmap"]
                 self.assertTrue(verdict.startswith("INVALID:") and fragment in verdict, verdict)
+
+
+@unittest.skipUnless(shutil.which("dotnet"), "the .NET SDK is not installed")
+class CsharpBuildHygieneTest(unittest.TestCase):
+    def test_the_reader_is_built_once_per_run_whatever_the_number_of_callers(self):
+        csharp_build.reader_dll()
+        csharp_build.reader_dll()
+        self.assertEqual(csharp_build.BUILD_COUNT, 1)
+
+    def test_a_failed_build_is_attempted_once_per_run(self):
+        from unittest import mock
+        failed = subprocess.CompletedProcess([], 1, "", "boom")
+        with mock.patch.object(csharp_build, "_dll", None), mock.patch.object(csharp_build, "_failure", None), \
+                mock.patch.object(csharp_build, "_outdir", None), mock.patch.object(csharp_build, "BUILD_COUNT", 0), \
+                mock.patch.object(csharp_build.subprocess, "run", return_value=failed) as run:
+            for _ in range(3):
+                with self.assertRaises(RuntimeError):
+                    csharp_build.reader_dll()
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(csharp_build.BUILD_COUNT, 1)
+            csharp_build._cleanup()
+
+    def test_a_launch_error_is_attempted_once_per_run(self):
+        from unittest import mock
+        with mock.patch.object(csharp_build, "_dll", None), mock.patch.object(csharp_build, "_failure", None), \
+                mock.patch.object(csharp_build, "_outdir", None), mock.patch.object(csharp_build, "BUILD_COUNT", 0), \
+                mock.patch.object(csharp_build.subprocess, "run", side_effect=FileNotFoundError("dotnet")) as run:
+            for _ in range(3):
+                with self.assertRaises(RuntimeError):
+                    csharp_build.reader_dll()
+            self.assertEqual(run.call_count, 1)
+            csharp_build._cleanup()
+
+    def test_the_repo_nuget_config_ignores_user_level_feeds(self):
+        with open(os.path.join(ROOT, "NuGet.config"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("<clear />", text)
+        self.assertEqual(text.count("<add key="), 1)
 
 
 if __name__ == "__main__":

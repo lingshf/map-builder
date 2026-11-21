@@ -662,13 +662,15 @@ class CrossingTest(unittest.TestCase):
         road = ([(-45 * c, -45 * c), (45 * c, 45 * c)], {"highway": "primary"})
         for ground in (lambda x, y: 0.0, lambda x, y: 0.1 * y):   # flat; and rising across the deck
             plan, ids, _ = make_scene(
-                [([(-125, 0), (-100, 0)], {"highway": "residential"}), ([(100, 0), (125, 0)], {"highway": "residential"}), road, ([(-100, 0), (100, 0)], {"highway": "residential", "bridge": "yes",
-                                                                 "layer": "1"})], ground, width=260.0, joins=self.JOINS)
+                [([(-60, 0), (-40, 0)], {"highway": "residential"}), ([(40, 0), (60, 0)], {"highway": "residential"}), road,
+                 ([(-40, 0), (40, 0)], {"highway": "residential", "bridge": "yes", "layer": "1"})],
+                ground, width=130.0, height=50.0, joins=self.JOINS)
             prov = objects(plan, "bridge")[0].provenance
             measured = self._ray_clearance(plan, ids)
             self.assertIsNotNone(measured)
-            self.assertAlmostEqual(prov["clearance_m"], measured, delta=0.03)
-            self.assertIs(prov["clearance_met"], measured >= 5.0 - 0.03)
+            # the short deck stands lower than the 5 m wanted, so the 2.8 m ray grid is off the true minimum by up to 0.04 m
+            self.assertAlmostEqual(prov["clearance_m"], measured, delta=0.05)
+            self.assertIs(prov["clearance_met"], measured >= 5.0 - 0.05)
 
     def _ray_gap(self, col, x, y, z):
         up = ray_cast(col, (x, y, z), (0, 0, 1), 30)
