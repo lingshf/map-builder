@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 from map_builder.core.package import PACKAGE_SCHEMA_VERSION, file_entry, manifest_bytes, validate_package
 
@@ -29,14 +30,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FUTURE_MINOR = "2.2.0"
 EXTRA = "extra/future.bin"
 REQUIRED = os.environ.get("MBMAP_REQUIRE_FROZEN") == "1"
-HAVE_DOTNET = shutil.which("dotnet") is not None
-
-
 def unavailable(why):
     """Skip locally; fail where the prerequisite is mandatory (CI)."""
     if REQUIRED:
         raise AssertionError(f"MBMAP_REQUIRE_FROZEN=1 but {why}")
     raise unittest.SkipTest(why)
+
+
+def require_tools(*names, which=None):
+    for name in names:
+        if (which or shutil.which)(name) is None:
+            unavailable(f"{name} is not installed")
 
 
 def write_raw(path, members, manifest):
@@ -145,8 +149,12 @@ class PythonPolicyTest(Fixtures):
         self.assertTrue(any("unknown package member ignored" in w for w in r.warnings), r.warnings)
 
 
-@unittest.skipUnless(HAVE_DOTNET, "the .NET SDK is not installed")
 class CsharpPolicyTest(Fixtures):
+    @classmethod
+    def setUpClass(cls):
+        require_tools("dotnet")
+        super().setUpClass()
+
     def test_current_csharp_rejects_major_3(self):
         code, out = self.run_cs(csharp_build.reader_command(), self.major3())
         self.assertEqual(code, 1, out)
@@ -169,7 +177,6 @@ class CsharpPolicyTest(Fixtures):
         self.assertIn("unknown package member", out)
 
 
-@unittest.skipUnless(HAVE_DOTNET and shutil.which("git") and shutil.which("tar"), "needs dotnet, git and tar")
 class FrozenReadersTest(Fixtures):
     """The frozen v0.3.0 Python validator and C# reader on the future-minor fixture (D57, D65)."""
 
@@ -178,6 +185,7 @@ class FrozenReadersTest(Fixtures):
 
     @classmethod
     def setUpClass(cls):
+        require_tools("dotnet", "git", "tar")
         super().setUpClass()
         if subprocess.run(["git", "rev-parse", "--verify", "-q", "v0.3.0^{tag}"], cwd=ROOT,
                           capture_output=True).returncode != 0 and subprocess.run(
@@ -220,6 +228,22 @@ class FrozenReadersTest(Fixtures):
                              cwd=self.frozen_dir, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn("unknown package member ignored", run.stdout)
+
+
+class StrictModeTest(unittest.TestCase):
+    """MBMAP_REQUIRE_FROZEN=1 turns a missing prerequisite into a failure instead of a skip."""
+
+    def test_missing_tool_fails_in_strict_mode(self):
+        for tool in ("dotnet", "git", "tar"):
+            with mock.patch.object(sys.modules[__name__], "REQUIRED", True):
+                with self.assertRaises(AssertionError) as cm:
+                    require_tools("dotnet", "git", "tar", which=lambda n, t=tool: None if n == t else "/bin/" + n)
+            self.assertIn(tool, str(cm.exception))
+
+    def test_missing_tool_skips_when_not_strict(self):
+        with mock.patch.object(sys.modules[__name__], "REQUIRED", False):
+            with self.assertRaises(unittest.SkipTest):
+                require_tools("git", which=lambda n: None)
 
 
 if __name__ == "__main__":
