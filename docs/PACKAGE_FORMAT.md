@@ -1,4 +1,4 @@
-# Map package format: `map-builder.package` 2.0.0
+# Map package format: `map-builder.package` 2.1.0
 
 This is the contract between map-builder (the producer) and any runtime (the consumer).
 Format and schema versions follow semver: a consumer must reject an unknown **major**
@@ -7,8 +7,8 @@ version and must ignore unknown fields. Major version 2 (this document) added th
 `passage_probes`; 1.x packages are rejected and must be regenerated. Minor version 2.1.0 is
 additive: optional embedded PNG base-colour textures with `TEXCOORD_0`, and the optional
 `asset_notices[]` manifest field (see "Textures and asset notices (2.1.0)"). The writer
-default stays 2.0.0 until the generator emits textures; a 2.1.0 package is written only when
-the caller passes `schema_version="2.1.0"`.
+default is 2.1.0 (since #49), and it stays 2.1.0. The compatibility rules are in
+"Compatibility and stability policy (draft)" below.
 
 ## Container
 
@@ -235,7 +235,7 @@ Reference tools: `python -m tests.make_textured_fixture OUT.mbmap` writes a comp
 
 ```jsonc
 {
-  "schema": "map-builder.package", "schema_version": "2.0.0",
+  "schema": "map-builder.package", "schema_version": "2.1.0",
   "name": "…", "created_utc": "…",
   "generator": {"name": "map-builder", "version": "0.4.0", "blender": "4.2.23 LTS" | null},
   "georeference": {"origin": {"lat_deg", "lon_deg"}, "horizontal_datum": "WGS84 (EPSG:4326)",
@@ -504,6 +504,63 @@ or cut (every road tunnel removes the terrain below its roof inside its footprin
 heightfield is NaN there; terrain above the roof remains), and it cannot represent bridges,
 tunnels, elevated volumes, overhangs or any other non-terrain object. A consumer that needs
 those must use the `.mbcol` triangles.
+
+## Compatibility and stability policy (draft)
+
+> **Draft (D101).** Not final until the user confirms it at v1.0. It describes what the validator and the
+> readers do today; it adds no check. The writer default stays 2.1.0.
+
+**Versions.**
+
+* **Patch** (2.1.x): clarifications only; no file changes.
+* **Minor** (2.n): additive, optional content that the frozen previous-minor Python **and C#** readers
+  load unchanged, **within today's limits** (below), which a minor never relaxes. A minor is published only
+  with a **positive frozen-reader fixture**: a 2.(n+1).0 package with the new content must load in the
+  frozen Python and C# readers in CI (D57, D65).
+* **Major** (3.0): any removal, rename or semantic change of an existing field, collision class or kind,
+  coordinate frame, units, the open-tube rule or a limit below, and any `.mbcol` or `.mbhf` format number
+  the current readers cannot read.
+
+**Readers** accept the same major with any minor, ignore unknown JSON fields, and reject another major with
+`unsupported schema major version N` (`core/package.py:1478`, `MbmapReader.cs:1339`). A `.mbcol` or `.mbhf`
+header `version` they do not know is rejected (`collision.py:255`, `MbmapReader.cs:188` and `:310`); a new
+binary number therefore needs a new package major. **Deprecation:** a field is deprecated for at least one
+minor before it is removed in the next major.
+
+**Today's limits** (quoted from the code, not from this document; a minor may not relax them):
+
+| Limit | Python (`core/package.py`) | C# (`MbmapReader.cs`) |
+|---|---|---|
+| Every ZIP member other than `manifest.json` listed in `files[]` with SHA-256, one to one | "unlisted file in package" error (`:1446`) | same error (`:1375`) |
+| Entries ≤ 64 | `MAX_ENTRIES = 64` (`:199`) | `MaxEntries = 64` (`:35`) |
+| Uncompressed ≤ 1.5 GiB | `MAX_TOTAL_UNCOMPRESSED = 1536 * 1024 * 1024` (`:200`) | `MaxTotalUncompressed = 1536L * 1024 * 1024` (`:36`) |
+| Manifest ≤ 32 MiB | `MAX_MANIFEST_BYTES = 32 * 1024 * 1024` (`:201`) | `MaxManifestBytes = 32L * 1024 * 1024` (`:37`) |
+| Compression ratio ≤ 200 | `MAX_RATIO = 200` (`:202`) | `MaxRatio = 200` (`:38`) |
+| Names ≤ 255 bytes | `MAX_NAME_LEN = 255` (`:203`) | `MaxNameLength = 255` (`:39`) |
+| One GLB-stored buffer; no external or data-URI buffers | `glb.py:452`, `:456` (more than one buffer, `uri`) | `MbmapReader.cs:398` (`uri`) |
+| No `extensionsRequired` | `glb.py:448` | `:390` |
+| GLB ≤ 1 GiB, ≤ 8 M visual triangles, ≤ 1 M nodes, depth ≤ 64 | `glb.py:151`–`:154`: `MAX_GLB_BYTES = 1024 ** 3`, `MAX_VISUAL_TRIANGLES = 8_000_000`, `MAX_NODES = 1_000_000`, `MAX_DEPTH = 64` | `MaxGlbBytes = 1024L * 1024 * 1024`, `MaxVisualTriangles = 8_000_000`, `MaxNodes = 1_000_000, MaxNodeDepth = 64` (`:47`–`:50`) |
+| Every embedded image listed in `asset_notices[]` | "texture without provenance" error (`:1908`) | same error (`:1415`) |
+
+**What a minor may add, and what it may not (found by the fixture).** The 2.2.0 fixture (an unknown top-level
+manifest field and glTF `extras` on `asset`, the root, a node and a material) loads in the current validator
+and in the frozen v0.3.0 Python and C# readers. An **extra listed member is not additive today**: the Python
+validators only warn (`unknown package member ignored`), but both C# readers reject it (`unknown package
+member (warnings are errors)`, `MbmapReader.cs:1368`). So a minor must not add a member or a role until the
+C# reader tolerates it; that is a major-version change today. An `extensionsUsed`-only glTF extension is not
+covered by a fixture, so it is not yet allowed.
+
+| Rule | Check |
+|---|---|
+| Same major, any minor accepted; unknown top-level field and glTF `extras` ignored | `tests/test_format_policy.py` (current validator, current C#, frozen v0.3.0 Python and C#) |
+| Another major rejected | same file: Python and current C# (`unsupported schema major version 3`) |
+| Unknown `.mbcol` format number rejected | same file: Python and current C# |
+| Extra listed member is an error in C# | same file: documents today's behaviour |
+| Frozen-reader fixture before a minor ships | CI `Frozen v0.3.0 readers accept a complete textured 2.1.0 package` step |
+| Limits above | `tests/test_package.py` (entries, ratio, unlisted file, buffer and image `uri`); the other limits are documentation only |
+| Writer default stays 2.1.0 | `tests/test_format_policy.py` |
+| Deprecation period | documentation only |
+| What counts as patch, minor and major | documentation only |
 
 ## Reference implementation
 

@@ -159,9 +159,20 @@ is no converter. Core should add a `.mbmap` loader alongside it, not translate b
 
 * `schema_version` (the package) and the `.mbcol`/`.mbhf` header `version` fields follow semver
   intent. **Reject an unknown major** (the package) or an unknown binary version. **Ignore
-  unknown JSON fields.** A minor version may add optional fields or members, but never changes
-  the meaning of existing ones.
+  unknown JSON fields.** A minor version may add optional fields, but never changes
+  the meaning of existing ones. (Members: see the pin below.)
 * `.mbcol` flags: bit 0 is required. Reject any unknown bit, and any non-zero reserved field.
+* **Pin major 2, accept any minor** (draft policy, D101: [PACKAGE_FORMAT.md](PACKAGE_FORMAT.md),
+  "Compatibility and stability policy"; final only when the user confirms it at v1.0):
+  * Accept `schema_version` `2.x.y` and reject any other major with a clear error. A 3.0.0 package
+    is not read.
+  * Ignore every unknown manifest field and every glTF `extras` entry. Do not fail on them.
+  * Reject an unknown `.mbcol` or `.mbhf` format number, a glTF with `extensionsRequired`, and any
+    archive member that is not listed in `files[]` with its SHA-256.
+  * Do not rely on extra members: a minor does not add members or roles today, because the
+    reference C# reader rejects an unknown listed member. If your loader tolerates one, that is
+    your choice, not a guarantee of the format.
+  * Keep the limits of the policy as your own bounds; a minor never relaxes them.
 * A replay is valid only against the exact `package_id` it recorded. Regenerating a map, even
   with the same content but a new `created_utc`, produces a new `package_id`.
 * A consumer that pins a reader version should test it against the committed synthetic sample.
