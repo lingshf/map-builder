@@ -8,14 +8,20 @@ Owner: design · sprint S4 · after all S4 dev tasks · D104
    (38/38 or the new total). The frozen v0.3.0 replay stays 1/67. Spot renders of one vertical-cut gable, one
    mixed end and one named fallback.
 2. **Collision (D98):** the degenerate-triangle count is below the baseline in the sample and both presets
-   through both paths, the D98 probe set gives identical hits before and after, and **no degenerate warning is
+   through both paths, the D98 probe set gives identical hits on S4-COL-DEGEN's own base → head comparison (D111), and **no degenerate warning is
    unreported**: every remaining one is a triangle kept under D98 and listed in the S4-COL-DEGEN report (0 is
    the stretch, not the gate). Probe ids and
    results are equal in Python and C#.
 3. **Water:** the river region colour rule holds on a re-render (S4-TEX-WATER AC1). S4-WATER-SURFACE (D112):
-   re-run its AC3 (no terrain above water, on emitted triangles), AC4 (shoreline deviation), AC5 (level) and AC6
-   (bridge decks, piers, probes) on main through both paths, and spot-render the Pittsburgh river with the
-   demokit cameras.
+   re-run on main, through both paths:
+   * AC3: no terrain above water, on the final emitted triangles, with every outcome named;
+   * AC4: shoreline deviation;
+   * AC5: water level;
+   * AC6: decks never lowered, and piers reach the bed;
+   * §7 replays (a) and (b): every fixed-query difference is in the listed change set, and every passage id is
+     passable on its regenerated path in Python and C#.
+   Also spot-render the Pittsburgh river with the demokit cameras, and record the uncovered water tagging
+   (§1) as a later S4-Fn.
 4. **Performance (D91):** whole Generate, Pittsburgh and Munich, CLI and headless Blender, median of 3, against
    v0.4.0 from frozen inputs. Byte identity of PERF-PKG and PERF-UV checked independently (D97).
 5. **Tests:** full suite with a private user-level NuGet feed configured (0 errors); two parallel suites; the
