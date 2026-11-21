@@ -5,6 +5,7 @@
 import os
 import re
 import tomllib
+import unicodedata
 import unittest
 import zipfile
 
@@ -38,8 +39,10 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def _tagline_ok(t):
-    """Blender 4.2: non-empty, at most 64 characters, ending in an alphanumeric character or ) ] }."""
-    return 0 < len(t) <= 64 and (t[-1].isalnum() or t[-1] in ")]}")
+    """Blender 4.2 strict: non-empty, at most 64 characters, no leading whitespace, no control characters
+    (newlines included), ending in an alphanumeric character or ) ] }."""
+    return (0 < len(t) <= 64 and t == t.lstrip() and not any(unicodedata.category(c) == "Cc" for c in t)
+            and (t[-1].isalnum() or t[-1] in ")]}"))
 
 
 def _forbidden(name, data):
@@ -67,7 +70,8 @@ class ManifestTest(unittest.TestCase):
     def test_tagline_rule_matches_blender(self):
         for ok in ("Build maps", "Build maps (OSM)", "Maps [v2]", "x" * 64):
             self.assertTrue(_tagline_ok(ok), ok)
-        for bad in ("", "Build maps.", "Build maps\u2014", "Build maps -", "Build maps ", "Maps!", "x" * 65):
+        for bad in ("", "Build maps.", "Build maps\u2014", "Build maps -", "Build maps ", "Maps!", "x" * 65,
+                    " Build maps", "\tBuild maps", "Build\nmaps", "Build\x00maps", "Build\x1fmaps", "Build\x7fmaps"):
             self.assertFalse(_tagline_ok(bad), bad)
 
     def test_id_version_schema_formats(self):
