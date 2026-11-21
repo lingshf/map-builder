@@ -469,6 +469,7 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D102 | Draft v1.0 exit criteria as listed above, for the user to confirm. | De (proposed; U confirms) | draft |
 | D103 | Sample ownership. Output-changing tasks (S4-TEX-WATER, S4-COL-DEGEN, and S4-ROOF-NAMED / S4-ROOF-ENDS only if the fixture's roofs change) regenerate `examples/synthetic_sample.mbmap` only while holding the single exclusive **merge-time sample slot** granted by the coordinator: rebase on main, regenerate, green CI and gate, merge, release the slot. Other PRs keep main's sample bytes. The PR lists the byte change. Perf tasks never change it (D97). Comparisons against v0.4.0 use frozen inputs: the committed Munich roof snapshot, the RC #56 caches by acquisition SHA-256, and the unchanged sample input. | De (proposed; C confirms at gate) | proposed |
 | D104 | Sprint 4 close order follows D48 and D63: S4-REVIEW on main first; its findings define the remaining v0.5.0 scope; then REL-v0.5.0 (version 0.5.0 via the D50 guard), the close check, the retro and the tag. | De (proposed; C confirms at gate) | proposed |
+| D110 | Amends D101: a minor version adds **no package members** (no new path or role), because both the current and the frozen v0.3.0 C# readers reject an unlisted-role member ("unknown package member"), while the Python validator only warns. The positive fixture (`tests/test_format_policy.py`) pins this. | C (coordinator) | decided |
 
 ## Decisions that need the user
 
