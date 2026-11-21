@@ -503,7 +503,7 @@ are authoritative.** The heightfield is **terrain-only**: it is NaN wherever ter
 or cut (every road tunnel removes the terrain below its roof inside its footprint, so the
 heightfield is NaN there; terrain above the roof remains), and it cannot represent bridges,
 tunnels, elevated volumes, overhangs or any other non-terrain object. A consumer that needs
-those must use the `.mbcol` triangles.
+those must use the `.mbcol` triangles. Water is one of them: the heightfield follows the carved bed under a water body, and the water surface exists only as class 5 `water` triangles (one `water:<osm-id>` object per body) in the `.mbcol`.
 
 ## Compatibility and stability policy (draft)
 
