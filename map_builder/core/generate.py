@@ -34,7 +34,7 @@ import struct
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Generic, NoReturn, TypeAlias, TypedDict, TypeVar
 
-from . import bridges, dsm, passages, roofs, tunnels
+from . import bridges, dsm, passages, roofs, tunnels, water
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .structures import (Color, InvalidEntry, Probe, ProbeBlock, Prov, Segment, StageContext, UnsupportedEntry, Vec2,
@@ -71,6 +71,7 @@ MAX_SCENE_TRIANGLES = 4_000_000
 MATERIALS = {
     # name: (base colour linear rgb, roughness, metallic)
     "MB Terrain": ((0.8, 0.8, 0.8), 0.95, 0.0),
+    "MB Water": ((0.8, 0.8, 0.8), 0.15, 0.0),
     "MB Facade": ((0.8, 0.8, 0.8), 0.85, 0.0),
     "MB Roof": ((0.8, 0.8, 0.8), 0.7, 0.0),
     "MB Road": ((0.8, 0.8, 0.8), 0.9, 0.0),
@@ -492,7 +493,8 @@ def _building_height(tags: Mapping[str, str]) -> tuple[float, float, float | Non
 
 def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, seed: int = 0,
                    max_ring_vertices: int = MAX_RING_VERTICES, max_work: int = DEFAULT_MAX_WORK,
-                   reserve: Callable[..., None] | None = None) -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
+                   reserve: Callable[..., None] | None = None,
+                   carved: ElevationGrid | None = None) -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
     """Returns (MeshData in object-local coords, location, provenance).
 
     Raises TriangulationError (invalid rings, work budget) or InvalidFeature (limits)
@@ -601,6 +603,12 @@ def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, se
     prov["base_datum"] = ("minimum of the piecewise-planar terrain mesh over the footprint (ring vertices, interior "
                           "grid nodes, ring crossings of grid lines and cell diagonals); heights are measured from "
                           f"it and the foundation extends {FOUNDATION_SINK_M:g} m below it")
+    if carved is not None and not elevated:
+        c_min = min(p[2] for p in footprint_terrain_samples(carved, rings))
+        if c_min < g_min - 1e-6:
+            base_z = c_min - g_min - FOUNDATION_SINK_M
+            prov["water_carve"] = (f"walls extended {g_min - c_min:.2f} m down to the carved water bed "
+                                    "(the base datum stays on the pre-carve terrain)")
     relief = g_max - g_min
     if relief > 0:
         prov["ground_slope_m"] = round(relief, 2)
@@ -1768,6 +1776,54 @@ def dsm_obstacles(classified: Classified, areas: Sequence[Feature] | None = None
     return buildings, trees, forests, bridges
 
 
+def _water_stage(terrain: ElevationGrid, z_offset: float, areas: Sequence[Feature], classified: Classified,
+                 opts: PlanOptions, budget: SceneBudget) -> water.WaterModel:
+    """Water bodies and the carved terrain grid (core/water.py). The terrain's own budget is charged exactly first,
+    then each built body's."""
+    budget.release()
+    budget.charge("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
+
+    def lines(feats: Iterable[Feature]) -> list[tuple[Sequence[Vec2], float]]:
+        return [(f.geometry, road_width(f.tags)[0] / 2.0) for f in feats]
+
+    foot = [f.geometry for f in classified.buildings] + [f.geometry for f in classified.outline_features.values()] \
+        + [f.geometry for f in classified.outside_buildings]
+    structs = lines(list(classified.structure_bridges) + list(classified.bridges) + list(classified.tunnels))
+
+    def refund(v: int, t: int) -> None:
+        budget.vertices -= v
+        budget.triangles -= t
+
+    return water.build_water(
+        terrain, z_offset, areas, classified.riverbanks, classified.waterways, foot, structs,
+        lines(classified.roads), terrain_extent(terrain),
+        lambda p: ring_topology_problem(p, opts.max_triangulation_work),
+        charge=lambda fid, v, t: budget.charge(fid, v, t), refund=refund)
+
+
+def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classified,
+                   add: Callable[[ObjectSpec], None]) -> None:
+    """One ``water:<id>`` object per built body, and the per-body outcome list of the report."""
+    rows: list[dict[str, object]] = []
+    over = water.at_grade_roads(model, [(r.id, r.geometry) for r in classified.roads], ROAD_LIFT_M)
+    for b in model.bodies:
+        row: dict[str, object] = {"id": b.id, "outcome": b.outcome}
+        if b.notes:
+            row["notes"] = list(b.notes)
+        if b.id in over:
+            row["at_grade_roads"] = over[b.id]
+        row.update(b.info)
+        rows.append(row)
+        if b.built:
+            mesh = model.mesh(b)
+            add(ObjectSpec(mesh.name, mesh.name, "water", "Water", mesh=mesh,
+                           provenance={"water_level": ("profile" if b.level is not None and b.level.flat is None
+                                                       else "flat"),
+                                       "level_source": "inferred:p20 of the shore band of the corrected DEM",
+                                       "outcome": b.outcome}))
+    plan.report["water_bodies"] = rows
+
+
 def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, options: PlanOptions | None = None,
                dsm_correction: bool | None = None) -> ScenePlan:
     """Scene plan from the elevation grid ``terrain`` and the classified features.
@@ -1833,9 +1889,13 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
 
     budget.reserve("terrain:grid", terrain.nx * terrain.ny, 2 * (terrain.nx - 1) * (terrain.ny - 1))
     coverage: dict[str, int] = {}
-    tmesh = build_terrain(terrain, z_offset, areas, coverage)
+    wmodel = None
+    if any(a.tags.get("_class") == "water" for a in areas) or classified.riverbanks:
+        wmodel = _water_stage(terrain, z_offset, areas, classified, opts, budget)
+    tmesh = build_terrain(wmodel.carved if wmodel is not None else terrain, z_offset, areas, coverage)
     tmesh.grid_layout = (terrain.nx, terrain.ny, terrain.x0, terrain.y0, terrain.spacing)  # lets probes find triangles by cell
-    budget.commit(tmesh)
+    if wmodel is None:
+        budget.commit(tmesh)
     if correction["applied"]:
         plan.inferred("terrain.surface")
     provider = terrain.provenance.get("provider")
@@ -1843,8 +1903,11 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                    provenance={"elevation": provider if isinstance(provider, str) else None,
                                "spacing_m": terrain.spacing,
                                "surface": DSM_CORRECTED_SURFACE if correction["applied"] else TERRAIN_SURFACE}))
+    if wmodel is not None:
+        _water_objects(plan, wmodel, classified, add)
     for a in areas:
-        if not coverage.get(a.id):
+        if not coverage.get(a.id) and not (wmodel is not None and any(b.id == a.id and b.built
+                                                                      for b in wmodel.bodies)):
             plan.report["unsupported_features"].append(
                 {"id": a.id, "reason": f"{a.tags['_class']} area contains no terrain cell centre at "
                                        f"{terrain.spacing:g} m spacing; not represented in terrain colouring"})
@@ -1859,6 +1922,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
     footprints: list[tuple[Polygon, Extent]] = []
     road_segments: list[Segment] = []
     ctx = StageContext(area, terrain, z_offset, budget, opts, add, classified, road_segments)
+    ctx.water = wmodel
     if opts.buildings:
         def build_one(f: Feature, extra_prov: Prov | None = None, reason_prefix: str = "") -> bool:
             """Build one footprint; returns True if generated, else reports it in invalid_features."""
@@ -1871,7 +1935,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                     mesh, origin, prov = build_building(
                         f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
                         max_work=opts.max_triangulation_work,
-                        reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
+                        reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
+                        carved=wmodel.carved if wmodel is not None else None)
             except TriangulationError as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": f"{reason_prefix}triangulation failed: {e}"})
@@ -1888,6 +1953,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                     plan.inferred(f"building.{k}")
             if "elevated" in prov and not getattr(f, "passage_upper", False):
                 passages.elevated_probe(plan, ctx, f)
+            if "water_carve" in prov:
+                plan.report.setdefault("water_buildings", []).append({"id": f.id, "note": prov["water_carve"]})
             if "terrain_warning" in prov:
                 plan.report["warnings"].append(f"{f.id}: {prov['terrain_warning']}")
             if "rejected_tags" in prov:

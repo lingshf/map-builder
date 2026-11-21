@@ -6,6 +6,8 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
+* **Rivers and lakes are now water surfaces, not painted ditches** (S4-WATER-SURFACE, D113-D118). Each water body gets its own mesh (water:<osm-id>, collision class `water`, material MB Water, untextured until S4-TEX-WATER) clipped to the exact OSM polygon, at a level taken from the shore band (p20 of the corrected DEM; rivers of 300 m or more follow a non-increasing downstream profile). The terrain bed under it is carved to 1.5 m below the surface and the banks are blended, so water no longer follows the DSM dip with 30 m cell staircase edges. Roads, bridges and building bases keep the pre-carve ground; decks are never lowered and are raised only where the water surface would touch them; piers and building walls extend to the carved bed. `report.json` lists every body with its outcome (`built(flat)`, `built(profile, N stations)` or a named fallback to today's painted cells) under `water_bodies`. Each body also lists `at_grade_roads` ("at-grade road over water" lines: metres inside the polygon and metres below the surface), and `report.water_decks_raised` lists every deck raised above the water with `raised_m` (also `water_raise_m` in the object provenance). No package format change; .mbhf stays terrain-only. Packages with no water (the Munich fixture) are byte-identical.
+
 * **Fewer degenerate collision triangles** (S4-COL-DEGEN, D98, D111). Road ribbon polygons drop duplicate and collinear
   vertices (the fan is not re-chosen, D119); faces with no
   area in float32 storage on either path are omitted. No ray or capsule probe changes. The remaining slivers are real

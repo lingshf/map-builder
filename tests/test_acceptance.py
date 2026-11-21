@@ -289,7 +289,7 @@ class FixturePackageTest(PackageBindingMixin, unittest.TestCase):
         terrain = TerrainIndex(self.col.class_triangles("terrain"))
         # open ground away from buildings, roads and water (tests/synthetic.py layout)
         samples = [(-170.0, -120.0), (-150.0, 100.0), (150.0, 120.0), (160.0, -60.0), (75.0, -40.0),
-                   (-80.0, 30.0), (0.0, -120.0), (120.0, 40.0)]
+                   (-80.0, 30.0), (-100.0, -120.0), (120.0, 40.0)]
         for x, y in samples:
             expected = dem_height(x, y) - self.z_offset
             got = terrain.height(x, y)

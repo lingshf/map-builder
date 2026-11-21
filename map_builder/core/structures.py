@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 
 from .collision import Collision, CollisionEntry, ColObject, f32, read_collision, write_collision
 from .glb import node_scale
@@ -112,6 +112,7 @@ class StageContext:
         self.add = add
         self.classified = classified
         self.road_segments = road_segments
+        self.water: Any = None                 # core.water.WaterModel when the area has water bodies (S4-WATER-SURFACE)
         self.probes: list[Probe] = []        # passage probes queued by the stages, checked by finalize_probes
         self.keepout: list[Segment] = []       # (a, b, radius) plan segments where no tree is placed
         self.pending: list[tuple[int, int, UnsupportedEntry]] = []
