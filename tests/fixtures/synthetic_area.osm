@@ -65,10 +65,10 @@
 <node id="1079" lat="47.000179891" lon="7.998290727"></node>
 <node id="1080" lat="47.000539697" lon="7.998290716"></node>
 <node id="1081" lat="47.000539683" lon="7.997501816"></node>
-<node id="1083" lat="46.998745172" lon="7.999217700"></node>
-<node id="1084" lat="46.998745174" lon="7.999743616"></node>
-<node id="1085" lat="46.999015029" lon="7.999743615"></node>
-<node id="1086" lat="46.999015027" lon="7.999217696"></node>
+<node id="1083" lat="46.998746991" lon="7.999217700"></node>
+<node id="1084" lat="46.998746993" lon="7.999743616"></node>
+<node id="1085" lat="46.999013250" lon="7.999743615"></node>
+<node id="1086" lat="46.999013248" lon="7.999217696"></node>
 <node id="1088" lat="47.000359807" lon="8.000000000"><tag k="natural" v="tree"/><tag k="height" v="11"/></node>
 <node id="1089" lat="47.000359796" lon="8.001577795"><tag k="natural" v="tree"/></node>
 <node id="1090" lat="46.998920561" lon="7.997896329"><tag k="natural" v="tree"/></node>
