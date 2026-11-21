@@ -82,24 +82,31 @@ S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touchin
 
 ## Sprint 4 (v0.5.0)
 
-Theme D93; decisions D94–D117 (D112 adds S4-WATER-SURFACE), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+Theme D93; decisions D94–D125 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
-| [S4-ROOF-SPIKE](S4-ROOF-SPIKE.md) | S4 | dev | — (½ day, D95) | none merged (scratch branch) | ready | |
-| [S4-ROOF-NAMED](S4-ROOF-NAMED.md) | S4 | dev | — | `core/roofs.py`, `core/generate.py` (roof section, reservation), `tests/roof_checks.py` (reference plane), `tests/test_roofs*.py`, `munich_roofs_expected.json`; soft: sample slot (D103), VALIDATION | ready | |
-| [S4-ROOF-ENDS](S4-ROOF-ENDS.md) | S4 | dev | S4-ROOF-SPIKE, S4-ROOF-NAMED, stretch recorded after the final-checker replay (D95) | `core/roofs.py`, `core/skeleton.py`, `core/generate.py` (roof section), `tests/test_roofs*.py`, `tests/test_skeleton.py`, `tests/blender/checks_roofs.py`; soft: sample slot, VALIDATION | blocked | |
-| [S4-PERF-PKG](S4-PERF-PKG.md) | S4 | dev | — | `core/package.py` (writer, validator internals; byte- and message-identical, D97) | ready | |
-| [S4-TEX-WATER](S4-TEX-WATER.md) | S4 | dev | — | `tools/textures/**`, `map_builder/assets/textures/terrain_*` + `LICENSE-textures.txt`, `core/textures.py`, `core/uv.py` (mean-albedo entry), `tests/test_textures.py`; soft: sample slot | ready | |
-| [S4-PERF-UV](S4-PERF-UV.md) | S4 | dev | S4-TEX-WATER | `core/uv.py` (byte-identical, D97) | blocked | |
-| [S4-BLENDER-HYGIENE](S4-BLENDER-HYGIENE.md) | S4 | dev | — | `blender/export.py` (material naming), `blender/bake.py` (default material, bbox), bbox code in `blender/sources.py`/`props.py`, new Blender checks; soft: `run_integration.py` | ready | |
-| [S4-COL-DEGEN](S4-COL-DEGEN.md) | S4 | dev | S4-BLENDER-HYGIENE | `core/collision.py`, `blender/bake.py`, `blender/export.py` (degenerate handling), collision tests; soft: sample slot, VALIDATION | blocked | |
-| [S4-TEST-HYGIENE](S4-TEST-HYGIENE.md) | S4 | dev | — | `tests/test_csharp_parity.py`, `tests/test_demo_bundle.py`, `tests/test_bridges.py` (45° test), `NuGet.config` (new), MbmapReader `.csproj` (build props), `ci.yml` (C# job), test bootstrap | ready | |
-| [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | **S4-TEST-HYGIENE** (hard: frozen C# fixture uses its build harness); S4-PERF-PKG only for a `package.py` edit | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections, stale 2.0.0 paragraph), `tests/test_format_policy.py` (new), C# test harness (use; edits serialised after TEST-HYGIENE) | blocked | |
-| [S4-EXT-READY](S4-EXT-READY.md) | S4 | dev | — | `.github/workflows/release.yml`, `tests/test_manifest.py` (new), `docs/PLATFORM_SUBMISSION.md` (new), `blender_manifest.toml` (non-version fields) | ready | |
-| [S4-WATER-SURFACE](S4-WATER-SURFACE.md) | S4 (D112) | dev | S4-COL-DEGEN (shared `blender/bake.py`/`export.py`) | `core/water.py` (new), `core/osm.py` (`area_class`, `classify` waterways; no selector change), `core/generate.py` (terrain/landcover section, coverage), `core/bridges.py` (deck ground rule, piers, under-probe), `blender/scene_build.py`/`bake.py`/`export.py` (water objects), `tests/test_water.py` (new), `tests/test_bridges.py`, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION, `docs/demo/` | blocked | |
-| [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | blocked | |
-| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW and its blocker S4-Fn tasks | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | blocked | |
+| [S4-ROOF-SPIKE](S4-ROOF-SPIKE.md) | S4 | dev | — (½ day, D95) | none merged (scratch branch) | done (scratch, closed) | #60 |
+| [S4-ROOF-NAMED](S4-ROOF-NAMED.md) | S4 | dev | — | `core/roofs.py`, `core/generate.py` (roof section, reservation), `tests/roof_checks.py` (reference plane), `tests/test_roofs*.py`, `munich_roofs_expected.json`; soft: sample slot (D103), VALIDATION | done | #62 (aea5fd9) |
+| [S4-ROOF-ENDS](S4-ROOF-ENDS.md) | S4 | dev | S4-ROOF-SPIKE, S4-ROOF-NAMED, stretch recorded after the final-checker replay (D95) | `core/roofs.py`, `core/skeleton.py`, `core/generate.py` (roof section), `tests/test_roofs*.py`, `tests/test_skeleton.py`, `tests/blender/checks_roofs.py`; soft: sample slot, VALIDATION | done | #67 (d8100cd) |
+| [S4-PERF-PKG](S4-PERF-PKG.md) | S4 | dev | — | `core/package.py` (writer, validator internals; byte- and message-identical, D97) | done | #63 (a20474a) |
+| [S4-TEX-WATER](S4-TEX-WATER.md) | S4 | dev | — | `tools/textures/**`, `map_builder/assets/textures/terrain_*` + `LICENSE-textures.txt`, `core/textures.py`, `core/uv.py` (mean-albedo entry), `tests/test_textures.py`; soft: sample slot | done | #61 (fd104e7) |
+| [S4-PERF-UV](S4-PERF-UV.md) | S4 | dev | S4-TEX-WATER | `core/uv.py` (byte-identical, D97) | done | #64 (a06acf5) |
+| [S4-BLENDER-HYGIENE](S4-BLENDER-HYGIENE.md) | S4 | dev | — | `blender/export.py` (material naming), `blender/bake.py` (default material, bbox), bbox code in `blender/sources.py`/`props.py`, new Blender checks; soft: `run_integration.py` | done | #66 (7822d50) |
+| [S4-COL-DEGEN](S4-COL-DEGEN.md) | S4 | dev | S4-BLENDER-HYGIENE | `core/collision.py`, `blender/bake.py`, `blender/export.py` (degenerate handling), collision tests; soft: sample slot, VALIDATION | done | #71 (70d93c7) |
+| [S4-TEST-HYGIENE](S4-TEST-HYGIENE.md) | S4 | dev | — | `tests/test_csharp_parity.py`, `tests/test_demo_bundle.py`, `tests/test_bridges.py` (45° test), `NuGet.config` (new), MbmapReader `.csproj` (build props), `ci.yml` (C# job), test bootstrap | done | #65 (44337ad) |
+| [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | **S4-TEST-HYGIENE** (hard: frozen C# fixture uses its build harness); S4-PERF-PKG only for a `package.py` edit | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections, stale 2.0.0 paragraph), `tests/test_format_policy.py` (new), C# test harness (use; edits serialised after TEST-HYGIENE) | done | #68 (268878a) |
+| [S4-EXT-READY](S4-EXT-READY.md) | S4 | dev | — | `.github/workflows/release.yml`, `tests/test_manifest.py` (new), `docs/PLATFORM_SUBMISSION.md` (new), `blender_manifest.toml` (non-version fields) | done | #69 (4233995) |
+| [S4-WATER-SURFACE](S4-WATER-SURFACE.md) | S4 (D112) | dev | S4-COL-DEGEN (shared `blender/bake.py`/`export.py`) | `core/water.py` (new), `core/osm.py` (`area_class`, `classify` waterways; no selector change), `core/generate.py` (terrain/landcover section, coverage), `core/bridges.py` (deck ground rule, piers, under-probe), `blender/scene_build.py`/`bake.py`/`export.py` (water objects), `tests/test_water.py` (new), `tests/test_bridges.py`, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION, `docs/demo/` | done | #72 (d38d4e8) |
+| [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | review (NO-GO until S4-F1) | this PR |
+| [S4-WATER-BANK](S4-WATER-BANK.md) | S4 (S4-F1, **v0.5.0 blocker**, D123) | dev | S4-WATER-SURFACE | `core/generate.py` (`build_terrain` colour choice, its call in `build_plan`), `tests/test_water.py`; soft: sample slot (D103), `docs/demo/` crops | ready | |
+| S4-F2 | later (D124) | dev | S4-WATER-BANK | `core/water.py` (UVs), `map_builder/assets/textures/`, NOTICES | → S5-TEX-WATER: texture "MB Water" | |
+| S4-F3 | later | dev | — | `core/water.py`, `core/osm.py` | → S5 water coverage: standalone `water=*`, riverbank multipolygons, coastline | |
+| S4-F4 | later | dev | — | `core/generate.py` (landcover colours), `core/textures.py` | → S5: default tint for untagged ground (near-white since D99) | |
+| S4-F5 | later or REL docs | dev | — | `docs/PACKAGE_FORMAT.md` | → stale C# line citations (+50 after #72) | |
+| S4-F6 | later | dev | S4-F4 | `core/generate.py` (`build_terrain`) | → S5: landcover edge staircase (per-cell colours) | |
+| S4-F7 | later | dev | — | `tests/test_col_degen.py` | → test hygiene: 6.1 s incl. C# build | |
+| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW and its blocker S4-Fn tasks (S4-WATER-BANK) | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | blocked | |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
 (then FORMAT-POLICY if needed); `core/uv.py` to TEX-WATER, then PERF-UV; `blender/bake.py` and `export.py` to
