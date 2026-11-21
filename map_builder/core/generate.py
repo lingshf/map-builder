@@ -1174,7 +1174,6 @@ class RoadBudgetExceeded(LimitError):
 
 
 RIBBON_RING_TOL_M = 1e-7  # ring vertices this close to a neighbour or to the line through their neighbours go
-RIBBON_POOR_AREA2 = 1e-4  # a fan triangle with twice-area at most this (m2) makes the polygon be re-fanned
 
 
 class _RibbonWelder:
@@ -1211,7 +1210,7 @@ class _RibbonWelder:
         index, verts, tris, td = self.index, self.verts, self.tris, self.tol_digits
         mv = self.max_vertices
         for q in polys:
-            for tri in fan_triangles(clean_ring(q, RIBBON_RING_TOL_M), RIBBON_POOR_AREA2):
+            for tri in fan_triangles(clean_ring(q, RIBBON_RING_TOL_M)):
                 if _area2(tri) <= _MIN_AREA2:  # sliver from clipping; zero area, nothing visible is lost
                     continue
                 keys = [(round(p[0], td), round(p[1], td)) for p in tri]

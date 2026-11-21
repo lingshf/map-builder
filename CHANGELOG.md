@@ -7,7 +7,7 @@ All notable user-visible changes are recorded here, following
 ## [Unreleased]
 
 * **Fewer degenerate collision triangles** (S4-COL-DEGEN, D98, D111). Road ribbon polygons drop duplicate and collinear
-  vertices and are re-fanned so no thin triangle is emitted where a better fan covers the same surface; faces with no
+  vertices (the fan is not re-chosen, D119); faces with no
   area in float32 storage on either path are omitted. No ray or capsule probe changes. The remaining slivers are real
   surface (a ray can hit them), so they stay; `report.json` lists them per object (`degenerate_objects`) and an object
   with no triangles is dropped and listed (`objects_dropped_empty`). The validator rule and warning are unchanged.

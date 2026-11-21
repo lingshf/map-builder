@@ -37,12 +37,10 @@ class RingCleanupTest(unittest.TestCase):
     def test_clean_ring_collapsed_ring_is_empty(self):
         self.assertEqual(clean_ring([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)], 1e-7), [])
 
-    def test_fan_keeps_the_surface_and_avoids_the_thin_triangle(self):
-        ring = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0 - 1e-6)]   # the fan from vertex 0 holds a thin triangle
-        tris = fan_triangles(ring, 1e-4)
-        self.assertEqual(len(tris), 2)
-        self.assertGreater(min(_area2(t) for t in tris), 1e-4)
-        self.assertAlmostEqual(sum(_area2(t) for t in tris) / 2, 16.0 - 2e-6 * 2, places=5)
+    def test_fan_starts_at_the_first_vertex_and_is_not_re_chosen(self):
+        ring = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0 - 1e-6)]   # D119: same triangulation as before the cleanup
+        tris = fan_triangles(ring)
+        self.assertEqual(tris, [(ring[0], ring[1], ring[2]), (ring[0], ring[2], ring[3])])
 
 
 class MillimetreTriangleTest(unittest.TestCase):

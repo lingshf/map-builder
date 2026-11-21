@@ -179,29 +179,11 @@ def clean_ring(points: Sequence[_P], tol: float) -> list[_P]:
     return ring if len(ring) >= 3 else []
 
 
-def fan_triangles(ring: Sequence[_P], poor_area2: float) -> list[tuple[_P, _P, _P]]:
-    """Fan triangles of a convex CCW ring. The fan starts at the first vertex unless one of its triangles
-    has twice-area at most ``poor_area2``; then it starts at the vertex whose smallest fan triangle is
-    largest. Every fan of a convex ring covers it exactly, so re-fanning removes thin triangles without
-    changing the covered surface."""
-    n = len(ring)
-
-    def fan(k: int) -> list[tuple[_P, _P, _P]]:
-        return [(ring[k], ring[(k + i) % n], ring[(k + i + 1) % n]) for i in range(1, n - 1)]
-
-    def smallest(tris: Sequence[tuple[_P, _P, _P]]) -> float:
-        return min((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) for a, b, c in tris)
-
-    best = fan(0)
-    if n <= 3 or smallest(best) > poor_area2:
-        return best
-    score = smallest(best)
-    for k in range(1, n):
-        cand = fan(k)
-        s = smallest(cand)
-        if s > score:
-            best, score = cand, s
-    return best
+def fan_triangles(ring: Sequence[_P]) -> list[tuple[_P, _P, _P]]:
+    """Fan triangles of a convex CCW ring from its first vertex. The triangulation is deliberately not
+    re-chosen to avoid thin triangles: another fan covers the same surface but moves where a zero-radius
+    capsule grazes a sliver edge, and probe hits must not change (D98, D119)."""
+    return [(ring[0], ring[i], ring[i + 1]) for i in range(1, len(ring) - 1)]
 
 
 def _label(r: int) -> str:
