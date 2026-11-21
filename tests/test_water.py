@@ -150,6 +150,32 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(col.objects[hit.object]["class"], "water")
 
 
+class LakeStructuresTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        ring = [(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)]
+        bld = [(-30.0, -10.0), (-10.0, -10.0), (-10.0, 10.0), (-30.0, 10.0)]
+        road = ([(-100.0, 20.0), (100.0, 20.0)], {"highway": "residential"})
+        cls.plan, cls.ids, cls.grid = make_scene(
+            [(ring, {"natural": "water"}, True), (bld, {"building": "yes"}, True), road],
+            lake_ground, width=W, height=H)
+
+    def test_building_walls_reach_the_carved_bed(self):
+        rows = self.plan.report.get("water_buildings") or []
+        self.assertEqual(len(rows), 1)
+        (b,) = objects(self.plan, "building")
+        (w,) = objects(self.plan, "water")
+        bed = min(v[2] for v in objects(self.plan, "terrain")[0].mesh.vertices if abs(v[0] + 20) < 15 and abs(v[1]) < 15)
+        low = min(v[2] + b.location[2] for v in b.mesh.vertices)
+        self.assertLessEqual(low, bed + 1e-6)
+        self.assertLess(low, w.mesh.vertices[0][2])
+
+    def test_at_grade_road_keeps_its_pre_carve_surface(self):
+        roads = objects(self.plan, "road")
+        self.assertTrue(roads)
+        top = max(v[2] for r in roads for v in r.mesh.vertices)
+        self.assertGreater(top, objects(self.plan, "terrain")[0].mesh.vertices[0][2] - 100)
+
 class CapsuleTest(unittest.TestCase):
     def test_polygon_is_convex_ccw_and_contains_the_capsule(self):
         poly = bridges.capsule_polygon((0.0, 0.0), (10.0, 0.0), 1.0)

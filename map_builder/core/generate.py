@@ -493,7 +493,8 @@ def _building_height(tags: Mapping[str, str]) -> tuple[float, float, float | Non
 
 def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, seed: int = 0,
                    max_ring_vertices: int = MAX_RING_VERTICES, max_work: int = DEFAULT_MAX_WORK,
-                   reserve: Callable[..., None] | None = None) -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
+                   reserve: Callable[..., None] | None = None,
+                   carved: ElevationGrid | None = None) -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
     """Returns (MeshData in object-local coords, location, provenance).
 
     Raises TriangulationError (invalid rings, work budget) or InvalidFeature (limits)
@@ -602,6 +603,12 @@ def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, se
     prov["base_datum"] = ("minimum of the piecewise-planar terrain mesh over the footprint (ring vertices, interior "
                           "grid nodes, ring crossings of grid lines and cell diagonals); heights are measured from "
                           f"it and the foundation extends {FOUNDATION_SINK_M:g} m below it")
+    if carved is not None and not elevated:
+        c_min = min(p[2] for p in footprint_terrain_samples(carved, rings))
+        if c_min < g_min - 1e-6:
+            base_z = c_min - g_min - FOUNDATION_SINK_M
+            prov["water_carve"] = (f"walls extended {g_min - c_min:.2f} m down to the carved water bed "
+                                    "(the base datum stays on the pre-carve terrain)")
     relief = g_max - g_min
     if relief > 0:
         prov["ground_slope_m"] = round(relief, 2)
@@ -1924,7 +1931,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                     mesh, origin, prov = build_building(
                         f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
                         max_work=opts.max_triangulation_work,
-                        reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t))
+                        reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
+                        carved=wmodel.carved if wmodel is not None else None)
             except TriangulationError as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": f"{reason_prefix}triangulation failed: {e}"})
@@ -1941,6 +1949,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                     plan.inferred(f"building.{k}")
             if "elevated" in prov and not getattr(f, "passage_upper", False):
                 passages.elevated_probe(plan, ctx, f)
+            if "water_carve" in prov:
+                plan.report.setdefault("water_buildings", []).append({"id": f.id, "note": prov["water_carve"]})
             if "terrain_warning" in prov:
                 plan.report["warnings"].append(f"{f.id}: {prov['terrain_warning']}")
             if "rejected_tags" in prov:
