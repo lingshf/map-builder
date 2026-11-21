@@ -203,15 +203,14 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
         prov.clear()
         prov.update(first[1])
         return first[0]
-    exc = failure
     if near_rect:
         prov["roof_shape"] = (f"approximate:gabled (the two slopes of a near-rectangular footprint are not "
-                              f"coplanar: {analytic_gable_slope_error(outer, across)}; straight skeleton: {exc})")
+                              f"coplanar: {analytic_gable_slope_error(outer, across)}; straight skeleton: {failure})")
         return RoofPlan("gabled")
     convex = is_convex(outer)
     shape = "pyramidal" if convex else "flat"
     prov["roof_shape"] = (f"fallback:{shape} (roof:shape={shape_tag} on non-rectangular footprint; "
-                          f"straight skeleton: {exc})")
+                          f"straight skeleton: {failure})")
     prov.pop("roof_orientation", None)
     return RoofPlan(shape)
 
