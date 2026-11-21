@@ -98,18 +98,42 @@ Validator degenerate-triangle warnings at head:
   70d93c7), through CLI and Blender:
   * Pittsburgh: relation/1080, relation/7937544 and way/379511900 are each at −1.500000 m.
   * Sample: way/1087 is at −1.5 m.
-  * way/1037461399 is named `fallback(no shore samples)`.
-* **AC4 shoreline and AC5 level:** the water mesh is the clipped polygon. The levels are p20 flat (D114).
-* **AC6, decks and piers:**
-  * Decks are never lowered: the change set has one "deck raised" and no lowered decks.
-  * Wet under-probes `121593794:under` and `173225719:under` clear by **0.6200 m** (≥ 0.62, D116).
+  * way/1037461399 is named `fallback(no shore samples)`, with the note "no part inside the terrain extent".
+    It has no surface mesh and no carve, so it is outside AC3–AC6.
+* **AC4 shoreline and AC5 level**, measured on main (CLI, Pittsburgh, frozen cache; my own run, cross-checked
+  against the #72 PR body):
+
+  | Body | Outcome | Polygon / mesh area (m²) | Hausdorff mesh→poly / poly→mesh | AC0.2 on the mesh (2 m raster) | Level (m) | p5 / p50 of shore band | `sanity_miss` |
+  |---|---|---|---|---|---|---|---|
+  | relation/1080 | built(flat) | 18 689.371 / 18 689.371 | 0.0 / 0.0 m | 0 of 9 241 cells → **0.0 m** | 218.9268 | 218.015 / 220.016 | no |
+  | relation/7937544 | built(flat), "profile slope > 1 %" | 75 538.080 / 75 538.080 | 0.0 / 0.0 m | 0 of 37 664 cells → **0.0 m** | 214.1489 | 213.000 / 218.248 | no |
+  | way/379511900 | built(flat) | 315.641 / 315.641 | 0.0 / 0.0 m | 0 of 146 cells → **0.0 m** | 220.7617 | 220.607 / 221.145 | no |
+
+  * AC4: Hausdorff 0.0 ≤ 1 mm both ways, and the AC0.2 staircase metric is 0.0 m ≤ 0.5 m on every built body.
+  * AC5: every level lies inside its p5–p50 window, and there are **0** sanity misses (no `sanity_miss` in
+    `report.json` `water_bodies`). The mesh vertices sit at the level within 5·10⁻⁵ m (float32 local z).
+* **AC6, decks and piers**, measured on main against 70d93c7 (same script, same cache):
+  * **Decks:** 33 bridges compared vertex by vertex. The minimum head − base delta is **0.000 m** (≥ −1 mm), so
+    no deck is lowered. Two decks are raised and both are listed in `report.json` `water_decks_raised`:
+    way/11950069 by +0.231 m and way/173225719 by +1.149 m. The §7 change set counts one "deck raised" because
+    only way/173225719 sits on a fixed query.
+  * **Piers:** 20 piers, of which 13 are wet (way/173225719 ×7, way/11950069 ×3, way/121593794 ×3). Every pier
+    bottom is **1.000 m below** the minimum of the carved bed under its footprint, so every pier reaches the bed.
+  * **Probes:** wet under-probes `121593794:under` and `173225719:under` clear by **0.6200 m** (≥ 0.62, D116).
 * **§7 replays:**
 
   | Replay | Result |
   |---|---|
   | (a) fixed-query, CLI | **PASS**, exit 0, seed 20260101. Change set {bed moved 51, new water hit 318, deck raised 1}, identical to #72. Python and C# agree on every query. |
   | (a) fixed-query, Blender | **PASS**, exit 0, same seed. 71 centroid rays (Blender degenerate set). The change set is identical to the CLI run. Python and C# agree on every query. |
-  | (b) regenerated passages | base 13 → head 11. The two drops are listed with their head `report.json` blockers: `osm:way/11950069:under` (blocked by `osm:way/121593794`) and `osm:way/121593794:deck` (blocked by `water:osm:relation/7937544`). Without these allowances, the replay fails only on these two. |
+  | (b) regenerated passages | base 13 → head 11. Each drop is listed with its head `report.json` blocker, and the two have different causes (below). Without these allowances, the replay fails only on these two. |
+
+  * `osm:way/11950069:under`: blocked by a **pier of the neighbouring bridge `osm:way/121593794`**. The
+    water-aware argmax moved the probe about 8 m along the span. The new path is also blocked by that pier on
+    the base build, so the probe was not lost to the water or the carve. It was lost by moving onto an
+    already-blocked path.
+  * `osm:way/121593794:deck`: a **new water hit** at its abutment, blocked by `water:osm:relation/7937544`. The
+    deck capsule reaches 0.53 m below the flat water surface there.
 
 * **Munich:** the head CLI package is byte-identical to the 70d93c7 build, because Munich has no water body.
 * **S4-TEX-WATER AC1, the colour rule:** overview pixels x 600–700, y 500–540 measure (142, 172, 202) at
@@ -120,9 +144,10 @@ Validator degenerate-triangle warnings at head:
   ![S4-F1](img/S4-F1-pittsburgh-bank.png)
   * Geometry, collision and every gate above are correct; only the colour is wrong.
   * The #70 spec missed it (a design gap; see the retro notes).
-  * Fix: [S4-WATER-BANK](../tasks/S4-WATER-BANK.md). Cells of built bodies take the next landcover colour.
-    Fallback bodies keep the water colour. `.mbcol` and `.mbhf` stay byte-identical, and Munich is
-    byte-identical.
+  * Fix: [S4-WATER-BANK](../tasks/S4-WATER-BANK.md). A cell whose centre is inside a built body
+    (`WaterModel.active()`) never gets the water colour, even when a fallback body also covers it. Cells covered
+    only by fallback bodies keep it. `.mbcol` and `.mbhf` stay byte-identical on the CLI and Blender paths, and
+    Munich is byte-identical on both.
 * The green 10 m staircase in the same crop is the pre-existing cell-quantised park landcover (S4-F6, later).
 * **"MB Water" material:** not a blocker (D124).
   * The flat, glossy surface with reflections answers the "ditch" complaint, and its colour passes AC1.
@@ -131,7 +156,8 @@ Validator degenerate-triangle warnings at head:
 
 ### 1.4 Performance (D91, D97, D120): met
 
-Medians of per-round medians, 3 alternating rounds, on the same host and offline:
+Medians of per-round medians, 3 alternating rounds, on the same host and offline. Every raw run and the
+aggregation are in [data/S4-REVIEW-timings.md](data/S4-REVIEW-timings.md).
 
 | Path | Preset | v0.4.0 | d38d4e8 | Δ |
 |---|---|---|---|---|
@@ -291,8 +317,12 @@ Medians of per-round medians, 3 alternating rounds, on the same host and offline
 Known limitations to disclose:
 
 * the listed, kept degenerate-triangle warnings (D98, D111);
-* way/1037461399 not built (`fallback(no shore samples)`);
-* two Pittsburgh passages that are now blocked by water or a raised deck, with their ids;
+* way/1037461399 not built (`fallback(no shore samples)`: no part inside the terrain extent);
+* two Pittsburgh passages dropped, with different causes:
+  * `osm:way/11950069:under`: the probe moved about 8 m onto a path blocked by a pier of the neighbouring
+    bridge `osm:way/121593794`, which is blocked on the base build too;
+  * `osm:way/121593794:deck`: a new water hit at its abutment (`water:osm:relation/7937544`; the capsule
+    reaches 0.53 m below the water);
 * the Blender Generate stage at +5.6 % on Pittsburgh (informational; the whole path is −4.1 %);
 * water untextured (S4-F2);
 * mixed roof ends seen only in synthetic tests.
