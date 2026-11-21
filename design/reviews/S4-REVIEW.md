@@ -271,8 +271,8 @@ Medians of per-round medians, 3 alternating rounds, on the same host and offline
     lines). It does not import `generate`.
   * `build_plan` grew from 336 to 347 lines; `build_terrain` is unchanged.
   * There are no speculative abstractions, so there is no over-engineering.
-* **Decisions:** D119–D122 were made by the coordinator during the sprint but are missing from the log. This PR
-  adds them; the coordinator should confirm the wording.
+* **Decisions:** D119–D122 were made by the coordinator during the sprint but were missing from the log. This PR
+  adds them with the coordinator's wording.
 
 ## 4 Gaps and S4-Fn tasks
 
@@ -317,4 +317,4 @@ Other REL actions:
     them (D125).
   * Large specs such as #70 should be split, or should get a pre-review by the coordinator before R1, to stay
     inside D89.
-* **Proposed decisions:** D123–D125 (roadmap).
+* **Decisions:** D123–D125, proposed here and confirmed by the coordinator at the S4-REVIEW gate (roadmap).
