@@ -1,0 +1,7 @@
+invariant water:osm:relation/1080: max terrain-water -1.500000 m OK
+invariant water:osm:relation/7937544: max terrain-water -1.500000 m OK
+invariant water:osm:way/379511900: max terrain-water -1.500000 m OK
+wet probe osm:way/121593794:under: clearance over pre-carve ground+water 0.6200 m, over emitted terrain+water 0.6200 m OK
+wet probe osm:way/173225719:under: clearance over pre-carve ground+water 0.6200 m, over emitted terrain+water 0.6200 m OK
+minimum wet clearance over pre-carve ground+water 0.6200 m
+3 water bodies, 2 wet under-probes, PASS
