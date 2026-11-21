@@ -355,25 +355,31 @@ class BankColourTest(unittest.TestCase):
         self.assertTrue(inside_both)
         self.assertTrue(all(c == self.FOREST for c in inside_both))
 
-    def test_fallback_body_keeps_water_colour(self):
+    def test_fallback_keeps_water_colour_and_built_body_wins_over_it(self):
         from map_builder.core.dem import ElevationGrid
         from map_builder.core.generate import build_terrain
         from map_builder.core.osm import Feature, Polygon
-        poly = Polygon([(-8.0, -8.0), (8.0, -8.0), (8.0, 8.0), (-8.0, 8.0)], [])
-        a = Feature("osm:way/1", "area", {"_class": "water"}, poly)
-        grid = ElevationGrid(-20.0, -20.0, 5.0, 9, 9, [[0.0] * 9 for _ in range(9)], {})
-        cov = {}
-        kept = build_terrain(grid, 0.0, [a], cov)
-        skipped = build_terrain(grid, 0.0, [a], {}, frozenset({a.id}))
-        self.assertIn(self.WATER, kept.face_colors)
-        self.assertNotIn(self.WATER, skipped.face_colors)
-        self.assertGreater(cov[a.id], 0)
-        built = Feature("osm:way/2", "area", {"_class": "water"},
-                        Polygon([(-4.0, -4.0), (4.0, -4.0), (4.0, 4.0), (-4.0, 4.0)], []))
-        both = build_terrain(grid, 0.0, [a, built], {}, frozenset({built.id}))
-        centre = [c for k, c in enumerate(both.face_colors) if k // 2 in (4 * 8 + 4,)]
-        self.assertEqual(centre, [generate.LANDCOVER_COLORS[None]] * 2)
 
+        def rect(x0, y0, x1, y1):
+            return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        fb = Feature("osm:way/1", "area", {"_class": "water"}, Polygon(rect(-16.0, -16.0, 16.0, 16.0), []))
+        grid = ElevationGrid(-20.0, -20.0, 5.0, 9, 9, [[0.0] * 9 for _ in range(9)], {})
+        # a built riverbank is not in ``areas``: only its polygon can win over the overlapping fallback area
+        bank = water.Body("osm:way/2", Polygon(rect(-4.0, -4.0, 4.0, 4.0), []), "riverbank", outcome="built(flat)")
+        bank.pieces = [(rect(-4.0, -4.0, 4.0, 4.0), [])]
+        cov: dict[str, int] = {}
+        only = build_terrain(grid, 0.0, [fb], {})
+        both = build_terrain(grid, 0.0, [fb], cov, [bank])
+        default = generate.LANDCOVER_COLORS[None]
+
+        def cell(mesh, i, j):
+            k = 2 * (j * 8 + i)
+            return mesh.face_colors[k], mesh.face_colors[k + 1]
+        self.assertEqual(cell(only, 4, 4), (self.WATER, self.WATER))
+        self.assertEqual(cell(both, 4, 4), (default, default))     # cell centre (2.5, 2.5): inside the bank
+        self.assertEqual(cell(both, 1, 4), (self.WATER, self.WATER))   # fallback-only cell keeps the colour
+        self.assertEqual([sum(c == self.WATER for c in m.face_colors) // 2 for m in (only, both)], [36, 32])
+        self.assertEqual(cov, {fb.id: 36})
     def test_riverbank_only_body_changes_nothing(self):
         ring = [(-50.0, -20.0), (50.0, -20.0), (50.0, 20.0), (-50.0, 20.0)]
         plan, _, _ = make_scene([(ring, {"waterway": "riverbank"}, True)], river_ground, width=W, height=H)

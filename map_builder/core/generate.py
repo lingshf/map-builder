@@ -767,16 +767,18 @@ def ring_topology_problem(poly: Polygon, max_work: int = DEFAULT_MAX_WORK, max_r
 
 def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature],
                   coverage: dict[str, int] | None = None,
-                  exclude_colour: frozenset[str] = frozenset()) -> MeshData:
+                  built_water: Sequence[water.Body] = ()) -> MeshData:
     """Terrain mesh; each cell is split along its (i, j)-(i+1, j+1) diagonal (see terrain_height).
 
     If ``coverage`` is a dict it receives, per area id, the number of cells whose
-    centre lies inside that area. Areas whose id is in ``exclude_colour`` (water bodies with a built
-    surface mesh) still count towards ``coverage`` but do not choose the cell colour."""
+    centre lies inside that area. ``built_water`` are the water bodies with an emitted surface mesh
+    (``WaterModel.active()``, riverbanks included): a cell whose centre lies inside one never gets the water
+    colour, whichever area covers it; it takes the highest-priority other landcover, else the default."""
     mesh = MeshData("terrain")
     buckets = _Buckets([(a, a.geometry.bbox()) for a in areas],
                        bounds=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * grid.spacing,
                                grid.y0 + (grid.ny - 1) * grid.spacing))
+    boxes = [(water._body_box(b), b) for b in built_water if b.pieces]
     for j in range(grid.ny):
         for i in range(grid.nx):
             mesh.add_vertex(grid.x0 + i * grid.spacing, grid.y0 + j * grid.spacing, grid.heights[j][i] - z_offset)
@@ -787,32 +789,25 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
             v01, v11 = v00 + nx, v10 + nx
             cx = grid.x0 + (i + 0.5) * grid.spacing
             cy = grid.y0 + (j + 0.5) * grid.spacing
-            cls: str | None = None
-            under_built = False
+            cls: str | None = None       # winner among all areas
+            dry: str | None = None       # winner among the non-water areas
             for a in buckets.query(cx, cy):
                 if not a.geometry.contains(cx, cy):
                     continue
                 if coverage is not None:
                     coverage[a.id] = coverage.get(a.id, 0) + 1
                 c = a.tags["_class"]
-                if a.id in exclude_colour:
-                    under_built = True
-                    continue
                 if cls is None or LANDCOVER_PRIORITY[c] > LANDCOVER_PRIORITY[cls]:
                     cls = c
-            if under_built and cls == "water":
-                # a built body wins over a fallback body: the cell is carved to the built bed
-                cls = None
-                for a in buckets.query(cx, cy):
-                    c = a.tags["_class"]
-                    if (c != "water" and a.geometry.contains(cx, cy)
-                            and (cls is None or LANDCOVER_PRIORITY[c] > LANDCOVER_PRIORITY[cls])):
-                        cls = c
+                if c != "water" and (dry is None or LANDCOVER_PRIORITY[c] > LANDCOVER_PRIORITY[dry]):
+                    dry = c
+            if cls == "water" and any(x0 <= cx <= x1 and y0 <= cy <= y1 and water._inside_pieces(b, cx, cy)
+                                      for (x0, y0, x1, y1), b in boxes):
+                cls = dry
             col = LANDCOVER_COLORS[cls]
             mesh.add_face((v00, v10, v11), "MB Terrain", col)
             mesh.add_face((v00, v11, v01), "MB Terrain", col)
     return mesh
-
 
 # --- Roads ------------------------------------------------------------------
 
@@ -1907,7 +1902,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
     if any(a.tags.get("_class") == "water" for a in areas) or classified.riverbanks:
         wmodel = _water_stage(terrain, z_offset, areas, classified, opts, budget)
     tmesh = build_terrain(wmodel.carved if wmodel is not None else terrain,     z_offset, areas, coverage,
-                              frozenset(b.id for b in wmodel.bodies if b.built) if wmodel is not None else frozenset())
+                              wmodel.active() if wmodel is not None else ())
     tmesh.grid_layout = (terrain.nx, terrain.ny, terrain.x0, terrain.y0, terrain.spacing)  # lets probes find triangles by cell
     if wmodel is None:
         budget.commit(tmesh)
