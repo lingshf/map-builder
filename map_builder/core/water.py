@@ -555,11 +555,11 @@ class WaterModel:
     def mesh(self, body: Body) -> MeshData:
         """The body's ``MB Water`` mesh (local z = absolute - z_offset; welded vertices; normals +Z)."""
         m = MeshData(f"water:{body.id}")
-        idx: dict[tuple[float, float, float], int] = {}
+        idx: dict[tuple[float, float, float], int] = {}  # welded to 1 um: platform libm differences must not change the vertex set
         for t in body.tris:
             ids = []
             for x, y, z in t:
-                key = (x, y, round(z, 9))
+                key = (round(x, 6), round(y, 6), round(z, 6))
                 if key not in idx:
                     idx[key] = m.add_vertex(x, y, z - self.z_offset)
                 ids.append(idx[key])
@@ -727,7 +727,7 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
     for b in bodies:
         if not b.built:
             continue
-        nv = len({(x, y, round(z, 9)) for t in b.tris for x, y, z in t})
+        nv = len({(round(x, 6), round(y, 6), round(z, 6)) for t in b.tris for x, y, z in t})
         b.mesh_counts = (nv, len(b.tris))
         if charge is not None:
             try:
