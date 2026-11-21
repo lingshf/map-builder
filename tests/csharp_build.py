@@ -77,13 +77,16 @@ def reader_dll():
             return _dll
         _outdir = tempfile.mkdtemp(prefix="mbmap-reader-")
         atexit.register(_cleanup)
+        # a private copy of the sources: the checkout keeps its own bin/obj (from ``dotnet run``), whose generated
+        # .cs files the default globbing would otherwise compile a second time
+        src = os.path.join(_outdir, "src")
+        shutil.copytree(PROJECT, src, ignore=shutil.ignore_patterns("bin", "obj"))
         out = os.path.join(_outdir, "bin")
-        obj = os.path.join(_outdir, "obj") + os.sep
         with _FileLock(os.path.join(tempfile.gettempdir(), "mbmap-reader-build.lock")):
             BUILD_COUNT += 1
             build = subprocess.run(
-                ["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", PROJECT, "-o", out,
-                 f"-p:BaseIntermediateOutputPath={obj}", "-p:NuGetAudit=false", "-p:WarningsNotAsErrors=NU1900",
+                ["dotnet", "build", "-c", "Release", "-nologo", "-v", "q", src, "-o", out,
+                 f"-p:RestoreConfigFile={os.path.join(ROOT, 'NuGet.config')}", "-p:NuGetAudit=false", "-p:WarningsNotAsErrors=NU1900",
                  "-p:UseSharedCompilation=false"],
                 capture_output=True, text=True)
         if build.returncode != 0:
