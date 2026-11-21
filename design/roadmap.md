@@ -360,7 +360,7 @@ Task docs: [tasks/README.md](tasks/README.md#sprint-4-v050).
 | Lane | Tasks in order |
 |---|---|
 | A: roofs | **S4-ROOF-SPIKE** (½ day) → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** |
-| B: package and collision | **S4-PERF-PKG** → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** |
+| B: package and collision | **S4-PERF-PKG** → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** → **S4-WATER-SURFACE** (D112) |
 | C: textures, tests, publishing | **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** → **S4-FORMAT-POLICY** (hard edge) → **S4-EXT-READY** |
 | Close (D104) | **S4-REVIEW** → S4-Fn blockers → **REL-v0.5.0** → close check → retro → tag `v0.5.0` |
 
@@ -379,8 +379,9 @@ graph LR
   TW[S4-TEX-WATER] --> UV[S4-PERF-UV]
   BH[S4-BLENDER-HYGIENE] --> CD[S4-COL-DEGEN]
   EX[S4-EXT-READY]
+  CD --> WS[S4-WATER-SURFACE]
   EN --> REV[S4-REVIEW]
-  CD --> REV
+  WS --> REV
   FP --> REV
   UV --> REV
   EX --> REV
@@ -390,13 +391,14 @@ graph LR
 Why the edges: ROOF-NAMED and ROOF-ENDS share `core/roofs.py`. If ROOF-NAMED changes the checker's reference
 plane, the spike's count is replayed under the final checker before the stretch is set (replay node, D95).
 TEX-WATER and PERF-UV share `core/uv.py` (the mean-albedo table). BLENDER-HYGIENE and COL-DEGEN share
-`blender/bake.py` and `blender/export.py`. **TEST-HYGIENE → FORMAT-POLICY is a hard edge:** FORMAT-POLICY's
+`blender/bake.py` and `blender/export.py`; WATER-SURFACE (added by D112 from the user's river request) shares
+them too, and also holds `core/generate.py` (terrain section) and `core/bridges.py` alone. **TEST-HYGIENE → FORMAT-POLICY is a hard edge:** FORMAT-POLICY's
 positive future-minor fixture runs through the frozen C# reader (D101), which uses the C# build harness,
 `tests/test_csharp_parity.py` and the reader project that TEST-HYGIENE rewrites (D92). FORMAT-POLICY may also need a
 `core/package.py` edit, which PERF-PKG owns first (dotted, conditional).
 
 **Sample slot (D103).** `examples/synthetic_sample.mbmap` is one binary with one writer at a time. The
-output-changing PRs (S4-TEX-WATER, S4-COL-DEGEN, and S4-ROOF-NAMED / S4-ROOF-ENDS only if the fixture's roofs
+output-changing PRs (S4-TEX-WATER, S4-COL-DEGEN, S4-WATER-SURFACE, and S4-ROOF-NAMED / S4-ROOF-ENDS only if the fixture's roofs
 change) take a single, exclusive **merge-time sample slot** from the coordinator. The slot holder rebases on
 main, regenerates the sample, gets green CI and the gate, and merges. The slot is then released, and the next
 holder starts its rebase only after that merge. Only the slot holder may push a sample change; other PRs
@@ -469,20 +471,19 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D102 | Draft v1.0 exit criteria as listed above, for the user to confirm. | De (proposed; U confirms) | draft |
 | D103 | Sample ownership. Output-changing tasks (S4-TEX-WATER, S4-COL-DEGEN, and S4-ROOF-NAMED / S4-ROOF-ENDS only if the fixture's roofs change) regenerate `examples/synthetic_sample.mbmap` only while holding the single exclusive **merge-time sample slot** granted by the coordinator: rebase on main, regenerate, green CI and gate, merge, release the slot. Other PRs keep main's sample bytes. The PR lists the byte change. Perf tasks never change it (D97). Comparisons against v0.4.0 use frozen inputs: the committed Munich roof snapshot, the RC #56 caches by acquisition SHA-256, and the unchanged sample input. | De (proposed; C confirms at gate) | proposed |
 | D104 | Sprint 4 close order follows D48 and D63: S4-REVIEW on main first; its findings define the remaining v0.5.0 scope; then REL-v0.5.0 (version 0.5.0 via the D50 guard), the close check, the retro and the tag. | De (proposed; C confirms at gate) | proposed |
+| D105 | The D95 stretch is **45/67**, and the roof checker (`tests/roof_checks.py`) stays unchanged in sprint 4; the S3-F7 reference-plane change is not made. Met by #67 (33 → 45/67). Sources: #60, #62, #67, `tests/test_roofs_munich.py:38`. | C (coordinator) | decided |
+| D106 | D91 measurement method: an independent, same-host, offline replay with alternating base/head runs (at least three per revision and preset), comparing medians of whole Generate. A single pair is only a sanity check. Sources: #63, #64, #67. | C (coordinator) | decided |
+| D107 | Gabled roofs with no usable height (for example `roof:levels=0`) stay flat with a named reason; no D77 height is invented for them (no change to the height policy). Source: #62, `core/generate.py:529`. | C (coordinator) | decided |
+| D108 | The bbox fields become exact text (S3-F6). Saved float values in an old `.blend` migrate once, on load or the first Generate, as the `repr` of the stored float; the legacy float properties stay registered but hidden. Source: #66. | C (coordinator) | decided |
+| D109 | A stage-level slowdown (Munich roof stage, about 30 ms in S4-ROOF-ENDS) is accepted when whole Generate stays within the D91 +5 % limit (as D85 and D91). Source: #67. | C (coordinator) | decided |
 | D110 | Amends D101: a minor version adds **no package members** (no new path or role), because both the current and the frozen v0.3.0 C# readers reject an unlisted-role member ("unknown package member"), while the Python validator only warns. The positive fixture (`tests/test_format_policy.py`) pins this. | C (coordinator) | decided |
-
-### Sprint 5 decisions (proposed: water surfaces)
-
-From the user's river request. The spec is [tasks/S5-WATER-SURFACE.md](tasks/S5-WATER-SURFACE.md). The numbers are proposed, and the coordinator may renumber them if D111 and later are already taken.
-
-| # | Decision | Who | Status |
-|---|---|---|---|
-| D111 | Water bodies are the validated `area_class == "water"` polygons (holes kept, clipped to the area). Each one becomes its own flat or profiled surface mesh (`water:<osm-id>`, class `water`). Linear `waterway=*` ways are only a centreline hint. | De (proposed; C confirms at gate) | proposed |
-| D112 | Water level = p20 of corrected-DEM samples in a 0–2-cell shore band outside the polygon (buildings, bridges and other water excluded, clipped edges excluded). Rivers longer than 300 m use 100 m stations with a downstream non-increasing (isotonic) profile, slope ≤ 1 %. AC0 may move the percentile within p10–p30. The tolerance is exact to 1 mm; the sanity window is shore-band [p5, p50]. | De (proposed; C confirms at gate) | proposed |
-| D113 | The terrain bed is carved to ≤ L − 1.5 m inside and in adjacent cells, with a 1-cell lowering-only bank blend; buildings and abutments are excluded. Invariant on emitted triangles (D39): no terrain is above the water inside a water polygon. | De (proposed; C confirms at gate) | proposed |
-| D114 | Bridge clearance (D22) is measured over max(terrain, water level), so decks do not drop; piers sink below the carved bed; under-bridge probes start at L + r; existing probes stay passable (D98 method). | De (proposed; C confirms at gate) | proposed |
-| D115 | Water goes to `.mbcol` as the existing class 5 `water` surface. There is no format change (D101/D110). `.mbhf` stays terrain-only (it shows the bed), and the consumer docs say to use the `.mbcol` query over water. | De (proposed; C confirms at gate) | proposed |
-| D116 | Sprint fit: S5-WATER-SURFACE is the first sprint-5 (v0.6.0) item, after S4-COL-DEGEN and REL-v0.5.0. Pulling it into v0.5.0, before S4-REVIEW, is the user's option. | De (proposed; U/C decide) | proposed |
+| D111 | S4-COL-DEGEN: the D98 probe invariance outranks AC3 (the degenerate-count target). If removing a degenerate triangle would change a probe result, the triangle is kept and listed. | C (coordinator) | decided |
+| D112 | User's river request: S4-WATER-SURFACE ships in **v0.5.0**. It runs right after S4-COL-DEGEN and before S4-REVIEW, because the user asked for it directly and prefers infrequent releases. | C (coordinator, for the user) | decided |
+| D113 | Water bodies are the validated `area_class == "water"` polygons (holes kept, clipped to the area). Each one becomes its own flat or profiled surface mesh (`water:<osm-id>`, class `water`). Linear `waterway=*` ways are only a centreline hint. Spec: [tasks/S4-WATER-SURFACE.md](tasks/S4-WATER-SURFACE.md). | De (proposed; C confirms at gate) | proposed |
+| D114 | Water level = p20 of corrected-DEM samples in a 0–2-cell shore band outside the polygon (buildings, bridges, other water and clipped edges excluded). Rivers longer than 300 m use 100 m stations with a downstream non-increasing (isotonic) profile, slope ≤ 1 %. AC0 may move the percentile within p10–p30. Tolerance: exact to 1 mm. Sanity window: the shore-band p5 to p50. | De (proposed; C confirms at gate) | proposed |
+| D115 | The terrain bed is carved to ≤ L − 1.5 m inside the polygon and in adjacent cells, with a 1-cell bank blend that only lowers terrain; buildings and abutments are excluded. Invariant on emitted triangles (D39): no terrain is above the water inside a water polygon. | De (proposed; C confirms at gate) | proposed |
+| D116 | Bridge clearance (D22) is measured over max(terrain, water level), so decks do not drop. Piers sink below the carved bed. Under-bridge probes start at L + r, and existing probes stay passable (D98 method). | De (proposed; C confirms at gate) | proposed |
+| D117 | Water goes into `.mbcol` as the existing class 5 `water` surface: no format change (D101/D110). `.mbhf` stays terrain-only and shows the bed; the consumer docs say to use the `.mbcol` query over water. | De (proposed; C confirms at gate) | proposed |
 
 ## Decisions that need the user
 
@@ -491,8 +492,6 @@ From the user's river request. The spec is [tasks/S5-WATER-SURFACE.md](tasks/S5-
    and the website URL shown on the platform. Dev only prepares the checklist.
 3. **`.mbmap` format-stability policy (D101)** and **v1.0 exit criteria (D102).** Drafts here; the user
    confirms or edits them before v1.0 is planned.
-4. **Water surfaces sprint fit (D116).** Ship better rivers in v0.6.0 (recommended), or pull the work into
-   v0.5.0 and delay that tag.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.

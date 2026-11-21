@@ -12,7 +12,10 @@ Owner: design · sprint S4 · after all S4 dev tasks · D104
    unreported**: every remaining one is a triangle kept under D98 and listed in the S4-COL-DEGEN report (0 is
    the stretch, not the gate). Probe ids and
    results are equal in Python and C#.
-3. **Water:** the river region colour rule holds on a re-render (S4-TEX-WATER AC1).
+3. **Water:** the river region colour rule holds on a re-render (S4-TEX-WATER AC1). S4-WATER-SURFACE (D112):
+   re-run its AC3 (no terrain above water, on emitted triangles), AC4 (shoreline deviation), AC5 (level) and AC6
+   (bridge decks, piers, probes) on main through both paths, and spot-render the Pittsburgh river with the
+   demokit cameras.
 4. **Performance (D91):** whole Generate, Pittsburgh and Munich, CLI and headless Blender, median of 3, against
    v0.4.0 from frozen inputs. Byte identity of PERF-PKG and PERF-UV checked independently (D97).
 5. **Tests:** full suite with a private user-level NuGet feed configured (0 errors); two parallel suites; the

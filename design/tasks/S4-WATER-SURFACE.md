@@ -1,7 +1,7 @@
-# S5-WATER-SURFACE: flat water surfaces on carved beds
+# S4-WATER-SURFACE: flat water surfaces on carved beds
 
-Owner: dev · sprint S5 (first item; see "Sprint fit") · after S4-COL-DEGEN and REL-v0.5.0 · D4, D21, D22, D39,
-D90, D91, D98, D101, D103, D110 · proposed decisions D111–D116 (in [../roadmap.md](../roadmap.md))
+Owner: dev · sprint S4 (v0.5.0, D112) · after S4-COL-DEGEN, before S4-REVIEW · D4, D21, D22, D39,
+D90, D91, D98, D101, D103, D110 · D111, D112; proposed decisions D113–D117 (in [../roadmap.md](../roadmap.md))
 
 User request (verbatim): "检查地图的河流，看起来像是一个沟，上面改垫了垫子，你看下，能改进么"
 ("The rivers on the map look like a ditch with a mat laid on top. Please look at them. Can this be improved?")
@@ -35,7 +35,7 @@ Before any change, on the v0.4.0 / v0.5.0 main and with the frozen Pittsburgh an
    per-vertex `contains` over the river multipolygons is too slow for the benchmark harness; this was measured
    while writing this spec.
 3. **Shore band.** DEM samples in a band 0–2 cells outside the polygon: p10, p20 and p50. Use these to choose
-   the level statistic (D112).
+   the level statistic (D114).
 4. **D91 baseline.** Whole Generate on the same host (CLI and Blender). Reuse the v0.5.0 numbers if they were
    measured on the same commit and host.
 
@@ -44,7 +44,7 @@ as a floor plus the measured value.
 
 ## Scope
 
-### 1. Water bodies (D111)
+### 1. Water bodies (D113)
 
 A *water body* is an `area_class == "water"` polygon after the existing ring validation
 (`landcover_ring_problem`): `natural=water`, `landuse=reservoir|basin`, any `water=*` (this includes
@@ -53,7 +53,7 @@ example islands and piers. Linear `waterway=*` ways do **not** create a surface;
 centreline hint for long rivers (§2). Polygons are clipped to the area extent first. Clipped edges are not
 shoreline and are excluded from the shore statistics.
 
-### 2. Water level (D112)
+### 2. Water level (D114)
 
 Each water body gets one level, or a level profile for rivers.
 
@@ -73,7 +73,7 @@ the noisy signal that causes the ditch. Its minimum is the deepest radar artefac
 noise. Banks are land: GLO-30 is reliable there, and the water line is the lowest stable part of the bank.
 p20 is robust to embankments, walls and quays, which pull the median and maximum up. It is also robust to
 single low outliers, which pull the minimum and p5 down. AC0.3 may move the percentile between p10 and p30 if
-the Pittsburgh/Munich data argue for it. Record the choice in D112.
+the Pittsburgh/Munich data argue for it. Record the choice in D114.
 
 **Tolerance.** The emitted level must equal the computed statistic to within 1 mm, and a flat body must be flat
 to within 1 mm. For the chosen percentile, acceptance against data is: on each preset, the level lies between
@@ -92,7 +92,7 @@ the shore-band p5 and p50 (a sanity window, not an accuracy claim; GLO-30 vertic
 * Terrain cells inside water keep the existing water vertex colour, so any gap reads as water. The bank cells
   use the bank colour/texture.
 
-### 4. Bed carve and bank blend (D113)
+### 4. Bed carve and bank blend (D115)
 
 After DSM correction and before bridges, roads and probes are built, the terrain heights are modified on the
 grid only (topology unchanged, so `grid_layout` and the probes' cell lookup keep working):
@@ -109,7 +109,7 @@ grid only (topology unchanged, so `grid_layout` and the probes' cell lookup keep
 water level `L(x,y)` within the water polygon. Because terrain triangles are planar over a 10 m grid, the check
 also covers edges that cross the shoreline. Inside-or-adjacent cells are carved for exactly this reason.
 
-### 5. Bridges, piers, roads and probes (D114)
+### 5. Bridges, piers, roads and probes (D116)
 
 * **Clearance is measured over the water surface.** In `core/bridges.py`, `_ground_max` uses a sampler
   `max(terrain_z, water_level)`, where water_level is −∞ outside water. D22 then still means "layer × 5 m above
@@ -125,7 +125,7 @@ also covers edges that cross the shoreline. Inside-or-adjacent cells are carved 
   passable (hit equivalence on the probe set, per the D98 method). New expected hits on water surfaces are
   listed in the PR.
 
-### 6. Collision and query semantics (D115)
+### 6. Collision and query semantics (D117)
 
 * Water surfaces are emitted to `.mbcol` as **class 5 `water` (kind surface, normal Z > 0)**. The class, kind,
   members and layout already exist, so this is **no format change**. It fits D101/D110: no new members, no
@@ -211,18 +211,13 @@ It overlaps S4-COL-DEGEN (`core/collision.py`, `blender/bake.py`, `blender/expor
 `core/generate.py`. It must therefore start after S4-COL-DEGEN merges and must not run in parallel with any
 task that holds `core/generate.py` or `core/bridges.py`.
 
-## Sprint fit (D116, recommendation)
+## Sprint fit (D112, coordinator)
 
-**Recommended: first item of sprint 5 (v0.6.0), not v0.5.0.** v0.5.0 is the quality-closeout and publishing
-release (D93). Its remaining blockers (S4-COL-DEGEN, then S4-REVIEW and REL-v0.5.0) share files with this task
-(`blender/bake.py`, `blender/export.py`). This task changes output geometry, collision content, probes and
-renders, and it needs the exclusive sample slot. Adding it to v0.5.0 would reopen the sprint-4 review and delay
-the tag by roughly one full dev task plus review rounds.
+**Ships in v0.5.0 (sprint 4).** It runs right after S4-COL-DEGEN merges, and before S4-REVIEW. This is the
+user's direct request, and the user prefers infrequent releases. S4-REVIEW audits this task (check 3), and
+REL-v0.5.0 carries the river renders and notes. While the task is open it takes the exclusive sample slot
+(D103) and is the only writer of `core/generate.py` (terrain section) and `core/bridges.py`.
 
-**Option (user's call):** if the user wants better rivers in the very next release, run it right after
-S4-COL-DEGEN, before S4-REVIEW. S4-REVIEW then audits it, and REL-v0.5.0 moves accordingly. The scope stays
-the same either way.
-
-Size: one dev PR (about 2–3 days), plus the sample slot and renders. Split it into **S5-WATER-A** (level, mesh,
-collision class, docs) and **S5-WATER-B** (carve, blend, bridges/probes) only if review asks. A is not useful
+Size: one dev PR (about 2–3 days), plus the sample slot and renders. Split it into **S4-WATER-A** (level, mesh,
+collision class, docs) and **S4-WATER-B** (carve, blend, bridges/probes) only if review asks. A is not useful
 on its own: a flat sheet over an un-carved, undulating bed lets terrain poke through.
