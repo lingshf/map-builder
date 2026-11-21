@@ -139,9 +139,10 @@ def _canonical_ring(ring: Iterable[Sequence[float]]) -> list[Pt]:
 
 
 class _Run:
-    def __init__(self, ring: list[Pt]) -> None:
+    def __init__(self, ring: list[Pt], vertical: frozenset[frozenset[Pt]] = frozenset()) -> None:
         self.ring = ring
         m = len(ring)
+        self.speed = [0.0 if frozenset((ring[i], ring[(i + 1) % m])) in vertical else 1.0 for i in range(m)]
         self.nodes: list[Node] = [(x, y, 0.0) for x, y in ring]
         self.edges: list[Edge] = []
         for i in range(m):
@@ -168,12 +169,13 @@ class _Run:
     def velocity(self, ep: int, en: int) -> Pt:
         _, _, n1x, n1y, _ = self.edges[ep]
         _, _, n2x, n2y, _ = self.edges[en]
+        s1, s2 = self.speed[ep], self.speed[en]
         det = n1x * n2y - n1y * n2x
         if abs(det) < _PARALLEL:
-            if n1x * n2x + n1y * n2y > 0:
-                return (n1x, n1y)
+            if n1x * n2x + n1y * n2y > 0 and s1 == s2:
+                return (n1x * s1, n1y * s1)
             raise SkeletonError("internal: antiparallel vertex")
-        return ((n2y - n1y) / det, (n1x - n2x) / det)
+        return ((s1 * n2y - s2 * n1y) / det, (s2 * n1x - s1 * n2x) / det)
 
     def antiparallel(self, ep: int, en: int) -> bool:
         e1, e2 = self.edges[ep], self.edges[en]
@@ -234,8 +236,9 @@ class _Run:
                     continue
                 dxe, dye, nx, ny, c = self.edges[a.en]
                 p = v.at(t0)
-                dist = nx * p[0] + ny * p[1] - c - t0
-                rate = nx * v.vel[0] + ny * v.vel[1] - 1.0
+                sa = self.speed[a.en]
+                dist = nx * p[0] + ny * p[1] - c - sa * t0
+                rate = nx * v.vel[0] + ny * v.vel[1] - sa
                 if dist < -POINT_TOL_M or rate >= -1e-12:
                     continue
                 t = t0 + max(dist, 0.0) / -rate
@@ -392,8 +395,10 @@ class _Run:
             _, _, nx, ny, c = self.edges[i]
             for k in face:
                 x, y, t = self.nodes[k]
-                if abs(nx * x + ny * y - c - t) > POINT_TOL_M * max(1.0, scale / 1000.0):
+                if abs(nx * x + ny * y - c - self.speed[i] * t) > POINT_TOL_M * max(1.0, scale / 1000.0):
                     raise SkeletonError("internal: skeleton node is off its face plane")
+            if self.speed[i] == 0.0:
+                continue
             area = _signed_area([self.nodes[k][:2] for k in face])
             if area <= 0:
                 raise SkeletonError("internal: degenerate or flipped skeleton face")
@@ -403,14 +408,19 @@ class _Run:
             raise SkeletonError("internal: skeleton faces do not cover the footprint")
 
 
-def straight_skeleton(ring: Iterable[Sequence[float]]) -> Skeleton:
+def straight_skeleton(ring: Iterable[Sequence[float]],
+                      vertical: frozenset[frozenset[Pt]] = frozenset()) -> Skeleton:
     """Straight skeleton of the simple polygon ``ring`` ([(x, y), ...], either orientation).
 
     Collinear runs are merged first. Raises :class:`SkeletonError` for a self-touching or
     self-intersecting ring, an edge shorter than ``POINT_TOL_M``, a zero-width spike or more than
     ``MAX_SKELETON_VERTICES`` vertices, and :class:`LimitError` past ``MAX_SKELETON_EVENTS``.
+
+    ``vertical`` is a set of footprint edges (each ``frozenset({a, b})`` of two points of the canonical ring) that
+    do not move: their wavefront has speed 0, so the face of such an edge is a vertical wall (zero area in plan)
+    and the neighbouring slopes run into it.
     """
     canon = _canonical_ring(ring)
-    run = _Run(canon)
+    run = _Run(canon, vertical)
     faces = run.run()
     return Skeleton(canon, run.nodes, faces, run.events)

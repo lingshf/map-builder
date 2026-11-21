@@ -45,6 +45,16 @@ HIPPED_L_OSM = ("<?xml version='1.0' encoding='UTF-8'?>\n<osm version=\"0.6\" ge
                 + '<tag k="roof:height" v="3"/></way>\n</osm>\n')
 
 
+# a chamfered pentagon (metres, the footprint that needs the vertical cut) at the fixture's latitude
+_CH = [(2, -6), (2, -4.5), (5, 7.5), (-3, 8), (-6, -5)]
+CHAMFERED_OSM = ("<?xml version='1.0' encoding='UTF-8'?>\n<osm version=\"0.6\" generator=\"mb-test\">\n"
+                 + "".join(f'<node id="{i + 1}" lat="{47.0005 + (y + 10) * 0.00000899:.9f}" lon="{8.0001 + (x + 10) * 0.00001317:.9f}"/>\n'
+                           for i, (x, y) in enumerate(_CH))
+                 + '<way id="9201">' + "".join(f'<nd ref="{i}"/>' for i in (1, 2, 3, 4, 5, 1))
+                 + '<tag k="building" v="house"/><tag k="roof:shape" v="gabled"/><tag k="height" v="8"/>'
+                 + '<tag k="roof:height" v="3"/></way>\n</osm>\n')
+
+
 def configure(s, osm, name, pkg):
     s.area_mode = "CENTER"
     s.centre_lat, s.centre_lon, s.width, s.height = str(LAT), str(LON), WIDTH, HEIGHT
@@ -286,6 +296,25 @@ def run(out_dir):
         if nl > 1e-9 and abs(nrm[2]) / nl < 1e-3 and zs[0] - zmin > 4.0 and abs(zs[0] - zs[1]) < 1e-3 and zs[2] - zs[1] > 0.1:
             ends += 1
     check(ends >= 2, f"roofs: the L-shaped gabled house has vertical gable-end walls ({ends} triangles)")
+
+    # --- a chamfered gabled house needs the vertical cut (S4-ROOF-ENDS): Blender == Python, closed, outward ---
+    scratch = os.path.join(out_dir, "roof_chamfered.osm")
+    with open(scratch, "w", encoding="utf-8") as f:
+        f.write(CHAMFERED_OSM)
+    s5 = bpy.context.scene.map_builder
+    configure(s5, scratch, "roofs_ch", os.path.join(out_dir, "roofs_ch.mbmap"))
+    res, err = run_op(bpy.ops.map_builder.generate)
+    check(res == {"FINISHED"}, f"roofs: generate a chamfered gabled house ({err or 'ok'})")
+    ob = by_id(s5.export_collection, "osm:way/9201")
+    plan5, _ = pipeline.generate_plan(make_area(s5), make_settings(s5))
+    sp = next(o for o in plan5.objects if o.mb_id == "osm:way/9201")
+    got = world_verts(ob)
+    want = [tuple(c + o for c, o in zip(v, sp.location)) for v in sp.mesh.vertices]
+    check(sp.provenance["roof_shape_built"] == "gabled" and "vertical gable wall" in sp.provenance["roof_construction"],
+          f"roofs: the chamfered house is built gabled by the vertical cut ({sp.provenance['roof_shape']})")
+    check(len(got) == len(want) and matches(got, want), f"roofs: chamfered gabled vertices equal Python within 1 mm ({len(got)} verts)")
+    check(not [e for e, c in welded_edge_faces(ob).items() if c != 2], "roofs: chamfered gabled house is closed manifold")
+    check(signed_volume(world_triangles(ob)) > 0, "roofs: chamfered gabled house is outward-wound")
 
 
 def top_p_dome(plan):

@@ -95,8 +95,9 @@ def add_planar_face(mesh: MeshData, idx: Sequence[int], mat: str, col: Color, to
 def resolve_shape(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: Prov,
                   skeleton_hipped: bool = False) -> str:
     """The roof shape that can be built for ``roof:shape`` on this footprint; sets
-    ``prov["roof_shape"]`` (``measured:``/``inferred:``/``fallback:``). With ``skeleton_hipped`` a hipped
-    roof on a non-rectangular footprint is kept (``plan_roof`` builds it from the straight skeleton)."""
+    ``prov["roof_shape"]`` (``measured:``/``inferred:``/``fallback:``). With ``skeleton_hipped`` a hipped or gabled
+    roof on a non-rectangular footprint, and a pyramidal one on a concave footprint, is kept (``plan_roof``
+    builds it from the straight skeleton)."""
     shape = shape_tag or "flat"
     prov["roof_shape"] = "measured:osm roof:shape" if shape_tag else "inferred:flat"
     if shape not in SUPPORTED_SHAPES:
@@ -112,7 +113,7 @@ def resolve_shape(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], pro
         else:
             prov["roof_shape"] = f"fallback:flat (roof:shape={shape} on non-rectangular footprint)"
             shape = "flat"
-    if shape in ("pyramidal", "dome", "onion") and not is_convex(outer):
+    if shape in ("pyramidal", "dome", "onion") and not is_convex(outer) and not (skeleton_hipped and shape == "pyramidal"):
         prov["roof_shape"] = f"fallback:flat ({shape} roof on concave footprint)"
         shape = "flat"
     return shape
@@ -160,6 +161,8 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
         across = resolve_orientation("gabled", {"roof:orientation": orientation} if orientation else {}, {},
                                      outer, direction)
         analytic_gable = analytic_gable_slope_error(outer, across) is None
+    if shape == "pyramidal" and not is_convex(outer):
+        return _concave_pyramid_plan(outer, prov)
     if shape not in ("hipped", "gabled") or (rect_check(outer) and (shape == "hipped" or analytic_gable)):
         return RoofPlan(shape)
     near_rect = rect_check(outer)
@@ -172,7 +175,12 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
             try:
                 return _skeleton_plan(outer, sk, _gable_ends(sk, orientation, direction, p))
             except _GableError as exc:
-                p["roof_shape"] = f"fallback:hipped (gable end not representable: {exc})"
+                cut = exc
+            try:
+                return _walled_plan(outer, sk, orientation, direction, p, merge)
+            except _GableError as exc:
+                p["roof_shape"] = (f"fallback:hipped (gable end not representable: {cut}; "
+                                   f"vertical cut: {exc})")
                 p.pop("roof_orientation", None)
         return _skeleton_plan(outer, sk)
 
@@ -214,6 +222,25 @@ def plan_roof(shape_tag: str | None, outer: Ring, holes: Sequence[Ring], prov: P
     prov.pop("roof_orientation", None)
     return RoofPlan(shape)
 
+
+def _concave_pyramid_plan(outer: Ring, prov: Prov) -> RoofPlan:
+    """A pyramidal roof on a concave footprint. The straight skeleton gives one sloped face per footprint edge,
+    but a reflex corner always splits the apex into a ridge, which the pyramidal roof signature (a single apex)
+    does not accept, so the skeleton roof is built only when it does have one apex; otherwise the roof is flat
+    and the reason names what the skeleton found (D105: the checker is unchanged)."""
+    try:
+        sk = straight_skeleton(outer)
+        plan = _skeleton_plan(outer, sk)
+    except (SkeletonError, LimitError, TriangulationError) as exc:
+        prov["roof_shape"] = f"fallback:flat (pyramidal roof on concave footprint; straight skeleton: {exc})"
+        return RoofPlan("flat")
+    apexes = len(plan.points or ()) - plan.n_ring
+    if apexes == 1:
+        plan.shape_built = "pyramidal"
+        return plan
+    prov["roof_shape"] = (f"fallback:flat (pyramidal roof on concave footprint: the straight skeleton has a ridge "
+                          f"of {apexes} nodes, not a single apex)")
+    return RoofPlan("flat")
 
 def analytic_gable_slope_error(outer: Ring, across: bool, ref_height: float = 10.0,
                                tol: float = 5e-4) -> str | None:
@@ -261,13 +288,11 @@ def _min_area_axes(ring: Sequence[Pt]) -> tuple[Pt, Pt]:
     return (u, v) if w >= h else (v, u)
 
 
-def _gable_ends(sk: Skeleton, orientation: str | None, direction: float | None,
-                prov: Prov) -> tuple[int, ...]:
-    """Faces of the skeleton to turn into gable ends: the triangular faces at a ridge end whose footprint edge is
-    perpendicular (within 45 degrees) to the ridge axis. The ridge axis is the long side of the minimum-area
-    bounding rectangle, or the short one for ``roof:orientation=across``; without an orientation a
-    ``roof:direction`` puts the ridge perpendicular to the way the slope faces."""
-    long_axis, short_axis = _min_area_axes(sk.ring)
+def _ridge_axis(ring: Sequence[Pt], orientation: str | None, direction: float | None, prov: Prov) -> Pt:
+    """The wanted ridge axis (unit vector), with its ``roof_orientation`` provenance: the long side of the
+    minimum-area bounding rectangle, or the short one for ``roof:orientation=across``; without an orientation a
+    ``roof:direction`` puts the ridge perpendicular to the way the slope faces (D84)."""
+    long_axis, short_axis = _min_area_axes(ring)
     if orientation in ("along", "across"):
         prov["roof_orientation"] = f"measured:osm roof:orientation={orientation}"
         axis = short_axis if orientation == "across" else long_axis
@@ -281,6 +306,19 @@ def _gable_ends(sk: Skeleton, orientation: str | None, direction: float | None,
         prov["roof_orientation"] = ("inferred:along (ridge parallel to the longer side of the minimum-area "
                                     "bounding rectangle)" if orientation is None else
                                     f"fallback:along (roof:orientation={orientation} not recognised)")
+    return axis
+
+
+def _is_end(a: Pt, b: Pt, axis: Pt) -> bool:
+    """A footprint edge a-b is an end when it is perpendicular to the ridge axis within 45 degrees."""
+    return abs((b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1]) / math.dist(a, b) <= math.sqrt(0.5)
+
+
+def _gable_ends(sk: Skeleton, orientation: str | None, direction: float | None,
+                prov: Prov) -> tuple[int, ...]:
+    """Faces of the skeleton to turn into gable ends: the triangular faces at a ridge end whose footprint edge is
+    perpendicular (within 45 degrees) to the ridge axis (:func:`_ridge_axis`)."""
+    axis = _ridge_axis(sk.ring, orientation, direction, prov)
     n = len(sk.ring)
     ridge_ends: list[int] = []
     reasons: list[str] = []
@@ -295,8 +333,7 @@ def _gable_ends(sk: Skeleton, orientation: str | None, direction: float | None,
         raise _GableError(reasons[0] if reasons else "the skeleton has fewer than two ridge ends")
     perpendicular: list[int] = []
     for i in ridge_ends:
-        a, b = sk.ring[i], sk.ring[(i + 1) % n]
-        if abs((b[0] - a[0]) * axis[0] + (b[1] - a[1]) * axis[1]) / math.dist(a, b) <= math.sqrt(0.5):
+        if _is_end(sk.ring[i], sk.ring[(i + 1) % n], axis):
             perpendicular.append(i)
     ends = tuple(perpendicular if len(perpendicular) >= 2 else ridge_ends)
     if direction is not None and orientation is None:
@@ -306,7 +343,7 @@ def _gable_ends(sk: Skeleton, orientation: str | None, direction: float | None,
 
 def _ridge_bearing(sk: Skeleton, i: int) -> float:
     """Compass bearing in [0, 180) of the emitted ridge that ends in gable end ``i``."""
-    N = sk.faces[i][2]
+    N = max(sk.faces[i][2:], key=lambda k: sk.nodes[k][2])
     prev = sk.faces[(i - 1) % len(sk.ring)]
     M = prev[(prev.index(N) + 1) % len(prev)]
     nn, mm = sk.nodes[N], sk.nodes[M]
@@ -377,11 +414,12 @@ def _gable_node(sk: Skeleton, i: int) -> tuple[Node, int]:
     return (p[0], p[1], t), N
 
 
-def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofPlan:
+def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = (), walls: Sequence[int] = ()) -> RoofPlan:
     n = len(outer)
     nodes = list(sk.nodes)
     faces = [list(f) for f in sk.faces]
     gable_apex: dict[int, int] = {}
+    wall_set = set(walls)
     for i in ends:
         apex, N = _gable_node(sk, i)
         nodes.append(apex)
@@ -407,6 +445,18 @@ def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofP
         a, b = pts[0], pts[1]
         between = sorted((u, k) for k in extra for u in [_along(outer[k], a, b)] if u is not None)
         fan = [k for _, k in between]
+        if i in wall_set:
+            # vertical wall: triangulate its outline in (distance along the edge, height); CCW there is outward
+            ln = math.dist(a, b)
+            ux, uy = (b[0] - a[0]) / ln, (b[1] - a[1]) / ln
+            poly = [(0.0, 0.0, node_to_pt[face[0]])] + [(u * ln, 0.0, k) for u, k in between]
+            poly.append((ln, 0.0, node_to_pt[face[1]]))
+            for k in face[2:]:
+                poly.append(((nodes[k][0] - a[0]) * ux + (nodes[k][1] - a[1]) * uy, nodes[k][2], node_to_pt[k]))
+            for (p, q, r) in triangulate([(x, y) for x, y, _ in poly], list(range(len(poly)))):
+                tri = [p, q, r] if _signed(poly[p][:2], poly[q][:2], poly[r][:2]) >= 0 else [p, r, q]
+                gable_tris.append((poly[tri[0]][2], poly[tri[1]][2], poly[tri[2]][2]))
+            continue
         if i in gable_apex:
             chain = [node_to_pt[face[0]]] + fan + [node_to_pt[face[1]]]
             top = node_to_pt[gable_apex[i]]
@@ -431,7 +481,59 @@ def _skeleton_plan(outer: Ring, sk: Skeleton, ends: Sequence[int] = ()) -> RoofP
         raise SkeletonError("the skeleton has no height")
     if len(tris) + len(gable_tris) > MAX_ROOF_TRIANGLES:
         raise LimitError(f"skeleton roof needs {len(tris) + len(gable_tris)} triangles (limit {MAX_ROOF_TRIANGLES})")
-    return RoofPlan("gabled" if ends else "hipped", n, points, tris, t_max, gable_tris)
+    return RoofPlan("gabled" if ends or walls else "hipped", n, points, tris, t_max, gable_tris)
+
+
+def _walled_plan(outer: Ring, sk: Skeleton, orientation: str | None, direction: float | None, prov: Prov,
+                 merge: bool) -> RoofPlan:
+    """Gable ends as vertical walls of a weighted skeleton: every footprint edge that is an end (perpendicular
+    to the ridge axis within 45 degrees) becomes a zero-speed wavefront edge, so the slopes run into a vertical
+    plane through it and an angled or chamfered end is cut instead of hipped. An end whose wall does not close
+    in a single apex (above ``GABLE_APEX_MIN`` and ``GABLE_MIN_HEIGHT_RATIO`` of the roof height) goes back
+    to a hip and the skeleton is rebuilt without it; at least two walls must survive (D82)."""
+    axis = _ridge_axis(sk.ring, orientation, direction, prov)
+    n = len(sk.ring)
+    walls = frozenset(frozenset((sk.ring[i], sk.ring[(i + 1) % n])) for i in range(n)
+                      if _is_end(sk.ring[i], sk.ring[(i + 1) % n], axis))
+    reasons: list[str] = []
+    for _ in range(n):
+        if len(walls) < 2:
+            raise _GableError(reasons[0] if reasons else "fewer than two gable ends perpendicular to the ridge")
+        wsk = straight_skeleton(sk.ring, walls)
+        if merge:
+            _merge_close_nodes(wsk.nodes, wsk.faces, n, set(), set())
+        t_max = max(p[2] for p in wsk.nodes)
+        bad = set()
+        for i in range(n):
+            edge = frozenset((wsk.ring[i], wsk.ring[(i + 1) % n]))
+            if edge not in walls:
+                continue
+            adjacent = [frozenset((wsk.ring[j], wsk.ring[(j + 1) % n])) in walls for j in (i - 1, (i + 1) % n)]
+            if any(adjacent):
+                reasons.append("two gable ends are adjacent (no ridge between slopes reaches the apex)")
+                bad.add(edge)
+                continue
+            tops = [wsk.nodes[k][2] for k in wsk.faces[i][2:] if wsk.nodes[k][2] > GABLE_APEX_MIN]
+            if len(tops) != len(wsk.faces[i]) - 2:
+                reasons.append("the gable end is not a triangle (a node on its base line)")
+                bad.add(edge)
+            elif len(tops) != 1:
+                reasons.append("the gable end is not a triangle (two tops)" if tops else
+                               "the gable end has no height")
+                bad.add(edge)
+            elif tops[0] < GABLE_MIN_HEIGHT_RATIO * t_max:
+                reasons.append("the gable end would be a sliver")
+                bad.add(edge)
+        if not bad:
+            break
+        walls -= bad
+    else:
+        raise _GableError("the gable ends do not settle")
+    wall_faces = [i for i in range(n) if frozenset((wsk.ring[i], wsk.ring[(i + 1) % n])) in walls]
+    plan = _skeleton_plan(outer, wsk, (), wall_faces)
+    if direction is not None and orientation is None:
+        _record_ridge_bearing(wsk, wall_faces, direction, prov)
+    return plan
 
 
 MERGE_NODE_M = 5e-4  # inside the 1 mm planarity tolerance of the roof checker

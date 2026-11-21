@@ -35,15 +35,16 @@ EXPECTED = os.path.join(FIX, "munich_roofs_expected.json")
 COUNTEREXAMPLES = os.path.join(FIX, "roof_counterexamples.osm")
 AREA_ARGS = (48.1395, 11.5764, 400.0, 400.0)
 BASELINE = 1            # buildings v0.3.0 builds as tagged (D61: measured on the 67 below)
-COUNTED = 33            # S4-ROOF-NAMED: 29 + the 4 near-rectangular gables built planar-exact (floor stays 29, D95/D105)
-GABLED_COUNTED = 21     # of the 52 eligible gabled ways: 17 skeleton + 4 near-rectangles built planar-exact ...
-GABLED_FALLBACK_HIPPED = 30   # ... these fall back to a named hipped roof
+COUNTED = 45            # 29 + 4 near-rectangular gables built planar-exact (S4-ROOF-NAMED) + 12 vertical cuts (S4-ROOF-ENDS); D105 aim
+GABLED_COUNTED = 33     # of the 52 eligible gabled ways: 17 skeleton + 4 near-rectangles + 12 vertical cuts ...
+GABLED_FALLBACK_HIPPED = 18   # ... these fall back to a named hipped roof
 TOTAL = 67
 # The 11 eligible hipped footprints (three have roof:levels=0, D77); one of them is a near-rectangle (analytic path),
 # the others are built from the straight skeleton.
 HIPPED_BUILT = {"osm:way/283850482", "osm:way/351239741", "osm:way/80965521", "osm:way/80965569",
                   "osm:way/80965603", "osm:way/80965619", "osm:way/80965653", "osm:way/85765760",
                   "osm:way/242367322", "osm:way/79401262", "osm:way/96815240"}
+CONCAVE_PYRAMID = "osm:way/283850484"   # its skeleton has a ridge of 8 nodes: named flat fallback
 SKELETON_BUILT = HIPPED_BUILT - {"osm:way/242367322"}
 # v0.3.0 froze roof_h_m = 0 for the three roof:levels=0 ways; D77 now builds the default roof height (frozen JSON untouched)
 D77_HEIGHTS = {"osm:way/242367322": 1.9559, "osm:way/79401262": 6.0, "osm:way/96815240": 6.0,
@@ -829,8 +830,12 @@ class MunichRoofSnapshotTests(unittest.TestCase):
         _, _, exp, results = _Built.get()
         for i, (_, o) in results.items():
             e = exp["buildings"][i]
+            if i == CONCAVE_PYRAMID:
+                self.assertTrue(o.provenance["roof_shape"].startswith(
+                    "fallback:flat (pyramidal roof on concave footprint: the straight skeleton has a ridge"), i)
+                continue
             if e["class"] == "eligible" and (e["tagged"] == "hipped" or "roof_construction" in o.provenance):
-                continue  # the skeleton changes these outcomes on purpose (test_hipped_..., test_gabled_...)
+                            continue  # the skeleton changes these outcomes on purpose (test_hipped_..., test_gabled_...)
             self.assertEqual(o.provenance["roof_shape_built"], e["built_shape"], i)
             self.assertEqual(o.provenance.get("roof_shape", "tagged"), e["roof_shape_provenance"], i)
             if e["built_shape"] == e["tagged"]:
@@ -1016,6 +1021,77 @@ class RoofCounterexampleTests(unittest.TestCase):
         prov = self.objects["osm:way/9005"].provenance
         self.assertNotEqual(prov["roof_shape_built"], "gabled")
         self.assertIn("fallback", prov["roof_shape"])
+
+
+class VerticalCutTests(unittest.TestCase):
+    """S4-ROOF-ENDS: gable ends cut by a vertical wall (D82, D95, D105), judged by the unchanged checker."""
+
+    house = HippedSignatureTests.house
+    skeleton_house = HippedSignatureTests.skeleton_house
+    judge = HippedSignatureTests.judge
+    EAVE, RISE = HippedSignatureTests.EAVE, HippedSignatureTests.RISE
+
+    CHAMFERED = [(2, -6), (2, -4.5), (5, 7.5), (-3, 8), (-6, -5)]  # plain cut: ridge meets the end outside it
+    SLIVER = [(6, -8), (7, -0.5), (5, 3), (-3.5, 5), (-6, 5.5), (-8.5, -5)]  # plain cut: sliver end
+    HEXAGON = [(0, 0), (14, 0), (20, 5), (14, 10), (0, 10)]
+    TRIANGLE = [(0, 0), (10, 0), (5, 8)]
+    L = [(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)]
+
+    def plan(self, shape, ring, *args):
+        prov = {}
+        return roofs.plan_roof(shape, [tuple(map(float, p)) for p in ring], [], prov, *args), prov
+
+    def assert_counted(self, ring, *args):
+        plan, prov = self.plan("gabled", ring, *args)
+        self.assertEqual(plan.shape_built, "gabled")
+        self.assertGreaterEqual(len(plan.ends), 2)
+        counted, fails, sig = self.judge("gabled", self.skeleton_house(ring, "gabled", args=args))
+        self.assertTrue(counted, (fails, sig))
+        return plan, prov
+
+    def assert_named_hip(self, ring, *args):
+        plan, prov = self.plan("gabled", ring, *args)
+        self.assertEqual(plan.shape_built, "hipped")
+        self.assertRegex(prov["roof_shape"], r"^fallback:hipped \(gable end not representable: .+; vertical cut: .+\)$")
+        return prov
+
+    def test_chamfered_end_is_cut_by_a_vertical_wall(self):
+        plan, prov = self.assert_counted(self.CHAMFERED)
+        self.assertEqual(prov["roof_shape"], "measured:osm roof:shape")
+
+    def test_sliver_end_falls_back_with_a_named_reason(self):
+        prov = self.assert_named_hip(self.SLIVER)
+        self.assertIn("sliver", prov["roof_shape"])
+
+    def test_mixed_ends_keep_a_hip_where_the_wall_is_not_representable(self):
+        plan, _ = self.assert_counted(self.CHAMFERED)
+        walls = len(plan.ends)
+        self.assertLess(walls, len(self.CHAMFERED))
+
+    def test_direction_tag_picks_the_ridge_and_records_it(self):
+        plan, prov = self.assert_counted(self.CHAMFERED, None, 90)
+        self.assertTrue(prov["roof_orientation"].startswith("measured:osm roof:direction=90"))
+        self.assertIn("roof_ridge_bearing", prov)
+
+    def test_wrong_orientation_falls_back_with_a_named_reason(self):
+        self.assert_named_hip(self.CHAMFERED, "across")
+        self.assert_named_hip(self.SLIVER, "across")
+
+    def test_untrimmable_ends_fall_back_with_a_named_reason(self):
+        self.assert_named_hip(self.HEXAGON)
+
+    def test_triangle_has_no_gable_and_names_it(self):
+        prov = self.assert_named_hip(self.TRIANGLE)
+        self.assertIn("adjacent", prov["roof_shape"])
+
+    def test_concave_pyramid_is_a_named_flat_fallback(self):
+        plan, prov = self.plan("pyramidal", self.L)
+        self.assertEqual(plan.shape_built, "flat")
+        self.assertRegex(prov["roof_shape"], r"^fallback:flat \(pyramidal roof on concave footprint: .+\)$")
+
+    def test_convex_pyramid_is_unchanged(self):
+        plan, _ = self.plan("pyramidal", self.TRIANGLE)
+        self.assertEqual(plan.shape_built, "pyramidal")
 
 
 if __name__ == "__main__" and len(sys.argv) < 2:

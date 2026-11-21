@@ -186,5 +186,31 @@ class TestDegenerateInput(unittest.TestCase):
                 straight_skeleton(RECT)
 
 
+class TestVerticalEdges(unittest.TestCase):
+    """Zero-speed (vertical wall) edges: the front never moves, so the faces beside it meet over the wall."""
+
+    CHAMFERED = [(2, -6), (2, -4.5), (5, 7.5), (-3, 8), (-6, -5)]
+
+    def test_no_vertical_edges_is_the_plain_skeleton(self):
+        a = straight_skeleton(RECT)
+        b = straight_skeleton(RECT, frozenset())
+        self.assertEqual(a.nodes, b.nodes)
+
+    def test_rectangle_ends_as_walls_give_a_single_ridge(self):
+        ring = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0)]
+        walls = frozenset({frozenset({ring[1], ring[2]}), frozenset({ring[3], ring[0]})})
+        sk = straight_skeleton(ring, walls)
+        tops = {round(t, 6) for _x, _y, t in sk.nodes if t > 1e-6}
+        self.assertEqual(tops, {3.0})
+        self.assertEqual(len(sk.faces), 4)
+
+    def test_vertical_cut_respects_the_event_cap(self):
+        ring = [tuple(map(float, p)) for p in self.CHAMFERED]
+        walls = frozenset({frozenset({ring[1], ring[2]}), frozenset({ring[4], ring[0]})})
+        with mock.patch.object(skeleton, "MAX_SKELETON_EVENTS", 1):
+            with self.assertRaises(LimitError):
+                straight_skeleton(ring, walls)
+
+
 if __name__ == "__main__":
     unittest.main()
