@@ -23,7 +23,7 @@ from ..core.package import validate_package
 from ..core.pipeline import Settings, generate_plan
 from . import export as mb_export
 from .scene_build import build_scene, write_report_text
-from .sources import (SettingsInputError, format_report, migrate_legacy_centre, needs_network, parse_degrees,
+from .sources import (SettingsInputError, format_report, migrate_legacy_bbox, migrate_legacy_centre, needs_network, parse_degrees,
                       redact_diagnostics, reject_credentials, settings_kwargs, UiValues)
 
 if TYPE_CHECKING:
@@ -67,7 +67,8 @@ def make_settings(s: MB_Settings) -> Settings:
 
 def make_area(s: MB_Settings) -> Area:
     if s.area_mode == "BBOX":
-        return Area.from_bbox(*(parse_degrees(getattr(s, f"bbox_{edge}"), edge.capitalize())
+        migrate_legacy_bbox(s)
+        return Area.from_bbox(*(parse_degrees(getattr(s, f"bbox_{edge}_deg"), edge.capitalize())
                                for edge in ("south", "west", "north", "east")))
     migrate_legacy_centre(s)
     return Area(parse_degrees(s.centre_lat, "Latitude"), parse_degrees(s.centre_lon, "Longitude"), s.width, s.height)

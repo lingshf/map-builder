@@ -6,7 +6,7 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
-* Blender: the bounding-box edges (South/West/North/East) are text fields read in double precision; the old float32 fields moved an edge by up to 0.24 m (S3-F6). A bbox saved by an earlier version must be typed again.
+* Blender: the bounding-box edges (South/West/North/East) are text fields read in double precision; the old float32 fields moved an edge by up to 0.24 m (S3-F6). A bbox saved by an earlier version migrates automatically, with the precision it was stored at.
 * Blender export: an unmodified default material is named "MB Default"; any parameter variant keeps its digest suffix (S3-F11).
 * Licence confirmed (D13, option B): Blender add-on code (`map_builder/blender/`) is GPL-3.0-or-later;
   everything else we wrote is Apache-2.0. Added `LICENSE`, `LICENSE-GPL-3.0.txt`, `NOTICE` and SPDX

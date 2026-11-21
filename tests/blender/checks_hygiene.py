@@ -27,13 +27,9 @@ BBOXES = (("munich", 48.13701, 11.57391, 48.14199, 11.57889),
 
 
 def set_bbox(s, values):
-    """Type the bbox the way the panel does (text, full precision); float properties of older versions take floats."""
-    for prop, v in zip(("bbox_south", "bbox_west", "bbox_north", "bbox_east"), values):
-        try:
-            setattr(s, prop, repr(v))
-        except TypeError:
-            setattr(s, prop, v)
-
+    """Type the bbox the way the panel does: text, full precision."""
+    for edge, v in zip(("south", "west", "north", "east"), values):
+        setattr(s, f"bbox_{edge}_deg", repr(v))
 
 def edge_errors_m(values):
     """Per-edge (south, west, north, east) distance in metres between the Blender-derived area and the area built
@@ -57,6 +53,26 @@ def check_bbox():
         check(max(errs) <= MAX_EDGE_ERROR_M < SMALLEST_FEATURE_M,
               f"hygiene: {name} bbox edges within {MAX_EDGE_ERROR_M} m of the double-precision area "
               f"(worst {max(errs):.4f} m)")
+
+
+def check_bbox_migration():
+    """A bbox stored by an older version (float32 properties) fills the empty text fields once, as stored."""
+    from map_builder.blender.operators import make_area
+    from map_builder.blender.sources import migrate_legacy_bbox
+
+    s = bpy.context.scene.map_builder
+    for edge in ("south", "west", "north", "east"):
+        setattr(s, f"bbox_{edge}_deg", "")
+    s.bbox_migrated = False
+    s.area_mode = "BBOX"
+    s.bbox_south, s.bbox_west, s.bbox_north, s.bbox_east = 40.434, -80.019, 40.441, -80.013
+    got = make_area(s).geographic_bbox()      # make_area migrates on first access
+    stored = [float(getattr(s, f"bbox_{e}")) for e in ("south", "west", "north", "east")]
+    check([s.bbox_south_deg, s.bbox_east_deg] == [repr(stored[0]), repr(stored[3])] and s.bbox_migrated,
+          f"hygiene: legacy float bbox migrates into the text fields as stored ({s.bbox_south_deg!r})")
+    check(abs(got[0] - 40.434) < 1e-3 and abs(got[3] + 80.013) < 1e-3, "hygiene: migrated bbox builds the area")
+    s.bbox_south_deg = ""
+    check(not migrate_legacy_bbox(s) and s.bbox_south_deg == "", "hygiene: a cleared bbox field is not revived")
 
 
 def check_default_material_name(out_dir):
@@ -91,4 +107,5 @@ def check_default_material_name(out_dir):
 
 def run(out_dir):
     check_bbox()
+    check_bbox_migration()
     check_default_material_name(out_dir)
