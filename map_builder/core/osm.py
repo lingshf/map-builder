@@ -563,6 +563,12 @@ class Classified:
         # The reason the DSM mask candidates are incomplete (e.g. the wider mask request failed), set by the
         # caller: the correction is then skipped with a warning (generate.build_plan).
         self.mask_unavailable: str | None = None
+        # Read by core/water.py only (D113, D118); neither list changes any other output or report.
+        # ``riverbanks``: closed waterway=riverbank ways (full polygons, not clipped). ``waterways``:
+        # waterway=river|canal polylines clipped to the area in way direction (downstream), with the OSM node id
+        # of every vertex (None where clipped).
+        self.riverbanks: list[Feature] = []
+        self.waterways: list[Feature] = []
 
 
 ROAD_EXCLUDE = {"proposed", "construction", "abandoned", "razed", "platform", "elevator", "corridor"}
@@ -1185,6 +1191,20 @@ def _classify(data: OsmData, area: Area, max_features: int, max_part_pair_checks
                                         for k, part in enumerate(bparts)))
             if "highway" not in tags:
                 lkind = "railway" if "railway" in tags else "waterway"
+                if lkind == "waterway" and _is_riverbank(tags) and closed and tags.get("area") != "no":
+                    if wid not in rel_outer_ways.get("water", ()):
+                        n_invalid = len(out.invalid)
+                        for p in make_polygons(fid, [pts], []):
+                            out.riverbanks.append(Feature(fid, "riverbank", tags, p))
+                        del out.invalid[n_invalid:]   # the report is unchanged: an unusable bank is just not used
+                wparts: list[list[Pt]] = []
+                wids: list[list[int | None]] = []
+                if lkind == "waterway" and tags.get("waterway") in ("river", "canal"):
+                    wparts = _clip_polyline(pts, area, nids=nids, ids_out=wids) or []
+                    for k, part in enumerate(wparts):
+                        wf = Feature(fid if len(wparts) == 1 else f"{fid}#{k}", "waterway", tags, part)
+                        wf.node_ids = wids[k]
+                        out.waterways.append(wf)
                 if _clip_polyline(pts, area):
                     out.unsupported.append({"id": fid, "reason": f"{lkind} lines are not generated in v1",
                                             "tags": _subset(tags)})
@@ -1630,6 +1650,12 @@ def _resolve_building_parts(out: Classified, max_pair_checks: int = MAX_PART_PAI
             out.outline_for[parts[pi].id] = [o.id]
     out.buildings = [b for b in out.buildings if id(b) not in replaced_ids
                      and not (b.kind == "building_part" and b.id in rejected_ids)]
+
+
+def _is_riverbank(tags: Tags) -> bool:
+    """A waterway=riverbank way. Recognised only by the water-body assembly (ClassifiedOSM.riverbanks, D118);
+    never by ``_is_area_tagged``, ``area_class`` or ``_area_family``."""
+    return tags.get("waterway") == "riverbank"
 
 
 def _area_family(tags: Tags) -> str | None:
