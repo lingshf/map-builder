@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from types import ModuleType
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .errors import LimitError
 from .structures import (Color, Frame, Probe, Region, RoadTri, Segment, Tri, Vec2, Vec3, polyline_z_profile,
@@ -464,8 +464,16 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
     dirs = _directions(xy)
     z_a, z_b = samples[0][3] + g.ROAD_LIFT_M, samples[-1][3] + g.ROAD_LIFT_M
     line = [z_a + (z_b - z_a) * si / total for si in s]
-    ground = [_ground_max(tz, x, y, d, half) + g.ROAD_LIFT_M for (x, y), d in zip(xy, dirs)]
+    ground = [_ground_max(tz, x, y, d, half) for (x, y), d in zip(xy, dirs)]
+    dry_ground = list(ground)
+    if ctx.water is not None:   # decks never drop into water: the highest surface a drone can hit (D116)
+        for k, ((x, y), d) in enumerate(zip(xy, dirs)):
+            wm = ctx.water.wmax_segment((x + d[1] * half, y - d[0] * half), (x - d[1] * half, y + d[0] * half))
+            if wm is not None:
+                ground[k] = max(ground[k], wm)
+    ground = [gr + g.ROAD_LIFT_M for gr in ground]
     lower = [gr + clearance + DECK_THICKNESS_M for gr in ground]
+    dry_lower = [gr + g.ROAD_LIFT_M + clearance + DECK_THICKNESS_M for gr in dry_ground]
 
     # the ends sink into the abutting ground/road (not past the terrain edge)
     path_xy = list(xy)
@@ -529,7 +537,9 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
         for m, w in zip(nodes, wd):
             if w > 1e-9:
                 lower[node(m)] = max(lower[node(m)], need)
+                dry_lower[node(m)] = max(dry_lower[node(m)], need)
     top = deck_profile(s, lower, z_a, z_b)
+    water_raise = max(t - d for t, d in zip(top, deck_profile(s, dry_lower, z_a, z_b))) if ctx.water is not None else 0.0
     max_raise = max(t - ln for t, ln in zip(top, line))
     grade = max(abs(top[i + 1] - top[i]) / (s[i + 1] - s[i]) for i in range(len(s) - 1))
 
@@ -564,7 +574,7 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
                      for v, (x, y, _) in enumerate(mesh.vertices)]
     road_color = (0.12, 0.12, 0.12) if f.tags.get("highway") not in g.FOOT else (0.35, 0.32, 0.28)
     _assign_materials(mesh, road_color, np_, surface)
-    under = _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, (lo, hi))
+    under = _under_probe(f, xy, s, dirs, top, half, tz, g, z_off, (lo, hi), ctx.water)
     n_piers = 0
     if piers_max:
         piers = _piers(xy, s, dirs, top, deck_w, tz, g, ctx, f, under, road_boxes)
@@ -590,6 +600,9 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
             "length_m": round(total, 2)}
     if checked is not None:
         prov["clearance_m"] = round(checked, 2)
+    if water_raise > 1e-3:   # raised above the dry baseline only because of the water surface (D116); listed in the report
+        prov["water_raise_m"] = round(water_raise, 3)
+        plan.report.setdefault("water_decks_raised", []).append({"id": f.id, "raised_m": round(water_raise, 3)})
     for key, nid in (("start", deck_nodes[0]), ("end", deck_nodes[1])):
         joined = next((r for r in roads.get(nid, ()) if r != f.id), None) if nid is not None else None
         prov[f"{key}_joint"] = f"joins at-grade road {joined}" if joined else "free end: terrain + road lift"
@@ -694,13 +707,20 @@ def _piers(xy: Sequence[Vec2], s: Sequence[float], dirs: Sequence[Vec2], top: Se
                     v = -b + 2 * b * vi / (int(2 * b / 0.5) + 1)
                     pts.append((cx + d[0] * u + nx * v, cy + d[1] * u + ny * v))
             ground = [tz(*p) for p in pts]
-            if min(z_lo, z_hi) - max(ground) - g.ROAD_LIFT_M <= PIER_MIN_CLEARANCE_M:
+            top_ground = max(ground)
+            water = ctx.water
+            if water is not None:
+                wm = water.wmax_polygon(corners)
+                if wm is not None:
+                    top_ground = max(top_ground, wm)
+            if min(z_lo, z_hi) - top_ground - g.ROAD_LIFT_M <= PIER_MIN_CLEARANCE_M:
                 continue
             if probe and any(_seg_dist(p, *probe) < PIER_PROBE_GAP_M for p in pts):
                 continue
             if near and any(_on_road(p[0], p[1], near) for p in pts):
                 continue
-            out.append((corners, (z_lo, z_hi), min(ground) - PIER_SINK_M))
+            base = water.carved_min_polygon(corners) if water is not None else min(ground)
+            out.append((corners, (z_lo, z_hi), base - PIER_SINK_M))
             last = t
             break
     return out
@@ -729,16 +749,47 @@ def _approach_runs(top: Sequence[float], ground: Sequence[float], clearance: flo
     return (ok[0], ok[-1]) if ok else (0, len(top) - 1)
 
 
+def capsule_polygon(a: Vec2, b: Vec2, r: float) -> list[Vec2]:
+    """Convex CCW polygon containing the capsule of radius ``r`` around segment a-b: each round end is a
+    circumscribed 8-segment half-polygon."""
+    ux, uy = _unit(b[0] - a[0], b[1] - a[1])
+    nx, ny = -uy, ux
+    rr = r / math.cos(math.pi / 16.0)
+    out: list[Vec2] = []
+    for c, sgn in ((b, 1.0), (a, -1.0)):
+        for k in range(9):
+            phi = -math.pi / 2.0 + k * math.pi / 8.0
+            out.append((c[0] + sgn * (ux * math.cos(phi) - nx * math.sin(phi)) * rr,
+                        c[1] + sgn * (uy * math.cos(phi) - ny * math.sin(phi)) * rr))
+    return out[::-1]
+
+
+def _wet_max(water: Any, p: Vec2, d: Vec2, reach: float, ground: float) -> float:
+    """``ground`` (the pre-carve section maximum) raised to Gmax(F) and Wmax(F) when the probe capsule F touches
+    water; unchanged (bit for bit) when it does not (D118)."""
+    nx, ny = -d[1], d[0]
+    cap = capsule_polygon((p[0] - nx * reach, p[1] - ny * reach), (p[0] + nx * reach, p[1] + ny * reach),
+                          PROBE_RADIUS_M)
+    if not water.touches_water(cap):
+        return ground
+    best = max(ground, water.ground_max_polygon(cap))
+    wm = water.wmax_polygon(cap)
+    return best if wm is None else max(best, wm)
+
+
 def _under_probe(f: Feature, xy: Sequence[Vec2], s: Sequence[float], dirs: Sequence[Vec2], top: Sequence[float],
                  half: float, tz: Callable[[float, float], float], g: ModuleType, z_off: float,
-                 span: tuple[int, int] | None = None) -> Probe | None:
+                 span: tuple[int, int] | None = None, water: Any = None) -> Probe | None:
     """The straight segment across the span at the interior sample with the most clearance under the deck
     (None below ``UNDER_PROBE_MIN_CLEARANCE_M``), level at the highest ground along it + 1.5 m."""
     reach = half + 3.0
     best: tuple[tuple[float, float], int, float, float] | None = None
     lo, hi = span or (1, len(xy) - 2)
     for i in range(max(lo, 1), min(hi, len(xy) - 2) + 1):
-        g_max = _ground_max(tz, xy[i][0], xy[i][1], dirs[i], reach, SEGMENT_SAMPLE_M) + g.ROAD_LIFT_M
+        g_max = _ground_max(tz, xy[i][0], xy[i][1], dirs[i], reach, SEGMENT_SAMPLE_M)
+        if water is not None:
+            g_max = _wet_max(water, xy[i], dirs[i], reach, g_max)
+        g_max += g.ROAD_LIFT_M
         clear = top[i] - DECK_THICKNESS_M - g_max
         # the most clearance; among equals (a raised plateau) the sample nearest the middle of the span
         key = (round(clear, 4), -abs(s[i] - s[-1] / 2.0))

@@ -33,12 +33,12 @@ def valley_height(x, y):
 
 
 def make_scene(ways, height_fn, width=W, height=H, opts=None, trees=(), joins=()):
-    """Plan from hand-placed ways ``[(points, tags)]`` (and mapped trees ``[(x, y)]``) over a synthetic terrain;
+    """Plan from hand-placed ways ``[(points, tags[, closed])]`` (and mapped trees ``[(x, y)]``) over a synthetic terrain;
     returns (plan, ids, grid) with the tree ids after the way ids. ``joins`` ``[(way, vertex, way, vertex)]`` make
     two ways share one OSM node."""
     area = Area(47.0, 8.0, width, height)
     b = OsmBuilder(area.frame)
-    ids = [f"osm:way/{b.way(pts, tags)}" for pts, tags in ways]
+    ids = [f"osm:way/{b.way(pts, tags, *closed)}" for pts, tags, *closed in ways]
     for wa, ia, wb, ib in joins:
         wmap = {f"osm:way/{w[0]}": k for k, w in enumerate(b.ways)}
         a, c = wmap[ids[wa]], wmap[ids[wb]]
