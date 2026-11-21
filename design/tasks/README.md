@@ -112,6 +112,14 @@ Pittsburgh Python and C# runs (D47).
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
 
+## Sprint 5 (v0.6.0, proposed)
+
+From the user's river request. Decisions D111–D116 are proposed in [../roadmap.md](../roadmap.md#sprint-5-decisions-proposed-water-surfaces).
+
+| id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
+|---|---|---|---|---|---|---|
+| [S5-WATER-SURFACE](S5-WATER-SURFACE.md) | S5 (or v0.5.0, D116) | dev | S4-COL-DEGEN (shared `blender/bake.py`/`export.py`); REL-v0.5.0 unless pulled into v0.5.0 | `core/water.py` (new), `core/generate.py` (terrain/landcover section, coverage), `core/bridges.py` (ground sampler, piers), probe placement, `blender/scene_build.py`/`bake.py`/`export.py` (water objects), `tests/test_water.py` (new), `tests/test_bridges.py`, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION, `docs/demo/` | proposed | |
+
 ## Dependency order and parallel waves (max 3 devs)
 
 1. Wave 1 (now): **S1-DEMOKIT**; after #11 merges: **REL-v0.1.0** (alone), then **S1-SEAMS** ∥
@@ -128,6 +136,7 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
 6. Wave 6 (sprint 4, D93): lanes **S4-ROOF-SPIKE** → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** ∥ **S4-PERF-PKG**
    → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** ∥ **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** →
    **S4-FORMAT-POLICY** (hard edge after TEST-HYGIENE) → **S4-EXT-READY** → **S4-REVIEW** → **REL-v0.5.0** → close check → retro → tag 0.5.0 (D104)
+   7. Wave 7 (sprint 5, proposed D116): **S5-WATER-SURFACE** (alone on `core/generate.py` terrain and `core/bridges.py`; holds the sample slot)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks
 (roof section, building loop, bridge hook, tunnel hook). The pairs listed as parallel above

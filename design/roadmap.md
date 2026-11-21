@@ -471,6 +471,19 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D104 | Sprint 4 close order follows D48 and D63: S4-REVIEW on main first; its findings define the remaining v0.5.0 scope; then REL-v0.5.0 (version 0.5.0 via the D50 guard), the close check, the retro and the tag. | De (proposed; C confirms at gate) | proposed |
 | D110 | Amends D101: a minor version adds **no package members** (no new path or role), because both the current and the frozen v0.3.0 C# readers reject an unlisted-role member ("unknown package member"), while the Python validator only warns. The positive fixture (`tests/test_format_policy.py`) pins this. | C (coordinator) | decided |
 
+### Sprint 5 decisions (proposed: water surfaces)
+
+From the user's river request. The spec is [tasks/S5-WATER-SURFACE.md](tasks/S5-WATER-SURFACE.md). The numbers are proposed, and the coordinator may renumber them if D111 and later are already taken.
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D111 | Water bodies are the validated `area_class == "water"` polygons (holes kept, clipped to the area). Each one becomes its own flat or profiled surface mesh (`water:<osm-id>`, class `water`). Linear `waterway=*` ways are only a centreline hint. | De (proposed; C confirms at gate) | proposed |
+| D112 | Water level = p20 of corrected-DEM samples in a 0–2-cell shore band outside the polygon (buildings, bridges and other water excluded, clipped edges excluded). Rivers longer than 300 m use 100 m stations with a downstream non-increasing (isotonic) profile, slope ≤ 1 %. AC0 may move the percentile within p10–p30. The tolerance is exact to 1 mm; the sanity window is shore-band [p5, p50]. | De (proposed; C confirms at gate) | proposed |
+| D113 | The terrain bed is carved to ≤ L − 1.5 m inside and in adjacent cells, with a 1-cell lowering-only bank blend; buildings and abutments are excluded. Invariant on emitted triangles (D39): no terrain is above the water inside a water polygon. | De (proposed; C confirms at gate) | proposed |
+| D114 | Bridge clearance (D22) is measured over max(terrain, water level), so decks do not drop; piers sink below the carved bed; under-bridge probes start at L + r; existing probes stay passable (D98 method). | De (proposed; C confirms at gate) | proposed |
+| D115 | Water goes to `.mbcol` as the existing class 5 `water` surface. There is no format change (D101/D110). `.mbhf` stays terrain-only (it shows the bed), and the consumer docs say to use the `.mbcol` query over water. | De (proposed; C confirms at gate) | proposed |
+| D116 | Sprint fit: S5-WATER-SURFACE is the first sprint-5 (v0.6.0) item, after S4-COL-DEGEN and REL-v0.5.0. Pulling it into v0.5.0, before S4-REVIEW, is the user's option. | De (proposed; U/C decide) | proposed |
+
 ## Decisions that need the user
 
 1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
@@ -478,6 +491,8 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
    and the website URL shown on the platform. Dev only prepares the checklist.
 3. **`.mbmap` format-stability policy (D101)** and **v1.0 exit criteria (D102).** Drafts here; the user
    confirms or edits them before v1.0 is planned.
+4. **Water surfaces sprint fit (D116).** Ship better rivers in v0.6.0 (recommended), or pull the work into
+   v0.5.0 and delay that tag.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.
