@@ -49,10 +49,21 @@ jobs:
       - name: Validate extension
         run: blender --command extension validate map_builder
 
-      - name: Build extension zip
+      - name: Build extension zip (mtimes normalised to the commit time, D100)
+        run: bash tools/build_extension.sh . dist
+
+      - name: Reproducibility check (dry run only) - a second build from a fresh clone is byte-identical
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          mkdir -p dist
-          blender --command extension build --source-dir map_builder --output-dir dist
+          git init --quiet "$RUNNER_TEMP/fresh"
+          git -C "$RUNNER_TEMP/fresh" fetch --quiet --depth 1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git -C "$RUNNER_TEMP/fresh" checkout --quiet FETCH_HEAD
+          bash tools/build_extension.sh "$RUNNER_TEMP/fresh" "$RUNNER_TEMP/dist2"
+          a=$(sha256sum dist/*.zip | cut -d' ' -f1)
+          b=$(sha256sum "$RUNNER_TEMP"/dist2/*.zip | cut -d' ' -f1)
+          echo "build 1 SHA-256: $a"
+          echo "build 2 SHA-256: $b"
+          [ "$a" = "$b" ] || { echo "::error::extension zip is not reproducible"; exit 1; }
 
       - name: The extension zip ships the texture set (S3-TEX-ASSETS AC4) and the licence texts
         run: |
@@ -62,7 +73,7 @@ jobs:
             echo "::error::expected exactly one extension zip in dist/, found ${#zips[@]}: ${zips[*]}"
             exit 1
           fi
-          MB_EXTENSION_ZIP="${zips[0]}" python3 -m unittest tests.test_textures.ExtensionZipTest -v
+          MB_EXTENSION_ZIP="${zips[0]}" python3 -m unittest tests.test_textures.ExtensionZipTest tests.test_manifest -v
 
       - name: Check manifest version matches the tag
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
