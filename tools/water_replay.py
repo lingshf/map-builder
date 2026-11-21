@@ -7,14 +7,17 @@
 
 (a) Fixed-query replay. The queries are frozen on BASE (its D98 ray and capsule grid, the centroid rays of its
     degenerate triangles, its passage probe paths) plus one downward ray per water object of HEAD at the pole of
-    inaccessibility of its triangles. They run on both packages in Python and in the C# reader (a ray is a
-    radius-0 capsule along the ray segment there). Python and C# must agree on every query; every difference
-    between BASE and HEAD must fall in a classified change set: new water hit, bed moved, deck raised, pier
-    extended, building wall extended. Anything else fails.
-(b) Regenerated-passage replay. Every BASE passage id must exist on HEAD unless it is listed with --allow-drop and
-    explained by HEAD's own report.json; a listed drop that is present fails; new and newly blocked ids must be
-    listed too. Each surviving HEAD id is validated passable on its regenerated path, read from HEAD's manifest,
-    in Python and in C#.
+    inaccessibility of its triangles. Rays are compared by their nearest hit (hit/miss, class, object and distance
+    to 1 mm) on both packages, in Python (query.ray_cast) and in the C# reader (``--ray-work``); capsules by their
+    hit sets (``--probe-work``). Python and C# must agree on every query. Every BASE/HEAD difference is classified
+    individually and printed (``--show N``, all in ``--diffs FILE``); each label must match the object, class and
+    direction actually hit: new water hit (a water object new on HEAD over a terrain or missed ray), bed moved
+    (terrain on both sides within the padded water box, or carved below a deck), deck raised (same bridge, reported
+    in water_decks_raised, lowered by at most the reported rise). Anything else is ``unlisted`` and fails.
+(b) Regenerated-passage replay. The sets are compared exactly: every dropped, new or newly blocked id must be
+    listed, and every listed id must really be one. Each listed reason must be non-empty and quote the generator's
+    own report row (``reason`` or ``blocker``, a blocker being an object of HEAD). Each surviving HEAD id is
+    validated passable on its regenerated path, read from HEAD's manifest, in Python and in C#.
 
 Both files are read in full (zip integrity, entry sizes) before anything is compared. Exit 0 only when every group
 ran and nothing failed; 1 on any failure; 2 when C# did not run (``--no-csharp`` or no reader), never 0.
@@ -23,9 +26,11 @@ ran and nothing failed; 1 on any failure; 2 when C# did not run (``--no-csharp``
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -36,9 +41,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 
-from col_degen_replay import DOWN, T_TOL, build_probes, csharp, names, py_ray  # noqa: E402
+from col_degen_replay import DOWN, build_probes, csharp, names  # noqa: E402
 from map_builder.core.collision import Collision, read_collision  # noqa: E402
-from map_builder.core.query import capsule_hits  # noqa: E402
+from map_builder.core.query import capsule_hits, ray_cast  # noqa: E402
 
 
 class Package:
@@ -61,6 +66,15 @@ class Package:
         self.report = json.loads(data["report.json"])
         self.col: Collision = read_collision(self.mbcol)
         self.probes: list[dict[str, Any]] = list(self.manifest.get("passage_probes") or [])
+        self.names = {e["name"] for e in self.col.objects}
+        self.mbids = {str(o.get("mb_id")) for o in self.manifest.get("objects") or []}
+        name_of = {str(o.get("mb_id")): o.get("name") for o in self.manifest.get("objects") or []
+                   if o.get("class") == "bridge"}
+        self.raised: dict[str, float] = {}
+        for r in self.report.get("water_decks_raised") or []:
+            nm = name_of.get(str(r.get("id")))
+            if nm in self.names and isinstance(r.get("raised_m"), (int, float)):
+                self.raised[nm] = float(r["raised_m"])
 
 
 def pole(tris: list[tuple[Any, Any, Any]]) -> tuple[float, float]:
@@ -94,31 +108,110 @@ def water_rays(head: Package, top: float) -> list[tuple[float, float, float]]:
     return out
 
 
-def ray_label(b: tuple[float, str] | None, h: tuple[float, str] | None) -> str | None:
-    """None when equivalent, else the change-set label, or ``unlisted``."""
-    if (b is None) == (h is None) and (b is None or (abs(b[0] - h[0]) <= T_TOL and b[1] == h[1])):  # type: ignore[index]
+DIST_TOL_M = 1e-3     # spec section 7(a): hit distances are compared to 1 mm
+BLEND_PAD_M = 65.0    # water bbox padding inside which the terrain bed may have moved (carve + blend, 2 cells)
+
+Hit = tuple[float, str, str]   # (distance, object name, class)
+
+
+class Context:
+    """What the HEAD package says about its own changes: the water objects new on HEAD (with their plan boxes) and
+    the decks it reports as raised (object name -> raised metres)."""
+
+    def __init__(self, base_names: set[str], head: Any) -> None:
+        self.new_water = {e["name"]: e["aabb"] for e in head.col.objects
+                          if e["class"] == "water" and e["name"] not in base_names}
+        self.raised = dict(head.raised)
+
+    def near_water(self, x: float, y: float) -> bool:
+        return any(b[0] - BLEND_PAD_M <= x <= b[3] + BLEND_PAD_M and b[1] - BLEND_PAD_M <= y <= b[4] + BLEND_PAD_M
+                   for b in self.new_water.values())
+
+
+def py_hit(col: Collision, o: tuple[float, float, float], dist: float) -> Hit | None:
+    h = ray_cast(col, o, DOWN, dist)
+    if h is None:
         return None
-    if h is not None and h[1] == "water" and (b is None or b[1] != "water"):
+    e = col.objects[h.object]
+    return (h.t, e["name"], e["class"])
+
+
+def csharp_rays(col_bytes: bytes, rays: list[tuple[float, float, float]], dist: float, work: str) -> list[Hit | None]:
+    """Nearest downward hits from the C# reader (``--ray-work``): (distance, object index as a string, class)."""
+    spec = importlib.util.spec_from_file_location("csharp_build", os.path.join(os.path.dirname(HERE), "tests",
+                                                                               "csharp_build.py"))
+    assert spec and spec.loader
+    cb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cb)
+    mbcol, pj = os.path.join(work, "r.mbcol"), os.path.join(work, "r.json")
+    with open(mbcol, "wb") as f:
+        f.write(col_bytes)
+    with open(pj, "w") as f:
+        json.dump([{"o": list(o), "dist": dist} for o in rays], f)
+    run = subprocess.run([*cb.reader_command(), "--ray-work", mbcol, pj], capture_output=True, text=True)
+    if run.returncode:
+        raise SystemExit(run.stdout + run.stderr)
+    out: list[Hit | None] = []
+    for line in run.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == "ray":
+            if parts[2] == "miss":
+                out.append(None)
+            else:
+                kv = dict(p.split("=", 1) for p in parts[2:])
+                out.append((float(kv["t"]), kv["object"], kv["class"]))
+    if len(out) != len(rays):
+        raise SystemExit(f"C# reader returned {len(out)} ray results for {len(rays)} rays")
+    return out
+
+
+def ray_disagreement(py_h: Hit | None, cs: Hit | None, col: Collision) -> str:
+    """Empty when the C# nearest hit equals the Python one in hit/miss, distance (1 mm), class and object. Two
+    coincident surfaces of one class (overlapping roads) tie within rounding, so their names may swap."""
+    if py_h is None and cs is None:
+        return ""
+    if py_h is None or cs is None:
+        return f"python {py_h}, C# {cs}"
+    cs_name = col.objects[int(cs[1])]["name"]
+    if abs(py_h[0] - cs[0]) > DIST_TOL_M or py_h[2] != cs[2] or (py_h[1] != cs_name and cs[2] != "road"):
+        return f"python {py_h}, C# {(cs[0], cs_name, cs[2])}"
+    return ""
+
+
+def ray_label(b: Hit | None, h: Hit | None, xy: tuple[float, float], ctx: Context) -> str | None:
+    """None when equivalent, else the change-set label of this ray, or ``unlisted``. A label is given only when
+    the hit object, its class and the direction of the change all match the label."""
+    if b is None and h is None:
+        return None
+    if b is not None and h is not None and b[1] == h[1] and b[2] == h[2] and abs(b[0] - h[0]) <= DIST_TOL_M:
+        return None
+    if h is not None and h[2] == "water" and h[1] in ctx.new_water and (b is None or b[2] == "terrain"):
         return "new water hit"
-    if b is not None and h is not None:
-        if b[1] == "terrain" and h[1] != "water" and h[0] > b[0]:
+    if (b is not None and h is not None and b[2] == "terrain" and h[2] == "bridge" and h[0] > b[0] + DIST_TOL_M
+            and ctx.near_water(*xy)):
+        return "bed moved"     # the carved terrain dropped below a deck that the old surface had covered
+    if b is not None and h is not None and b[1] == h[1]:
+        if b[2] == h[2] == "terrain" and h[0] > b[0] + DIST_TOL_M and ctx.near_water(*xy):
             return "bed moved"
-        if b[1] == h[1] == "bridge" and h[0] < b[0]:
+        raise_m = ctx.raised.get(h[1], 0.0)
+        if b[2] == h[2] == "bridge" and raise_m > 0 and 0 < b[0] - h[0] <= raise_m + DIST_TOL_M:
             return "deck raised"
     return "unlisted"
 
 
-def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]]) -> list[str]:
+def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]], xy: tuple[float, float],
+                   ctx: Context) -> list[str]:
+    """One label per object that entered or left the capsule's hit set. Only a water object new on HEAD may
+    enter; only terrain near a new water body (bed moved) or a bridge HEAD reports as raised may leave. Piers
+    and building walls that extend keep their object names, so they do not change a hit set."""
     out = []
-    for cls_, added in [(c, True) for _, c in set(h) - set(b)] + [(c, False) for _, c in set(b) - set(h)]:
-        if cls_ == "water" and added:
-            out.append("new water hit")
-        elif cls_ == "terrain":
+    for name, cls_ in sorted(set(h) - set(b)):
+        out.append("new water hit" if cls_ == "water" and name in ctx.new_water else "unlisted")
+    for name, cls_ in sorted(set(b) - set(h)):
+        if cls_ == "terrain" and ctx.near_water(*xy):
             out.append("bed moved")
-        elif cls_ == "bridge":
-            out.append("pier extended" if added else "deck raised")
-        elif cls_ == "building" and added:
-            out.append("building wall extended")
+        elif cls_ == "bridge" and ctx.raised.get(name, 0.0) > 0:
+            out.append("deck raised")
         else:
             out.append("unlisted")
     return out
@@ -134,32 +227,50 @@ def pairs(spec: list[str]) -> dict[str, str]:
     return out
 
 
-def passage_check(base: Package, head: Package, drop: dict[str, str], new: dict[str, str],
+def d21_backing(row: dict[str, Any] | None, head: Any) -> tuple[str | None, str]:
+    """The generator's own D21 text of a report row (``reason`` of a dropped row, ``blocker`` of a blocked row) and
+    a problem string. A blocker must name an object of HEAD (collision name or mb_id); an empty row has no backing."""
+    if not row:
+        return None, "HEAD's report has no row for it"
+    text = row.get("reason") or row.get("blocker")
+    if not isinstance(text, str) or not text.strip():
+        return None, "HEAD's report row has no non-empty reason or blocker"
+    if "blocker" in row and text not in head.names and text not in head.mbids:
+        return None, f"blocker {text!r} is not an object of HEAD"
+    return text, ""
+
+
+def passage_check(base: Any, head: Any, drop: dict[str, str], new: dict[str, str],
                   blocked: dict[str, str]) -> list[str]:
+    """Exact set differences, each listed id backed by HEAD's own report and quoting the generator's text."""
     problems: list[str] = []
     b = {str(p["id"]) for p in base.probes}
     h = {str(p["id"]) for p in head.probes}
-    explained = {str(e.get("id")): e for key in ("passage_probes_dropped", "passage_probes_blocked")
-                 for e in head.report.get(key) or []}
-    for pid in sorted(b - h):
-        if pid not in drop:
-            problems.append(f"passage {pid} missing from HEAD and not listed")
-        elif pid not in explained:
-            problems.append(f"passage {pid} is listed as dropped but HEAD's report gives no D21 reason")
-    for pid in sorted(set(drop) & h):
-        problems.append(f"passage {pid} is listed as dropped but present on HEAD")
-    for pid in sorted(h - b):
-        if pid not in new:
-            problems.append(f"passage {pid} is new on HEAD and not listed")
-    for pid in sorted(set(new) - h):
-        problems.append(f"passage {pid} is listed as new but absent from HEAD")
+    rows = {}
+    for key in ("passage_probes_dropped", "passage_probes_blocked"):
+        for e in head.report.get(key) or []:
+            rows.setdefault(str(e.get("id")), e)
     base_blocked = {str(e.get("id")) for e in base.report.get("passage_probes_blocked") or []}
     head_blocked = {str(e.get("id")) for e in head.report.get("passage_probes_blocked") or []}
-    for pid in sorted(head_blocked - base_blocked):
-        if pid not in blocked:
-            problems.append(f"passage {pid} is newly blocked on HEAD and not listed")
-    for pid in sorted(set(blocked) - head_blocked):
-        problems.append(f"passage {pid} is listed as blocked but is not blocked on HEAD")
+
+    def check(kind: str, actual: set[str], listed: dict[str, str], backed: bool) -> None:
+        for pid in sorted(actual - set(listed)):
+            problems.append(f"passage {pid} is {kind} on HEAD and not listed")
+        for pid in sorted(set(listed) - actual):
+            problems.append(f"passage {pid} is listed as {kind} but is not {kind} on HEAD")
+        for pid in sorted(actual & set(listed)):
+            if not listed[pid].strip():
+                problems.append(f"passage {pid} is listed as {kind} with an empty reason")
+            elif backed:
+                text, why = d21_backing(rows.get(pid), head)
+                if text is None:
+                    problems.append(f"passage {pid} is listed as {kind} but {why}")
+                elif text.lower() not in listed[pid].lower():
+                    problems.append(f"passage {pid}: listed reason {listed[pid]!r} does not quote HEAD's D21 text {text!r}")
+
+    check("dropped", b - h, drop, True)
+    check("new", h - b, new, False)
+    check("newly blocked", head_blocked - base_blocked, blocked, True)
     return problems
 
 
@@ -174,6 +285,8 @@ def main() -> int:
     ap.add_argument("--allow-new", action="append", default=[])
     ap.add_argument("--allow-blocked", action="append", default=[])
     ap.add_argument("--no-csharp", action="store_true")
+    ap.add_argument("--diffs", help="write every classified difference (query, location, base/head hit, label) as JSON")
+    ap.add_argument("--show", type=int, default=12, help="print this many classified differences individually")
     a = ap.parse_args()
     base, head = Package(a.base), Package(a.head)
     fails: list[str] = []
@@ -184,31 +297,42 @@ def main() -> int:
     wrays = water_rays(head, top)
     all_rays = rays + wrays
     passages_base = [(p["path_map"], float(p["radius_m"])) for p in base.probes]
-    queries: list[tuple[list, float]] = [([o, (o[0], o[1], o[2] - dist)], 0.0) for o in all_rays] + caps \
-        + passages_base
+    queries: list[tuple[list, float]] = caps + passages_base
     head_passages = [(p["path_map"], float(p["radius_m"])) for p in head.probes]
+    ctx = Context(base.names, head)
 
     py = {}
     for key, pkg in (("base", base), ("head", head)):
         py[key] = [names(pkg.col, capsule_hits(pkg.col, path, r)) for path, r in queries]   # type: ignore[arg-type]
+    py_rays = {key: [py_hit(pkg.col, o, dist) for o in all_rays] for key, pkg in (("base", base), ("head", head))}
     py_head_passage = [capsule_hits(head.col, p, r) for p, r in head_passages]   # type: ignore[arg-type]
     fails += [f"passage {p['id']} not clear on HEAD (python)" for p, hit in zip(head.probes, py_head_passage) if hit]
+    for k, (o, hh) in enumerate(zip(wrays, py_rays["head"][len(rays):])):
+        if hh is None or hh[2] != "water":
+            fails.append(f"water ray {k} at ({o[0]:.3f}, {o[1]:.3f}) does not hit water on HEAD: {hh}")
 
     labels: Counter = Counter()
-    unlisted: list[str] = []
+    diffs: list[dict[str, Any]] = []
+
+    def record(kind: str, i: int, xy: tuple[float, float], bv: Any, hv: Any, lab: str) -> None:
+        labels[lab] += 1
+        diffs.append({"query": kind, "index": i, "xy": [round(xy[0], 3), round(xy[1], 3)], "base": bv, "head": hv,
+                      "label": lab})
+
     for i, o in enumerate(all_rays):
-        lab = ray_label(py_ray(base.col, o, dist), py_ray(head.col, o, dist))
+        bh, hh = py_rays["base"][i], py_rays["head"][i]
+        lab = ray_label(bh, hh, (o[0], o[1]), ctx)
         if lab:
-            labels[lab] += 1
-            if lab == "unlisted":
-                unlisted.append(f"ray {o}")
-    for i in range(len(all_rays), len(queries)):
-        kind = "capsule" if i < len(all_rays) + len(caps) else "base passage"
-        for lab in capsule_labels(py["base"][i], py["head"][i]):
-            labels[lab] += 1
-            if lab == "unlisted":
-                unlisted.append(f"{kind} {i}")
-    fails += [f"unlisted difference: {u}" for u in unlisted[:20]]
+            record("ray", i, (o[0], o[1]), bh, hh, lab)
+    for i, (path, _r) in enumerate(queries):
+        kind = "capsule" if i < len(caps) else "base passage"
+        for lab in capsule_labels(py["base"][i], py["head"][i], (path[0][0], path[0][1]), ctx):
+            record(kind, i, (path[0][0], path[0][1]), py["base"][i], py["head"][i], lab)
+    bad = [d for d in diffs if d["label"] == "unlisted"]
+    fails += [f"unlisted difference: {d}" for d in bad[:20]]
+    if a.diffs:
+        with open(a.diffs, "w") as fh:
+            json.dump(diffs, fh, indent=1)
 
     summary = (f"seed {a.seed} | centroid rays {ncent} + grid rays {len(rays) - ncent} + water rays {len(wrays)} | "
                f"capsules {len(caps)} | base passages {len(passages_base)} | head passages {len(head_passages)} | "
@@ -218,12 +342,20 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as w1, tempfile.TemporaryDirectory() as w2:
             cb, ch = csharp(base.mbcol, queries, w1), csharp(head.mbcol, queries, w2)
             cs_head_passage = csharp(head.mbcol, head_passages, w2) if head_passages else []
+            rb, rh = csharp_rays(base.mbcol, all_rays, dist, w1), csharp_rays(head.mbcol, all_rays, dist, w2)
         cs_ran = True
         for key, got, pkg in (("base", cb, base), ("head", ch, head)):
             for i, idx in enumerate(got):
                 if names(pkg.col, idx) != py[key][i]:
                     fails.append(f"C# and Python disagree on {key} query {i}")
+        for key, got, pkg in (("base", rb, base), ("head", rh, head)):
+            for i, cs in enumerate(got):
+                msg = ray_disagreement(py_rays[key][i], cs, pkg.col)
+                if msg:
+                    fails.append(f"C# and Python disagree on {key} ray {i}: {msg}")
         fails += [f"passage {p['id']} not clear on HEAD (C#)" for p, hit in zip(head.probes, cs_head_passage) if hit]
+    for d in diffs[:a.show]:
+        print(f"  diff {d['label']}: {d['query']} {d['index']} at {d['xy']} base {d['base']} head {d['head']}")
     if fails:
         print(f"FAIL {summary}")
         for f in fails[:50]:
@@ -232,7 +364,7 @@ def main() -> int:
     if not cs_ran:
         print(f"{summary} | python only, C# SKIPPED")
         return 2
-    print(f"OK {summary} | Python and C# agree on every query")
+    print(f"OK {summary} | Python and C# agree on every query (ray distance to 1 mm, class and object)")
     return 0
 
 

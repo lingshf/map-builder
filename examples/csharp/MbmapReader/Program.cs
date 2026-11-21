@@ -8,6 +8,7 @@ using MapBuilder.Reference;
 
 // Usage: dotnet run -c Release -- <package.mbmap>
 //        dotnet run -c Release -- --validate-many <dir>   (one verdict line per *.mbmap in <dir>)
+//        dotnet run -c Release -- --ray-work <map.mbcol> <rays.json>   (nearest downward hit per ray, for tools/water_replay.py)
 // Verifies the package (container rules, files[] one-to-one, sizes, SHA-256), computes package_id,
 // parses .mbcol/.mbhf/GLB, checks the visual/collision name binding, runs the orientation probes against
 // the GLB through a simulated X-negating importer (plus two negative controls), checks each passage probe
@@ -20,8 +21,9 @@ static class Program
     static int Main(string[] args)
     {
         if (args.Length >= 3 && args[0] == "--probe-work") return ProbeWork(args[1], args[2], args.Length == 4 ? long.Parse(args[3]) : (long?)null);
+        if (args.Length == 3 && args[0] == "--ray-work") return RayWork(args[1], args[2]);
         if (args.Length == 2 && args[0] == "--validate-many") return ValidateMany(args[1]);
-        if (args.Length != 1) { Console.Error.WriteLine("usage: MbmapReader <package.mbmap> | --validate-many <dir> | --probe-work <map.mbcol> <probes.json> [shared budget]"); return 2; }
+        if (args.Length != 1) { Console.Error.WriteLine("usage: MbmapReader <package.mbmap> | --validate-many <dir> | --probe-work <map.mbcol> <probes.json> [shared budget] | --ray-work <map.mbcol> <rays.json>"); return 2; }
         return Validate(args[0]);
     }
 
@@ -101,6 +103,30 @@ static class Program
                     var hits = CapsuleCheck.Hits(col, pp, ref left);
                     if (hits == null) { Console.WriteLine($"probe {i} unchecked"); break; }
                     Console.WriteLine($"probe {i++} hits={string.Join(",", hits)} left={left}");
+                }
+            }
+        }
+        return 0;
+    }
+
+    // Parity aid: downward ray queries on a bare .mbcol. The JSON is an array of {"o": [x, y, z], "dist": d}; each
+    // line is "ray <i> miss" or "ray <i> t=<metres, 9 decimals> object=<index> class=<name>" (nearest hit).
+    static int RayWork(string mbcol, string raysJson)
+    {
+        var col = CollisionMesh.Read(File.ReadAllBytes(mbcol));
+        using (var doc = JsonDocument.Parse(File.ReadAllText(raysJson)))
+        {
+            int i = 0;
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                var o = e.GetProperty("o");
+                double t = col.RayDown(o[0].GetDouble(), o[1].GetDouble(), o[2].GetDouble(), e.GetProperty("dist").GetDouble(), out int tri);
+                if (tri < 0) Console.WriteLine($"ray {i++} miss");
+                else
+                {
+                    int obj = (int)col.TriangleObject[tri];
+                    Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "ray {0} t={1:F9} object={2} class={3}", i++, t, obj, col.Objects[obj].Class));
                 }
             }
         }

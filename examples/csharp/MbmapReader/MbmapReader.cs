@@ -175,6 +175,56 @@ namespace MapBuilder.Reference
             return best;
         }
 
+        /// <summary>Nearest hit of the downward ray from (x, y, originZ), distance 0..maxDist, as query.py ray_cast
+        /// computes it for direction (0, 0, -1): two-sided watertight edge functions (Woop, Benthin and Wald, in
+        /// doubles), degenerate triangles skipped, ties to the lower triangle index. Returns the distance, or NaN for
+        /// a miss; triangle receives the hit triangle index (-1 on a miss). Brute force over the objects whose
+        /// plan box contains (x, y); a parity aid, not a consumer query.</summary>
+        public double RayDown(double x, double y, double originZ, double maxDist, out int triangle)
+        {
+            double best = double.NaN;
+            triangle = -1;
+            const double pad = 1e-6;
+            foreach (var o in Objects)
+            {
+                if (x < o.Aabb[0] - pad || x > o.Aabb[3] + pad || y < o.Aabb[1] - pad || y > o.Aabb[4] + pad) continue;
+                for (int t = o.TriStart; t < o.TriStart + o.TriCount; t++)
+                {
+                    var tri = GetTriangle(t);
+                    if (CapsuleCheck.IsDegenerate(tri.A, tri.B, tri.C)) continue;
+                    double ax = tri.A.X - x, ay = tri.A.Y - y, bx = tri.B.X - x, by = tri.B.Y - y, cx = tri.C.X - x, cy = tri.C.Y - y;
+                    double u = cx * by - cy * bx, v = ax * cy - ay * cx, w = bx * ay - by * ax;
+                    double hit = double.NaN;
+                    double det = u + v + w;
+                    if (!((u < 0 || v < 0 || w < 0) && (u > 0 || v > 0 || w > 0)) && det != 0)
+                        hit = -(u * (tri.A.Z - originZ) + v * (tri.B.Z - originZ) + w * (tri.C.Z - originZ)) / det;
+                    if (double.IsNaN(hit) || double.IsInfinity(hit) || hit < 0 || hit > maxDist)
+                        hit = TolerantRayDown(x, y, originZ, tri.A, tri.B, tri.C);
+                    if (double.IsNaN(hit) || double.IsInfinity(hit) || hit < 0 || hit > maxDist) continue;
+                    if (double.IsNaN(best) || hit < best || (hit == best && t < triangle)) { best = hit; triangle = t; }
+                }
+            }
+            return best;
+        }
+
+        /// <summary>query.py _ray_triangle_tolerant for the direction (0, 0, -1): two-sided Moller-Trumbore with the
+        /// barycentric bounds widened by RAY_EDGE_TOL (1e-9), so a ray that only touches a silhouette edge counts.</summary>
+        static double TolerantRayDown(double x, double y, double originZ, Vec3 a, Vec3 b, Vec3 c)
+        {
+            const double tol = 1e-9;
+            double e1x = b.X - a.X, e1y = b.Y - a.Y, e1z = b.Z - a.Z, e2x = c.X - a.X, e2y = c.Y - a.Y, e2z = c.Z - a.Z;
+            double pvx = e2y, pvy = -e2x;
+            double det = e1x * pvx + e1y * pvy;
+            if (det == 0) return double.NaN;
+            double tx = x - a.X, ty = y - a.Y, tz = originZ - a.Z;
+            double u = (tx * pvx + ty * pvy) / det;
+            if (!(u >= -tol && u <= 1.0 + tol)) return double.NaN;
+            double qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+            double v = -qz / det;
+            if (!(v >= -tol && u + v <= 1.0 + tol)) return double.NaN;
+            return (e2x * qx + e2y * qy + e2z * qz) / det;
+        }
+
         /// <summary>Parse and fully bounds-check an .mbcol file (mirrors collision.read_collision).
         /// Diagnostics never echo strings from the file.</summary>
         public static CollisionMesh Read(byte[] d)
