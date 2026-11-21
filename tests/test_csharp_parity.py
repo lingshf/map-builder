@@ -165,6 +165,17 @@ class CsharpBuildHygieneTest(unittest.TestCase):
             self.assertEqual(csharp_build.BUILD_COUNT, 1)
             csharp_build._cleanup()
 
+    def test_a_launch_error_is_attempted_once_per_run(self):
+        from unittest import mock
+        with mock.patch.object(csharp_build, "_dll", None), mock.patch.object(csharp_build, "_failure", None), \
+                mock.patch.object(csharp_build, "_outdir", None), mock.patch.object(csharp_build, "BUILD_COUNT", 0), \
+                mock.patch.object(csharp_build.subprocess, "run", side_effect=FileNotFoundError("dotnet")) as run:
+            for _ in range(3):
+                with self.assertRaises(RuntimeError):
+                    csharp_build.reader_dll()
+            self.assertEqual(run.call_count, 1)
+            csharp_build._cleanup()
+
     def test_the_repo_nuget_config_ignores_user_level_feeds(self):
         with open(os.path.join(ROOT, "NuGet.config"), encoding="utf-8") as f:
             text = f.read()
