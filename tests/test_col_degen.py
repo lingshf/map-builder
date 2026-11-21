@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -112,6 +113,38 @@ class ExportReportTest(unittest.TestCase):
             for e in report["degenerate_objects"]:
                 self.assertTrue(0 <= e["ray_collapsed"] <= e["triangles"] and e["area_m2"] >= 0.0, e)
                 self.assertNotIn("ray can hit", e["reason"])
+
+
+class ReplayToolPassageTest(unittest.TestCase):
+    SAMPLE = os.path.join(csharp_build.ROOT, "examples", "synthetic_sample.mbmap")
+    TOOL = os.path.join(csharp_build.ROOT, "tools", "col_degen_replay.py")
+
+    def _with_passages(self, d, keep):
+        out = os.path.join(d, "stripped.mbmap")
+        with zipfile.ZipFile(self.SAMPLE) as src, zipfile.ZipFile(out, "w") as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == "manifest.json":
+                    m = json.loads(data)
+                    self.assertGreaterEqual(len(m["passage_probes"]), 2)
+                    m["passage_probes"] = m["passage_probes"][:keep]
+                    data = json.dumps(m).encode()
+                dst.writestr(item.filename, data)
+        return out
+
+    def test_removed_passages_fail_the_replay(self):
+        with tempfile.TemporaryDirectory() as d:
+            for keep in (0, 1):
+                run = subprocess.run([sys.executable, self.TOOL, self.SAMPLE, self._with_passages(d, keep)],
+                                     capture_output=True, text=True)
+                self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+                self.assertIn("passage", run.stdout)
+
+    def test_skipping_csharp_is_not_a_pass(self):
+        run = subprocess.run([sys.executable, self.TOOL, self.SAMPLE, self.SAMPLE, "--rays", "5", "--capsules", "2",
+                              "--no-csharp"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("C# SKIPPED", run.stdout)
 
 
 if __name__ == "__main__":
