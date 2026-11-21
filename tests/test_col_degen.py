@@ -109,6 +109,9 @@ class ExportReportTest(unittest.TestCase):
             self.assertEqual([e["object"] for e in report["objects_dropped_empty"]], ["empty_one"])
             kept = {e["object"]: e["triangles"] for e in report["degenerate_objects"]}
             self.assertEqual(sum(kept.values()), report["export"]["degenerate_triangles"])
+            for e in report["degenerate_objects"]:
+                self.assertTrue(0 <= e["ray_collapsed"] <= e["triangles"] and e["area_m2"] >= 0.0, e)
+                self.assertNotIn("ray can hit", e["reason"])
 
 
 if __name__ == "__main__":

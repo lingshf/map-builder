@@ -31,6 +31,7 @@ from .glb import GlbNodeSpec, MaterialSpec, node_scale, write_glb
 from .http import HttpClient, redact
 from .osm import (DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_FETCH_MARGIN_M, OSM_LICENSE, Classified, OsmData, classify,
                   fetch_overpass, load_osm_file)
+from .query import triangle_is_degenerate
 from .package import (HeightfieldInfo, Manifest, ObjectEntry, PassageProbe, ValidationResult, assemble, find_secrets,
                       is_utc_timestamp, passage_probe_problems, write_package)
 
@@ -440,6 +441,12 @@ def merge_dropped(report: Mapping[str, object], deleted_ids: Iterable[str]) -> l
     return kept + [{"id": i, "reason": "feature_deleted"} for i in deleted_ids]
 
 
+def _tri_area(a: Sequence[float], b: Sequence[float], c: Sequence[float]) -> float:
+    u = [b[i] - a[i] for i in range(3)]
+    v = [c[i] - a[i] for i in range(3)]
+    return 0.5 * math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+
+
 def export_package(path: str | PathLike[str], name: str, area: Area, sources: Sequence[Mapping[str, object]],
                    glb_bytes: bytes,
                    col_objects: Sequence[ColObject], report: Mapping[str, object] | None,
@@ -464,13 +471,20 @@ def export_package(path: str | PathLike[str], name: str, area: Area, sources: Se
                         "provenance": dict(info.get("provenance") or {})})
     exported: dict[str, object] = copy.deepcopy(dict(report or {}))
     kept_degenerate: list[dict[str, object]] = []
+    n_degenerate = 0
     for k, o in enumerate(col_objects):
         e = col.objects[k]
-        n = sum(1 for t in range(e["tri_start"], e["tri_start"] + e["tri_count"]) if is_degenerate(*col.triangle(t)))
-        if n:
-            kept_degenerate.append({"object": o.name, "mb_id": o.mb_id, "class": o.cls, "triangles": n,
-                                    "reason": "kept: thin sliver from clipping; removing it would remove "
-                                              "surface a ray can hit"})
+        tris = [col.triangle(t) for t in range(e["tri_start"], e["tri_start"] + e["tri_count"])]
+        degen = [tr for tr in tris if is_degenerate(*tr)]
+        n_degenerate += len(degen)
+        if degen:
+            collapsed = sum(1 for tr in degen if triangle_is_degenerate(*tr))
+            kept_degenerate.append({"object": o.name, "mb_id": o.mb_id, "class": o.cls, "triangles": len(degen),
+                                    "ray_collapsed": collapsed,
+                                    "area_m2": sum(_tri_area(*tr) for tr in degen),
+                                    "reason": "kept: removing it would change a collision probe result (D98); "
+                                              "'ray_collapsed' of these are flat or collinear for ray queries and "
+                                              "kept only so capsule queries stay identical"})
     exported["degenerate_objects"] = kept_degenerate
     exported["export"] = {"objects": len(col_objects), "collision_triangles": col.triangle_count,
                         "collision_vertices": len(col.vertices),
