@@ -28,7 +28,15 @@ from .make_textured_fixture import _load, build_textured_package, edit_glb
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FUTURE_MINOR = "2.2.0"
 EXTRA = "extra/future.bin"
+REQUIRED = os.environ.get("MBMAP_REQUIRE_FROZEN") == "1"
 HAVE_DOTNET = shutil.which("dotnet") is not None
+
+
+def unavailable(why):
+    """Skip locally; fail where the prerequisite is mandatory (CI)."""
+    if REQUIRED:
+        raise AssertionError(f"MBMAP_REQUIRE_FROZEN=1 but {why}")
+    raise unittest.SkipTest(why)
 
 
 def write_raw(path, members, manifest):
@@ -174,11 +182,11 @@ class FrozenReadersTest(Fixtures):
         if subprocess.run(["git", "rev-parse", "--verify", "-q", "v0.3.0^{tag}"], cwd=ROOT,
                           capture_output=True).returncode != 0 and subprocess.run(
                 ["git", "rev-parse", "--verify", "-q", "v0.3.0"], cwd=ROOT, capture_output=True).returncode != 0:
-            raise unittest.SkipTest("the v0.3.0 tag is not available (CI fetches tags)")
+            unavailable("the v0.3.0 tag is not available (CI fetches tags)")
         frozen = os.path.join(cls.tmp.name, "v030")
         os.makedirs(frozen)
         if not _git_archive_v030(frozen):
-            raise unittest.SkipTest("git archive v0.3.0 failed")
+            unavailable("git archive v0.3.0 failed")
         cls.frozen_dir = frozen
         out = os.path.join(cls.tmp.name, "frozen-bin")
         src = os.path.join(frozen, "examples", "csharp", "MbmapReader")

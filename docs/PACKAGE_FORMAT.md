@@ -522,7 +522,7 @@ those must use the `.mbcol` triangles.
   the current readers cannot read.
 
 **Readers** accept the same major with any minor, ignore unknown JSON fields, and reject another major with
-`unsupported schema major version N` (`core/package.py:1478`, `MbmapReader.cs:1339`). A `.mbcol` or `.mbhf`
+`unsupported schema major version N` (`core/package.py:1479`, `MbmapReader.cs:1339`). A `.mbcol` or `.mbhf`
 header `version` they do not know is rejected (`collision.py:255`, `MbmapReader.cs:188` and `:310`); a new
 binary number therefore needs a new package major. **Deprecation:** a field is deprecated for at least one
 minor before it is removed in the next major.
@@ -536,9 +536,9 @@ minor before it is removed in the next major.
 | Uncompressed ≤ 1.5 GiB | `MAX_TOTAL_UNCOMPRESSED = 1536 * 1024 * 1024` (`:200`) | `MaxTotalUncompressed = 1536L * 1024 * 1024` (`:36`) |
 | Manifest ≤ 32 MiB | `MAX_MANIFEST_BYTES = 32 * 1024 * 1024` (`:201`) | `MaxManifestBytes = 32L * 1024 * 1024` (`:37`) |
 | Compression ratio ≤ 200 | `MAX_RATIO = 200` (`:202`) | `MaxRatio = 200` (`:38`) |
-| Names ≤ 255 bytes | `MAX_NAME_LEN = 255` (`:203`) | `MaxNameLength = 255` (`:39`) |
-| One GLB-stored buffer; no external or data-URI buffers | `glb.py:452`, `:456` (more than one buffer, `uri`) | `MbmapReader.cs:398` (`uri`) |
-| No `extensionsRequired` | `glb.py:448` | `:390` |
+| Names ≤ 255 characters (not bytes): Python counts Unicode code points, C# counts UTF-16 code units | `MAX_NAME_LEN = 255` (`:203`), checked as `len(name) > MAX_NAME_LEN` (`:305`) | `MaxNameLength = 255` (`:39`), checked as `n.Length > Limits.MaxNameLength` (`:1535`) |
+| At most one GLB-stored buffer (zero or one in both readers); no external or data-URI buffers | `glb.py:452` (`len(buffers) > 1`), `:455` (`uri`) | `MbmapReader.cs:393` (`buffers.Count > 1`), `:398` (`uri`) |
+| No `extensionsRequired`; an empty array is accepted by both readers | `glb.py:448` (`if gl.get("extensionsRequired")`, falsy when empty) | `:390` (rejects unless an empty array) |
 | GLB ≤ 1 GiB, ≤ 8 M visual triangles, ≤ 1 M nodes, depth ≤ 64 | `glb.py:151`–`:154`: `MAX_GLB_BYTES = 1024 ** 3`, `MAX_VISUAL_TRIANGLES = 8_000_000`, `MAX_NODES = 1_000_000`, `MAX_DEPTH = 64` | `MaxGlbBytes = 1024L * 1024 * 1024`, `MaxVisualTriangles = 8_000_000`, `MaxNodes = 1_000_000, MaxNodeDepth = 64` (`:47`–`:50`) |
 | Every embedded image listed in `asset_notices[]` | "texture without provenance" error (`:1908`) | same error (`:1415`) |
 
@@ -553,6 +553,7 @@ covered by a fixture, so it is not yet allowed.
 | Rule | Check |
 |---|---|
 | Same major, any minor accepted; unknown top-level field and glTF `extras` ignored | `tests/test_format_policy.py` (current validator, current C#, frozen v0.3.0 Python and C#) |
+| Unknown `.mbhf` format number rejected (`collision.py:463`, `MbmapReader.cs:310`) | documentation only: `.mbhf` is optional, and `.mbcol` is the tested case |
 | Another major rejected | same file: Python and current C# (`unsupported schema major version 3`) |
 | Unknown `.mbcol` format number rejected | same file: Python and current C# |
 | Extra listed member is an error in C# | same file: documents today's behaviour |
