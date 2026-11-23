@@ -37,7 +37,11 @@ the finished collision (D21). A probe that collision blocks at generation is
   an 8 % ramp can reach.
 
 Read these entries instead of assuming that every bridge has every probe. The
-Pittsburgh demo exports 13 probes and reports 29 blocked ones.
+v0.5.0 Pittsburgh demo exports 11 probes and reports 31 blocked ones (v0.4.0:
+13 and 29). The change comes from the rivers: one bridge's clearance probe now
+starts over the water and runs into a pier of the next bridge, and one
+low deck's probe capsule reaches below the new water surface. A probe never
+passes through water.
 
 ## Real-data example: Munich Altstadt
 
@@ -76,7 +80,7 @@ is a **warning, not an error**, so the package can still be `VALID`:
 
 The C# reference reader prints one `passage N ... PASS` line per probe and
 reports the same two cases. Both checkers count query work the same way (the
-Pittsburgh demo: 13 of 13 checked and PASS in each).
+v0.5.0 Pittsburgh demo: 11 of 11 checked and PASS in each).
 
 **Before flying, stop on any blocked or unchecked probe, even if the package
 is `VALID`.** `VALID` alone does not mean that every probe was checked and clear.
@@ -104,5 +108,8 @@ in the exported `report.json` `passage_probes_dropped`. The list also keeps the 
   but not the southern ends.
 - Probes are sanity checks for a 1–1.5 m capsule, not a guarantee that a given
   aircraft fits. Your simulator must still use the exported triangle collision.
+- Water surfaces are collision (class 5). A bridge deck is never lowered to
+  meet a river; where a deck would sit too close to the water it is raised and
+  listed in eport.json water_decks_raised. Piers reach the carved bed.
 - A heightfield alone cannot represent underpasses. Use the triangle collision
   (bridge, tunnel and structure classes) for flight.

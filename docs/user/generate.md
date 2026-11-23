@@ -117,9 +117,14 @@ OSM `roof:shape` is built as follows:
 | half-hipped, gambrel, mansard, round, saltbox | rectangles only |
 
 A gabled roof on a non-rectangular footprint gets a vertical gable wall on
-each end the skeleton can represent. If an end cannot be represented (the
-ridge would meet the gable edge outside it, or the gable end would be a
-sliver), the roof falls back to **hipped**, not flat. `roof:direction` is the
+each end the skeleton can represent. Since v0.5.0, an end the plain cut cannot
+represent (the ridge would meet the gable edge outside it, or the gable end
+would be a sliver) is cut by a vertical wall through that end edge instead;
+the other ends stay hipped, and a gabled roof needs at least two gable ends.
+Only if that is not possible does the roof fall back to **hipped**, not flat,
+with the reason in `provenance.roof_shape`. A near-rectangle gable whose eave
+edges are not parallel is built from the skeleton (planar) or falls back with a
+named reason. `roof:direction` is the
 direction the slope faces, and a ridge perpendicular to it is the target, not
 a guarantee: on a skeleton gable the ridge bearing follows from the footprint.
 If no emitted ridge is within 10° of perpendicular, `provenance.roof_direction`
@@ -130,24 +135,52 @@ every tagged roof is reproduced. The synthetic sample's way/1043 demonstrates
 a dome.
 
 On real data, some tagged roofs still fall back. In the Munich Altstadt demo,
-67 buildings have a tagged non-flat `roof:shape`. In v0.4.0, **29** are built
-as tagged (17 of 52 gabled, 11 of 12 hipped, the skillion), 30 gabled roofs
-fall back to hipped, and 4 to flat (courtyard, roof height 0, a
-quadruple_saltbox, a concave pyramidal). 4 near-rectangle gables are built
-analytically but do not pass the planarity check; their provenance gives no
-fallback reason (follow-up S3-F1). Each building's `provenance.roof_shape` in
+67 buildings have a tagged non-flat `roof:shape`. In v0.5.0, **45** are built
+as tagged (v0.4.0: 29). The other 22 all name
+their reason: 18 gabled roofs fall back to hipped (the gable end is not
+representable, even with a vertical cut), and 4 to flat (courtyard,
+quadruple_saltbox, roof height 0, a concave pyramidal). Mixed ends (a gable
+wall on some ends, a hip on the others) are covered by tests but do not occur
+in this area. Each building's `provenance.roof_shape` in
 `manifest.json` says which: `measured:osm roof:shape` (built as tagged),
 `fallback:...` with the reason, or `inferred:flat` (no tag);
 `provenance.roof_construction` says how it was built. See the
-[v0.4.0 demo](../demo/v0.4.0/README.md).
+[v0.5.0 demo](../demo/v0.5.0/README.md).
+
+## Water (rivers and lakes)
+
+Since v0.5.0, every OSM water polygon (`natural=water`, `waterway=riverbank`
+and the other water area tags the area query already reads) that lies inside
+the terrain becomes its own **flat water surface**: an object
+`water:osm:<type>/<id>`, material **MB Water**, collision class `water`. The
+surface is clipped to the polygon, at a level taken from the shore (rivers of
+300 m or more step down along their course). The terrain under it is carved to
+1.5 m below the surface, so the water no longer follows the elevation model's
+dips and you do not see a painted "mat" of terrain. Banks keep their landcover
+colour; only water bodies that cannot be built keep the old water-coloured
+terrain cells.
+
+Roads, buildings and bridge decks stand on the ground before carving. Decks are
+never lowered; a deck the water would touch is raised just above it
+(`report.json` `water_decks_raised`). Bridge piers and building walls reach
+down to the carved bed. `report.json` `water_bodies` lists each body and its
+outcome (`built(flat)`, `built(profile, N stations)` or a named fallback,
+for example `fallback(no shore samples)` for a body outside the terrain).
+
+**MB Water** has no texture yet; it is a flat, glossy colour (planned:
+S5-TEX-WATER). The heightfield (`.mbhf`) shows the riverbed, not the water;
+to land on or detect water, query the collision mesh (`.mbcol`), where water
+is class 5 `water`. Packages with no water are unchanged.
 
 ## Textures
 
 **Content > Textures** (default on) gives the generated buildings, roofs,
 roads and terrain CC0 base-colour textures (facade, roof tiles, flat-roof
-gravel, asphalt, grass, concrete) with world-scaled UVs. The vertex colour
-keeps each object's palette colour on average; the texture adds detail. Turn
-it off for the plain-colour look with the same v0.4.0 geometry (it does not
+gravel, asphalt, a neutral terrain detail, concrete) with world-scaled UVs. The
+vertex colour keeps each object's palette colour on average; the texture adds
+detail. Since v0.5.0 the terrain texture is grey detail only, so landcover keeps
+its colour (water reads blue, not green). Turn
+it off for the plain-colour look with the same geometry (it does not
 bring back earlier roofs). Collision is the same
 either way. The panel shows the CC0 attribution while Textures is on, and the
 CLI equivalent is `--textures` / `--no-textures`. What ends up in the package

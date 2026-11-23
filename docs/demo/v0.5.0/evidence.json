@@ -1,0 +1,1642 @@
+{
+  "status": "release candidate; preliminary until S4-COL-FLOAT (D126) merges",
+  "base_commit": "7c24dc3",
+  "generator_version": "0.5.0",
+  "inputs": {
+    "caches": "frozen v0.4.0 caches (OSM + Copernicus GLO-30, acquired 2026-11-20 UTC), offline replay",
+    "before": "v0.4.0 RC packages",
+    "after": "v0.5.0 RC packages"
+  },
+  "render": {
+    "engine": "Cycles CPU",
+    "resolution": [
+      1280,
+      720
+    ],
+    "samples": 64,
+    "blender": "4.2.23 LTS",
+    "render_seconds": {
+      "pittsburgh": 150.3,
+      "munich": 268.0
+    },
+    "budget_seconds": 1800
+  },
+  "cli_builds": {
+    "munich-v050": {
+      "area": "munich",
+      "textures": true,
+      "package_id": null,
+      "offline": true,
+      "times_s": [
+        3.297,
+        3.26,
+        3.325
+      ],
+      "median_s": 3.297,
+      "objects": 389,
+      "classes": {
+        "terrain": 1,
+        "building": 148,
+        "road": 197,
+        "tunnel": 26,
+        "vegetation": 17
+      },
+      "probes": [
+        {
+          "id": "osm:way/879138845:under",
+          "kind": "elevated",
+          "feature": "osm:way/879138845",
+          "path_map": [
+            [
+              120.63477509980612,
+              -160.12684844929572,
+              11.525311621936613
+            ],
+            [
+              118.47953067855701,
+              -165.9053096953803,
+              11.525311621936613
+            ],
+            [
+              116.3242862573079,
+              -171.6837709414649,
+              11.525311621936613
+            ]
+          ],
+          "radius_m": 1.0
+        },
+        {
+          "id": "osm:way/1163022325:passage",
+          "kind": "elevated",
+          "feature": "osm:way/1163022325",
+          "path_map": [
+            [
+              -4.175180159070007,
+              4.514438780645287,
+              7.971070847507053
+            ],
+            [
+              -3.084868155197812,
+              10.352072654524957,
+              7.905815578275155
+            ],
+            [
+              -1.9945561513256176,
+              16.189706528404628,
+              7.867020500877902
+            ]
+          ],
+          "radius_m": 1.0
+        },
+        {
+          "id": "osm:way/405100898:bore",
+          "kind": "tunnel",
+          "feature": "osm:way/405100898",
+          "path_map": [
+            [
+              -46.8925,
+              -109.1951,
+              6.7288
+            ],
+            [
+              -44.0003,
+              -109.992,
+              6.7288
+            ],
+            [
+              -35.9152,
+              -112.2196,
+              7.0749
+            ],
+            [
+              -27.8301,
+              -114.4472,
+              7.421
+            ],
+            [
+              -19.7451,
+              -116.6748,
+              7.7671
+            ],
+            [
+              -16.8528,
+              -117.4717,
+              7.7671
+            ]
+          ],
+          "radius_m": 1.5
+        }
+      ],
+      "passage_probes_blocked": [
+        {
+          "id": "osm:way/25882642:passage",
+          "blocker": "osm:way/91268686"
+        },
+        {
+          "id": "osm:way/55829466:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/55829512:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/270862107:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/270862139:bore",
+          "blocker": "osm:way/55829512"
+        },
+        {
+          "id": "osm:way/270862163:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/270862167:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/270862204:bore",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/270862241:bore",
+          "blocker": "osm:way/55829512"
+        },
+        {
+          "id": "osm:way/270862245:bore",
+          "blocker": "osm:way/270862163"
+        },
+        {
+          "id": "osm:way/270862247:bore",
+          "blocker": "osm:way/55829466"
+        },
+        {
+          "id": "osm:way/270862262:bore",
+          "blocker": "osm:way/55829466"
+        },
+        {
+          "id": "osm:way/320523547:bore",
+          "blocker": "osm:way/223907241"
+        },
+        {
+          "id": "osm:way/400206038:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/400206054:bore",
+          "blocker": "osm:way/55829466"
+        },
+        {
+          "id": "osm:way/400206060:bore",
+          "blocker": "osm:way/223907241"
+        },
+        {
+          "id": "osm:way/400206063:bore",
+          "blocker": "osm:way/223907241"
+        },
+        {
+          "id": "osm:way/405100896:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/405100897:bore",
+          "blocker": "osm:way/270862107"
+        },
+        {
+          "id": "osm:way/820921954:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/820921955:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/820921956:bore",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/1211251117:bore",
+          "blocker": "osm:way/320523547"
+        },
+        {
+          "id": "osm:way/1211251118:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/1277822434:bore",
+          "blocker": "osm:way/219431666"
+        },
+        {
+          "id": "osm:way/1277822435:bore",
+          "blocker": "osm:way/351239741"
+        }
+      ]
+    },
+    "munich-v050notex": {
+      "area": "munich",
+      "textures": false,
+      "package_id": null,
+      "offline": true,
+      "times_s": [
+        4.187,
+        3.014,
+        3.019
+      ],
+      "median_s": 3.019,
+      "objects": 389,
+      "classes": {
+        "terrain": 1,
+        "building": 148,
+        "road": 197,
+        "tunnel": 26,
+        "vegetation": 17
+      },
+      "probes": [
+        {
+          "id": "osm:way/879138845:under",
+          "kind": "elevated",
+          "feature": "osm:way/879138845",
+          "path_map": [
+            [
+              120.63477509980612,
+              -160.12684844929572,
+              11.525311621936613
+            ],
+            [
+              118.47953067855701,
+              -165.9053096953803,
+              11.525311621936613
+            ],
+            [
+              116.3242862573079,
+              -171.6837709414649,
+              11.525311621936613
+            ]
+          ],
+          "radius_m": 1.0
+        },
+        {
+          "id": "osm:way/1163022325:passage",
+          "kind": "elevated",
+          "feature": "osm:way/1163022325",
+          "path_map": [
+            [
+              -4.175180159070007,
+              4.514438780645287,
+              7.971070847507053
+            ],
+            [
+              -3.084868155197812,
+              10.352072654524957,
+              7.905815578275155
+            ],
+            [
+              -1.9945561513256176,
+              16.189706528404628,
+              7.867020500877902
+            ]
+          ],
+          "radius_m": 1.0
+        },
+        {
+          "id": "osm:way/405100898:bore",
+          "kind": "tunnel",
+          "feature": "osm:way/405100898",
+          "path_map": [
+            [
+              -46.8925,
+              -109.1951,
+              6.7288
+            ],
+            [
+              -44.0003,
+              -109.992,
+              6.7288
+            ],
+            [
+              -35.9152,
+              -112.2196,
+              7.0749
+            ],
+            [
+              -27.8301,
+              -114.4472,
+              7.421
+            ],
+            [
+              -19.7451,
+              -116.6748,
+              7.7671
+            ],
+            [
+              -16.8528,
+              -117.4717,
+              7.7671
+            ]
+          ],
+          "radius_m": 1.5
+        }
+      ],
+      "passage_probes_blocked": [
+        {
+          "id": "osm:way/25882642:passage",
+          "blocker": "osm:way/91268686"
+        },
+        {
+          "id": "osm:way/55829466:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/55829512:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/270862107:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/270862139:bore",
+          "blocker": "osm:way/55829512"
+        },
+        {
+          "id": "osm:way/270862163:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/270862167:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/270862204:bore",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/270862241:bore",
+          "blocker": "osm:way/55829512"
+        },
+        {
+          "id": "osm:way/270862245:bore",
+          "blocker": "osm:way/270862163"
+        },
+        {
+          "id": "osm:way/270862247:bore",
+          "blocker": "osm:way/55829466"
+        },
+        {
+          "id": "osm:way/270862262:bore",
+          "blocker": "osm:way/55829466"
+        },
+        {
+          "id": "osm:way/320523547:bore",
+          "blocker": "osm:way/223907241"
+        },
+        {
+          "id": "osm:way/400206038:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/400206054:bore",
+          "blocker": "osm:way/55829466"
+        },
+        {
+          "id": "osm:way/400206060:bore",
+          "blocker": "osm:way/223907241"
+        },
+        {
+          "id": "osm:way/400206063:bore",
+          "blocker": "osm:way/223907241"
+        },
+        {
+          "id": "osm:way/405100896:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/405100897:bore",
+          "blocker": "osm:way/270862107"
+        },
+        {
+          "id": "osm:way/820921954:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/820921955:bore",
+          "blocker": "osm:way/504896249"
+        },
+        {
+          "id": "osm:way/820921956:bore",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/1211251117:bore",
+          "blocker": "osm:way/320523547"
+        },
+        {
+          "id": "osm:way/1211251118:bore",
+          "blocker": "osm:way/270862139"
+        },
+        {
+          "id": "osm:way/1277822434:bore",
+          "blocker": "osm:way/219431666"
+        },
+        {
+          "id": "osm:way/1277822435:bore",
+          "blocker": "osm:way/351239741"
+        }
+      ]
+    },
+    "pittsburgh-v050": {
+      "area": "pittsburgh",
+      "textures": true,
+      "package_id": null,
+      "offline": true,
+      "times_s": [
+        17.828,
+        15.887,
+        16.031
+      ],
+      "median_s": 16.031,
+      "objects": 3293,
+      "classes": {
+        "terrain": 1,
+        "water": 3,
+        "building": 987,
+        "road": 258,
+        "bridge": 33,
+        "tunnel": 5,
+        "structure": 6,
+        "vegetation": 2000
+      },
+      "probes": [
+        {
+          "id": "osm:way/24957029:under",
+          "kind": "bridge",
+          "feature": "osm:way/24957029",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              238.6137,
+              80.7804,
+              23.3039
+            ],
+            [
+              228.0958,
+              93.8163,
+              23.3039
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/121593794:under",
+          "kind": "bridge",
+          "feature": "osm:way/121593794",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              367.231,
+              174.8544,
+              2.7689
+            ],
+            [
+              355.78,
+              191.2518,
+              2.7689
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/173225719:under",
+          "kind": "bridge",
+          "feature": "osm:way/173225719",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              326.3815,
+              164.8307,
+              2.7689
+            ],
+            [
+              321.2868,
+              172.2499,
+              2.7689
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/550018203:deck",
+          "kind": "bridge",
+          "feature": "osm:way/550018203",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              184.8446,
+              125.1811,
+              15.057
+            ],
+            [
+              177.253,
+              130.6401,
+              15.805
+            ],
+            [
+              169.6613,
+              136.0991,
+              16.5531
+            ],
+            [
+              162.0697,
+              141.5581,
+              17.3011
+            ],
+            [
+              154.478,
+              147.0171,
+              18.0492
+            ],
+            [
+              146.8864,
+              152.4761,
+              18.7972
+            ],
+            [
+              139.2947,
+              157.9351,
+              19.5453
+            ],
+            [
+              131.7031,
+              163.3941,
+              20.2933
+            ],
+            [
+              124.1114,
+              168.8531,
+              21.0414
+            ],
+            [
+              116.3443,
+              175.0517,
+              21.8363
+            ],
+            [
+              108.5771,
+              181.2503,
+              22.6313
+            ],
+            [
+              100.81,
+              187.4488,
+              23.4263
+            ],
+            [
+              93.0428,
+              193.6474,
+              24.2213
+            ],
+            [
+              85.2757,
+              199.846,
+              24.1456
+            ],
+            [
+              77.5086,
+              206.0446,
+              23.3506
+            ],
+            [
+              69.7414,
+              212.2432,
+              22.5556
+            ],
+            [
+              61.9743,
+              218.4417,
+              21.7607
+            ],
+            [
+              54.2071,
+              224.6403,
+              20.9657
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/550018206:deck",
+          "kind": "bridge",
+          "feature": "osm:way/550018206",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              104.4699,
+              155.9052,
+              23.6504
+            ],
+            [
+              112.156,
+              150.3004,
+              24.4114
+            ],
+            [
+              119.842,
+              144.6957,
+              25.1724
+            ],
+            [
+              127.5281,
+              139.0909,
+              25.9334
+            ],
+            [
+              135.2141,
+              133.4861,
+              26.5383
+            ],
+            [
+              142.9002,
+              127.8814,
+              25.7773
+            ],
+            [
+              150.5862,
+              122.2766,
+              25.0163
+            ],
+            [
+              158.2722,
+              116.6719,
+              24.2553
+            ],
+            [
+              165.9583,
+              111.0671,
+              23.4943
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/54223852:deck",
+          "kind": "bridge",
+          "feature": "osm:way/54223852",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              566.0519,
+              -272.2894,
+              45.851
+            ],
+            [
+              572.5936,
+              -268.247,
+              40.9372
+            ],
+            [
+              579.4153,
+              -265.4037,
+              36.2146
+            ],
+            [
+              583.4031,
+              -263.9377,
+              33.4997
+            ],
+            [
+              588.4516,
+              -262.6603,
+              30.172
+            ],
+            [
+              593.7631,
+              -261.4717,
+              26.6941
+            ],
+            [
+              599.168,
+              -260.7717,
+              23.2115
+            ],
+            [
+              600.0,
+              -260.7147,
+              22.6786
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/54210147:deck",
+          "kind": "bridge",
+          "feature": "osm:way/54210147",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              598.3039,
+              466.1161,
+              12.2813
+            ],
+            [
+              599.1519,
+              475.2058,
+              12.223
+            ],
+            [
+              600.0,
+              484.2954,
+              11.4927
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/264591820:deck",
+          "kind": "bridge",
+          "feature": "osm:way/264591820",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              562.5541,
+              319.4698,
+              6.9998
+            ],
+            [
+              567.4706,
+              322.1408,
+              7.4474
+            ],
+            [
+              572.3871,
+              324.8117,
+              7.895
+            ],
+            [
+              579.2903,
+              328.8194,
+              8.5336
+            ],
+            [
+              586.1935,
+              332.827,
+              9.1722
+            ],
+            [
+              593.0968,
+              336.8347,
+              9.6342
+            ],
+            [
+              600.0,
+              340.8424,
+              8.9956
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/550018192:deck",
+          "kind": "bridge",
+          "feature": "osm:way/550018192",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              596.6324,
+              254.4123,
+              4.5727
+            ],
+            [
+              600.0,
+              252.7931,
+              4.7535
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/11965424:bore",
+          "kind": "tunnel",
+          "feature": "osm:way/11965424",
+          "path_map": [
+            [
+              182.8053,
+              68.0674,
+              40.025
+            ],
+            [
+              180.2644,
+              66.4725,
+              40.025
+            ],
+            [
+              147.2341,
+              45.7401,
+              42.5658
+            ],
+            [
+              133.8964,
+              37.245,
+              43.5961
+            ],
+            [
+              -600.0,
+              -474.47,
+              101.8874
+            ]
+          ],
+          "radius_m": 1.5
+        },
+        {
+          "id": "osm:way/28411466:bore",
+          "kind": "tunnel",
+          "feature": "osm:way/28411466",
+          "path_map": [
+            [
+              -600.0,
+              -497.102,
+              103.5588
+            ],
+            [
+              180.163,
+              46.8734,
+              41.7173
+            ],
+            [
+              189.7844,
+              54.5356,
+              40.9175
+            ],
+            [
+              192.1312,
+              56.4045,
+              40.9175
+            ]
+          ],
+          "radius_m": 1.5
+        }
+      ],
+      "passage_probes_blocked": [
+        {
+          "id": "osm:way/11950069:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/11950069:under",
+          "blocker": "osm:way/121593794"
+        },
+        {
+          "id": "osm:way/24957029:deck",
+          "blocker": "osm:way/121593795"
+        },
+        {
+          "id": "osm:way/54210154:deck",
+          "blocker": "osm:way/24957029"
+        },
+        {
+          "id": "osm:way/121593794:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/121593795:deck",
+          "blocker": "osm:way/24957029"
+        },
+        {
+          "id": "osm:way/173225719:deck",
+          "blocker": "osm:way/364838217"
+        },
+        {
+          "id": "osm:way/264591932:deck",
+          "blocker": "osm:way/24957029"
+        },
+        {
+          "id": "osm:way/54210161:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/137766148:deck",
+          "blocker": "osm:way/550018203"
+        },
+        {
+          "id": "osm:way/137766151:deck",
+          "blocker": "osm:way/137766148"
+        },
+        {
+          "id": "osm:way/264591970:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/550018210:deck",
+          "blocker": "osm:way/137766151"
+        },
+        {
+          "id": "osm:way/43082522:deck",
+          "blocker": "osm:way/550018211"
+        },
+        {
+          "id": "osm:way/550018211:deck",
+          "blocker": "osm:way/43082522"
+        },
+        {
+          "id": "osm:way/24957033:deck",
+          "blocker": "osm:way/121593802"
+        },
+        {
+          "id": "osm:way/54210140:deck",
+          "blocker": "osm:way/379511882"
+        },
+        {
+          "id": "osm:way/54210143:deck",
+          "blocker": "osm:way/379511882"
+        },
+        {
+          "id": "osm:way/54210148:deck",
+          "blocker": "osm:way/379511882"
+        },
+        {
+          "id": "osm:way/54210156:deck",
+          "blocker": "osm:way/121593802"
+        },
+        {
+          "id": "osm:way/54210157:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/54210162:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/54210163:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/121593802:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/264591784:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/323231442:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/379511882:deck",
+          "blocker": "osm:way/54210140"
+        },
+        {
+          "id": "osm:way/625362030:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/54223854:bore",
+          "blocker": "osm:way/534078565"
+        },
+        {
+          "id": "osm:way/550018216:bore",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/550018195:bore",
+          "blocker": "osm:way/550018190"
+        }
+      ]
+    },
+    "pittsburgh-v050notex": {
+      "area": "pittsburgh",
+      "textures": false,
+      "package_id": null,
+      "offline": true,
+      "times_s": [
+        15.029,
+        15.197,
+        15.334
+      ],
+      "median_s": 15.197,
+      "objects": 3293,
+      "classes": {
+        "terrain": 1,
+        "water": 3,
+        "building": 987,
+        "road": 258,
+        "bridge": 33,
+        "tunnel": 5,
+        "structure": 6,
+        "vegetation": 2000
+      },
+      "probes": [
+        {
+          "id": "osm:way/24957029:under",
+          "kind": "bridge",
+          "feature": "osm:way/24957029",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              238.6137,
+              80.7804,
+              23.3039
+            ],
+            [
+              228.0958,
+              93.8163,
+              23.3039
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/121593794:under",
+          "kind": "bridge",
+          "feature": "osm:way/121593794",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              367.231,
+              174.8544,
+              2.7689
+            ],
+            [
+              355.78,
+              191.2518,
+              2.7689
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/173225719:under",
+          "kind": "bridge",
+          "feature": "osm:way/173225719",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              326.3815,
+              164.8307,
+              2.7689
+            ],
+            [
+              321.2868,
+              172.2499,
+              2.7689
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/550018203:deck",
+          "kind": "bridge",
+          "feature": "osm:way/550018203",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              184.8446,
+              125.1811,
+              15.057
+            ],
+            [
+              177.253,
+              130.6401,
+              15.805
+            ],
+            [
+              169.6613,
+              136.0991,
+              16.5531
+            ],
+            [
+              162.0697,
+              141.5581,
+              17.3011
+            ],
+            [
+              154.478,
+              147.0171,
+              18.0492
+            ],
+            [
+              146.8864,
+              152.4761,
+              18.7972
+            ],
+            [
+              139.2947,
+              157.9351,
+              19.5453
+            ],
+            [
+              131.7031,
+              163.3941,
+              20.2933
+            ],
+            [
+              124.1114,
+              168.8531,
+              21.0414
+            ],
+            [
+              116.3443,
+              175.0517,
+              21.8363
+            ],
+            [
+              108.5771,
+              181.2503,
+              22.6313
+            ],
+            [
+              100.81,
+              187.4488,
+              23.4263
+            ],
+            [
+              93.0428,
+              193.6474,
+              24.2213
+            ],
+            [
+              85.2757,
+              199.846,
+              24.1456
+            ],
+            [
+              77.5086,
+              206.0446,
+              23.3506
+            ],
+            [
+              69.7414,
+              212.2432,
+              22.5556
+            ],
+            [
+              61.9743,
+              218.4417,
+              21.7607
+            ],
+            [
+              54.2071,
+              224.6403,
+              20.9657
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/550018206:deck",
+          "kind": "bridge",
+          "feature": "osm:way/550018206",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              104.4699,
+              155.9052,
+              23.6504
+            ],
+            [
+              112.156,
+              150.3004,
+              24.4114
+            ],
+            [
+              119.842,
+              144.6957,
+              25.1724
+            ],
+            [
+              127.5281,
+              139.0909,
+              25.9334
+            ],
+            [
+              135.2141,
+              133.4861,
+              26.5383
+            ],
+            [
+              142.9002,
+              127.8814,
+              25.7773
+            ],
+            [
+              150.5862,
+              122.2766,
+              25.0163
+            ],
+            [
+              158.2722,
+              116.6719,
+              24.2553
+            ],
+            [
+              165.9583,
+              111.0671,
+              23.4943
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/54223852:deck",
+          "kind": "bridge",
+          "feature": "osm:way/54223852",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              566.0519,
+              -272.2894,
+              45.851
+            ],
+            [
+              572.5936,
+              -268.247,
+              40.9372
+            ],
+            [
+              579.4153,
+              -265.4037,
+              36.2146
+            ],
+            [
+              583.4031,
+              -263.9377,
+              33.4997
+            ],
+            [
+              588.4516,
+              -262.6603,
+              30.172
+            ],
+            [
+              593.7631,
+              -261.4717,
+              26.6941
+            ],
+            [
+              599.168,
+              -260.7717,
+              23.2115
+            ],
+            [
+              600.0,
+              -260.7147,
+              22.6786
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/54210147:deck",
+          "kind": "bridge",
+          "feature": "osm:way/54210147",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              598.3039,
+              466.1161,
+              12.2813
+            ],
+            [
+              599.1519,
+              475.2058,
+              12.223
+            ],
+            [
+              600.0,
+              484.2954,
+              11.4927
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/264591820:deck",
+          "kind": "bridge",
+          "feature": "osm:way/264591820",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              562.5541,
+              319.4698,
+              6.9998
+            ],
+            [
+              567.4706,
+              322.1408,
+              7.4474
+            ],
+            [
+              572.3871,
+              324.8117,
+              7.895
+            ],
+            [
+              579.2903,
+              328.8194,
+              8.5336
+            ],
+            [
+              586.1935,
+              332.827,
+              9.1722
+            ],
+            [
+              593.0968,
+              336.8347,
+              9.6342
+            ],
+            [
+              600.0,
+              340.8424,
+              8.9956
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/550018192:deck",
+          "kind": "bridge",
+          "feature": "osm:way/550018192",
+          "radius_m": 1.0,
+          "path_map": [
+            [
+              596.6324,
+              254.4123,
+              4.5727
+            ],
+            [
+              600.0,
+              252.7931,
+              4.7535
+            ]
+          ]
+        },
+        {
+          "id": "osm:way/11965424:bore",
+          "kind": "tunnel",
+          "feature": "osm:way/11965424",
+          "path_map": [
+            [
+              182.8053,
+              68.0674,
+              40.025
+            ],
+            [
+              180.2644,
+              66.4725,
+              40.025
+            ],
+            [
+              147.2341,
+              45.7401,
+              42.5658
+            ],
+            [
+              133.8964,
+              37.245,
+              43.5961
+            ],
+            [
+              -600.0,
+              -474.47,
+              101.8874
+            ]
+          ],
+          "radius_m": 1.5
+        },
+        {
+          "id": "osm:way/28411466:bore",
+          "kind": "tunnel",
+          "feature": "osm:way/28411466",
+          "path_map": [
+            [
+              -600.0,
+              -497.102,
+              103.5588
+            ],
+            [
+              180.163,
+              46.8734,
+              41.7173
+            ],
+            [
+              189.7844,
+              54.5356,
+              40.9175
+            ],
+            [
+              192.1312,
+              56.4045,
+              40.9175
+            ]
+          ],
+          "radius_m": 1.5
+        }
+      ],
+      "passage_probes_blocked": [
+        {
+          "id": "osm:way/11950069:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/11950069:under",
+          "blocker": "osm:way/121593794"
+        },
+        {
+          "id": "osm:way/24957029:deck",
+          "blocker": "osm:way/121593795"
+        },
+        {
+          "id": "osm:way/54210154:deck",
+          "blocker": "osm:way/24957029"
+        },
+        {
+          "id": "osm:way/121593794:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/121593795:deck",
+          "blocker": "osm:way/24957029"
+        },
+        {
+          "id": "osm:way/173225719:deck",
+          "blocker": "osm:way/364838217"
+        },
+        {
+          "id": "osm:way/264591932:deck",
+          "blocker": "osm:way/24957029"
+        },
+        {
+          "id": "osm:way/54210161:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/137766148:deck",
+          "blocker": "osm:way/550018203"
+        },
+        {
+          "id": "osm:way/137766151:deck",
+          "blocker": "osm:way/137766148"
+        },
+        {
+          "id": "osm:way/264591970:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/550018210:deck",
+          "blocker": "osm:way/137766151"
+        },
+        {
+          "id": "osm:way/43082522:deck",
+          "blocker": "osm:way/550018211"
+        },
+        {
+          "id": "osm:way/550018211:deck",
+          "blocker": "osm:way/43082522"
+        },
+        {
+          "id": "osm:way/24957033:deck",
+          "blocker": "osm:way/121593802"
+        },
+        {
+          "id": "osm:way/54210140:deck",
+          "blocker": "osm:way/379511882"
+        },
+        {
+          "id": "osm:way/54210143:deck",
+          "blocker": "osm:way/379511882"
+        },
+        {
+          "id": "osm:way/54210148:deck",
+          "blocker": "osm:way/379511882"
+        },
+        {
+          "id": "osm:way/54210156:deck",
+          "blocker": "osm:way/121593802"
+        },
+        {
+          "id": "osm:way/54210157:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/54210162:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/54210163:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/121593802:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/264591784:deck",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/323231442:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/379511882:deck",
+          "blocker": "osm:way/54210140"
+        },
+        {
+          "id": "osm:way/625362030:deck",
+          "blocker": "water:osm:relation/7937544"
+        },
+        {
+          "id": "osm:way/54223854:bore",
+          "blocker": "osm:way/534078565"
+        },
+        {
+          "id": "osm:way/550018216:bore",
+          "blocker": "terrain:grid"
+        },
+        {
+          "id": "osm:way/550018195:bore",
+          "blocker": "osm:way/550018190"
+        }
+      ]
+    }
+  },
+  "blender_builds": {
+    "munich-tex": {
+      "validator": "VALID",
+      "csharp": "OK",
+      "generate_s": 4.0,
+      "export_s": 4.6,
+      "degenerate_triangles": 56
+    },
+    "munich-notex": {
+      "validator": "VALID",
+      "csharp": "OK",
+      "generate_s": 3.7,
+      "export_s": 2.6,
+      "degenerate_triangles": 56
+    },
+    "pittsburgh-tex": {
+      "validator": "VALID",
+      "csharp": "OK",
+      "generate_s": 13.2,
+      "export_s": 23.3,
+      "degenerate_triangles": 71
+    },
+    "pittsburgh-notex": {
+      "validator": "VALID",
+      "csharp": "OK",
+      "generate_s": 13.7,
+      "export_s": 19.4,
+      "degenerate_triangles": 71
+    }
+  },
+  "csharp": {
+    "munich": "3/3 PASS",
+    "pittsburgh": "11/11 PASS",
+    "mb_id_warnings": 0
+  },
+  "col_float": "pending (D126)",
+  "assets": [
+    {
+      "name": "munich-altstadt-0.5.0-blender-notex.mbmap",
+      "bytes": 978058,
+      "sha256": "BE8F0981FDD33EB1DC63F7E837E938FB03FA0891178D1484FAB4DB5C8DA333BC",
+      "package_id": "sha256:f17bf8438ef9703058f4f86048ca77e431fa6d5862437b39508358c44e391765",
+      "validate": "warning: collision has 56 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "munich-altstadt-0.5.0-blender.mbmap",
+      "bytes": 1622507,
+      "sha256": "69CB5E7C057118B91376AEC690F353796C002224410995FBAB2F281C8D4A55BD",
+      "package_id": "sha256:1549ea1a150a2bb539af0c2c8b2b5da067f8bf3e4e98f73955c140fcfc767931",
+      "validate": "warning: collision has 56 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "munich-altstadt-0.5.0-notex.mbmap",
+      "bytes": 914091,
+      "sha256": "5BA47765921DD56C156DAC24175D6F0405D1338D2FB22E26131DB8F7168C17AB",
+      "package_id": "sha256:7d8ed27299cd676bebe9229c6c7c927df33d2f77a059cfb200d48fd4fcd64d8f",
+      "validate": "warning: collision has 57 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "munich-altstadt-0.5.0.mbmap",
+      "bytes": 1554274,
+      "sha256": "F12DC1345EE51BDAC0A5363345086E4F05BB8168E720F22B9CA5C859C4AC4CB5",
+      "package_id": "sha256:62e08fd1ff5e284fef9b5341e4d1ad2fcb99b3125b228e74351982a79da488af",
+      "validate": "warning: collision has 57 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "pittsburgh-0.5.0-blender-notex.mbmap",
+      "bytes": 5531628,
+      "sha256": "A0F25D4B1DB6F9D68C1FCFAF219EF7C89BF868B1094A9D0CC7497E1D8E271EC6",
+      "package_id": "sha256:12adb15861989f30517e051c71a2b22a481dee3dcc695402a3b6258d97963fad",
+      "validate": "warning: collision has 71 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "pittsburgh-0.5.0-blender.mbmap",
+      "bytes": 6593892,
+      "sha256": "F2147A6537D2739A55A6DBBCDA3583A3B5139F0A3EED493856BC1CFDEA6CACEC",
+      "package_id": "sha256:a8e7021cbb0b986baa11ecb317f95df96fbca8fb03879e10f78f0d9b97d804ae",
+      "validate": "warning: collision has 71 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "pittsburgh-0.5.0-notex.mbmap",
+      "bytes": 4212116,
+      "sha256": "DCA3F69D00535FA8D48ADDF7622C78CA3DA16B17BEDC15B1BB4CDDF6D66EB195",
+      "package_id": "sha256:bff2935d688bf8b471de38ceb2dbd8b6dad53ba7780941ef9049fd8fbd5bd79a",
+      "validate": "warning: collision has 75 degenerate (zero-area) triangles"
+    },
+    {
+      "name": "pittsburgh-0.5.0.mbmap",
+      "bytes": 5266465,
+      "sha256": "0EF863C5718B4E15FCE46BBCE70784D10DC6954FF2A49179690DAE19FF5ADB81",
+      "package_id": "sha256:b3fbee0c5212bafb3620b4bf35b67f604afb461d39ddf70e6d3fa5bb2e352ae1",
+      "validate": "warning: collision has 75 degenerate (zero-area) triangles"
+    }
+  ]
+}

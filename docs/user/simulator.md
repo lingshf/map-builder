@@ -1,6 +1,6 @@
 # Simulator use: integration preview
 
-**v0.4.0 does not add a playable map loader to
+**v0.5.0 does not add a playable map loader to
 lingshf/drone-flight-simulator.** This release delivers a package contract, a
 sample and a reference reader. No simulator files are changed by installing the
 Blender extension.
@@ -36,4 +36,9 @@ ignores both. The collision and heightfield do not depend on textures, so
 `--no-textures` changes only the visuals. A Unity glTF importer that reads
 embedded PNGs shows the textures; ship the textures' CC0 notice from
 `NOTICES.txt` along with the map data notices.
+Since v0.5.0, rivers inside the map are flat water surfaces exported as
+collision class 5 (water) over a carved bed; treat class 5 as a surface your
+simulator decides how to handle (land, splash or crash). The heightfield
+.mbhf stays terrain-only and therefore shows the bed below the water, so
+use the triangle collision over rivers. The schema is still 2.1.0.
 Check every probe before flight: see [bridges, tunnels and passages](structures.md).
