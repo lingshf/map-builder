@@ -126,6 +126,24 @@ alone. REL-v0.5.0 (#75) rebases, rebuilds every package and drops its `design/` 
 shares `docs/PACKAGE_FORMAT.md` and the sample slot with COL-FLOAT-2, so the two never run at the same time.
 Test budget for these tasks: D134.
 
+## Sprint 5 (style)
+
+Direction, budgets and ACs are in [S5-STYLE.md](S5-STYLE.md) (user request; D136–D145). Every row passes the
+G0 flight-data gate: `.mbcol` and `.mbhf` byte-identical; `manifest.georeference`, `manifest.passage_probes`,
+`report.passage_probes_blocked` and `report.passage_probes_dropped` exactly equal. No S5 task has a geometry
+exception (D145). The single start gate is #75 merged into main (D136). S5 shares files with #77, S4-MYPY and
+the #75 sample slot, so those tasks never edit the shared files at the same time (overlap table in the spec).
+
+| id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
+|---|---|---|---|---|---|---|
+| [S5-STYLE-BASE](S5-STYLE.md#s5-style-base-baselines-metrics-g0-checker-and-acceptance-harness) | S5 | dev | #75 merged (D136) | `tools/style_check.py`, `tests/test_style_check.py` (new), `tools/demo/` (style cameras, render recipe, frame-time proxy) | blocked | |
+| [S5-STYLE-PALETTE](S5-STYLE.md#s5-style-palette-style-option-default-stylized-palette-faceting-terrain-buildings-roads-and-trees) | S5 | dev | S5-STYLE-BASE; #75 and S4-MYPY merged | `core/style.py` (new), `core/generate.py` (colour constants and colour choice only, trees included; no geometry), `core/glb.py` (normals/welding), `core/uv.py`/`core/textures.py` (mode switch), `tools/mbmap_cli.py` (flag), `blender/props.py`, `ui.py`, `scene_build.py` (option); soft: sample slot (D103, default becomes stylized, D141) | blocked | |
+| [S5-STYLE-WATER](S5-STYLE.md#s5-style-water-cyan-water-terrain-side-shore-band-sandy-banks-colour-only) | S5 | dev | S5-STYLE-PALETTE (shared files); D143 (colour-only band); #75 merged (so #77 too) | `core/style.py` (water/band colours), water-stage and `bank:` colour code in `core/generate.py`, `core/water.py`/`core/shore.py` (colour only); soft: sample slot | blocked | |
+| [S5-STYLE-REVIEW](S5-STYLE.md#s5-style-review-design-milestone-review-gono-go) | S5 | design | S5-STYLE-BASE, PALETTE, WATER | `design/` only; explicit GO/NO-GO | blocked | |
+| [S5-DECOR](S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) | S5 (last, D142) | dev | S5-STYLE-REVIEW GO; step 1a (frozen-reader fixture) and 1b (glTFast hide proof) pass, else stop and escalate | `core/decor.py` (new), `core/generate.py` (decor call), `core/glb.py` (primitive), `core/package.py` (exporter exemption), `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`, `tests/test_decor.py`, format-policy fixtures | blocked | |
+| S5-F1 | later | dev | explicit user approval | `core/generate.py` (`tree_mesh`), collision | deferred: tree shape change (changes `vegetation` collision; D145) | |
+| S5-F2 | later | dev | data and collision-class review | new rock objects | deferred: rocks from OSM `natural=stone`/`bare_rock` | |
+
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
 

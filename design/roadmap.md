@@ -509,6 +509,29 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D134 | v0.5.0 closeout test budget: each new test ≤ 5 s with no wall-clock asserts, and no case is duplicated across `tests/test_water*.py`, `tests/test_shore_ramps.py` and `tests/test_floating_audit.py`. Real-data audits and replays are PR evidence, not persisted tests. PR CI stays ≤ 10 min; the mypy step runs in one job only and adds ≤ 60 s. Reviewers block duplicate or slow tests. | De (proposed); C confirms | proposed |
 | D135 | Coordinator ruling on #77 (D89 cap reached at R3, head 568f4a5): R3.1–R3.3 are closed by **one coordinator-verified fix commit**, checked against [S4-COL-FLOAT-2](tasks/S4-COL-FLOAT-2.md) AC3 and AC5, with no R4 review round. Exact-head Blender D106 timing is still required: Generate and Generate+Export, three alternating offline rounds. The merge still needs the D133 gate. | C (coordinator) | decided |
 
+## v5: sprint 5 — stylized look (after v0.5.0)
+
+User request: the map follows the reference's stylized low-poly look. Priorities in order: looks good, then low
+hardware cost, then real-map fidelity. Height and collision data must stay exact, because flight depends on
+them. The user then delegated the remaining open points to the coordinator ("其他的你先尽量选择最优，推进项目，不要等我").
+Spec, palette, the G0 flight-data gate, budgets, acceptance method and tasks: [tasks/S5-STYLE.md](tasks/S5-STYLE.md).
+Order: S5-STYLE-BASE → PALETTE → WATER → S5-STYLE-REVIEW (GO/NO-GO), then S5-DECOR last; nothing waits on DECOR.
+
+### Sprint 5 decisions
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D136 | Style work is sprint 5, after v0.5.0. The v0.5.0 closeout (#77 → S4-MYPY → #75, D133) continues unchanged, and S5 changes no #77 or #75 scope. **Single start gate:** #75 merged into main; tagging and publishing are separate user decisions and are not S5 gates. S5 really does share files: PALETTE and WATER overlap #77's `core/generate.py`, `core/water.py` and `core/shore.py`, S4-MYPY's typing domain after triage, and the #75 sample slot. The rule is no simultaneous edits (overlap table in the spec). | C (coordinator; user may change) | decided |
+| D137 | Priority order for the visuals: (1) looks good, (2) low hardware cost, (3) real-map fidelity. Above all three sits the **G0 flight-data gate**, run in every S5 task with no waivers: `collision/map.mbcol` and `collision/terrain.mbhf` byte-identical; `manifest.georeference`, `manifest.passage_probes`, `report.passage_probes_blocked` and `report.passage_probes_dropped` exactly equal. It covers both paths and both modes under pinned settings, and its negative cases are tested. | U (priorities), De (gate) | proposed |
+| D138 | The visual and collision one-to-one rule stays (`docs/PACKAGE_FORMAT.md:187–193`; the validator rejects a visible node with no collision, `core/package.py:1747`). Anything that looks solid is in collision with the same triangles, and the look comes only from vertex colours, materials, normals and welding. The only planned exception is S5-DECOR (D142), and it is contingent on its own frozen-reader fixture. | De (proposed); C confirms | proposed |
+| D139 | Low-end budgets, measured and cumulative against the S5-BASE baseline: ≤ 8 material definitions; draw submissions (node instances × primitives) ≤ baseline; frame time on a labelled proxy (vendored three.js viewer, headless Chromium with SwiftShader, 1280 × 720, fixed camera, median of 300 frames) ≤ baseline + 10 %; render memory (vertex + index + texture bytes) ≤ baseline; visual triangles equal to baseline; 0 texture bytes in stylized mode; GLB ≤ baseline. S5-DECOR has its own allowances. D91 timing is reported separately for CLI whole Generate, Blender Generate and Blender Generate+Export, each ≤ +5 %. The contact-sheet render limit is about producing evidence, not a hardware budget. | De (proposed); C confirms | proposed |
+| D140 | Visual acceptance: the same cameras rendered with one EEVEE setup in ≤ 2 min, on a contact sheet (reference, base, head) attached to the PR and not committed, plus an information-only palette ΔE report. S5-STYLE-REVIEW is an explicit GO/NO-GO on G0, classic identity, the cumulative budgets and the sheets. | De (proposed); C confirms | proposed |
+| D141 | U1: stylized is the default. Classic stays available and, in every S5 task, is whole-archive byte-identical to main before S5 (sample, Munich, Pittsburgh; CLI and Blender). Between the modes, only the GLB, manifest hashes and `package_id`, `asset_notices`/NOTICES and the `report.json` `style` option may differ. | U | decided |
+| D142 | U2: visual-only decoration ≤ 0.3 m is allowed, in the separate last task S5-DECOR, which nothing else waits on. It stays within D101/D110 (no new package members), is marked by a separate primitive with its own material `MB Decor` (normative for consumers) plus `extras.mb_decor`, and needs two proofs first: a genuine exported frozen-reader positive fixture, and a glTFast (pinned version) import showing that the decoration submesh can be hidden on its own. If either fails, DECOR stops and escalates, and Design proposes the minimal format change; no other task is blocked. Tests on the emitted triangles enforce the 0.3 m cap and keep decoration out of the designated flight corridors (dilated roads, water and banks, bridge/tunnel/structure envelopes, building footprints, and probe capsules plus 1 m clearance). | U (overrides the Design recommendation) | decided |
+| D143 | U3: the shore band is colour only, on the existing terrain-side and `bank:` triangles. The water is not re-triangulated, so `.mbcol` and `.mbhf` stay byte-identical. | C (delegated by the user; user may change) | decided |
+| D144 | U4: lit materials (standard metallic-roughness) first. `KHR_materials_unlit` may be revisited after S5-STYLE-REVIEW. | C (delegated by the user; user may change) | decided |
+| D145 | Trees are appearance-only in S5 (colours and facet shading on today's tree mesh). No S5 task changes collision geometry. A tree shape change (S5-F1) or any geometry change needs explicit user approval plus per-object and query-equivalence criteria. | C (delegated by the user; user may change) | decided |
+
 ## Decisions that need the user
 
 1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
@@ -516,6 +539,9 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
    and the website URL shown on the platform. Dev only prepares the checklist.
 3. **`.mbmap` format-stability policy (D101)** and **v1.0 exit criteria (D102).** Drafts here; the user
    confirms or edits them before v1.0 is planned.
+4. **S5 style.** U1 and U2 were decided by the user (D141, D142). U3, U4 and the tree rule were decided by the
+   coordinator under the user's delegation (D143–D145); the user may change them. A tree shape change (S5-F1) still
+   needs the user.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.
