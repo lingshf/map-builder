@@ -3,21 +3,26 @@
 """The committed sample must have no floating or buried collision (tools/floating_audit.py)."""
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "tools"))
-
-import floating_audit  # noqa: E402
-
 SAMPLE = os.path.join(ROOT, "examples", "synthetic_sample.mbmap")
+HAS_NUMPY = importlib.util.find_spec("numpy") is not None   # the audit tool needs it; the core does not
 
 
+@unittest.skipUnless(HAS_NUMPY, "numpy is not installed (the audit tool is a developer tool)")
 class SampleAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        try:
+            import floating_audit
+        finally:
+            sys.path.pop(0)
         cls.result = floating_audit.audit(SAMPLE)
 
     def test_no_collision_floats_above_or_is_buried_below_the_visible_surface(self):
@@ -27,7 +32,6 @@ class SampleAuditTest(unittest.TestCase):
         self.assertNotIn("ground_above_terrain:road", self.result["findings_summary"])
 
     def test_findings_are_json_serialisable_without_infinities(self):
-        import json
         json.dumps(self.result, allow_nan=False)
 
 
