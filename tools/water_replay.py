@@ -117,7 +117,7 @@ BLEND_PAD_M = 65.0    # water bbox padding inside which the terrain bed may have
 SHARED_EDGE_TOL_M = 1e-4   # vertices closer than this are the same vertex; a ray this close is on the edge
 FOOTPRINT_RADIUS_M = 1.0   # triangles this close to the pinned ray must keep their plan position
 Z_RISE_TOL_M = 1e-6        # a local vertex may not rise by more than float noise
-PIN_XY_TOL_M = 5e-4        # the pinned ray position is recorded to 3 decimals
+PIN_XY_TOL_M = 0.05        # a ray matches a pin within 5 cm of the pinned XY
 
 Hit = tuple[float, str, str]   # (distance, object name, class)
 
@@ -311,14 +311,13 @@ class SharedEdgeSwap:
     """One ray exactly on the shared edge of two abutting road ribbons: it reports either ribbon, so the nearest
     hit's name may flip between BASE and HEAD although both ribbons were lowered together."""
     package: str
-    ray: int
     xy: tuple[float, float]
     roads: frozenset[str]
     reason: str
 
 
 PINNED_SHARED_EDGE_SWAPS = (
-    SharedEdgeSwap("pittsburgh", 71, (458.888, 379.118),
+    SharedEdgeSwap("pittsburgh", (458.888, 379.118),
                    frozenset({"road_way_1568643371", "road_way_1568643374"}),
                    "Pittsburgh CLI: the ray lies on the boundary shared by two ribbons that both follow the carved bed"),
 )
@@ -398,14 +397,15 @@ def lowered_together_on_shared_edge(base: Any, head: Any, roads: list[str], xy: 
     return _lowered_equally(base_edges, head_edges)
 
 
-def pinned_shared_edge_swap(base: Any, head: Any, index: int, xy: tuple[float, float],
+def pinned_shared_edge_swap(base: Any, head: Any, xy: tuple[float, float],
                             base_nearest: Hit | None, head_nearest: Hit | None) -> bool:
-    """True only for a ray listed in PINNED_SHARED_EDGE_SWAPS whose two nearest hits are the pinned road pair and
+    """True only for a ray in PINNED_SHARED_EDGE_SWAPS (same package, XY within 5 cm; the ray index is not used
+    because it shifts whenever the source data changes) whose two nearest hits are the pinned road pair and
     whose geometry still shows the two ribbons sharing an edge and lowered together."""
     if base_nearest is None or head_nearest is None:
         return False
     for pin in PINNED_SHARED_EDGE_SWAPS:
-        is_pinned_ray = (head.manifest.get("name"), index) == (pin.package, pin.ray) and \
+        is_pinned_ray = head.manifest.get("name") == pin.package and \
             abs(xy[0] - pin.xy[0]) <= PIN_XY_TOL_M and abs(xy[1] - pin.xy[1]) <= PIN_XY_TOL_M
         if is_pinned_ray and {base_nearest[1], head_nearest[1]} == pin.roads:
             return lowered_together_on_shared_edge(base, head, sorted(pin.roads), xy)
@@ -545,7 +545,7 @@ def main() -> int:
             continue
         base_hits = py_hits(base.col, o, dist)
         lab = ray_label(base_hits, py_hits(head.col, o, dist), (o[0], o[1]), ctx)
-        if lab == "unlisted" and pinned_shared_edge_swap(base, head, i, (o[0], o[1]), bh, hh):
+        if lab == "unlisted" and pinned_shared_edge_swap(base, head, (o[0], o[1]), bh, hh):
             lab = "road lowered"
         if lab:
             record("ray", i, (o[0], o[1]), bh, hh, lab)

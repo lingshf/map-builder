@@ -143,7 +143,7 @@ class SharedEdgeRoadsStub:
 
 class PinnedSharedEdgeTest(unittest.TestCase):
     ON_THE_SHARED_EDGE = (0.0, 0.5)
-    PIN = wr.SharedEdgeSwap("area", 7, ON_THE_SHARED_EDGE, frozenset({"road_a", "road_b"}), "test")
+    PIN = wr.SharedEdgeSwap("area", ON_THE_SHARED_EDGE, frozenset({"road_a", "road_b"}), "test")
 
     def setUp(self) -> None:
         self._pins = wr.PINNED_SHARED_EDGE_SWAPS
@@ -152,17 +152,20 @@ class PinnedSharedEdgeTest(unittest.TestCase):
     def tearDown(self) -> None:
         wr.PINNED_SHARED_EDGE_SWAPS = self._pins
 
-    def swap(self, head_stub: SharedEdgeRoadsStub, index: int = 7, name: str = "area") -> bool:
+    def swap(self, head_stub: SharedEdgeRoadsStub, name: str = "area", xy: tuple[float, float] = ON_THE_SHARED_EDGE,
+             ) -> bool:
         base = SimpleNamespace(col=SharedEdgeRoadsStub(0.0, 0.0), manifest={"name": name})
         head = SimpleNamespace(col=head_stub, manifest={"name": name})
-        return wr.pinned_shared_edge_swap(base, head, index, self.ON_THE_SHARED_EDGE,
-                                          (1.0, "road_a", "road"), (1.1, "road_b", "road"))
+        return wr.pinned_shared_edge_swap(base, head, xy, (1.0, "road_a", "road"), (1.1, "road_b", "road"))
 
-    def test_the_pinned_ray_on_a_shared_edge_lowered_together_is_accepted(self) -> None:
+    def test_the_pinned_location_on_a_shared_edge_lowered_together_is_accepted(self) -> None:
         self.assertTrue(self.swap(SharedEdgeRoadsStub(0.1, 0.1)))
 
-    def test_the_same_shared_edge_on_an_unpinned_ray_or_package_is_rejected(self) -> None:
-        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), index=8))
+    def test_the_pin_is_matched_by_package_and_xy_and_not_by_ray_index(self) -> None:
+        self.assertTrue(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=(0.0, 0.5 + wr.PIN_XY_TOL_M / 2)))
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=(0.0, 0.5 + 2 * wr.PIN_XY_TOL_M)))
+
+    def test_the_same_shared_edge_in_another_package_is_rejected(self) -> None:
         self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), name="other"))
 
     def test_ribbons_lowered_by_different_amounts_are_rejected(self) -> None:
