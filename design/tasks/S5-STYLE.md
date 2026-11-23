@@ -331,7 +331,16 @@ over the full height:
 * **Exclusion is tested on the emitted triangles,** using the exact area test in `core/overlap.py`: no
   decoration triangle overlaps or touches the corridor set. Boundary contact counts as overlap here, which is
   conservative.
-* **Height cap:** every decoration vertex is ≤ 0.3 m above the terrain surface directly below it, and ≥ 0 m.
+* **Height cap, over the whole triangle:** for every decoration triangle, the maximum of (decoration Z − terrain
+  surface Z directly below) over the **entire triangle area**, including its interior over terrain dips, is
+  ≤ 0.30 m. Both surfaces are piecewise planar, so the check is exact when it evaluates the difference at every
+  vertex of their XY overlay:
+  * the decoration triangle's vertices;
+  * the crossings of its edges with terrain triangle edges;
+  * the terrain vertices that lie inside it.
+
+  "Terrain" means the final emitted ground surface: the `terrain` class collision triangles, including the
+  `bank:` ramps. There is no vertex-only or sampled shortcut.
 * The exporter exempts only `MB Decor` primitives, and only from the 1:1 triangle correspondence; every other
   check stays.
 
@@ -341,8 +350,8 @@ over the full height:
 2. Classic identity: no decoration in classic mode.
 3. The DECOR budget rows (draw submissions ≤ baseline + 2 %, triangles and GLB ≤ baseline + 10 %).
 4. The steps 1a and 1b fixture and its evidence: 1a persisted as a CI test, 1b attached to the PR.
-5. On the sample, Munich and Pittsburgh: 0 decoration triangles in the corridor set, and a maximum decoration
-   height ≤ 0.3 m, both reported.
+5. On the sample, Munich and Pittsburgh: 0 decoration triangles in the corridor set, and the maximum
+   whole-triangle height over terrain ≤ 0.30 m, both reported.
 6. Contact sheet.
 
 **Tests (≤ 5 s each), all on synthetic inputs:**
@@ -350,6 +359,9 @@ over the full height:
 * a decoration triangle partly inside a dilated road, inside a probe capsule plus clearance, or on a bridge
   envelope is rejected;
 * a 0.31 m decoration instance is rejected, and a 0.30 m one is accepted;
+* **straddle over a dip:** a flat decoration triangle whose three vertices are each 0.20 m above the terrain, but
+  which spans a terrain vertex lowered by 0.15 m inside it (0.35 m gap at that point), is rejected. The same
+  triangle over flat terrain is accepted;
 * the exporter exempts `MB Decor` primitives only; an unmarked extra primitive still fails the binding.
 
 **Conflict domain:** `core/decor.py` (new); `core/generate.py` (decor call only); `core/glb.py` (extra
