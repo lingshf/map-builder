@@ -95,6 +95,99 @@ class RayLabelTest(unittest.TestCase):
                          "unlisted")
 
 
+class RoadLoweredTest(unittest.TestCase):
+    NEAR_WATER = (50, 50)
+    FAR_FROM_WATER = (400, 400)
+
+    def test_the_same_road_hit_farther_down_is_lowered(self) -> None:
+        base, head = [(1.0, "road_a", "road")], [(9.0, "road_a", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "road lowered")
+        self.assertEqual(wr.ray_label(base, head, self.FAR_FROM_WATER, ctx()), "unlisted")
+
+    def test_an_unrelated_deeper_road_replacing_the_base_road_is_not_lowered(self) -> None:
+        base, head = [(1.0, "road_a", "road")], [(9.0, "road_b", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "unlisted")
+
+    def test_another_road_winning_is_not_lowered_even_if_the_base_road_is_still_hit_farther_down(self) -> None:
+        base = [(1.0, "road_a", "road")]
+        for winner_t in (0.5, 9.0):
+            head = [(winner_t, "road_b", "road"), (9.5, "road_a", "road")]
+            self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "unlisted", winner_t)
+
+    def test_a_road_that_was_on_the_base_ray_and_moved_down_may_take_over_as_winner(self) -> None:
+        base = [(1.0, "road_a", "road"), (1.3, "road_b", "road")]
+        head = [(1.6, "road_b", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "road lowered")
+
+    def test_the_same_road_hit_higher_is_not_lowered(self) -> None:
+        self.assertEqual(wr.ray_label([(1.0, "road_a", "road")], [(0.5, "road_a", "road")], self.NEAR_WATER, ctx()),
+                         "unlisted")
+
+
+class SharedEdgeRoadsStub:
+    """Collision stub: ribbon A is a triangle whose edge x=0, y in [0, 1] is shared with ribbon B; A has a second
+    local triangle, away from the shared edge, whose Z is 5 + ``local_rise``."""
+
+    def __init__(self, drop_a: float, drop_b: float, gap: float = 0.0, swap_sides: bool = False,
+                 local_rise: float = 0.0) -> None:
+        self.objects = [{"name": "road_a"}, {"name": "road_b"}]
+        far_a, far_b = (1.0, -1.0) if swap_sides else (-1.0, 1.0)
+        z = 5.0 + local_rise
+        self.tris = {"road_a": [((far_a, 0.0, 5.0 - drop_a), (0.0, 0.0, 5.0 - drop_a), (0.0, 1.0, 5.0 - drop_a)),
+                                ((-1.0, 0.0, z), (-1.0, 1.0, z), (-0.5, 1.0, z))],
+                     "road_b": [((gap, 0.0, 5.0 - drop_b), (far_b, 0.0, 5.0 - drop_b), (gap, 1.0, 5.0 - drop_b))]}
+
+    def object_triangles(self, entry: dict) -> list:
+        return self.tris[entry["name"]]
+
+
+class PinnedSharedEdgeTest(unittest.TestCase):
+    ON_THE_SHARED_EDGE = (0.0, 0.5)
+    PIN = wr.SharedEdgeSwap("area", ON_THE_SHARED_EDGE, frozenset({"road_a", "road_b"}), "test")
+
+    def setUp(self) -> None:
+        self._pins = wr.PINNED_SHARED_EDGE_SWAPS
+        wr.PINNED_SHARED_EDGE_SWAPS = (self.PIN,)
+
+    def tearDown(self) -> None:
+        wr.PINNED_SHARED_EDGE_SWAPS = self._pins
+
+    def swap(self, head_stub: SharedEdgeRoadsStub, name: str = "area", xy: tuple[float, float] = ON_THE_SHARED_EDGE,
+             ) -> bool:
+        base = SimpleNamespace(col=SharedEdgeRoadsStub(0.0, 0.0), manifest={"name": name})
+        head = SimpleNamespace(col=head_stub, manifest={"name": name})
+        return wr.pinned_shared_edge_swap(base, head, xy, (1.0, "road_a", "road"), (1.1, "road_b", "road"))
+
+    def test_the_pinned_location_on_a_shared_edge_lowered_together_is_accepted(self) -> None:
+        self.assertTrue(self.swap(SharedEdgeRoadsStub(0.1, 0.1)))
+
+    def test_the_pin_is_matched_by_package_and_xy_and_not_by_ray_index(self) -> None:
+        self.assertTrue(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=(0.0, 0.5 + wr.PIN_XY_TOL_M / 2)))
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=(0.0, 0.5 + 2 * wr.PIN_XY_TOL_M)))
+
+    def test_a_diagonal_offset_beyond_the_planar_radius_is_rejected(self) -> None:
+        diagonal = (0.04, 0.5 + 0.04)   # 5.66 cm from the pin: inside a 5 cm square, outside a 5 cm circle
+        accept_geometry = lambda *_: True  # noqa: E731 - isolate the location match from the geometry check
+        real, wr.lowered_together_on_shared_edge = wr.lowered_together_on_shared_edge, accept_geometry
+        self.addCleanup(setattr, wr, "lowered_together_on_shared_edge", real)
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=diagonal))
+
+    def test_the_same_shared_edge_in_another_package_is_rejected(self) -> None:
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), name="other"))
+
+    def test_ribbons_lowered_by_different_amounts_are_rejected(self) -> None:
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.2)))
+
+    def test_ribbons_swapping_sides_of_the_shared_edge_are_rejected(self) -> None:
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1, swap_sides=True)))
+
+    def test_a_local_triangle_rising_while_the_shared_edge_drops_is_rejected(self) -> None:
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1, local_rise=0.2)))
+
+    def test_a_lateral_move_leaving_a_1_5_mm_gap_is_rejected(self) -> None:
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1, gap=0.0015)))
+
+
 class CapsuleLabelTest(unittest.TestCase):
     WET = [[10, 10, 5], [30, 10, 5]]
     DRY = [[300, 300, 5], [320, 300, 5]]

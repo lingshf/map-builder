@@ -170,11 +170,14 @@ class LakeStructuresTest(unittest.TestCase):
         self.assertLessEqual(low, bed + 1e-6)
         self.assertLess(low, w.mesh.vertices[0][2])
 
-    def test_at_grade_road_keeps_its_pre_carve_surface(self):
-        roads = objects(self.plan, "road")
-        self.assertTrue(roads)
-        top = max(v[2] for r in roads for v in r.mesh.vertices)
-        self.assertGreater(top, objects(self.plan, "terrain")[0].mesh.vertices[0][2] - 100)
+    def test_at_grade_road_follows_the_carved_bed_instead_of_floating_over_it(self):
+        z_off = self.plan.report["z_offset_m"]
+        (water_obj,) = objects(self.plan, "water")
+        level = water_obj.mesh.vertices[0][2] + z_off
+        wet = [v[2] + r.location[2] for r in objects(self.plan, "road") for v in r.mesh.vertices
+               if abs(v[0] + r.location[0]) < 30]
+        self.assertTrue(wet)
+        self.assertLessEqual(max(wet) + z_off, level - water.CARVE_DEPTH_M + ROAD_LIFT_M + 0.1)
 
     def test_at_grade_road_over_water_is_reported(self):
         row = bodies(self.plan)[self.ids[0]]

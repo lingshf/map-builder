@@ -2042,7 +2042,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
         order = {id(f): k for k, f in enumerate(road_feats)}
         for f in sorted(road_feats, key=road_priority):
             try:
-                mesh, origin, prov = build_road(f, terrain, z_offset,
+                mesh, origin, prov = build_road(f, wmodel.carved if wmodel is not None else terrain, z_offset,
                                                 reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
                                                 max_work=opts.max_triangulation_work, ownership=ownership,
                                                 limit=budget.remaining())
