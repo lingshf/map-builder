@@ -165,6 +165,13 @@ class PinnedSharedEdgeTest(unittest.TestCase):
         self.assertTrue(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=(0.0, 0.5 + wr.PIN_XY_TOL_M / 2)))
         self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=(0.0, 0.5 + 2 * wr.PIN_XY_TOL_M)))
 
+    def test_a_diagonal_offset_beyond_the_planar_radius_is_rejected(self) -> None:
+        diagonal = (0.04, 0.5 + 0.04)   # 5.66 cm from the pin: inside a 5 cm square, outside a 5 cm circle
+        accept_geometry = lambda *_: True  # noqa: E731 - isolate the location match from the geometry check
+        real, wr.lowered_together_on_shared_edge = wr.lowered_together_on_shared_edge, accept_geometry
+        self.addCleanup(setattr, wr, "lowered_together_on_shared_edge", real)
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), xy=diagonal))
+
     def test_the_same_shared_edge_in_another_package_is_rejected(self) -> None:
         self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1), name="other"))
 

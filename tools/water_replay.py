@@ -406,7 +406,7 @@ def pinned_shared_edge_swap(base: Any, head: Any, xy: tuple[float, float],
         return False
     for pin in PINNED_SHARED_EDGE_SWAPS:
         is_pinned_ray = head.manifest.get("name") == pin.package and \
-            abs(xy[0] - pin.xy[0]) <= PIN_XY_TOL_M and abs(xy[1] - pin.xy[1]) <= PIN_XY_TOL_M
+            math.hypot(xy[0] - pin.xy[0], xy[1] - pin.xy[1]) <= PIN_XY_TOL_M
         if is_pinned_ray and {base_nearest[1], head_nearest[1]} == pin.roads:
             return lowered_together_on_shared_edge(base, head, sorted(pin.roads), xy)
     return False
