@@ -108,10 +108,27 @@ class RoadLoweredTest(unittest.TestCase):
         base, head = [(1.0, "road_a", "road")], [(9.0, "road_b", "road")]
         self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "unlisted")
 
-    def test_overlapping_roads_swapping_winner_need_the_base_road_to_remain_lower(self) -> None:
+    def test_another_road_winning_is_not_lowered_even_if_the_base_road_is_still_hit_farther_down(self) -> None:
         base = [(1.0, "road_a", "road")]
-        head = [(9.0, "road_b", "road"), (9.5, "road_a", "road")]
+        for winner_t in (0.5, 9.0):
+            head = [(winner_t, "road_b", "road"), (9.5, "road_a", "road")]
+            self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "unlisted", winner_t)
+
+    def test_a_road_that_was_on_the_base_ray_and_moved_down_may_take_over_as_winner(self) -> None:
+        base = [(1.0, "road_a", "road"), (1.3, "road_b", "road")]
+        head = [(1.6, "road_b", "road")]
         self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "road lowered")
+
+    def test_the_edge_neighbour_road_may_win_but_only_if_it_was_there_and_moved_down(self) -> None:
+        base, head = [(1.0, "road_a", "road")], [(1.1, "road_b", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx(), [(1.0, "road_b", "road")]),
+                         "road lowered")
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx(), [(1.2, "road_b", "road")]), "unlisted")
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx(), [(1.0, "road_c", "road")]), "unlisted")
+
+    def test_the_same_road_hit_higher_is_not_lowered(self) -> None:
+        self.assertEqual(wr.ray_label([(1.0, "road_a", "road")], [(0.5, "road_a", "road")], self.NEAR_WATER, ctx()),
+                         "unlisted")
 
 
 class CapsuleLabelTest(unittest.TestCase):

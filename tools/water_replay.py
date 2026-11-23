@@ -36,6 +36,7 @@ import sys
 import tempfile
 import zipfile
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -113,6 +114,7 @@ def water_rays(head: Package, top: float) -> list[tuple[float, float, float]]:
 
 DIST_TOL_M = 1e-3     # spec section 7(a): hit distances are compared to 1 mm
 BLEND_PAD_M = 65.0    # water bbox padding inside which the terrain bed may have moved (carve + blend, 2 cells)
+EDGE_TIE_M = 2e-3     # a ray this close to a road ribbon's edge may report either of two abutting ribbons
 
 Hit = tuple[float, str, str]   # (distance, object name, class)
 
@@ -256,7 +258,18 @@ def _moved_down(name: str, cls_: str, t: float, h_hits: list[Hit]) -> bool:
 
 
 
-def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
+def edge_tied_roads(col: Collision, o: tuple[float, float, float], dist: float, on_ray: list[Hit]) -> list[Hit]:
+    """Road hits within EDGE_TIE_M of the ray that the ray itself does not report: two abutting road ribbons
+    share an edge, and a ray exactly on it reports only one of them."""
+    known = {h[1] for h in on_ray}
+    tied: list[Hit] = []
+    for dx, dy in ((EDGE_TIE_M, 0.0), (-EDGE_TIE_M, 0.0), (0.0, EDGE_TIE_M), (0.0, -EDGE_TIE_M)):
+        tied += [h for h in py_hits(col, (o[0] + dx, o[1] + dy, o[2]), dist) if h[2] == "road" and h[1] not in known]
+    return tied
+
+
+def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context,
+              edge_tied: Sequence[Hit] = ()) -> str | None:
     """None when the nearest hits are equivalent, else the change-set label, or ``unlisted``. ``b_hits``/``h_hits``
     are every hit of the ray, nearest first. A difference is accepted only when each BASE object nearer than the
     new nearest hit is explained: terrain near new water that HEAD hits again farther down (the bed moved), or
@@ -280,9 +293,12 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
             return "deck raised"
         return "unlisted"
     if b is not None and b[2] == h[2] == "road":
-        # The base road must still be on the ray, lower; a different road replacing it is not "lowered".
-        same_road_lowered = _moved_down(b[1], b[2], b[0], h_hits)
-        return "road lowered" if same_road_lowered and ctx.near_any_water(*xy) else "unlisted"
+        # The head winner must itself be a road already on the base ray that moved down, and the nearest hit
+        # must not rise; a road that was not on the base ray is an unexplained replacement.
+        base_roads = [x for x in [*b_hits, *edge_tied] if x[2] == "road"]
+        winner_was_on_base_ray = any(n == h[1] and h[0] > t + DIST_TOL_M for t, n, _c in base_roads)
+        lowered = winner_was_on_base_ray and h[0] >= b[0] - DIST_TOL_M
+        return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
     label = None
     for t, name, cls_ in nearer:
         if cls_ == "road" and h[2] == "water" and _moved_down(name, cls_, t, h_hits):
@@ -430,7 +446,9 @@ def main() -> int:
         if (bh is None and hh is None) or (bh and hh and bh[1] == hh[1] and bh[2] == hh[2]
                                            and abs(bh[0] - hh[0]) <= DIST_TOL_M):
             continue
-        lab = ray_label(py_hits(base.col, o, dist), py_hits(head.col, o, dist), (o[0], o[1]), ctx)
+        base_hits = py_hits(base.col, o, dist)
+        lab = ray_label(base_hits, py_hits(head.col, o, dist), (o[0], o[1]), ctx,
+                        edge_tied_roads(base.col, o, dist, base_hits))
         if lab:
             record("ray", i, (o[0], o[1]), bh, hh, lab)
     for i, (path, qr) in enumerate(queries):
