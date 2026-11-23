@@ -10,7 +10,7 @@ Owner: dev · sprint S4 · **v0.5.0 blocker** (D128) · after S4-COL-FLOAT-2 (#7
 `core/overlap.py` and edits `core/water.py`, `core/generate.py` and `core/package.py`, so the error set is final
 only once #77 has merged.
 
-## Sequence (D128, D130)
+## Sequence (D128, D133)
 
 1. **While #77 is open: read-only triage.** Run `python -m mypy` on main and on the #77 head; post the error list
    (file:line, code, one-line cause, planned fix) to the coordinator. No branch, no edits.
@@ -30,8 +30,10 @@ only once #77 has merged.
 
 1. `python -m mypy` reports `Success: no issues found` on the PR head, locally and in CI, with the pinned version.
 2. **Byte identity (D97):** the committed sample and the frozen Munich and Pittsburgh CLI builds are byte-identical
-   before and after; validator verdicts and messages unchanged. Blender: the sample through headless Blender is
-   byte-identical (the presets too if `map_builder/blender/` changed).
+   before and after, as whole archives; validator verdicts and messages unchanged. Both sides are built fresh with
+   the same pinned inputs and settings as S4-WATER-BANK: frozen caches, seed 1, DSM on, offline,
+   `created_utc = "2026-11-20T00:00:00Z"`, same export options. Blender: the sample through headless Blender is
+   byte-identical under the same pins (the presets too if `map_builder/blender/` changed).
 3. Unit suite: same test count and result as the base (nothing added, removed or skipped to make mypy pass).
 4. **CI budget:** the new step adds ≤ 60 s to the slowest job; PR CI stays ≤ 10 min. mypy runs once, in one job
    (the Python 3.12 leg or a separate light job), not in every matrix leg.

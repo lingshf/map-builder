@@ -1,6 +1,6 @@
 # REL-v0.5.0: release candidate for sprint 4
 
-Owner: release manager · sprint S4 · after S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2 and S4-MYPY · D28, D32, D50, D53, D104, D126, D128, D130
+Owner: release manager · sprint S4 · after S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2 and S4-MYPY · D28, D32, D50, D53, D104, D126, D128, D133
 
 ## Scope
 
@@ -38,11 +38,14 @@ Same shape as REL-v0.4.0:
    count and maximum (≤ 1.5 m) and describe the new `bank:<id>` terrain objects.
 7. **Typing (D128).** The VALIDATION row says mypy-clean with CI enforcement only after S4-MYPY has merged; before
    that, no mypy claim.
-8. **Final RC (D130).** The RC is rebased on the final main after S4-MYPY; every package, render and checksum is
-   rebuilt from it, and the RC's `design/` hunk is dropped (D125). Tagging and publishing stay a separate user
+8. **Final RC (D133).** The RC is rebased on the final main after S4-MYPY; every package, render and checksum is
+   rebuilt from it, and the RC's `design/` hunk is dropped (D125). It merges through the D133 gate (exact-head
+   approval, green CI, mergeability, coordinator authorization). Tagging and publishing stay a separate user
    decision.
 
 ## Conflict domain
 
-Version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`,
-`docs/DEMO.md`. Runs alone.
+Version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `blender_manifest.toml`), `CHANGELOG.md`,
+`docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md`, `docs/PACKAGE_FORMAT.md`
+(shared with S4-COL-FLOAT-2), `docs/VALIDATION.md`, `examples/README.md`, and the D103 sample slot
+(`examples/synthetic_sample.mbmap`). Runs alone, after S4-MYPY.
