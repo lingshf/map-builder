@@ -137,7 +137,7 @@ notes list sizes and package_ids.
 | `munich-altstadt-0.5.0-blender-notex.mbmap` | headless Blender | off | `BE8F0981FDD33EB1DC63F7E837E938FB03FA0891178D1484FAB4DB5C8DA333BC` |
 | `pittsburgh-0.5.0-blender.mbmap` | headless Blender | on | `F2147A6537D2739A55A6DBBCDA3583A3B5139F0A3EED493856BC1CFDEA6CACEC` |
 | `pittsburgh-0.5.0-blender-notex.mbmap` | headless Blender | off | `A0F25D4B1DB6F9D68C1FCFAF219EF7C89BF868B1094A9D0CC7497E1D8E271EC6` |
-| `map_builder-0.5.0.zip` (RC build; the release workflow rebuilds it from the tag) | | | ZIP_SHA |
+| `map_builder-0.5.0.zip` (RC build; the release workflow rebuilds it from the tag) | | | `DE13602CD3D910C3B60C04540FA2144DE5CE027A5FF1E7496E4900A44E49D1EB` (879,163 bytes) |
 
 **Credits:** (c) OpenStreetMap contributors, ODbL 1.0. Copernicus DEM
 GLO-30 / WorldDEM-30: (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space

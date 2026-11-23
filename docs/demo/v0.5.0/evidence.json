@@ -1638,5 +1638,13 @@
       "package_id": "sha256:b3fbee0c5212bafb3620b4bf35b67f604afb461d39ddf70e6d3fa5bb2e352ae1",
       "validate": "warning: collision has 75 degenerate (zero-area) triangles"
     }
-  ]
+  ],
+  "zip": {
+    "name": "map_builder-0.5.0.zip",
+    "sha256": "DE13602CD3D910C3B60C04540FA2144DE5CE027A5FF1E7496E4900A44E49D1EB",
+    "bytes": 879163,
+    "built_from": "fresh clone of the RC branch via tools/build_extension.sh",
+    "extension_validate": "OK",
+    "clean_install": "installs as (0, 5, 0) in an empty BLENDER_USER_RESOURCES; map_builder operators registered"
+  }
 }
