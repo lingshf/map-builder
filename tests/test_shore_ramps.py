@@ -143,6 +143,10 @@ class WetPatchTest(unittest.TestCase):
         self.assertFalse(triangle_overlaps_region(tri, touch, []))
         self.assertTrue(triangle_overlaps_region(tri, overlap, []))
 
+    def test_coincident_triangle_and_ring_have_positive_overlap(self):
+        tri = [(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)]
+        self.assertTrue(triangle_overlaps_region(tri, tri, []))
+
     def test_water_hole_is_dry_but_crossing_the_hole_boundary_is_wet(self):
         outer = [(0.0, 0.0), (12.0, 0.0), (12.0, 12.0), (0.0, 12.0)]
         hole = [(4.0, 4.0), (8.0, 4.0), (8.0, 8.0), (4.0, 8.0)]

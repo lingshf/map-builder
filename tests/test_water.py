@@ -8,7 +8,10 @@ import unittest
 from unittest import mock
 
 from map_builder.core import bridges, generate, water
+from map_builder.core.dem import ElevationGrid
 from map_builder.core.generate import ROAD_LIFT_M
+from map_builder.core.overlap import triangle_overlaps_region
+from map_builder.core.osm import Polygon
 from map_builder.core.query import ray_cast
 from map_builder.core.structures import plan_collision
 
@@ -388,6 +391,31 @@ class BankColourTest(unittest.TestCase):
         plan, _, _ = make_scene([(ring, {"waterway": "riverbank"}, True)], river_ground, width=W, height=H)
         colours = set(objects(plan, "terrain")[0].mesh.face_colors)
         self.assertEqual(colours, {generate.LANDCOVER_COLORS[None]})
+
+
+class ShoreRampWetWiringTest(unittest.TestCase):
+    @staticmethod
+    def rect(x0, y0, x1, y1):
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+    def test_attach_ramps_checks_source_body_wet_overlap_by_area(self):
+        source_piece = self.rect(-4.0, -1.0, 0.0, 3.0)
+        wet_patch = self.rect(2.0, 0.55, 2.1, 0.65)
+        body = water.Body("osm:way/1", Polygon(source_piece, []), "area",
+                          pieces=[(source_piece, []), (wet_patch, [])], outcome="built(flat)",
+                          level=water.Level(flat=10.0), shore=[((0.0, 0.0), (0.0, 2.0))])
+        heights = [[6.0] * 12 for _ in range(12)]
+        grid = ElevationGrid(-6.0, -6.0, 1.0, 12, 12, heights, {})
+        model = water.WaterModel(grid, grid, [body])
+
+        class Masks:
+            @staticmethod
+            def hit_triangle(_tri):
+                return False
+
+        water._attach_ramps(model, Masks(), charge=None)
+        self.assertGreater(body.info["shore_ramp_blocked_m"], 0.0)
+        self.assertFalse(any(triangle_overlaps_region([(v[0], v[1]) for v in t], wet_patch, []) for t in body.bank))
 
 
 if __name__ == "__main__":

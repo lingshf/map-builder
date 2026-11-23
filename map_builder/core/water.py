@@ -781,9 +781,9 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
             covers = [(o.id, o.level.at(x, y)) for o in model.active() if _inside_pieces(o, x, y) and o.level is not None]
             return max(covers, key=lambda pair: (pair[1], pair[0])) if covers else None
 
-        def wet_by(tri: Sequence[Pt], receiver_id: str | None, src_id: str = b.id) -> bool:
+        def wet_by(tri: Sequence[Pt], receiver_id: str | None) -> bool:
             box = _ring_box(tri)
-            allowed = {src_id} if receiver_id is None else {receiver_id}
+            allowed = set() if receiver_id is None else {receiver_id}
             return any(_boxes_meet(box, pb) and body_id not in allowed and triangle_overlaps_region(tri, o, hs)
                        for body_id, pb, o, hs in wet_pieces)
 

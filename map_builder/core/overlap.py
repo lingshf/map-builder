@@ -10,6 +10,7 @@ from collections.abc import Iterator, Sequence
 from .osm import point_in_ring
 
 Pt = tuple[float, float]
+BOUNDARY_CROSS_EPS = 1e-12   # plan-area/collinearity epsilon: points this close to an edge are treated as boundary
 
 
 def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
@@ -42,7 +43,10 @@ def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequ
         return True
     if any(_segments_cross(a, b, c, d) for a, b in _edges(outer, True) for c, d in _edges(tri, True)):
         return True
-    return any(_segments_cross(a, b, c, d) for hole in holes for a, b in _edges(hole, True) for c, d in _edges(tri, True))
+    if any(_segments_cross(a, b, c, d) for hole in holes for a, b in _edges(hole, True) for c, d in _edges(tri, True)):
+        return True
+    centre = (sum(p[0] for p in tri) / 3.0, sum(p[1] for p in tri) / 3.0)
+    return _in_region_strict(centre, outer, holes)
 
 
 def _in_region_strict(p: Pt, outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
@@ -62,7 +66,7 @@ def _on_ring_boundary(p: Pt, ring: Sequence[Pt]) -> bool:
 def _point_on_segment(p: Pt, a: Pt, b: Pt) -> bool:
     dx, dy = b[0] - a[0], b[1] - a[1]
     cross = dx * (p[1] - a[1]) - dy * (p[0] - a[0])
-    if abs(cross) > 1e-12:
+    if abs(cross) > BOUNDARY_CROSS_EPS:
         return False
     dot = (p[0] - a[0]) * dx + (p[1] - a[1]) * dy
     if dot < 0:
