@@ -147,6 +147,11 @@ class WetPatchTest(unittest.TestCase):
         tri = [(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)]
         self.assertTrue(triangle_overlaps_region(tri, tri, []))
 
+    def test_partial_containment_with_wet_vertices_on_triangle_boundary_is_wet(self):
+        tri = [(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)]
+        wet = [(0.0, 0.0), (2.0, 0.0), (0.0, 1.0)]
+        self.assertTrue(triangle_overlaps_region(tri, wet, []))
+
     def test_water_hole_is_dry_but_crossing_the_hole_boundary_is_wet(self):
         outer = [(0.0, 0.0), (12.0, 0.0), (12.0, 12.0), (0.0, 12.0)]
         hole = [(4.0, 4.0), (8.0, 4.0), (8.0, 8.0), (4.0, 8.0)]

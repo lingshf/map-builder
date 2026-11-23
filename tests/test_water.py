@@ -417,6 +417,24 @@ class ShoreRampWetWiringTest(unittest.TestCase):
         self.assertGreater(body.info["shore_ramp_blocked_m"], 0.0)
         self.assertFalse(any(triangle_overlaps_region([(v[0], v[1]) for v in t], wet_patch, []) for t in body.bank))
 
+    def test_attach_ramps_blocks_overlap_with_connected_concave_source_piece(self):
+        source_piece = [(-5.0, -1.0), (0.0, -1.0), (0.0, 10.0), (2.0, 10.0),
+                        (2.0, 0.55), (2.1, 0.55), (2.1, 11.0), (-5.0, 11.0)]
+        body = water.Body("osm:way/1", Polygon(source_piece, []), "area",
+                          pieces=[(source_piece, [])], outcome="built(flat)",
+                          level=water.Level(flat=10.0), shore=[((0.0, 0.0), (0.0, 10.0))])
+        heights = [[6.0] * 16 for _ in range(16)]
+        grid = ElevationGrid(-6.0, -6.0, 1.0, 16, 16, heights, {})
+        model = water.WaterModel(grid, grid, [body])
+
+        class Masks:
+            @staticmethod
+            def hit_triangle(_tri):
+                return False
+
+        water._attach_ramps(model, Masks(), charge=None)
+        self.assertGreater(body.info["shore_ramp_blocked_m"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

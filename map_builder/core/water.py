@@ -790,13 +790,8 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
                     continue
                 if not triangle_overlaps_region(tri, o, hs):
                     continue
-                source_piece = body_id == b.id and piece_idx == source_piece_idx
-                tri_c = (sum(p[0] for p in tri) / 3.0, sum(p[1] for p in tri) / 3.0)
-                source_boundary_only = source_piece and triangle_touches(tri, o, 0.0, closed=True) and not (
-                    point_in_ring(*tri_c, o) and not any(point_in_ring(*tri_c, h) for h in hs)
-                )
                 cascade_receiver = receiver_id is not None and body_id == receiver_id
-                if cascade_receiver or source_boundary_only:
+                if cascade_receiver:
                     continue
                 return True
             return False

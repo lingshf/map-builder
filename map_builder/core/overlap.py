@@ -11,6 +11,7 @@ from .osm import point_in_ring
 
 Pt = tuple[float, float]
 BOUNDARY_CROSS_EPS = 1e-12   # plan-area/collinearity epsilon: points this close to an edge are treated as boundary
+OVERLAP_AREA_EPS_M2 = 1e-9   # area this small is treated as boundary-only touch (no positive wet overlap)
 
 
 def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
@@ -35,18 +36,13 @@ def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, close
 def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
     """Whether the triangle and the region (``outer`` minus ``holes``) share positive area.
 
-    Boundary-only touch is not overlap. The test is exact in plan, without shrinking.
+    The overlap is exact in plan area: each ring is clipped against the triangle, then overlap area is
+    ``area(clip(outer)) - Σ area(clip(hole))``. Boundary-only touch gives zero area by construction.
     """
-    if any(_in_region_strict(p, outer, holes) for p in tri):
-        return True
-    if any(_in_triangle_strict((x, y), tri) for x, y in outer):
-        return True
-    if any(_segments_cross(a, b, c, d) for a, b in _edges(outer, True) for c, d in _edges(tri, True)):
-        return True
-    if any(_segments_cross(a, b, c, d) for hole in holes for a, b in _edges(hole, True) for c, d in _edges(tri, True)):
-        return True
-    centre = (sum(p[0] for p in tri) / 3.0, sum(p[1] for p in tri) / 3.0)
-    return _in_region_strict(centre, outer, holes)
+    if not _boxes_meet(_box(tri), _box(outer)):
+        return False
+    wet = _clipped_ring_area(tri, outer) - sum(_clipped_ring_area(tri, h) for h in holes)
+    return wet > OVERLAP_AREA_EPS_M2
 
 
 def _in_region_strict(p: Pt, outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
@@ -108,3 +104,67 @@ def _segments_cross(a: Pt, b: Pt, c: Pt, d: Pt) -> bool:
 
 def _side(a: Pt, b: Pt, p: Pt) -> float:
     return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+
+
+def _box(points: Sequence[Pt]) -> tuple[float, float, float, float]:
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _boxes_meet(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def _clipped_ring_area(tri: Sequence[Pt], ring: Sequence[Pt]) -> float:
+    poly = list(ring)
+    if len(poly) < 3:
+        return 0.0
+    t = list(tri)
+    for i in range(3):
+        a, b, c = t[i], t[(i + 1) % 3], t[(i + 2) % 3]
+        poly = _clip_against_edge(poly, a, b, c)
+        if len(poly) < 3:
+            return 0.0
+    return _polygon_area(poly)
+
+
+def _clip_against_edge(subject: list[Pt], a: Pt, b: Pt, inside_ref: Pt) -> list[Pt]:
+    if not subject:
+        return []
+    out: list[Pt] = []
+    prev = subject[-1]
+    prev_in = _inside_half_plane(prev, a, b, inside_ref)
+    for curr in subject:
+        curr_in = _inside_half_plane(curr, a, b, inside_ref)
+        if curr_in:
+            if not prev_in:
+                out.append(_line_intersection(prev, curr, a, b))
+            out.append(curr)
+        elif prev_in:
+            out.append(_line_intersection(prev, curr, a, b))
+        prev, prev_in = curr, curr_in
+    return out
+
+
+def _inside_half_plane(p: Pt, a: Pt, b: Pt, inside_ref: Pt) -> bool:
+    edge = _side(a, b, p)
+    ref = _side(a, b, inside_ref)
+    if abs(ref) <= BOUNDARY_CROSS_EPS:
+        return abs(edge) <= BOUNDARY_CROSS_EPS
+    return edge * ref >= -BOUNDARY_CROSS_EPS
+
+
+def _line_intersection(p0: Pt, p1: Pt, a: Pt, b: Pt) -> Pt:
+    sx, sy = p1[0] - p0[0], p1[1] - p0[1]
+    rx, ry = b[0] - a[0], b[1] - a[1]
+    den = sx * ry - sy * rx
+    if abs(den) <= BOUNDARY_CROSS_EPS:
+        return p1
+    qx, qy = a[0] - p0[0], a[1] - p0[1]
+    t = (qx * ry - qy * rx) / den
+    return p0[0] + t * sx, p0[1] + t * sy
+
+
+def _polygon_area(poly: Sequence[Pt]) -> float:
+    return 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
+                         for i in range(len(poly))))
