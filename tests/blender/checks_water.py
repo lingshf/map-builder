@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
-"""S4-WATER-SURFACE (AC3, AC7) Blender check: the synthetic fixture area is generated and exported through the
+"""S4-WATER-SURFACE (AC3, AC7) and S4-WATER-BANK (AC1) Blender check: the synthetic fixture area is generated and exported through the
 operators. The package must carry the water object as class ``water`` with the same triangle count as the CLI
 build of the same inputs (examples/synthetic_sample.mbmap), no wet-probe violation, and the section 4 carve
 invariant must hold on the triangles Blender baked into the package collision (``tools/water_check.py``)."""
 
+import json
 import os
 import re
 import sys
@@ -48,3 +49,21 @@ def run(out_dir):
     for name, worst in sorted(water_check.invariant(col).items()):
         check(worst <= 1e-9, f"water: carve invariant on Blender's baked triangles, {name}: max terrain-water "
                              f"{worst:+.6f} m")
+
+    # S4-WATER-BANK AC1: a terrain face carries the water colour only inside a fallback body. The fixture's one
+    # lake is built, so the terrain Blender generated must carry no water-coloured face at all.
+    from map_builder.core.generate import LANDCOVER_COLORS
+    with zipfile.ZipFile(pkg) as z:
+        rows = json.loads(z.read("report.json"))["water_bodies"]
+    fallback = [r["id"] for r in rows if str(r["outcome"]).startswith("fallback")]
+    built = [r["id"] for r in rows if str(r["outcome"]).startswith("built")]
+    terrain = next((o for o in s.export_collection.all_objects if o.get("mb_class") == "terrain"), None)
+    check(terrain is not None and built and not fallback, f"water bank: fixture has a built body and no fallback "
+                                                          f"({built}, {fallback})")
+    me, wc = terrain.data, LANDCOVER_COLORS["water"]
+    buf = [0.0] * (4 * len(me.loops))
+    me.color_attributes["mb_color"].data.foreach_get("color", buf)
+    painted = sum(1 for p in me.polygons
+                  if all(max(abs(buf[4 * l + k] - wc[k]) for k in range(3)) < 1e-4 for l in p.loop_indices))
+    check(painted == 0, f"water bank: no Blender terrain face carries the water colour under a built body "
+                        f"({painted} do)")
