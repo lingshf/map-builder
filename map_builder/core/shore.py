@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """Shore ramps (S4-COL-FLOAT-2): no flat water sheet hovers over its bank.
 
 The water carve (``water.py``) lowers the terrain around a body to ``CARVE_DEPTH_M`` below its sheet, so the sheet's
