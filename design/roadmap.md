@@ -509,6 +509,23 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D134 | v0.5.0 closeout test budget: each new test ≤ 5 s with no wall-clock asserts, and no case is duplicated across `tests/test_water*.py`, `tests/test_shore_ramps.py` and `tests/test_floating_audit.py`. Real-data audits and replays are PR evidence, not persisted tests. PR CI stays ≤ 10 min; the mypy step runs in one job only and adds ≤ 60 s. Reviewers block duplicate or slow tests. | De (proposed); C confirms | proposed |
 | D135 | Coordinator ruling on #77 (D89 cap reached at R3, head 568f4a5): R3.1–R3.3 are closed by **one coordinator-verified fix commit**, checked against [S4-COL-FLOAT-2](tasks/S4-COL-FLOAT-2.md) AC3 and AC5, with no R4 review round. Exact-head Blender D106 timing is still required: Generate and Generate+Export, three alternating offline rounds. The merge still needs the D133 gate. | C (coordinator) | decided |
 
+## v5: sprint 5 — stylized look (after v0.5.0)
+
+User request: the map follows the reference's stylized low-poly look. Priorities in order: looks good, then low
+hardware cost, then real-map fidelity. Height and collision data must stay accurate, because flight depends on
+them. Spec, palette, budgets, acceptance method and tasks: [tasks/S5-STYLE.md](tasks/S5-STYLE.md). Order:
+S5-STYLE-BASE → PALETTE → TREES → WATER → S5-STYLE-REVIEW.
+
+### Sprint 5 decisions
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D136 | The style work is sprint 5 and lands after v0.5.0. The v0.5.0 closeout (#77 → S4-MYPY → #75, D133) continues unchanged, and no S5 task touches #77 or #75 scope. | C (coordinator; user may change) | decided |
+| D137 | Priority order for the visuals: (1) looks good, (2) low hardware cost, (3) real-map fidelity. **Hard invariant above all three:** `.mbcol`, `.mbhf`, the passage probes and the georeference are never altered for looks. Every S5-STYLE task keeps them byte-identical or equal under pinned settings, except the listed tree and water exceptions with their replay proofs. | U (priorities), De (invariant) | proposed |
+| D138 | The visual and collision one-to-one rule stays (`docs/PACKAGE_FORMAT.md:187–193`). Anything that looks solid is in collision with the same triangles. The look comes only from vertex colours, materials, normals and welding. Visual-only decoration needs user decision U2, and then is ≤ 0.3 m, marked with `extras.mb_decor` and covered by a D101 fixture. | De (proposed); C confirms | proposed |
+| D139 | Low-end budgets: ≤ 8 materials; standard glTF PBR only, no required extension, opaque (glTFast URP, mobile included); 0 texture bytes in stylized mode; visual triangles ≤ baseline + 25 %; nodes ≤ baseline; GLB ≤ baseline; whole Generate ≤ +5 % (D91). Baselines are measured first in S5-STYLE-BASE (D90). | De (proposed); C confirms | proposed |
+| D140 | Visual acceptance: the same cameras rendered with one EEVEE setup in ≤ 2 min, on a contact sheet (reference, base and head) attached to the PR, not committed, plus an information-only palette ΔE report. The reviewer judges the sheet; the user accepts the look before stylized becomes the default (U1). | De (proposed); C confirms | proposed |
+
 ## Decisions that need the user
 
 1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
@@ -516,6 +533,11 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
    and the website URL shown on the platform. Dev only prepares the checklist.
 3. **`.mbmap` format-stability policy (D101)** and **v1.0 exit criteria (D102).** Drafts here; the user
    confirms or edits them before v1.0 is planned.
+4. **S5 style (D136–D140), [tasks/S5-STYLE.md](tasks/S5-STYLE.md#decisions-for-the-user):**
+   * U1: should stylized become the default look?
+   * U2: is visual-only decoration allowed?
+   * U3: how is the water shore band built?
+   * U4: should the materials be unlit?
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.

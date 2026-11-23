@@ -126,6 +126,20 @@ alone. REL-v0.5.0 (#75) rebases, rebuilds every package and drops its `design/` 
 shares `docs/PACKAGE_FORMAT.md` and the sample slot with COL-FLOAT-2, so the two never run at the same time.
 Test budget for these tasks: D134.
 
+## Sprint 5 (style)
+
+Direction, budgets and ACs in [S5-STYLE.md](S5-STYLE.md) (user request; D136–D140). It starts after v0.5.0 and does
+not touch #77 or #75. Hard invariant for every row: `.mbcol`, `.mbhf`, probes and the georeference unchanged unless
+the task lists an exception.
+
+| id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
+|---|---|---|---|---|---|---|
+| [S5-STYLE-BASE](S5-STYLE.md#s5-style-base-baselines-metrics-and-the-acceptance-harness) | S5 | dev | REL-v0.5.0 merged (D136) | `tools/style_check.py`, `tests/test_style_check.py` (new), `tools/demo/` (style cameras, render recipe) | blocked | |
+| [S5-STYLE-PALETTE](S5-STYLE.md#s5-style-palette-style-option-palette-faceted-terrain-buildings-and-roads) | S5 | dev | S5-STYLE-BASE | `core/style.py` (new), `core/generate.py` (colour constants and colour choice only), `core/glb.py` (normals/welding), `core/uv.py`/`core/textures.py` (mode switch), `tools/mbmap_cli.py` (flag), `blender/props.py`, `ui.py`, `scene_build.py` (option); soft: sample slot only if the default changes (U1) | blocked | |
+| [S5-STYLE-TREES](S5-STYLE.md#s5-style-trees-faceted-low-poly-trees) | S5 | dev | S5-STYLE-PALETTE | `core/generate.py` (`tree_mesh`, tree mesh choice), `core/style.py` (tree colours), tree tests; soft: sample slot. Exception: `vegetation` collision only | blocked | |
+| [S5-STYLE-WATER](S5-STYLE.md#s5-style-water-cyan-water-shore-band-and-sandy-banks) | S5 | dev | S5-STYLE-TREES (shared files); U3 decided | `core/water.py`, `core/shore.py` (colour/band), `core/style.py`, water colour code in `core/generate.py`; soft: sample slot | blocked | |
+| [S5-STYLE-REVIEW](S5-STYLE.md#s5-style-review-design-milestone-review-and-the-users-look-check) | S5 | design | all S5-STYLE dev tasks | `design/` only | blocked | |
+
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
 
