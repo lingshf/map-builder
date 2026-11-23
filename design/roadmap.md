@@ -512,19 +512,25 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 ## v5: sprint 5 — stylized look (after v0.5.0)
 
 User request: the map follows the reference's stylized low-poly look. Priorities in order: looks good, then low
-hardware cost, then real-map fidelity. Height and collision data must stay accurate, because flight depends on
-them. Spec, palette, budgets, acceptance method and tasks: [tasks/S5-STYLE.md](tasks/S5-STYLE.md). Order:
-S5-STYLE-BASE → PALETTE → TREES → WATER → S5-STYLE-REVIEW.
+hardware cost, then real-map fidelity. Height and collision data must stay exact, because flight depends on
+them. The user then delegated the remaining open points to the coordinator ("其他的你先尽量选择最优，推进项目，不要等我").
+Spec, palette, the G0 flight-data gate, budgets, acceptance method and tasks: [tasks/S5-STYLE.md](tasks/S5-STYLE.md).
+Order: S5-STYLE-BASE → PALETTE → WATER → S5-STYLE-REVIEW (GO/NO-GO), then S5-DECOR last; nothing waits on DECOR.
 
 ### Sprint 5 decisions
 
 | # | Decision | Who | Status |
 |---|---|---|---|
-| D136 | The style work is sprint 5 and lands after v0.5.0. The v0.5.0 closeout (#77 → S4-MYPY → #75, D133) continues unchanged, and no S5 task touches #77 or #75 scope. | C (coordinator; user may change) | decided |
-| D137 | Priority order for the visuals: (1) looks good, (2) low hardware cost, (3) real-map fidelity. **Hard invariant above all three:** `.mbcol`, `.mbhf`, the passage probes and the georeference are never altered for looks. Every S5-STYLE task keeps them byte-identical or equal under pinned settings, except the listed tree and water exceptions with their replay proofs. | U (priorities), De (invariant) | proposed |
-| D138 | The visual and collision one-to-one rule stays (`docs/PACKAGE_FORMAT.md:187–193`). Anything that looks solid is in collision with the same triangles. The look comes only from vertex colours, materials, normals and welding. Visual-only decoration needs user decision U2, and then is ≤ 0.3 m, marked with `extras.mb_decor` and covered by a D101 fixture. | De (proposed); C confirms | proposed |
-| D139 | Low-end budgets: ≤ 8 materials; standard glTF PBR only, no required extension, opaque (glTFast URP, mobile included); 0 texture bytes in stylized mode; visual triangles ≤ baseline + 25 %; nodes ≤ baseline; GLB ≤ baseline; whole Generate ≤ +5 % (D91). Baselines are measured first in S5-STYLE-BASE (D90). | De (proposed); C confirms | proposed |
-| D140 | Visual acceptance: the same cameras rendered with one EEVEE setup in ≤ 2 min, on a contact sheet (reference, base and head) attached to the PR, not committed, plus an information-only palette ΔE report. The reviewer judges the sheet; the user accepts the look before stylized becomes the default (U1). | De (proposed); C confirms | proposed |
+| D136 | Style work is sprint 5, after v0.5.0. The v0.5.0 closeout (#77 → S4-MYPY → #75, D133) continues unchanged, and S5 changes no #77 or #75 scope. **Single start gate:** #75 merged into main; tagging and publishing are separate user decisions and are not S5 gates. S5 really does share files: PALETTE and WATER overlap #77's `core/generate.py`, `core/water.py` and `core/shore.py`, S4-MYPY's typing domain after triage, and the #75 sample slot. The rule is no simultaneous edits (overlap table in the spec). | C (coordinator; user may change) | decided |
+| D137 | Priority order for the visuals: (1) looks good, (2) low hardware cost, (3) real-map fidelity. Above all three sits the **G0 flight-data gate**, run in every S5 task with no waivers: `collision/map.mbcol` and `collision/terrain.mbhf` byte-identical; `manifest.georeference`, `manifest.passage_probes`, `report.passage_probes_blocked` and `report.passage_probes_dropped` exactly equal. It covers both paths and both modes under pinned settings, and its negative cases are tested. | U (priorities), De (gate) | proposed |
+| D138 | The visual and collision one-to-one rule stays (`docs/PACKAGE_FORMAT.md:187–193`; the validator rejects a visible node with no collision, `core/package.py:1747`). Anything that looks solid is in collision with the same triangles, and the look comes only from vertex colours, materials, normals and welding. The only planned exception is S5-DECOR (D142), and it is contingent on its own frozen-reader fixture. | De (proposed); C confirms | proposed |
+| D139 | Low-end budgets, measured and cumulative against the S5-BASE baseline: ≤ 8 material definitions; draw submissions (node instances × primitives) ≤ baseline; frame time on a labelled proxy (vendored three.js viewer, headless Chromium with SwiftShader, 1280 × 720, fixed camera, median of 300 frames) ≤ baseline + 10 %; render memory (vertex + index + texture bytes) ≤ baseline; visual triangles equal to baseline; 0 texture bytes in stylized mode; GLB ≤ baseline. S5-DECOR has its own allowances. D91 timing is reported separately for CLI whole Generate, Blender Generate and Blender Generate+Export, each ≤ +5 %. The contact-sheet render limit is about producing evidence, not a hardware budget. | De (proposed); C confirms | proposed |
+| D140 | Visual acceptance: the same cameras rendered with one EEVEE setup in ≤ 2 min, on a contact sheet (reference, base, head) attached to the PR and not committed, plus an information-only palette ΔE report. S5-STYLE-REVIEW is an explicit GO/NO-GO on G0, classic identity, the cumulative budgets and the sheets. | De (proposed); C confirms | proposed |
+| D141 | U1: stylized is the default. Classic stays available and, in every S5 task, is whole-archive byte-identical to main before S5 (sample, Munich, Pittsburgh; CLI and Blender). Between the modes, only the GLB, manifest hashes and `package_id`, `asset_notices`/NOTICES and the `report.json` `style` option may differ. | U | decided |
+| D142 | U2: visual-only decoration ≤ 0.3 m is allowed, in the separate last task S5-DECOR, which nothing else waits on. It stays within D101/D110 (no new package members), uses an explicit `extras.mb_decor` marking that consumers can act on, and needs a genuine exported frozen-reader positive fixture first. If that is impossible in 2.x, Design specifies the minimal minor change and flags it, without blocking other tasks. A test enforces the 0.3 m cap and keeps decoration off roads, water, `bank:` ramps, decks, footprints and probe volumes. | U (overrides the Design recommendation) | decided |
+| D143 | U3: the shore band is colour only, on the existing terrain-side and `bank:` triangles. The water is not re-triangulated, so `.mbcol` and `.mbhf` stay byte-identical. | C (delegated by the user; user may change) | decided |
+| D144 | U4: lit materials (standard metallic-roughness) first. `KHR_materials_unlit` may be revisited after S5-STYLE-REVIEW. | C (delegated by the user; user may change) | decided |
+| D145 | Trees are appearance-only in S5 (colours and facet shading on today's tree mesh). No S5 task changes collision geometry. A tree shape change (S5-F1) or any geometry change needs explicit user approval plus per-object and query-equivalence criteria. | C (delegated by the user; user may change) | decided |
 
 ## Decisions that need the user
 
@@ -533,11 +539,9 @@ S5-STYLE-BASE → PALETTE → TREES → WATER → S5-STYLE-REVIEW.
    and the website URL shown on the platform. Dev only prepares the checklist.
 3. **`.mbmap` format-stability policy (D101)** and **v1.0 exit criteria (D102).** Drafts here; the user
    confirms or edits them before v1.0 is planned.
-4. **S5 style (D136–D140), [tasks/S5-STYLE.md](tasks/S5-STYLE.md#decisions-for-the-user):**
-   * U1: should stylized become the default look?
-   * U2: is visual-only decoration allowed?
-   * U3: how is the water shore band built?
-   * U4: should the materials be unlit?
+4. **S5 style.** U1 and U2 were decided by the user (D141, D142). U3, U4 and the tree rule were decided by the
+   coordinator under the user's delegation (D143–D145); the user may change them. A tree shape change (S5-F1) still
+   needs the user.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.

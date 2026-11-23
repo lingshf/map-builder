@@ -1,7 +1,6 @@
 # S5-STYLE: stylized low-poly look for the GLB visuals (direction and tasks)
 
-Owner: design (direction); dev (tasks below) · sprint S5, after v0.5.0 (D136) · decisions D136–D140 · user
-decisions U1–U4 at the end
+Owner: design (direction); dev (tasks below) · sprint S5 · decisions D136–D145
 
 ## User direction (verbatim)
 
@@ -9,262 +8,333 @@ decisions U1–U4 at the end
 >
 > 高度和碰撞数据必须准确，因为飞行依赖这个
 
-The reference is a stylized low-poly cartoon map. Only the background terrain art counts, not the UI overlay
-(level nodes, labels, path lines). The image is not committed. Its palette is sampled below, and the full image
-stays with the coordinator.
+> 其他的你先尽量选择最优，推进项目，不要等我
+
+The reference is a stylized low-poly cartoon map. Only its background terrain art counts, not the UI overlay. The
+image is not committed. Its palette is sampled below, and the coordinator holds the full image.
 
 ## Priorities (D137)
 
 1. **Looks good.** The output matches the reference style: saturated, bright and readable from drone height.
-2. **Low hardware cost.** It runs on low-end and mobile GPUs: few materials, opaque, no custom shaders.
-3. **Real-map fidelity.** Every object stays where OSM and the DEM put it, and landcover keeps its real class. The
-   style changes how things look, not where they are or whether they exist.
+2. **Low hardware cost.** It is cheap to render on low-end and mobile GPUs. This is measured, not assumed; see
+   the budgets.
+3. **Real-map fidelity.** Every object stays where OSM and the DEM put it, and landcover keeps its real class.
 
-**Hard invariant (above all three).** Terrain height (`.mbhf`), `.mbcol` collision, passage probes and the
-georeference are accurate and are **never altered for looks**. Every S5-STYLE task keeps
-`collision/map.mbcol` and `collision/terrain.mbhf` byte-identical, and keeps the manifest georeference fields,
-`report.json` probes, passages and the blocked list equal to the base. This holds for the sample, Munich and
-Pittsburgh, through the CLI and Blender, with pinned settings (frozen caches, seed 1, DSM on, offline,
-`created_utc = "2026-11-20T00:00:00Z"`). The only exceptions are listed per task (S5-STYLE-TREES; S5-STYLE-WATER
-only under U3 option a), and each needs the replay proof stated in that task.
+## G0: the flight-data gate (every S5 task, no waivers)
+
+Flight depends on height and collision, so G0 sits above all three priorities. It is one gate, run by
+`tools/style_check.py` (S5-STYLE-BASE) on the task's base and head.
+
+* **Packages:** the sample, Munich and Pittsburgh.
+* **Paths:** the CLI and headless Blender.
+* **Modes:** stylized and classic.
+* **Pinned settings:** frozen caches, seed 1, DSM on, offline, `created_utc = "2026-11-20T00:00:00Z"`, and the
+  same export options on both sides.
+
+G0 requires:
+
+1. `collision/map.mbcol` and `collision/terrain.mbhf` are **byte-identical**.
+2. `manifest.georeference` (the whole object) and `manifest.passage_probes` are exactly equal (JSON equality, no
+   tolerance).
+3. `report.json` `passage_probes_blocked` and `passage_probes_dropped` are exactly equal.
+
+`tools/style_check.py` must fail on each of these negative cases: one `.mbcol` byte flipped; one `.mbhf` byte
+flipped; one probe moved by 1 mm; one georeference field changed; one probe status changed (passable → blocked,
+and exported → dropped).
+
+**No S5 task has a geometry exception.** Tree and water styling are appearance-only (D143, D145). A future change
+to collision geometry is a separate task that needs explicit user approval. Its spec must then add:
+
+* a per-object comparison proving every object outside the changed class is byte-identical in `.mbcol`;
+* explicit geometric criteria (surface, holes and the class of every triangle);
+* query-equivalence criteria (ground height and capsule clearance) for the changed objects.
+
+## Classic mode stays exactly as it is today (D141)
+
+Stylized is the default (U1, user). Classic stays available. In **classic** mode, every S5 task keeps the
+**whole `.mbmap` archive** byte-identical to main before S5. This covers the sample, Munich and Pittsburgh, through
+the CLI and Blender, with the G0 settings.
+
+Between classic and stylized on the same head, only these may differ, so each change is attributable to the mode:
+
+* `visual/map.glb`;
+* the manifest `files[]` hashes and `package_id`;
+* `asset_notices` and NOTICES (stylized embeds no textures);
+* one `report.json` options entry, `style`.
+
+The PR lists every changed member.
 
 ## Visual versus collision (D138)
 
-Today the exporter refuses to publish unless each node's visual and collision triangles correspond one-to-one
-(`docs/PACKAGE_FORMAT.md:187–193`; README: "GLB visuals, baked from the final evaluated triangles"). Trees are in
-`.mbcol` as class 4 `vegetation`. This rule is revisited here, and **it stays**:
+The exporter refuses to publish unless each node's visual and collision triangles correspond one-to-one
+(`docs/PACKAGE_FORMAT.md:187–193`). The validator also rejects a glTF node with triangles but no same-name
+collision object ("visible but not collidable", `core/package.py:1747`), and so do the frozen readers. Trees are
+class 4 `vegetation` in `.mbcol`. The rule **stays** for every S5 task except S5-DECOR:
 
-* **Anything a pilot can see as solid stays in collision with the same triangles.** That covers terrain, water,
-  roads, buildings, bridges, tunnels, structures, trees and any rock or cliff mesh. A stylized tree is therefore a
-  new tree mesh in **both** the visual and the collision.
-* **The look comes from attributes that are not geometry:** vertex colours (`COLOR_0`), material base colours,
-  flat versus smooth normals, and vertex layout (welding). None of these enter `.mbcol` or `.mbhf`. A task may
-  unweld visual vertices for faceted colour only if the exporter correspondence check still passes and `.mbcol`
-  stays byte-identical.
-* **Visual-only decoration** (flowers, grass tufts, pebbles) is **not allowed** without user decision U2. If U2
-  allows it, it must meet all of these:
-  * ≤ 0.3 m tall, so it can never look like an obstacle;
-  * marked as node `extras.mb_decor = true` (an extras field, no new package member, D110);
-  * excluded from the correspondence check by that mark only;
-  * counted in the budgets;
-  * covered by a positive frozen-reader fixture (D101).
-* **Nothing invented is taller than 0.3 m unless it is in collision.** Procedural scatter trees already follow
-  this, because they are collision objects.
+* Anything that looks solid is in collision with the same triangles.
+* The look comes only from attributes that are not geometry: vertex colours (`COLOR_0`), material parameters,
+  normals, and the visual vertex layout (welding).
+* Unwelding visual vertices is allowed only if the exporter correspondence check still passes and G0 holds.
+* The only planned exception is S5-DECOR, last in the sprint. It covers visual-only decoration ≤ 0.3 m (D142,
+  user), and it is contingent on its own compatibility proof.
 
 ## Target look (palette sampled from the reference, sRGB)
 
-The swatches include the reference's own lighting, so they are targets for the **rendered** result under the
-acceptance lighting below, not raw vertex colours. The palette module (S5-STYLE-PALETTE) converts them and stores
-linear values.
+The swatches include the reference's lighting, so they are targets for the **rendered** result under the
+acceptance setup, not raw vertex colours. `core/style.py` stores linear values.
 
-| Element | Target sRGB | Source in the reference |
-|---|---|---|
-| Grass, light / mid | `#b9d17a` / `#96b671` | open meadow, dominant cluster |
-| Grass, shaded | `#7ea55b` | meadow near trees |
-| Tree foliage, lit / mid / shadow side | `#6f934e` / `#39864c` / `#3d6e69` | faceted cones and blobs |
-| Water, open | `#6dc0e7` | river and lake |
-| Water, shallow shore band | `#ceeef6` | light band along every shore |
-| Sand bank / footpath | `#f2dcae` / `#fdeaa2` | beaches, dirt path |
-| Cliff, lit faces / shadowed faces | `#d4b590` / `#70828b` | river cliffs |
-| Rock | `#88909c` | boulders |
+| Element | Target sRGB |
+|---|---|
+| Grass, light / mid / shaded | `#b9d17a` / `#96b671` / `#7ea55b` |
+| Tree foliage, lit / mid / shadow side | `#6f934e` / `#39864c` / `#3d6e69` |
+| Water, open / shallow shore band | `#6dc0e7` / `#ceeef6` |
+| Sand bank / footpath | `#f2dcae` / `#fdeaa2` |
+| Cliff, lit / shadowed faces | `#d4b590` / `#70828b` |
+| Rock | `#88909c` |
 
-Further rules:
+How each element is styled:
 
-* **Shading.** The look is faceted (flat-shaded) and soft. Materials are roughness ≈ 1, metallic 0 and opaque.
-  There is no alpha blending, water included. A glTF primitive without `NORMAL` must be rendered with flat
-  normals (glTF 2.0 specification, mesh attributes), so faceting may cost nothing. S5-STYLE-PALETTE measures this against the
-  validator's orientation probes and picks between dropping normals and unwelding.
-* **Terrain** is coloured per face by landcover class (real OSM), then by slope. Faces of ≥ 35° use the cliff
-  colours, lit or shadowed by facing. Faces in a bank band (≤ 6 m from a built water body, or on a `bank:` ramp)
-  use sand. Nothing is moved.
-* **Water** is open cyan with a light shore band (see U3 for how the band is built).
-* **Trees** are faceted low-poly conifers and broadleaf blobs, two to three variants. The variant comes
-  deterministically from the OSM id or the scatter index, and tags (`leaf_type`) choose the type when present.
-* **Buildings** use flat-shaded walls from a soft pastel palette, with roofs in a few saturated warm or cool
-  colours. Tagged `building:colour` and `roof:colour` are kept as the **hue** but pulled into the palette
-  (fidelity P3 under looks P1). There are no facade textures.
-* **Roads** are light warm grey; footways, tracks and paths are sand-coloured. The ribbon geometry is unchanged.
-* **No textures by default.** The stylized mode embeds no images, so texture memory is 0 and there are no
-  `asset_notices`. The S3/S4 detail textures stay available only in the classic mode (U1).
+* **Lighting.** Materials are lit (U4, D144): standard glTF metallic-roughness, roughness ≈ 1, metallic 0, opaque.
+  There is no alpha blending and no extension. `KHR_materials_unlit` may be revisited after S5-STYLE-REVIEW.
+* **Faceting.** A primitive without `NORMAL` must be rendered with flat normals (glTF 2.0 specification, mesh
+  attributes). S5-STYLE-PALETTE measures dropping normals against unwelding, using the validator's orientation
+  probes and the runtime proxy, and picks the one that passes and costs less.
+* **Terrain** is coloured per face by OSM landcover, then by slope: faces of ≥ 35° use the cliff colours, lit or
+  shadowed by facing. A bank band (≤ 6 m from a built water body, plus every `bank:` ramp face) uses sand.
+* **Water and its shore** (U3, D143): **colour only** on the existing triangles. Water bodies get open cyan.
+  The light shore band goes on the terrain-side faces next to water (and on the `bank:` ramps), using the
+  shallow-band colour blending into sand. The water is not re-triangulated.
+* **Trees** (D145): the current tree mesh is already a faceted bicone, and its triangles stay unchanged. Style
+  comes from colours: per-face foliage shading (lit, mid or shadow by facing), a deterministic tint variant from
+  the OSM id or scatter index, and the bark colour. A new tree **shape** changes `vegetation` collision, so it is
+  deferred (S5-F1) and needs explicit user approval.
+* **Buildings** use a soft pastel wall palette and a few saturated roof colours. Tagged `building:colour` and
+  `roof:colour` keep their hue but are pulled into the palette. There are no facade textures.
+* **Roads** are light warm grey; footways, tracks and paths are sand-coloured. Ribbon geometry is unchanged.
+* **No textures** in stylized mode: 0 embedded image bytes and no `asset_notices`. Classic keeps today's textures.
 
 ## Low-end budgets (D139)
 
-The first step of S5-STYLE-BASE measures every baseline on main after v0.5.0 (D90). The floors below are relative
-to those numbers. Pittsburgh (1.2 × 1 km) is the sizing case.
+S5-STYLE-BASE measures every baseline on main at the S5 start, both modes, for the sample, Munich and Pittsburgh
+(D90). Pittsburgh is the sizing case.
 
-| Item | Floor (must) | Aim |
+**Cumulative rule.** Each implementation task reports every row twice:
+
+* against the S5-BASE baseline: cumulative, and this must stay within the floor;
+* against its own base: incremental, reported with D106 alternating rounds for timing.
+
+| Item | How it is counted | Floor (must, cumulative) |
 |---|---|---|
-| Materials (= draw-call groups after merge by material) | ≤ 8 per package | ≤ 6 |
-| Shaders | standard glTF PBR metallic-roughness only, no required extension; works with glTFast default shaders on URP (incl. mobile) | — |
-| Visual triangles | ≤ baseline + 25 % (trees may add triangles; terrain, roads and buildings add none) | ≤ baseline |
-| Visual vertices | ≤ baseline × 2 (unwelding for facets) | ≤ baseline + 25 % |
-| Nodes | ≤ baseline (trees stay shared-mesh instances) | — |
-| Embedded texture bytes (stylized mode) | 0 | — |
-| GLB size | ≤ baseline | ≤ baseline − 20 % |
-| Whole Generate, CLI and Blender (D91, D106) | ≤ +5 % vs base | ≤ base |
-| Collision size and triangles | unchanged (hard invariant), except S5-STYLE-TREES within its own limit | — |
+| Material definitions | glTF `materials[]` length | ≤ 8 |
+| Draw submissions | Σ over rendered node instances of their primitives, counted statically from the GLB; trees count once per instance | ≤ baseline; S5-DECOR ≤ baseline + 2 % |
+| Runtime frame time (proxy) | Labelled proxy, not a device: the vendored three.js viewer (`tools/demo/viewer/`) in headless Chromium with SwiftShader software rendering, 1280 × 720, fixed Pittsburgh overview camera; median frame time over 300 frames after 60 warm-up frames; same host, alternating base/head runs | ≤ baseline + 10 % |
+| Render memory (proxy) | vertex-buffer bytes + index-buffer bytes + texture bytes in the GLB | ≤ baseline |
+| Visual triangles | from the GLB | = baseline; S5-DECOR ≤ baseline + 10 % |
+| Visual vertices | from the GLB | ≤ baseline × 2 (unwelding) |
+| Embedded texture bytes (stylized) | images in the GLB | 0 |
+| GLB size | bytes | ≤ baseline; S5-DECOR ≤ baseline + 10 % |
+| Generate time (D91, D106) | **CLI whole Generate**, **Blender Generate** and **Blender Generate+Export**, each reported separately | each ≤ +5 % vs the task's base |
+
+Shaders: standard glTF PBR only, as imported by glTFast with its default URP shaders, mobile included. No custom
+or required-extension shaders.
+
+The contact-sheet render (D140) has its own time limit (≤ 2 min for all cameras). That limit is about producing
+evidence quickly and is **not** a hardware budget.
 
 ## Blender and CLI parity, determinism
 
-* One palette and style module in `core/` is used by both paths. The Blender path adds nothing of its own.
-* For the same inputs and settings, the CLI and Blender packages have equal visual vertex colours and materials
-  per node. This is checked in S5-STYLE-BASE's harness, while today's collision and probe parity continues.
-* Two builds with the same inputs are byte-identical. No randomness except seeded by feature id or scatter index;
-  no wall-clock or host data in the output.
+* One style module, `core/style.py`, is used by both paths.
+* For the same inputs and settings, CLI and Blender packages have equal visual vertex colours and materials per
+  node (`tools/style_check.py`), while today's collision and probe parity continues.
+* Two builds are byte-identical. No randomness except seeded by feature id or scatter index, and no wall-clock
+  or host data in the output.
 
 ## Consumer impact (drone-flight-simulator, read-only)
 
-* **Flight is unaffected.** `.mbcol`, `.mbhf` and the probes are unchanged (hard invariant). S5-STYLE-TREES changes
-  tree collision shapes within the limits below. The simulator's `GroundBelow` and capsule queries behave as before.
-* **Visual import.** It is the same glTF feature set (`COLOR_0`, base colour, metallic-roughness, no extension),
-  and glTFast imports it as today. With no textures, the visual is cheaper. A missing `NORMAL` (if chosen) is
-  standard glTF; the C# reader and the glTF-Validator CI proxy (D66) confirm it.
-* **Format.** Schema stays 2.1.0. If U2 allows decoration, `extras.mb_decor` is additive and needs the D101
-  positive fixture. `package_id` changes for every package.
-* The simulator owner's own visual check is a user or owner action, not claimed here.
+* **Flight is unaffected:** G0 keeps `.mbcol`, `.mbhf`, probes and georeference identical in every S5 task.
+* **Visual import:** the same glTF feature set (`COLOR_0`, base colour, metallic-roughness, no extension), which
+  glTFast imports as today. With no textures it is cheaper. If normals are dropped, that is standard glTF; the C#
+  reader and the glTF-Validator proxy (D66) confirm it.
+* **S5-DECOR:** decoration is visual-only. Consumers can identify it by its marking, it has no collision, and the
+  simulator's `.mbcol` queries never see it.
+* **Format:** schema stays 2.1.0 unless S5-DECOR's feasibility step fails (see that task). `package_id` changes
+  for every stylized package.
+* The simulator owner's visual check is a user or owner action and is not claimed here.
 
-## Visual acceptance method (D140, cheap)
+## Visual acceptance method (D140)
 
-1. **Fixed cameras:** the demokit presets plus three style cameras: a Pittsburgh river bend with banks, a Munich
-   roofscape, and a forest edge on the sample. Cameras are stored in `tools/demo/presets/`.
-2. **One fixed render setup:** Blender EEVEE, one sun and the world colour as soft ambient, 64 samples,
-   1280 × 720. The target is ≤ 2 min for all cameras, CPU fallback allowed. A three.js viewer capture
-   (`tools/demo/viewer/`, vendored) is the low-end proxy.
-3. **Contact sheet:** for each camera, a reference crop (kept with the coordinator, not committed), the base render
-   and the head render side by side. The sheet is attached to the PR, not committed (`docs/demo/` stays REL-only).
-4. **Palette check (automatic, information only):** the mean colour of fixed screen regions (grass, water,
-   shore band, sand, tree crowns, a cliff where one exists) is compared with the target table. The PR reports
-   ΔE2000. Over 15 is flagged for the reviewer, but it does not fail CI.
-5. **Verdict:** the reviewer judges the sheet against the user's priority order. The user accepts the look on the
-   S5-STYLE-REVIEW sheet before the stylized mode becomes the default (U1).
+1. **Cameras:** the demokit presets plus three style cameras: a Pittsburgh river bend with banks, a Munich
+   roofscape and a forest edge on the sample. Cameras are stored in `tools/demo/presets/`.
+2. **Render:** Blender EEVEE, one sun and the world colour as soft ambient, 64 samples, 1280 × 720.
+3. **Contact sheet:** for each camera, the reference crop (held by the coordinator), the base render and the head
+   render side by side. It is attached to the PR, not committed (`docs/demo/` is for REL only).
+4. **Palette report:** mean colour of fixed screen regions compared with the target table, as ΔE2000. This is
+   information only; a value above 15 is flagged to the reviewer.
+5. **Verdict:** the reviewer judges the sheet against the user's priority order. **S5-STYLE-REVIEW is an explicit
+   GO/NO-GO** on the G0 evidence, classic identity, the cumulative budgets and the sheets.
+
+## Scheduling and shared files (D136)
+
+* **One start gate:** S5 implementation starts after the REL-v0.5.0 RC PR (#75) has **merged into main**.
+  Tagging and publishing v0.5.0 are separate user decisions and are not S5 gates.
+* **Shared files:** S5 overlaps v0.5.0 work. The rule is **no simultaneous edits**, not no overlap:
+
+| S5 task | Shares with | Files |
+|---|---|---|
+| S5-STYLE-PALETTE | #77 (S4-COL-FLOAT-2) | `core/generate.py` |
+| S5-STYLE-PALETTE | S4-MYPY, after its triage | the files with mypy errors (likely `core/generate.py`, `core/glb.py`) |
+| S5-STYLE-PALETTE | #75 | the sample slot (D103), when the default changes to stylized |
+| S5-STYLE-WATER | #77 | `core/water.py`, `core/shore.py`, `core/generate.py` (water stage) |
+| S5-DECOR | #77 | `core/package.py` (validator), if the feasibility step needs a format change |
+
+* **The design PR itself:** S5-STYLE only shares `design/tasks/README.md` with #75's hunk, which is scheduled for
+  removal (D125, D133).
 
 ## Tasks
 
-Each task also has a row in [README.md](README.md#sprint-5-style). Test budget for all of them: D134 (≤ 5 s per
-test, no wall-clock asserts, no duplicate cases; renders and real-data runs are PR evidence only). Every task
-meets the **hard invariant** AC and the **D91/D106** timing AC unless it lists an exception.
+Every implementation task meets **G0**, **classic identity**, the **cumulative budgets** and **D91 timing**
+(three series), and attaches the contact sheet and the palette report. Test budget: D134 (≤ 5 s per test, no
+wall-clock asserts, no duplicate cases; renders and real-data runs are PR evidence only).
 
-### S5-STYLE-BASE: baselines, metrics and the acceptance harness
+Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing waits on DECOR.
 
-* **Change:**
-  * add `tools/style_check.py`, which reports materials, visual triangles, vertices, nodes, texture bytes and GLB
-    size; checks the hard invariant (byte-compares the collision members, georeference, probes and passages
-    between two packages); and computes the palette regions for given renders;
-  * add the three style cameras;
-  * add the render and contact-sheet recipe to `tools/demo/`.
-* **ACs:**
-  1. The baseline table (all budget rows) on main after v0.5.0, for the sample, Munich and Pittsburgh through the
-     CLI and Blender, is posted in the PR and recorded by Design in the roadmap.
-  2. The invariant check fails on a package with one `.mbcol` byte flipped, with one probe moved by 1 mm, and with
-     one georeference field changed.
-  3. The render recipe produces all cameras in ≤ 2 min on the pinned host.
-  4. No generator output changes; the sample is byte-identical.
-* **Conflict domain:** `tools/style_check.py`, `tests/test_style_check.py` (both new), `tools/demo/`
-  (presets and recipe). No `core/` edits.
-* **Dependencies:** REL-v0.5.0 merged (D136).
-
-### S5-STYLE-PALETTE: style option, palette, faceted terrain, buildings and roads
+### S5-STYLE-BASE: baselines, metrics, G0 checker and acceptance harness
 
 * **Change:**
-  * add a new `core/style.py`, which holds the palette, the slope, bank and road-class colour rules, and the
-    building and roof palette mapping;
-  * add a `style` option (`"stylized"` or `"classic"`) to the CLI, Blender properties and `GenerateOptions`;
-  * add flat shading by dropping `NORMAL` or by unwelding, whichever passes the validator's orientation probes
-    and costs less; the PR measures both;
-  * in stylized mode, embed no textures.
+  * `tools/style_check.py` (new): G0 and its negative cases; classic whole-archive identity; the member diff
+    between classic and stylized; every budget row (materials, draw submissions, render memory, triangles,
+    vertices, texture bytes, GLB size); per-node CLI-versus-Blender colour and material parity; and the palette
+    regions for given renders;
+  * the runtime frame-time proxy runner (headless Chromium, SwiftShader, the vendored viewer);
+  * the three style cameras and the render and contact-sheet recipe in `tools/demo/`.
 * **ACs:**
-  1. Hard invariant, both paths, all three packages.
-  2. Classic mode is byte-identical to the base for every package and path.
-  3. Budgets: materials, triangles, vertices, nodes, texture bytes and GLB size, with base versus head numbers in
-     the PR.
-  4. Contact sheet and palette report for every camera; there is no tree or water change yet.
-  5. Parity: CLI versus Blender vertex colours and materials are equal per node on the sample, Munich and
-     Pittsburgh.
-  6. Determinism: two builds of each package are byte-identical.
-  7. glTF-Validator (D66) and the C# reader pass on a stylized sample.
-* **Tests:**
-  * palette rule unit tests: slope threshold, bank band, the road-class mapping, and a tagged colour pulled into
-    the palette;
-  * one Blender check for the option;
-  * classic byte identity on the sample.
+  1. The baseline table (every budget row, both modes, the sample, Munich and Pittsburgh, CLI and Blender, plus
+     the three D91 series) is posted in the PR. Design records it in the roadmap.
+  2. `tests/test_style_check.py` covers each G0 negative case and one classic-identity negative case (a single
+     GLB byte change).
+  3. The frame-time proxy repeats within ±5 % over three runs of the same package on the pinned host; otherwise
+     the PR proposes a more stable proxy before PALETTE starts.
+  4. The render recipe produces all cameras in ≤ 2 min.
+  5. No generator output changes; the sample is byte-identical.
+* **Conflict domain:** `tools/style_check.py`, `tests/test_style_check.py` (both new), `tools/demo/` (presets,
+  recipe, proxy runner). No `core/` edits.
+* **Dependencies:** #75 merged (D136).
+
+### S5-STYLE-PALETTE: style option (default stylized), palette, faceting, terrain, buildings, roads and trees
+
+* **Change:**
+  * `core/style.py` (new): the palette; the slope, bank-band and road-class rules; the building and roof mapping;
+    and tree tinting and facet shading;
+  * a `style` option (`"stylized"` by default, or `"classic"`) in the CLI, Blender properties and
+    `GenerateOptions`;
+  * faceting by dropping `NORMAL` or by unwelding, whichever is measured best;
+  * no textures in stylized mode.
+* **ACs:**
+  1. G0, classic identity and the cumulative budgets on every package and path.
+  2. Visual triangles equal to the baseline per node; only colours, materials, normals and welding change.
+  3. Parity and determinism, as above.
+  4. glTF-Validator (D66), the current Python validator and C# reader, and the frozen v0.3.0 readers accept a
+     stylized sample. This is the same check as the existing CI step, run on the new sample.
+  5. Contact sheets for every camera (water is still classic-coloured, which is expected).
+  6. The default switch regenerates `examples/synthetic_sample.mbmap` only under the D103 slot. The PR lists the
+     member changes.
+* **Tests:** palette rules (slope threshold, bank band, road classes, a tagged colour pulled into the palette, a
+  deterministic tree tint); classic byte identity on the sample; one Blender check that the option is present and
+  defaults to stylized.
 * **Conflict domain:**
-  * Hard: `core/style.py` (new), `core/generate.py` (the `LANDCOVER_COLORS`, `MATERIALS`, `FACADE_PALETTE` and
-    `ROOF_PALETTE` constants and the colour choice in `build_terrain`, buildings and roads; no geometry code),
-    `core/glb.py` (normals and welding), `core/uv.py` / `core/textures.py` (mode switch only), `tools/mbmap_cli.py`
-    (flag), `blender/props.py`, `blender/ui.py`, `blender/scene_build.py` (option plumbing).
-  * Soft: sample slot (D103) only if the default changes, which it does not before U1.
-* **Dependencies:** S5-STYLE-BASE.
+  * Hard: `core/style.py` (new); `core/generate.py` (the `LANDCOVER_COLORS`, `MATERIALS`, `FACADE_PALETTE` and
+    `ROOF_PALETTE` constants and the colour choice in `build_terrain`, buildings, roads and `tree_mesh` colours;
+    **no geometry code**); `core/glb.py` (normals and welding); `core/uv.py` and `core/textures.py` (mode switch
+    only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option).
+  * Soft: sample slot (D103).
+* **Dependencies:** S5-STYLE-BASE; #75 merged; S4-MYPY merged (it shares `generate.py` and `glb.py` typing).
 
-### S5-STYLE-TREES: faceted low-poly trees
-
-* **Change:**
-  * replace `tree_mesh()` with two or three faceted variants: a conifer and broadleaf blobs, ≤ 48 triangles each,
-    shared meshes;
-  * the variant comes from the id or index plus `leaf_type`;
-  * the mesh is the same in the visual and in collision class 4.
-* **Hard-invariant exception:** only `vegetation` triangles in `.mbcol` change. The ACs below must hold.
-* **ACs:**
-  1. Fixed-query replay (as D116), Python and C#: every changed hit is class `vegetation`. Terrain, road, water,
-     building and bridge hits are unchanged.
-  2. Every passage probe is still passable, and the blocked list is unchanged. The D21 rule still keeps trees out of
-     probe clearances.
-  3. No tree is taller than the old one by more than 10 %, and each tree's footprint stays within its old crown
-     radius + 0.3 m, so tree density and obstacle placement read the same.
-  4. Total visual triangles stay within the budget, and tree instances still share a mesh.
-  5. Contact sheet (forest-edge camera) and palette check.
-  6. Classic mode keeps today's tree byte-identical.
-* **Conflict domain:** `core/generate.py` (`tree_mesh`, `TREE_UNIT_HEIGHT` and the tree loop's mesh choice only),
-  `core/style.py` (tree colours), `tests/test_scene_generation.py` (tree cases) or a new `tests/test_trees.py`; soft: sample slot.
-* **Dependencies:** S5-STYLE-PALETTE (shares `core/style.py` and `generate.py`).
-
-### S5-STYLE-WATER: cyan water, shore band and sandy banks
+### S5-STYLE-WATER: cyan water, terrain-side shore band, sandy banks (colour only)
 
 * **Change:**
-  * water and shore-band colours;
-  * the terrain bank band and the `bank:` ramps in sand;
-  * the light shore band on the water, built as U3 decides.
+  * water body colour;
+  * the shallow-band and sand colours on the terrain faces next to built water and on the `bank:` ramps, colour
+    only (D143);
+  * no new vertices, no re-triangulation, no transparency.
 * **ACs:**
-  1. Hard invariant. Under U3 option (a), the exception is the water triangles only, and needs:
-     * the D98 hit-equivalence replay on a deterministic ray grid over every body, where hits match in class and
-       in Z within 1e-6 m;
-     * every probe unchanged;
-     * the S4-COL-FLOAT-2 floating audit still at 0 `water_above_bank` and 0 `water_buried`.
-  2. Budgets.
-  3. Contact sheet with the river-bend and bridge-under cameras; the palette check includes the shore band.
-  4. The water stays opaque, with no transparency or extra material beyond the budget.
-* **Conflict domain:** `core/water.py`, `core/shore.py` (colour and band only), `core/style.py`, the water-stage
-  colour code in `core/generate.py`; soft: sample slot.
-* **Dependencies:** S5-STYLE-PALETTE; v0.5.0 released (`core/water.py` and `core/shore.py` free after #77).
-  Serialised after S5-STYLE-TREES because both use `core/style.py` and `generate.py`.
+  1. G0, classic identity and the cumulative budgets. Visual triangles per water, terrain and `bank:` node are
+     unchanged.
+  2. The S4-COL-FLOAT-2 floating audit is unchanged from the base (0 `water_above_bank`, 0 `water_buried`).
+  3. Contact sheets with the river-bend and bridge-under cameras; the palette report includes the shore band.
+* **Conflict domain:** `core/style.py` (water and band colours), the water-stage and `bank:` colour code in
+  `core/generate.py`, `core/water.py` and `core/shore.py` (colour only); soft: sample slot.
+* **Dependencies:** S5-STYLE-PALETTE (it shares `core/style.py` and `generate.py`); U3 resolved as colour-only
+  (D143); #75 merged, which means #77 has merged too.
 
-### S5-STYLE-REVIEW: design milestone review and the user's look check
+### S5-STYLE-REVIEW: design milestone review (GO/NO-GO)
 
-* **Scope:**
-  * a contact sheet of every camera, before and after, with the reference;
-  * the budget table, the invariant evidence and the test audit;
-  * the GO/NO-GO verdict, which carries U1 to the user;
-  * `design/` only.
-* **Dependencies:** all S5-STYLE dev tasks. It then precedes the next REL task; the release itself is a user
-  decision.
+* **Scope:** `design/` only.
+* **Evidence:** G0 and classic identity for every package, path and mode; cumulative budgets against the S5-BASE
+  baseline; the contact sheets; and the test audit (D134).
+* **Verdict:** explicit **GO or NO-GO**. A NO-GO names the failing evidence and the S5-Fn fix tasks.
+* **Dependencies:** S5-STYLE-BASE, PALETTE and WATER. S5-DECOR is not a dependency.
 
-Order: **BASE → PALETTE → TREES → WATER → REVIEW**. These tasks are serial because PALETTE, TREES and WATER share
-`core/style.py` and `core/generate.py`. BASE can start as soon as v0.5.0 has merged.
+### S5-DECOR: visual-only decoration ≤ 0.3 m (last; contingent)
 
-Deferred, not scheduled: rocks and boulders as `prop` collision objects from OSM `natural=stone` / `bare_rock`, which
-needs data and a collision-class review; also visual-only decoration (U2). S4-F2 (water texture) and S4-F4/F6
-(default tint, landcover staircase) are superseded in stylized mode and stay classic-only follow-ups.
+The user allowed it (U2, D142). It runs last, and nothing else waits on it.
 
-## Decisions for the user
+**Step 1, feasibility (no merge).** Today a triangle node without a same-name collision object is rejected by the
+validator (`core/package.py:1747`) and by the frozen readers. A separate decoration node is therefore not possible
+in 2.x, and D110 forbids new package members. The candidate within 2.1.0 is:
 
-* **U1, default look.** Should stylized become the default after S5-STYLE-REVIEW, with classic kept as an option?
-  The recommendation is yes, because classic stays byte-identical for anyone who needs it.
-* **U2, visual-only decoration.** Should small decoration with no collision be allowed (flowers, tufts ≤ 0.3 m,
-  marked `mb_decor`)? It would look closer to the reference, but it breaks "what you see is what you hit" for
-  those items. The recommendation is not in S5.
-* **U3, shore band on water.** One option is to re-triangulate the water sheet with a band ring (a). That
-  changes the `.mbcol` water triangles while keeping the same flat surface, proven by the replay. The other is to
-  approximate the band on the terrain side only (b), with no collision change but a weaker look. The
-  recommendation is (a).
-* **U4, unlit look.** Should the soft lighting be baked into vertex colours under a `KHR_materials_unlit`
-  material? That is cheaper and closer to the reference, but it is an extension and needs a D101 fixture. The
-  alternative is standard lit materials. The recommendation is lit first, revisiting after REVIEW.
+* decoration is an **additional primitive inside an existing terrain node's mesh**;
+* the primitive uses material `MB Decor` and carries primitive `extras.mb_decor = true`;
+* its triangles always lie inside the host node's collision AABB, within the existing tolerance.
+
+The developer builds a **genuine exported package**: the real exporter path, not a hand-made GLB. The fixture must
+show all of these:
+
+* the current Python validator and C# reader report no new error or warning;
+* the frozen v0.3.0 Python and C# readers accept it (the D101 positive fixture);
+* the current exporter's 1:1 GLB-to-`.mbcol` name binding still holds;
+* the orientation probes pass;
+* glTF-Validator is clean.
+
+If any check fails, stop. Design then writes the minimal minor-format change (for example 2.2.0, declaring decor
+primitives) and flags it to the coordinator. BASE, PALETTE, WATER and REVIEW are not blocked.
+
+**Step 2, implementation (only after step 1 passes):**
+
+* Content: small grass tufts, flowers and pebbles, placed deterministically (seeded by area id) on grass and
+  forest landcover only.
+* Height: each instance ≤ 0.3 m above the terrain under it. A test enforces this on the emitted triangles.
+* Exclusions, each enforced by a test: never on road ribbons, water bodies, `bank:` ramps, bridge decks or building
+  footprints; never inside a passage-probe capsule's swept volume dilated by 1 m.
+* The exporter exempts only primitives marked `mb_decor`, and only from the 1:1 triangle correspondence. The node
+  name binding and every other check stay.
+* Documented in `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md`: consumers may hide decoration by its
+  marking, and it is never collidable.
+* **ACs:**
+  1. G0 holds: decoration never touches `.mbcol` or `.mbhf`.
+  2. Classic identity: no decoration in classic mode.
+  3. The DECOR budget rows.
+  4. The step-1 fixture is persisted as a CI test.
+  5. Contact sheet.
+* **Conflict domain:** `core/decor.py` (new); `core/generate.py` (decor call only); `core/glb.py` (extra
+  primitive); `core/package.py` (exporter exemption); `docs/PACKAGE_FORMAT.md`; `docs/UNITY_CORE_HANDOFF.md`;
+  `tests/test_decor.py`; the format-policy fixture tests.
+* **Dependencies:** S5-STYLE-REVIEW GO.
+
+### Deferred (not scheduled)
+
+* **S5-F1:** tree shape change, which changes `vegetation` collision. It needs explicit user approval and the
+  geometry-exception criteria under G0.
+* **S5-F2:** rocks and boulders as collision objects from OSM `natural=stone` / `bare_rock`. It needs data and a
+  collision-class review.
+* **Classic-only follow-ups:** S4-F2 (water texture) and S4-F4/F6 (default tint, landcover staircase) stay
+  classic-only.
+
+## Decision record for this spec
+
+| # | Decision | Who |
+|---|---|---|
+| D141 | U1: stylized is the default; classic stays available and is whole-archive byte-identical to pre-S5 main. | U |
+| D142 | U2: visual-only decoration ≤ 0.3 m is allowed, as the last task S5-DECOR, within D101/D110, contingent on the step-1 fixture; otherwise a minimal minor change is specified and flagged, without blocking other tasks. | U (overrides the Design recommendation) |
+| D143 | U3: the shore band is colour only on existing triangles; no water re-triangulation; `.mbcol` and `.mbhf` byte-identical. | C (delegated by the user) |
+| D144 | U4: lit materials first; `KHR_materials_unlit` may be revisited after S5-STYLE-REVIEW. | C |
+| D145 | Trees are appearance-only in S5; no S5 task changes collision geometry. A tree shape change (S5-F1) or any other geometry change needs explicit user approval. | C (user delegated open points; user may change) |
