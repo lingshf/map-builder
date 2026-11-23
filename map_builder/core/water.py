@@ -417,6 +417,7 @@ class Body:
     level: Level | None = None
     tris: list[Tri] = field(default_factory=list)          # absolute z
     shore: list[tuple[Pt, Pt]] = field(default_factory=list)   # clipped-ring edges that are polygon edges
+    shore_source_piece: list[int] = field(default_factory=list)  # piece index of each edge in ``shore``
     carve: dict[int, float] = field(default_factory=dict)
     blend: dict[int, float] = field(default_factory=dict)
     bank: list[Tri] = field(default_factory=list)           # terrain ramp from the shore edge down to the bank
@@ -774,20 +775,34 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
 
-    wet_pieces = [(body.id, _ring_box(o), o, hs) for body in model.active() for o, hs in body.pieces]
+    wet_pieces = [(body.id, piece_idx, _ring_box(o), o, hs)
+                  for body in model.active() for piece_idx, (o, hs) in enumerate(body.pieces)]
 
     for b in model.active():
         def water_receiver(x: float, y: float, src: Body = b) -> tuple[str, float] | None:
             covers = [(o.id, o.level.at(x, y)) for o in model.active() if _inside_pieces(o, x, y) and o.level is not None]
             return max(covers, key=lambda pair: (pair[1], pair[0])) if covers else None
 
-        def wet_by(tri: Sequence[Pt], receiver_id: str | None) -> bool:
+        def wet_by(tri: Sequence[Pt], receiver_id: str | None, source_piece_idx: int) -> bool:
             box = _ring_box(tri)
-            allowed = set() if receiver_id is None else {receiver_id}
-            return any(_boxes_meet(box, pb) and body_id not in allowed and triangle_overlaps_region(tri, o, hs)
-                       for body_id, pb, o, hs in wet_pieces)
+            for body_id, piece_idx, pb, o, hs in wet_pieces:
+                if not _boxes_meet(box, pb):
+                    continue
+                if not triangle_overlaps_region(tri, o, hs):
+                    continue
+                source_piece = body_id == b.id and piece_idx == source_piece_idx
+                tri_c = (sum(p[0] for p in tri) / 3.0, sum(p[1] for p in tri) / 3.0)
+                source_boundary_only = source_piece and triangle_touches(tri, o, 0.0, closed=True) and not (
+                    point_in_ring(*tri_c, o) and not any(point_in_ring(*tri_c, h) for h in hs)
+                )
+                cascade_receiver = receiver_id is not None and body_id == receiver_id
+                if cascade_receiver or source_boundary_only:
+                    continue
+                return True
+            return False
 
-        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_receiver, wet_by)  # type: ignore[union-attr]
+        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_receiver, wet_by,
+                            edge_sources=b.shore_source_piece)  # type: ignore[union-attr]
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:
@@ -813,7 +828,7 @@ def _make_level(b: Body, grid: ElevationGrid, extent: Rect, all_bodies: Sequence
                 waterways: Sequence[Feature], s: float) -> None:
     # shore edges and samples
     rings = [dedupe_ring(b.polygon.outer)] + [dedupe_ring(h) for h in b.polygon.holes]
-    for o, hs in b.pieces:
+    for piece_idx, (o, hs) in enumerate(b.pieces):
         for ring in [o] + hs:
             n = len(ring)
             for k in range(n):
@@ -822,6 +837,7 @@ def _make_level(b: Body, grid: ElevationGrid, extent: Rect, all_bodies: Sequence
                            or (p[1] == q[1] and p[1] in (extent[1], extent[3])))
                 if not on_edge:
                     b.shore.append((p, q))
+                    b.shore_source_piece.append(piece_idx)
 
     def collect(cells: Sequence[float]) -> list[tuple[float, float, float]]:
         out: list[tuple[float, float, float]] = []

@@ -16,7 +16,7 @@ SHEET = 10.0
 SHORE_EDGE = ((0.0, 0.0), (0.0, 10.0))        # water on the left, so the bank lies at x > 0
 NO_OTHER_BODY = lambda x, y: None             # noqa: E731
 NOT_BLOCKED = lambda tri: False               # noqa: E731
-DRY = lambda tri, receiver: False             # noqa: E731
+DRY = lambda tri, receiver, source: False             # noqa: E731
 
 
 def ramps(edges=(SHORE_EDGE,), ground=lambda x, y: 6.0, blocked=NOT_BLOCKED, other=NO_OTHER_BODY, wet=DRY):
@@ -100,7 +100,7 @@ class StripMaskTest(unittest.TestCase):
     def test_a_strip_between_a_cascade_and_a_bank_is_split_at_the_edge_of_the_other_body(self):
         other_body = [(0.2, -5.0), (20.0, -5.0), (20.0, 5.0), (0.2, 5.0)]
         out = ramps(other=lambda x, y: ("water:2", 4.0) if x > 0.2 and y < 5.0 else None,
-                    wet=lambda tri, receiver: receiver != "water:2" and triangle_overlaps_region(tri, other_body, []))
+                    wet=lambda tri, receiver, source: receiver != "water:2" and triangle_overlaps_region(tri, other_body, []))
         self.assertTrue(out.cascade and out.bank)
         self.assertLessEqual(max(v[1] for t in out.cascade for v in t), 5.0)
         self.assertGreaterEqual(min(v[1] for t in out.bank for v in t if v[0] > 0.3), 5.0 - 1e-9)
@@ -109,7 +109,7 @@ class StripMaskTest(unittest.TestCase):
         receiver = [(0.45, -1.0), (2.0, -1.0), (2.0, 11.0), (0.45, 11.0)]
         third_body = [(0.2, 0.75), (0.35, 0.75), (0.35, 1.25), (0.2, 1.25)]
 
-        def wet_by(tri, receiving):
+        def wet_by(tri, receiving, source):
             bodies = {"water:2": receiver, "water:3": third_body}
             return any(name != receiving and triangle_overlaps_region(tri, ring, []) for name, ring in bodies.items())
 
@@ -124,7 +124,7 @@ class WetPatchTest(unittest.TestCase):
 
     @staticmethod
     def wet_where(outer):
-        return lambda tri, receiver: receiver is None and triangle_overlaps_region(tri, outer, [])
+        return lambda tri, receiver, source: receiver is None and triangle_overlaps_region(tri, outer, [])
 
     def test_a_small_patch_inside_a_strip_blocks_it(self):
         patch = [(2.0, 0.55), (2.1, 0.55), (2.1, 0.65), (2.0, 0.65)]

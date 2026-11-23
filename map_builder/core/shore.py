@@ -51,6 +51,7 @@ class _Node:
     top: Vec3
     foot: Vec3
     cascade: bool
+    source_piece: int
     receiver: str | None = None
 
     @property
@@ -60,26 +61,28 @@ class _Node:
 
 def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Surface,
                 blocked_by: Callable[[Sequence[Pt]], bool], other_level_at: Callable[[float, float], Receiver | None],
-                wet_by: Callable[[Sequence[Pt], str | None], bool]) -> ShoreRamps:
+                wet_by: Callable[[Sequence[Pt], str | None, int], bool],
+                edge_sources: Sequence[int] | None = None) -> ShoreRamps:
     """Ramps along ``edges`` (water on the left of each p->q). ``level_at``: the body's sheet; ``ground_at``: the
     final terrain; ``blocked_by``: whether a plan triangle overlaps a footprint, road or bridge that must not be
     covered; ``other_level_at``: the receiving water body id and its sheet at a point, or None; ``wet_by``:
     whether a plan triangle overlaps disallowed wet area (a cascade may overlap only its receiving body)."""
     out = ShoreRamps()
     normals = [_right_normal(p, q) for p, q in edges]
+    sources = list(edge_sources) if edge_sources is not None and len(edge_sources) == len(edges) else [0] * len(edges)
 
-    def section(pt: Pt, normal: Pt) -> _Node:
-        return _node(pt, normal, level_at, ground_at, other_level_at)
+    def section(pt: Pt, normal: Pt, source_piece: int) -> _Node:
+        return _node(pt, normal, level_at, ground_at, other_level_at, source_piece)
 
-    for (p, q), normal in zip(edges, normals):
-        nodes = [section(pt, normal) for pt in _cut(p, q)]
+    for (p, q), normal, source_piece in zip(edges, normals, sources):
+        nodes = [section(pt, normal, source_piece) for pt in _cut(p, q)]
         for a, b in zip(nodes, nodes[1:]):
-            for part in _split_mixed(a, b, lambda pt: section(pt, normal)):
+            for part in _split_mixed(a, b, lambda pt: section(pt, normal, source_piece)):
                 _place_strip(out, *part, blocked_by, wet_by)
     for i, (_, corner) in enumerate(edges):
         following = (i + 1) % len(edges)
         if _same_point(corner, edges[following][0]) and _turns_towards_water(normals[i], normals[following]):
-            fan = [section(corner, n) for n in _fan_normals(normals[i], normals[following])]
+            fan = [section(corner, n, sources[i]) for n in _fan_normals(normals[i], normals[following])]
             for a, b in zip(fan, fan[1:]):
                 _place_strip(out, a, b, blocked_by, wet_by)
     return out
@@ -96,7 +99,7 @@ def _split_mixed(a: _Node, b: _Node, section: Callable[[Pt], _Node], depth: int 
 
 
 def _place_strip(out: ShoreRamps, a: _Node, b: _Node, blocked_by: Callable[[Sequence[Pt]], bool],
-                 wet_by: Callable[[Sequence[Pt], str | None], bool]) -> None:
+                 wet_by: Callable[[Sequence[Pt], str | None, int], bool]) -> None:
     """Add the strip between two cross-sections as a cascade (both ends cascade) or a bank ramp. A strip that
     overlaps a footprint, road or bridge, or a bank strip that would cover water, is left out."""
     tris = _ramp_tris(a, b)
@@ -104,7 +107,8 @@ def _place_strip(out: ShoreRamps, a: _Node, b: _Node, blocked_by: Callable[[Sequ
         return
     cascade = a.cascade and b.cascade and a.receiver is not None and a.receiver == b.receiver
     plan = [[(v[0], v[1]) for v in t] for t in tris]
-    if any(blocked_by(t) or wet_by(t, a.receiver if cascade else None) for t in plan):
+    source_piece = a.source_piece if a.source_piece == b.source_piece else a.source_piece
+    if any(blocked_by(t) or wet_by(t, a.receiver if cascade else None, source_piece) for t in plan):
         out.blocked_m += math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
     else:
         (out.cascade if cascade else out.bank).extend(tris)
@@ -139,41 +143,41 @@ def _cut(p: Pt, q: Pt) -> list[Pt]:
 
 
 def _node(pt: Pt, normal: Pt, level_at: Surface, ground_at: Surface,
-          other_level_at: Callable[[float, float], Receiver | None]) -> _Node:
+          other_level_at: Callable[[float, float], Receiver | None], source_piece: int) -> _Node:
     """A bank ramp, or a cascade down to another body where the sheet's edge touches one."""
     sheet = level_at(*pt)
     probe = (pt[0] + normal[0] * ACROSS_STEP_M, pt[1] + normal[1] * ACROSS_STEP_M)
     receiver = other_level_at(*probe)
     if receiver is None or receiver[1] >= sheet - LEVEL_TOL_M:
-        return _cross_section(pt, normal, sheet - FREEBOARD_M, ground_at, other_level_at, cascade=False)
-    return _cross_section(pt, normal, sheet, ground_at, other_level_at, cascade=True, receiver=receiver[0])
+        return _cross_section(pt, normal, sheet - FREEBOARD_M, ground_at, other_level_at, source_piece, cascade=False)
+    return _cross_section(pt, normal, sheet, ground_at, other_level_at, source_piece, cascade=True, receiver=receiver[0])
 
 
 def _cross_section(pt: Pt, normal: Pt, start: float, ground_at: Surface,
-                   other_level_at: Callable[[float, float], Receiver | None], cascade: bool, receiver: str | None = None
-                   ) -> _Node:
+                   other_level_at: Callable[[float, float], Receiver | None], source_piece: int, cascade: bool,
+                   receiver: str | None = None) -> _Node:
     """The ramp leaving ``pt`` along ``normal`` from height ``start``, down to the ground. It also ends where it
     reaches another body: a cascade lands on that sheet, so the two sheets meet without a gap; a bank ramp stops."""
     top = (pt[0], pt[1], start)
     if start - ground_at(*pt) < MIN_DROP_M:
-        return _Node(top, top, False, None)
+        return _Node(top, top, False, source_piece, None)
     if cascade and receiver is not None:
         for k in range(1, round(MAX_WIDTH_M / ACROSS_STEP_M) + 1):
             run = k * ACROSS_STEP_M
             x, y = pt[0] + normal[0] * run, pt[1] + normal[1] * run
             other = other_level_at(x, y)
             if other is not None and other[0] == receiver and other[1] < start - LEVEL_TOL_M:
-                return _Node(top, (x, y, other[1]), True, receiver)
-        return _Node(top, top, False, None)
+                return _Node(top, (x, y, other[1]), True, source_piece, receiver)
+        return _Node(top, top, False, source_piece, None)
     foot = top
     for k in range(1, round(MAX_WIDTH_M / ACROSS_STEP_M) + 1):
         run = k * ACROSS_STEP_M
         x, y = pt[0] + normal[0] * run, pt[1] + normal[1] * run
         if other_level_at(x, y) is not None:
-            return _Node(top, foot, False, None)
+            return _Node(top, foot, False, source_piece, None)
         surface = ground_at(x, y)
         if start - RAMP_SLOPE * run <= surface or run >= MAX_WIDTH_M:
-            return _Node(top, (x, y, surface), False, None)
+            return _Node(top, (x, y, surface), False, source_piece, None)
         foot = (x, y, start - RAMP_SLOPE * run)
     raise AssertionError("unreachable")
 
