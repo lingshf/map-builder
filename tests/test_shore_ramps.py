@@ -160,6 +160,25 @@ class WetPatchTest(unittest.TestCase):
         self.assertFalse(triangle_overlaps_region(inside_hole, outer, [hole]))
         self.assertTrue(triangle_overlaps_region(crossing, outer, [hole]))
 
+    def test_disjoint_ring_stays_dry_for_small_clip_triangle(self):
+        tri = [(0.0, 0.0), (0.01, 0.0), (0.0, 0.01)]
+        wet = [(0.001, 0.0090001), (0.008, 0.0020001), (0.008, 0.0020009), (0.001, 0.0090009)]
+        self.assertFalse(triangle_overlaps_region(tri, wet, []))
+
+    def test_translated_triangle_just_above_cutoff_stays_wet(self):
+        x0, y0 = 1000.0, 1000.0
+        tri = [(x0, y0), (x0 + 1.0, y0), (x0, y0 + 1.0)]
+        wet = [(x0, y0), (x0 + 4.5e-5, y0), (x0, y0 + 4.5e-5)]
+        self.assertTrue(triangle_overlaps_region(tri, wet, []))
+
+    def test_translated_cutoff_is_pinned_on_both_sides(self):
+        x0, y0 = 1000.0, 1000.0
+        tri = [(x0, y0), (x0 + 1.0, y0), (x0, y0 + 1.0)]
+        above = [(x0, y0), (x0 + 4.5e-5, y0), (x0, y0 + 4.5e-5)]       # area 1.0125e-9 > 1e-9
+        below = [(x0, y0), (x0 + 4.4e-5, y0), (x0, y0 + 4.5e-5)]       # area 9.9e-10 < 1e-9
+        self.assertTrue(triangle_overlaps_region(tri, above, []))
+        self.assertFalse(triangle_overlaps_region(tri, below, []))
+
 
 class LakeBankTest(unittest.TestCase):
     """On main the carve leaves the sheet hanging 1.5 m over the cell just outside it."""

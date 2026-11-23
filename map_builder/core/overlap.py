@@ -41,7 +41,11 @@ def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequ
     """
     if not _boxes_meet(_box(tri), _box(outer)):
         return False
-    wet = _clipped_ring_area(tri, outer) - sum(_clipped_ring_area(tri, h) for h in holes)
+    origin = tri[0]
+    tri_local = [_sub_xy(p, origin) for p in tri]
+    outer_local = [_sub_xy(p, origin) for p in outer]
+    holes_local = [[_sub_xy(p, origin) for p in h] for h in holes]
+    wet = _clipped_ring_area(tri_local, outer_local) - sum(_clipped_ring_area(tri_local, h) for h in holes_local)
     return wet > OVERLAP_AREA_EPS_M2
 
 
@@ -120,51 +124,53 @@ def _clipped_ring_area(tri: Sequence[Pt], ring: Sequence[Pt]) -> float:
     if len(poly) < 3:
         return 0.0
     t = list(tri)
+    if _signed_area2(t) < 0.0:
+        t[1], t[2] = t[2], t[1]
     for i in range(3):
-        a, b, c = t[i], t[(i + 1) % 3], t[(i + 2) % 3]
-        poly = _clip_against_edge(poly, a, b, c)
+        a, b = t[i], t[(i + 1) % 3]
+        poly = _clip_against_edge(poly, a, b)
         if len(poly) < 3:
             return 0.0
     return _polygon_area(poly)
 
 
-def _clip_against_edge(subject: list[Pt], a: Pt, b: Pt, inside_ref: Pt) -> list[Pt]:
+def _clip_against_edge(subject: list[Pt], a: Pt, b: Pt) -> list[Pt]:
     if not subject:
         return []
     out: list[Pt] = []
     prev = subject[-1]
-    prev_in = _inside_half_plane(prev, a, b, inside_ref)
+    prev_side = _side(a, b, prev)
+    prev_in = prev_side >= 0.0
     for curr in subject:
-        curr_in = _inside_half_plane(curr, a, b, inside_ref)
+        curr_side = _side(a, b, curr)
+        curr_in = curr_side >= 0.0
         if curr_in:
             if not prev_in:
-                out.append(_line_intersection(prev, curr, a, b))
+                out.append(_line_intersection_by_side(prev, curr, prev_side, curr_side))
             out.append(curr)
         elif prev_in:
-            out.append(_line_intersection(prev, curr, a, b))
-        prev, prev_in = curr, curr_in
+            out.append(_line_intersection_by_side(prev, curr, prev_side, curr_side))
+        prev, prev_in, prev_side = curr, curr_in, curr_side
     return out
 
 
-def _inside_half_plane(p: Pt, a: Pt, b: Pt, inside_ref: Pt) -> bool:
-    edge = _side(a, b, p)
-    ref = _side(a, b, inside_ref)
-    if abs(ref) <= BOUNDARY_CROSS_EPS:
-        return abs(edge) <= BOUNDARY_CROSS_EPS
-    return edge * ref >= -BOUNDARY_CROSS_EPS
-
-
-def _line_intersection(p0: Pt, p1: Pt, a: Pt, b: Pt) -> Pt:
-    sx, sy = p1[0] - p0[0], p1[1] - p0[1]
-    rx, ry = b[0] - a[0], b[1] - a[1]
-    den = sx * ry - sy * rx
-    if abs(den) <= BOUNDARY_CROSS_EPS:
-        return p1
-    qx, qy = a[0] - p0[0], a[1] - p0[1]
-    t = (qx * ry - qy * rx) / den
-    return p0[0] + t * sx, p0[1] + t * sy
+def _line_intersection_by_side(a: Pt, b: Pt, side_a: float, side_b: float) -> Pt:
+    den = side_a - side_b
+    if den == 0.0:
+        return b
+    t = side_a / den
+    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
 
 
 def _polygon_area(poly: Sequence[Pt]) -> float:
     return 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
                          for i in range(len(poly))))
+
+
+def _signed_area2(poly: Sequence[Pt]) -> float:
+    return sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
+               for i in range(len(poly)))
+
+
+def _sub_xy(a: Pt, b: Pt) -> Pt:
+    return a[0] - b[0], a[1] - b[1]
