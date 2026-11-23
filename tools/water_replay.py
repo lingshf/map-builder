@@ -279,9 +279,10 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
         if raise_m > 0 and ctx.near_water(*xy) and 0 < b[0] - h[0] <= raise_m + DIST_TOL_M:
             return "deck raised"
         return "unlisted"
-    if b is not None and b[2] == h[2] == "road":      # overlapping roads may swap names, as in ray_disagreement
-        lowered = 0 < h[0] - b[0]
-        return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
+    if b is not None and b[2] == h[2] == "road":
+        # The base road must still be on the ray, lower; a different road replacing it is not "lowered".
+        same_road_lowered = _moved_down(b[1], b[2], b[0], h_hits)
+        return "road lowered" if same_road_lowered and ctx.near_any_water(*xy) else "unlisted"
     label = None
     for t, name, cls_ in nearer:
         if cls_ == "road" and h[2] == "water" and _moved_down(name, cls_, t, h_hits):

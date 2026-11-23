@@ -95,6 +95,25 @@ class RayLabelTest(unittest.TestCase):
                          "unlisted")
 
 
+class RoadLoweredTest(unittest.TestCase):
+    NEAR_WATER = (50, 50)
+    FAR_FROM_WATER = (400, 400)
+
+    def test_the_same_road_hit_farther_down_is_lowered(self) -> None:
+        base, head = [(1.0, "road_a", "road")], [(9.0, "road_a", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "road lowered")
+        self.assertEqual(wr.ray_label(base, head, self.FAR_FROM_WATER, ctx()), "unlisted")
+
+    def test_an_unrelated_deeper_road_replacing_the_base_road_is_not_lowered(self) -> None:
+        base, head = [(1.0, "road_a", "road")], [(9.0, "road_b", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "unlisted")
+
+    def test_overlapping_roads_swapping_winner_need_the_base_road_to_remain_lower(self) -> None:
+        base = [(1.0, "road_a", "road")]
+        head = [(9.0, "road_b", "road"), (9.5, "road_a", "road")]
+        self.assertEqual(wr.ray_label(base, head, self.NEAR_WATER, ctx()), "road lowered")
+
+
 class CapsuleLabelTest(unittest.TestCase):
     WET = [[10, 10, 5], [30, 10, 5]]
     DRY = [[300, 300, 5], [320, 300, 5]]

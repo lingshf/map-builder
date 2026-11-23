@@ -8,7 +8,7 @@
 On a dense XY grid (one downward ray per cell centre) the tool takes the FIRST hit (highest surface) of
 
   * the ``.mbcol`` collision, per class and overall,
-  * the ``.mbhf`` heightfield (at its own nodes, and bilinear at every grid point),
+  * the ``.mbhf`` heightfield (only at its own nodes, compared with the collision and visual terrain there),
   * the visual GLB, per category (terrain, water, road, bridge, building, roof, vegetation, structure, tunnel).
 
 Rays are evaluated exactly (barycentric test at the cell centre on the triangle plane, both facings), batched with
@@ -63,6 +63,77 @@ SHORE_STEP_TOL_M = 0.05
 INFO_KINDS = ("hf_below_ground:water", "hf_coverage", "water_shore_step:col", "water_shore_step:vis")
 
 
+BARY_EPS = 1e-9            # barycentric slack: a ray through a shared edge hits both triangles
+DEGENERATE_DET = 1e-12     # |det| below this: a vertical or collapsed triangle has no height at a point
+HEIGHT_TIE_EPS = 1e-12     # hits this close to the highest one share the cell; the last triangle given owns it
+BATCH_CELLS = 1_000_000    # candidate (triangle, cell) pairs held in memory at once
+
+
+@dataclass
+class CellRanges:
+    """Per triangle, the inclusive-start rectangle of grid cells its bounding box covers (``ni`` or ``nj`` = 0: none)."""
+    i0: np.ndarray
+    j0: np.ndarray
+    ni: np.ndarray
+    nj: np.ndarray
+
+    @property
+    def counts(self) -> np.ndarray:
+        return self.ni * self.nj
+
+
+def _axis_range(lo: np.ndarray, hi: np.ndarray, origin: float, step: float, n: int) -> tuple[np.ndarray, np.ndarray]:
+    """First cell index and cell count along one axis for the extents [lo, hi], clipped to the grid."""
+    first = np.maximum(np.ceil((lo - origin) / step - BARY_EPS).astype(np.int64), 0)
+    last = np.minimum(np.floor((hi - origin) / step + BARY_EPS).astype(np.int64), n - 1)
+    return first, np.maximum(last - first + 1, 0)
+
+
+def _cell_ranges(tris: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> CellRanges:
+    step_x = float(xs[1] - xs[0]) if len(xs) > 1 else 1.0
+    step_y = float(ys[1] - ys[0]) if len(ys) > 1 else 1.0
+    i0, ni = _axis_range(tris[:, :, 0].min(1), tris[:, :, 0].max(1), float(xs[0]), step_x, len(xs))
+    j0, nj = _axis_range(tris[:, :, 1].min(1), tris[:, :, 1].max(1), float(ys[0]), step_y, len(ys))
+    return CellRanges(i0, j0, ni, nj)
+
+
+def _batches(counts: np.ndarray) -> list[np.ndarray]:
+    """Triangle indices (those with at least one cell) in groups of about BATCH_CELLS candidate cells."""
+    used = np.nonzero(counts)[0]
+    ends = np.cumsum(counts[used])
+    batches, start = [], 0
+    while start < len(used):
+        stop = max(int(np.searchsorted(ends, (ends[start - 1] if start else 0) + BATCH_CELLS, side="right")),
+                   start + 1)
+        batches.append(used[start:stop])
+        start = stop
+    return batches
+
+
+def _candidate_cells(ranges: CellRanges, tri: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Every (triangle, cell column, cell row) whose cell lies in the bounding box of a triangle of ``tri``."""
+    counts = ranges.counts[tri]
+    owner = np.repeat(tri, counts)
+    offset = np.arange(int(counts.sum())) - np.repeat(np.cumsum(counts) - counts, counts)
+    width = ranges.ni[owner]
+    return owner, ranges.i0[owner] + offset % width, ranges.j0[owner] + offset // width
+
+
+def _plane_heights(tris: np.ndarray, px: np.ndarray, py: np.ndarray) -> np.ndarray:
+    """Height of each triangle's plane at its own point (px, py), NaN where the point is outside the triangle.
+
+    ``tris`` is (N, 3, 3) vertices x coordinates in the map frame; the test is barycentric, so both facings hit."""
+    (ax, ay, az), (bx, by, bz), (cx, cy, cz) = (tris[:, v].T for v in range(3))
+    det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    usable = np.abs(det) > DEGENERATE_DET
+    det = np.where(usable, det, 1.0)
+    w_a = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / det
+    w_b = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / det
+    w_c = 1.0 - w_a - w_b
+    inside = usable & (w_a >= -BARY_EPS) & (w_b >= -BARY_EPS) & (w_c >= -BARY_EPS)
+    return np.where(inside, w_a * az + w_b * bz + w_c * cz, NAN)
+
+
 class Raster:
     """Highest-surface raster on a regular grid of cell centres, with the owning object index per cell."""
 
@@ -71,71 +142,27 @@ class Raster:
         self.z = np.full((len(ys), len(xs)), -np.inf)
         self.owner = np.full((len(ys), len(xs)), -1, dtype=np.int32)
 
-    def add(self, tris: np.ndarray, owners: np.ndarray, budget: int = 3_000_000) -> None:
-        """tris: (T,3,3) map-frame triangles; owners: (T,) object index."""
+    def add(self, tris: np.ndarray, owners: np.ndarray) -> None:
+        """Ray-cast every cell centre against ``tris`` (T, 3, 3), keeping the highest hit and its ``owners`` (T,)."""
         if not len(tris):
             return
-        xs, ys = self.xs, self.ys
-        dx = float(xs[1] - xs[0]) if len(xs) > 1 else 1.0
-        dy = float(ys[1] - ys[0]) if len(ys) > 1 else 1.0
-        x0, y0 = float(xs[0]), float(ys[0])
-        tx, ty = tris[:, :, 0], tris[:, :, 1]
-        i0 = np.ceil((tx.min(1) - x0) / dx - 1e-9).astype(np.int64)
-        i1 = np.floor((tx.max(1) - x0) / dx + 1e-9).astype(np.int64)
-        j0 = np.ceil((ty.min(1) - y0) / dy - 1e-9).astype(np.int64)
-        j1 = np.floor((ty.max(1) - y0) / dy + 1e-9).astype(np.int64)
-        i0, j0 = np.maximum(i0, 0), np.maximum(j0, 0)
-        i1, j1 = np.minimum(i1, len(xs) - 1), np.minimum(j1, len(ys) - 1)
-        ni, nj = i1 - i0 + 1, j1 - j0 + 1
-        keep = (ni > 0) & (nj > 0)
-        idx = np.nonzero(keep)[0]
-        if not len(idx):
-            return
-        size = (ni[idx] * nj[idx])
-        order = idx[np.argsort(size, kind="stable")]
-        size = ni[order] * nj[order]
-        pos = 0
-        while pos < len(order):
-            # a chunk of similar-size triangles whose padded cell count stays within the budget
-            end = pos + 1
-            while end < len(order) and (end - pos + 1) * int(size[end]) <= budget and \
-                    size[end] <= 2 * size[pos] + 4:
-                end += 1
-            sel = order[pos:end]
-            self._chunk(tris[sel], owners[sel], i0[sel], j0[sel], ni[sel], nj[sel], x0, y0, dx, dy)
-            pos = end
+        ranges = _cell_ranges(tris, self.xs, self.ys)
+        for batch in _batches(ranges.counts):
+            tri, column, row = _candidate_cells(ranges, batch)
+            heights = _plane_heights(tris[tri], self.xs[column], self.ys[row])
+            self._keep_highest(row * len(self.xs) + column, heights, owners[tri])
 
-    def _chunk(self, t, owner, i0, j0, ni, nj, x0, y0, dx, dy) -> None:
-        mi, mj = int(ni.max()), int(nj.max())
-        ii = i0[:, None, None] + np.arange(mi)[None, :, None] + np.zeros((1, 1, mj), dtype=np.int64)
-        jj = j0[:, None, None] + np.arange(mj)[None, None, :] + np.zeros((1, mi, 1), dtype=np.int64)
-        valid = (np.arange(mi)[None, :, None] < ni[:, None, None]) & (np.arange(mj)[None, None, :] < nj[:, None, None])
-        px = x0 + ii * dx
-        py = y0 + jj * dy
-        ax, ay, az = (t[:, 0, k][:, None, None] for k in range(3))
-        bx, by, bz = (t[:, 1, k][:, None, None] for k in range(3))
-        cx, cy, cz = (t[:, 2, k][:, None, None] for k in range(3))
-        det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
-        ok = np.abs(det) > 1e-12
-        safe = np.where(ok, det, 1.0)
-        l1 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / safe
-        l2 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / safe
-        l3 = 1.0 - l1 - l2
-        e = 1e-9
-        inside = valid & ok & (l1 >= -e) & (l2 >= -e) & (l3 >= -e)
-        z = l1 * az + l2 * bz + l3 * cz
-        k = np.nonzero(inside)
-        if not len(k[0]):
-            return
-        flat = jj[k] * len(self.xs) + ii[k]
-        zz = z[k]
-        zf = self.z.reshape(-1)
-        np.maximum.at(zf, flat, zz)
-        win = zz >= zf[flat] - 1e-12
-        self.owner.reshape(-1)[flat[win]] = owner[k[0]][win]
+    def _keep_highest(self, flat_cell: np.ndarray, heights: np.ndarray, owners: np.ndarray) -> None:
+        hit = np.isfinite(heights)
+        flat_cell, heights, owners = flat_cell[hit], heights[hit], owners[hit]
+        best = self.z.reshape(-1)
+        np.maximum.at(best, flat_cell, heights)
+        wins = heights >= best[flat_cell] - HEIGHT_TIE_EPS
+        self.owner.reshape(-1)[flat_cell[wins]] = owners[wins]
 
     def final(self) -> np.ndarray:
         return np.where(np.isfinite(self.z), self.z, NAN)
+
 
 
 def _load(path: str):
@@ -439,7 +466,13 @@ def audit(path: str, cell: float = 1.0, threshold: float = 0.2, hf_tol: float = 
     return result
 
 
+CROP_PAD_M = 12.0          # context around a region in its crop
+CROP_MIN_PIXELS = 160      # crops are enlarged until their short side has about this many pixels
+HEATMAP_MIN_RANGE_M = 1.0  # the colour scale spans at least this much, so tiny offsets do not look severe
+
+
 def _shade(h: np.ndarray) -> np.ndarray:
+    """Grey hill-shade of a height raster (NaN cells take its lowest height)."""
     z = np.nan_to_num(h, nan=float(np.nanmin(h)) if np.isfinite(h).any() else 0.0)
     gy, gx = np.gradient(z)
     s = np.clip(0.5 + 0.6 * (-gx - gy), 0, 1)
@@ -447,6 +480,7 @@ def _shade(h: np.ndarray) -> np.ndarray:
 
 
 def _colour(v: np.ndarray, vmax: float) -> np.ndarray:
+    """Red for positive offsets, blue for negative, white at zero."""
     t = np.clip(np.abs(v) / vmax, 0, 1)
     pos = v >= 0
     r = np.where(pos, 255, 40 + 100 * (1 - t)).astype(np.uint8)
@@ -455,44 +489,51 @@ def _colour(v: np.ndarray, vmax: float) -> np.ndarray:
     return np.stack([r, g, b], axis=-1)
 
 
-def _render(png_dir, stem, xs, ys, layers, V, vterr, findings, crops) -> None:
+def _overlay(base: np.ndarray, layer: np.ndarray) -> np.ndarray:
+    """Copy of the grey ``base`` image with the finite cells of ``layer`` painted by offset."""
+    image = base.copy()
+    painted = np.isfinite(layer)
+    if painted.any():
+        image[painted] = _colour(layer[painted], max(HEATMAP_MIN_RANGE_M, float(np.nanmax(np.abs(layer)))))
+    return image
+
+
+def _index_window(axis: np.ndarray, lo: float, hi: float) -> slice:
+    """Cells of a regular ``axis`` covering [lo - pad, hi + pad]."""
+    step = axis[1] - axis[0]
+    first = max(0, int((lo - CROP_PAD_M - axis[0]) / step))
+    last = min(len(axis), int((hi + CROP_PAD_M - axis[0]) / step) + 1)
+    return slice(first, last)
+
+
+def _enlarge(image: np.ndarray) -> np.ndarray:
+    scale = max(1, CROP_MIN_PIXELS // max(1, min(image.shape[:2])))
+    return np.kron(image, np.ones((scale, scale, 1), dtype=np.uint8))
+
+
+def _save_png(image: np.ndarray, png_dir: str, name: str) -> None:
     from PIL import Image
+    Image.fromarray(np.flipud(image)).save(os.path.join(png_dir, name))   # row 0 is the southern edge
+
+
+def _render(png_dir: str, stem: str, xs: np.ndarray, ys: np.ndarray, layers: dict[str, np.ndarray],
+            visible: np.ndarray, visible_terrain: np.ndarray, findings: dict[str, list[dict]], crops: int) -> None:
+    """One heatmap per finding kind, plus crops of the ``crops`` largest regions of each kind."""
     os.makedirs(png_dir, exist_ok=True)
-    base = _shade(np.where(np.isfinite(V), V, vterr))
-    rgb0 = np.stack([base] * 3, axis=-1)
+    grey = _shade(np.where(np.isfinite(visible), visible, visible_terrain))
+    base = np.stack([grey] * 3, axis=-1)
+    for kind, layer in layers.items():
+        if np.isfinite(layer).any():
+            _save_png(_overlay(base, layer), png_dir, f"{stem}.{kind.replace(':', '-')}.heat.png")
+    crop_number = 0
+    for kind, regions in findings.items():
+        for region in regions[:crops] if kind in layers else []:
+            x0, y0, x1, y1 = region["bbox"]
+            rows, columns = _index_window(ys, y0, y1), _index_window(xs, x0, x1)
+            crop = _overlay(base[rows, columns], layers[kind][rows, columns])
+            _save_png(_enlarge(crop), png_dir, f"{stem}.{kind.replace(':', '-')}.crop{crop_number}.png")
+            crop_number += 1
 
-    def save(img: np.ndarray, name: str) -> None:
-        Image.fromarray(np.flipud(img)).save(os.path.join(png_dir, name))
-
-    for kind, lay in layers.items():
-        if not np.isfinite(lay).any():
-            continue
-        vmax = max(1.0, float(np.nanmax(np.abs(lay))))
-        rgb = rgb0.copy()
-        m = np.isfinite(lay)
-        rgb[m] = _colour(lay[m], vmax)
-        save(rgb, f"{stem}.{kind.replace(':', '-')}.heat.png")
-    n = 0
-    for kind, regs in findings.items():
-        for r in regs[:crops]:
-            lay = layers.get(kind)
-            if lay is None:
-                continue
-            pad = 12.0
-            x0, y0, x1, y1 = r["bbox"]
-            i0 = max(0, int((x0 - pad - xs[0]) / (xs[1] - xs[0])))
-            i1 = min(len(xs), int((x1 + pad - xs[0]) / (xs[1] - xs[0])) + 1)
-            j0 = max(0, int((y0 - pad - ys[0]) / (ys[1] - ys[0])))
-            j1 = min(len(ys), int((y1 + pad - ys[0]) / (ys[1] - ys[0])) + 1)
-            rgb = rgb0[j0:j1, i0:i1].copy()
-            sub = lay[j0:j1, i0:i1]
-            m = np.isfinite(sub)
-            if m.any():
-                rgb[m] = _colour(sub[m], max(1.0, float(np.nanmax(np.abs(sub)))))
-            scale = max(1, 160 // max(1, min(rgb.shape[:2])))
-            rgb = np.kron(rgb, np.ones((scale, scale, 1), dtype=np.uint8))
-            save(rgb, f"{stem}.{kind.replace(':', '-')}.crop{n}.png")
-            n += 1
 
 
 def _print(res: dict, quiet: bool) -> None:
