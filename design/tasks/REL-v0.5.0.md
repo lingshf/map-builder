@@ -1,6 +1,6 @@
 # REL-v0.5.0: release candidate for sprint 4
 
-Owner: release manager · sprint S4 · after S4-REVIEW and its blocker S4-Fn tasks · D28, D32, D50, D53, D104
+Owner: release manager · sprint S4 · after S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2 and S4-MYPY · D28, D32, D50, D53, D104, D126, D128, D130
 
 ## Scope
 
@@ -33,6 +33,14 @@ Same shape as REL-v0.4.0:
 4. The frozen-input reproduction in the RC matches the asset SHA-256 of at least one package.
 5. Assets: the extension zip, the Munich and Pittsburgh `.mbmap` from the CLI (and the Blender candidates), the
    renders, and the viewer capture.
+6. **Floating collision (D126).** `tools/floating_audit.py` on every release package, CLI and Blender: 0 floating,
+   0 `water_above_bank` and 0 `water_buried` regions above 0.2 m. The notes state the remaining `water_shore_step`
+   count and maximum (≤ 1.5 m) and describe the new `bank:<id>` terrain objects.
+7. **Typing (D128).** The VALIDATION row says mypy-clean with CI enforcement only after S4-MYPY has merged; before
+   that, no mypy claim.
+8. **Final RC (D130).** The RC is rebased on the final main after S4-MYPY; every package, render and checksum is
+   rebuilt from it, and the RC's `design/` hunk is dropped (D125). Tagging and publishing stay a separate user
+   decision.
 
 ## Conflict domain
 

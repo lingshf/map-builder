@@ -362,7 +362,7 @@ Task docs: [tasks/README.md](tasks/README.md#sprint-4-v050).
 | A: roofs | **S4-ROOF-SPIKE** (½ day) → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** |
 | B: package and collision | **S4-PERF-PKG** → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** → **S4-WATER-SURFACE** (D112) |
 | C: textures, tests, publishing | **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** → **S4-FORMAT-POLICY** (hard edge) → **S4-EXT-READY** |
-| Close (D104) | **S4-REVIEW** → S4-Fn blockers → **REL-v0.5.0** → close check → retro → tag `v0.5.0` |
+| Close (D104, D130) | **S4-REVIEW** → S4-WATER-BANK → **S4-COL-FLOAT** → **S4-COL-FLOAT-2** → **S4-MYPY** → **REL-v0.5.0** → close check → retro → tag `v0.5.0` (user decision) |
 
 Hard dependencies are only the arrows in the graph; the lane order otherwise just balances three devs.
 The lane-A dev runs the spike first (it merges nothing). The stretch is recorded only after the final-checker
@@ -385,7 +385,11 @@ graph LR
   FP --> REV
   UV --> REV
   EX --> REV
-  REV --> REL[REL-v0.5.0]
+  REV --> WB[S4-WATER-BANK]
+  WB --> CF[S4-COL-FLOAT]
+  CF --> CF2[S4-COL-FLOAT-2]
+  CF2 --> MY[S4-MYPY]
+  MY --> REL[REL-v0.5.0]
 ```
 
 Why the edges: ROOF-NAMED and ROOF-ENDS share `core/roofs.py`. If ROOF-NAMED changes the checker's reference
@@ -418,6 +422,8 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | River colour (textured) | B ≥ G, and each channel within 30 of the untextured render | within 15 |
 | New tests | ≤ 5 s each, no wall-clock gates (DoD) | — |
 | PR CI | ≤ 10 min (today about 1m32 for the slowest job); a C# prebuild may add ≤ 30 s | — |
+| Floating collision (D126) | `tools/floating_audit.py` at 0.2 m: 0 floating, 0 `water_above_bank`, 0 `water_buried` regions in the sample, Munich and Pittsburgh, CLI and Blender | — |
+| mypy (D128) | 0 errors, enforced in CI; the step adds ≤ 60 s to one job | — |
 | Local suite | 0 host-dependent errors with a private user-level NuGet feed configured (D92) | — |
 
 ### Consumer impact (drone-flight-simulator, read-only)
@@ -492,6 +498,12 @@ keep the sample bytes of main. Rebasing alone does not serialise the writers.
 | D123 | S4-F1 (water-coloured terrain on the banks of built water bodies) is a **v0.5.0 blocker**, fixed by [S4-WATER-BANK](tasks/S4-WATER-BANK.md): colours only, `.mbcol`/`.mbhf` byte-identical. REL-v0.5.0 waits for it; once it merges the S4-REVIEW verdict becomes GO with no further review round. | De (proposed); C confirmed (S4-REVIEW gate) | decided |
 | D124 | "MB Water" stays untextured in v0.5.0. A texture needs water UVs, a CC0 asset and NOTICES (D86), so it moves to S5-TEX-WATER (S4-F2). | De (proposed); C confirmed (S4-REVIEW gate) | decided |
 | D125 | Dev PRs do not edit `design/`. Measurements and spec gaps go in the PR body; design or the coordinator records them in the roadmap. Specs that add an `mb_id` namespace list `core/package.py` (`_MB_ID`) in their conflict domain. | De (proposed); C confirmed (S4-REVIEW gate) | decided |
+| D126 | Floating collision is a **v0.5.0 blocker** (S4-COL-FLOAT, #76): a collision surface above the visible ground stops a descending drone, because the simulator's `GroundBelow` takes the highest terrain/road/water triangle. Gate: `tools/floating_audit.py` at 0.2 m on the sample, Munich and Pittsburgh, CLI and Blender. Recorded here from #75 and #76; no task spec was written for #76. | C (coordinator) | decided (recorded from #75, #76) |
+| D127 | Shore strips are typed per transition (bank or cascade); a strip whose ends differ is split and each part is judged on its own type. Recorded from the #77 R1 review. | C (coordinator) | decided (recorded from #77) |
+| D128 | S4-MYPY: fix the mypy errors on main (19 in 6 files when #75 was opened) and add a CI mypy step. It starts after the COL-FLOAT work and blocks v0.5.0. Spec: [tasks/S4-MYPY.md](tasks/S4-MYPY.md). Recorded from #75. | C (coordinator) | decided (recorded from #75) |
+| D129 | S4-COL-FLOAT-2 (#77) is the D126 follow-up inside v0.5.0: it closes `water_above_bank` (Pittsburgh 10 regions, 380 m², max 6.28 m on 53c54d3) with terrain shore ramps and junction cascades, not a skirt or a confined carve. Spec, written after the PR opened from its R1–R3 findings: [tasks/S4-COL-FLOAT-2.md](tasks/S4-COL-FLOAT-2.md). Recorded from #77. | C (coordinator) | decided (recorded from #77) |
+| D130 | v0.5.0 close order: #77 → S4-MYPY → REL-v0.5.0 (#75 rebases, rebuilds every package, refreshes renders and drops its `design/` hunk, D125) → close check → retro → tag (publishing is a separate user decision). Until #77 merges, Dev does read-only mypy triage only. #77 reached the D89 cap at R3 (head 568f4a5), so the coordinator rules. Design recommends: R3.1–R3.3 are gaps in the PR's own stated invariants (S4-COL-FLOAT-2 AC2, AC3, AC5), small and testable, closed by one coordinator-verified fix commit as in D122; R3.4 (exact-head Blender D106 timing) is required evidence, not waived, because R3 changes shared generator geometry. No criterion beyond the spec. | De (proposed); C rules | proposed |
+| D131 | v0.5.0 closeout test budget: each new test ≤ 5 s with no wall-clock asserts, and no case is duplicated across `tests/test_water*.py`, `tests/test_shore_ramps.py` and `tests/test_floating_audit.py`. Real-data audits and replays are PR evidence, not persisted tests. PR CI stays ≤ 10 min; the mypy step runs in one job only and adds ≤ 60 s. Reviewers block duplicate or slow tests. | De (proposed); C confirms | proposed |
 
 ## Decisions that need the user
 

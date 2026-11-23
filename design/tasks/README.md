@@ -82,7 +82,7 @@ S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touchin
 
 ## Sprint 4 (v0.5.0)
 
-Theme D93; decisions D94–D125 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+Theme D93; decisions D94–D131 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
@@ -98,15 +98,18 @@ Theme D93; decisions D94–D125 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-
 | [S4-FORMAT-POLICY](S4-FORMAT-POLICY.md) | S4 | dev | **S4-TEST-HYGIENE** (hard: frozen C# fixture uses its build harness); S4-PERF-PKG only for a `package.py` edit | `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` (new sections, stale 2.0.0 paragraph), `tests/test_format_policy.py` (new), C# test harness (use; edits serialised after TEST-HYGIENE) | done | #68 (268878a) |
 | [S4-EXT-READY](S4-EXT-READY.md) | S4 | dev | — | `.github/workflows/release.yml`, `tests/test_manifest.py` (new), `docs/PLATFORM_SUBMISSION.md` (new), `blender_manifest.toml` (non-version fields) | done | #69 (4233995) |
 | [S4-WATER-SURFACE](S4-WATER-SURFACE.md) | S4 (D112) | dev | S4-COL-DEGEN (shared `blender/bake.py`/`export.py`) | `core/water.py` (new), `core/osm.py` (`area_class`, `classify` waterways; no selector change), `core/generate.py` (terrain/landcover section, coverage), `core/bridges.py` (deck ground rule, piers, under-probe), `blender/scene_build.py`/`bake.py`/`export.py` (water objects), `tests/test_water.py` (new), `tests/test_bridges.py`, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION, `docs/demo/` | done | #72 (d38d4e8) |
-| [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | review (NO-GO until S4-F1) | this PR |
-| [S4-WATER-BANK](S4-WATER-BANK.md) | S4 (S4-F1, **v0.5.0 blocker**, D123) | dev | S4-WATER-SURFACE | `core/generate.py` (`build_terrain` colour choice, its call in `build_plan`), `tests/test_water.py`, `tests/blender/checks_water.py`; soft: sample slot (D103). Crops are PR evidence, no `docs/demo/` | ready | |
+| [S4-REVIEW](S4-REVIEW.md) | S4 | design | all S4 dev tasks | `design/` only | done (GO after S4-WATER-BANK, D123) | #73 |
+| [S4-WATER-BANK](S4-WATER-BANK.md) | S4 (S4-F1, **v0.5.0 blocker**, D123) | dev | S4-WATER-SURFACE | `core/generate.py` (`build_terrain` colour choice, its call in `build_plan`), `tests/test_water.py`, `tests/blender/checks_water.py`; soft: sample slot (D103). Crops are PR evidence, no `docs/demo/` | done | #74 (7c24dc3) |
+| S4-COL-FLOAT | S4 (**v0.5.0 blocker**, D126) | dev | S4-WATER-BANK | `core/generate.py` (road drape source), `tools/floating_audit.py` (new), `tools/water_replay.py`; soft: sample slot (D103), VALIDATION | done (no spec; criteria in the PR) | #76 (53c54d3) |
+| [S4-COL-FLOAT-2](S4-COL-FLOAT-2.md) | S4 (**v0.5.0 blocker**, D126, D129) | dev | S4-COL-FLOAT | `core/shore.py`, `core/overlap.py` (new), `core/water.py`, `core/generate.py` (water stage, ramp objects), `core/package.py` (`_MB_ID`), `tools/floating_audit.py`, `tools/water_replay.py`, their tests, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION | review (D89 cap reached at R3; coordinator rules, D130) | #77 |
+| [S4-MYPY](S4-MYPY.md) | S4 (**v0.5.0 blocker**, D128) | dev | **S4-COL-FLOAT-2** (shared `core/` files); read-only triage allowed before | `pyproject.toml` (`[tool.mypy]`), `.github/workflows/ci.yml` (mypy step), the files with mypy errors after #77 | blocked (triage only) | |
 | S4-F2 | later (D124) | dev | S4-WATER-BANK | `core/water.py` (UVs), `map_builder/assets/textures/`, NOTICES | → S5-TEX-WATER: texture "MB Water" | |
 | S4-F3 | later | dev | — | `core/water.py`, `core/osm.py` | → S5 water coverage: standalone `water=*`, riverbank multipolygons, coastline | |
 | S4-F4 | later | dev | — | `core/generate.py` (landcover colours), `core/textures.py` | → S5: default tint for untagged ground (near-white since D99) | |
 | S4-F5 | later or REL docs | dev | — | `docs/PACKAGE_FORMAT.md` | → stale C# line citations (+50 after #72) | |
 | S4-F6 | later | dev | S4-F4 | `core/generate.py` (`build_terrain`) | → S5: landcover edge staircase (per-cell colours) | |
 | S4-F7 | later | dev | — | `tests/test_col_degen.py` | → test hygiene: 6.1 s incl. C# build | |
-| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW and its blocker S4-Fn tasks (S4-WATER-BANK) | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | blocked | |
+| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2, S4-MYPY (D130) | version files, `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md` | RC open; final after S4-COL-FLOAT-2 and S4-MYPY | #75 (RC) |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
 (then FORMAT-POLICY if needed); `core/uv.py` to TEX-WATER, then PERF-UV; `blender/bake.py` and `export.py` to
@@ -116,6 +119,11 @@ FORMAT-POLICY. Perf tasks keep every package byte-identical (D97). **Sample slot
 `examples/synthetic_sample.mbmap` only while holding the single exclusive merge-time slot from the coordinator
 (rebase, regenerate, green CI and gate, merge, release); rebasing alone does not serialise writers. Tasks that touch probes or collision (S4-COL-DEGEN, S4-WATER-SURFACE) attach the
 Pittsburgh Python and C# runs (D47).
+
+v0.5.0 closeout (D130): `core/water.py`, the water stage of `core/generate.py` and `core/package.py` (`_MB_ID`)
+belong to S4-COL-FLOAT-2 until #77 merges. S4-MYPY only triages (read-only) until then, then holds its files
+alone. REL-v0.5.0 (#75) rebases, rebuilds every package and drops its `design/` hunk (D125) after S4-MYPY merges.
+Test budget for these tasks: D131.
 
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
@@ -135,7 +143,8 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
    → **S3-REVIEW** → **REL-v0.4.0** → close check → retro → tag `v0.4.0` (D63, **released**)
 6. Wave 6 (sprint 4, D93): lanes **S4-ROOF-SPIKE** → **S4-ROOF-NAMED** → **S4-ROOF-ENDS** ∥ **S4-PERF-PKG**
    → **S4-BLENDER-HYGIENE** → **S4-COL-DEGEN** → **S4-WATER-SURFACE** (D112) ∥ **S4-TEX-WATER** → **S4-PERF-UV** → **S4-TEST-HYGIENE** →
-   **S4-FORMAT-POLICY** (hard edge after TEST-HYGIENE) → **S4-EXT-READY** → **S4-REVIEW** → **REL-v0.5.0** → close check → retro → tag 0.5.0 (D104)
+   **S4-FORMAT-POLICY** (hard edge after TEST-HYGIENE) → **S4-EXT-READY** → **S4-REVIEW** → **S4-WATER-BANK** → **S4-COL-FLOAT**
+      → **S4-COL-FLOAT-2** → **S4-MYPY** → **REL-v0.5.0** (rebase #75, rebuild) → close check → retro → tag 0.5.0 (D104, D130; publishing is a user decision)
 
 `core/generate.py` appears in several hard domains, but in different functions/hunks
 (roof section, building loop, bridge hook, tunnel hook). The pairs listed as parallel above
