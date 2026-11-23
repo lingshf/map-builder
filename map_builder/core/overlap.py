@@ -10,6 +10,7 @@ from collections.abc import Iterator, Sequence
 from .osm import point_in_ring
 
 Pt = tuple[float, float]
+SHRINK = 1e-3   # relative; far above rounding along a shared edge, far below any patch worth ramping around
 
 
 def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
@@ -30,6 +31,18 @@ def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, close
     return any(_segment_distance(a, b, c, d) <= margin
                for a, b in _edges(path, closed) if _edge_in_box(a, b, box) for c, d in _edges(tri, True))
 
+
+def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
+    """Whether the triangle and the region (``outer`` minus ``holes``) share area. A triangle whose edge lies on
+    the region's boundary does not: it is shrunk a little first, so rounding along that edge is not an overlap."""
+    centre = (sum(p[0] for p in tri) / 3, sum(p[1] for p in tri) / 3)
+    core = [(centre[0] + (x - centre[0]) * (1 - SHRINK), centre[1] + (y - centre[1]) * (1 - SHRINK)) for x, y in tri]
+    rings = [outer, *holes]
+    if any(point_in_ring(x, y, core) for ring in rings for x, y in ring):
+        return True
+    if any(_segments_cross(a, b, c, d) for ring in rings for a, b in _edges(ring, True) for c, d in _edges(core, True)):
+        return True
+    return point_in_ring(*centre, outer) and not any(point_in_ring(*centre, h) for h in holes)
 
 def _padded_box(points: Sequence[Pt], pad: float) -> tuple[float, float, float, float]:
     xs, ys = [p[0] for p in points], [p[1] for p in points]

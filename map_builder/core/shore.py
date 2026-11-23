@@ -29,7 +29,6 @@ FREEBOARD_M = 0.02        # a bank ramp starts this far under the sheet: terrain
 MAX_WIDTH_M = 12.0        # a ramp that has not met its surface by then ends there, steeper than RAMP_SLOPE
 ALONG_STEP_M = 2.0        # shore edges are cut into ramp segments at most this long
 ACROSS_STEP_M = 0.5       # the surface below is probed at this spacing away from the shore
-COVER_PROBES = 8          # a strip is checked for water at this many points from its sheet edge to its foot
 CORNER_TOL_M = 1e-6       # consecutive shore edges share their corner within this
 FAN_STEP_RAD = math.radians(15)   # a convex corner is covered by cross-sections turning in steps of this
 MIN_PLAN_AREA_M2 = 1e-6   # a ramp triangle thinner than this in plan would not face up
@@ -58,10 +57,11 @@ class _Node:
 
 def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Surface,
                 blocked_by: Callable[[Sequence[Pt]], bool], other_level_at: Callable[[float, float], float | None],
-                ) -> ShoreRamps:
+                wet_by: Callable[[Sequence[Pt]], bool]) -> ShoreRamps:
     """Ramps along ``edges`` (water on the left of each p->q). ``level_at``: the body's sheet; ``ground_at``: the
     final terrain; ``blocked_by``: whether a plan triangle overlaps a footprint, road or bridge that must not be
-    covered; ``other_level_at``: the sheet of another water body at a point, or None."""
+    covered; ``other_level_at``: the sheet of another water body at a point, or None; ``wet_by``: whether a plan
+    triangle shares area with any water body (a bank ramp must not cover water)."""
     out = ShoreRamps()
     normals = [_right_normal(p, q) for p, q in edges]
 
@@ -72,13 +72,13 @@ def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Su
         nodes = [section(pt, normal) for pt in _cut(p, q)]
         for a, b in zip(nodes, nodes[1:]):
             for part in _split_mixed(a, b, lambda pt: section(pt, normal)):
-                _place_strip(out, *part, blocked_by, other_level_at)
+                _place_strip(out, *part, blocked_by, wet_by)
     for i, (_, corner) in enumerate(edges):
         following = (i + 1) % len(edges)
         if _same_point(corner, edges[following][0]) and _turns_towards_water(normals[i], normals[following]):
             fan = [section(corner, n) for n in _fan_normals(normals[i], normals[following])]
             for a, b in zip(fan, fan[1:]):
-                _place_strip(out, a, b, blocked_by, other_level_at)
+                _place_strip(out, a, b, blocked_by, wet_by)
     return out
 
 
@@ -93,24 +93,19 @@ def _split_mixed(a: _Node, b: _Node, section: Callable[[Pt], _Node], depth: int 
 
 
 def _place_strip(out: ShoreRamps, a: _Node, b: _Node, blocked_by: Callable[[Sequence[Pt]], bool],
-                 water_at: Callable[[float, float], float | None]) -> None:
+                 wet_by: Callable[[Sequence[Pt]], bool]) -> None:
     """Add the strip between two cross-sections as a cascade (both ends cascade) or a bank ramp. A strip that
     overlaps a footprint, road or bridge, or a bank strip that would cover water, is left out."""
     tris = _ramp_tris(a, b)
     if not tris:
         return
     cascade = a.cascade and b.cascade
-    if any(blocked_by([(v[0], v[1]) for v in t]) for t in tris) or (not cascade and _covers_water(a, b, water_at)):
+    plan = [[(v[0], v[1]) for v in t] for t in tris]
+    if any(blocked_by(t) or (not cascade and wet_by(t)) for t in plan):
         out.blocked_m += math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
     else:
         (out.cascade if cascade else out.bank).extend(tris)
 
-def _covers_water(a: _Node, b: _Node, water_at: Callable[[float, float], float | None]) -> bool:
-    """Whether the strip between two cross-sections passes over water, judged along its middle line."""
-    top = ((a.top[0] + b.top[0]) / 2, (a.top[1] + b.top[1]) / 2)
-    foot = ((a.foot[0] + b.foot[0]) / 2, (a.foot[1] + b.foot[1]) / 2)
-    along = (k / COVER_PROBES for k in range(1, COVER_PROBES + 1))
-    return any(water_at(top[0] + (foot[0] - top[0]) * t, top[1] + (foot[1] - top[1]) * t) is not None for t in along)
 
 
 def _same_point(a: Pt, b: Pt) -> bool:

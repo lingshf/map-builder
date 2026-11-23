@@ -24,7 +24,7 @@ from .dem import ElevationGrid
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
-from .overlap import point_segment_distance, triangle_touches
+from .overlap import point_segment_distance, triangle_overlaps_region, triangle_touches
 from .shore import shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
@@ -778,8 +778,14 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
 
+    wet_pieces = [(_ring_box(o), o, hs) for body in model.active() for o, hs in body.pieces]
+
+    def wet_by(tri: Sequence[Pt]) -> bool:
+        box = _ring_box(tri)
+        return any(_boxes_meet(box, pb) and triangle_overlaps_region(tri, o, hs) for pb, o, hs in wet_pieces)
+
     for b in model.active():
-        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_level)  # type: ignore[union-attr]
+        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_level, wet_by)  # type: ignore[union-attr]
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:
@@ -790,6 +796,15 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
             continue
         b.bank, b.cascade = ramps.bank, ramps.cascade
         b.info["shore_ramp_triangles"] = len(triangles)
+
+
+def _ring_box(ring: Sequence[Pt]) -> tuple[float, float, float, float]:
+    xs, ys = [p[0] for p in ring], [p[1] for p in ring]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _boxes_meet(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
 def _make_level(b: Body, grid: ElevationGrid, extent: Rect, all_bodies: Sequence[Body], masks: _Masks,
