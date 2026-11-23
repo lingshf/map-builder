@@ -115,6 +115,7 @@ def water_rays(head: Package, top: float) -> list[tuple[float, float, float]]:
 DIST_TOL_M = 1e-3     # spec section 7(a): hit distances are compared to 1 mm
 BLEND_PAD_M = 65.0    # water bbox padding inside which the terrain bed may have moved (carve + blend, 2 cells)
 SHARED_EDGE_TOL_M = 1e-4   # vertices closer than this are the same vertex; a ray this close is on the edge
+FOOTPRINT_RADIUS_M = 1.0   # triangles this close to the pinned ray must keep their plan position
 PIN_XY_TOL_M = 5e-4        # the pinned ray position is recorded to 3 decimals
 
 Hit = tuple[float, str, str]   # (distance, object name, class)
@@ -348,19 +349,50 @@ def _same_plan_position(edge: list[Vertex], other: list[Vertex]) -> bool:
                for p, q in zip(edge, other))
 
 
+def _inside_plan(px: float, py: float, tri: Any) -> bool:
+    signs = [(b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]) for a, b in zip(tri, (*tri[1:], tri[0]))]
+    return all(s >= 0 for s in signs) or all(s <= 0 for s in signs)
+
+
+def _near_plan(tri: Any, xy: tuple[float, float]) -> bool:
+    return _inside_plan(*xy, tri) or any(
+        _distance_to_segment(*xy, a, b) <= FOOTPRINT_RADIUS_M for a, b in zip(tri, (*tri[1:], tri[0])))
+
+
+def local_footprint(col: Collision, road: str) -> list[Any] | None:
+    entry = next((e for e in col.objects if e["name"] == road), None)
+    return None if entry is None else list(col.object_triangles(entry))
+
+
+def footprint_unchanged(base_tris: list[Any], head_tris: list[Any], xy: tuple[float, float]) -> bool:
+    """Every vertex of the triangles around ``xy`` (the hit triangle and its neighbours) has the same plan position
+    on BASE and HEAD within 1e-4 m, so the ribbon keeps its side of the shared edge and only Z may differ."""
+    if len(base_tris) != len(head_tris):
+        return False
+    return all(abs(b[0] - h[0]) <= SHARED_EDGE_TOL_M and abs(b[1] - h[1]) <= SHARED_EDGE_TOL_M
+               for b_tri, h_tri in zip(base_tris, head_tris) if _near_plan(b_tri, xy)
+               for b, h in zip(b_tri, h_tri))
+
+
+def _lowered_equally(base_edges: list[list[Vertex]], head_edges: list[list[Vertex]]) -> bool:
+    """Each shared-edge vertex dropped, and by the same amount on every ribbon (the amount may differ per vertex)."""
+    per_ribbon = [[h[2] - b[2] for b, h in zip(be, he)] for be, he in zip(base_edges, head_edges)]
+    return all(abs(a - b) <= DIST_TOL_M and a < -DIST_TOL_M for a, b in zip(*per_ribbon))
+
+
 def lowered_together_on_shared_edge(base: Any, head: Any, roads: list[str], xy: tuple[float, float]) -> bool:
-    """Both ribbons have the same boundary vertices (plan, within 1e-4 m) on BASE and on HEAD at ``xy``, and every
-    ribbon's vertices moved down by the same amount as the other ribbon's matching vertices (within 1 mm)."""
+    """The ribbons share a boundary edge at ``xy`` on BASE and HEAD, each ribbon's local footprint is unchanged in
+    plan position per vertex and per road id, and the shared-edge vertices were lowered by the same delta on both."""
+    footprints = [(local_footprint(base.col, r), local_footprint(head.col, r)) for r in roads]
+    if any(b is None or h is None or not footprint_unchanged(b, h, xy) for b, h in footprints):
+        return False
     base_edges = [ribbon_edge_at(base.col, r, xy) for r in roads]
     head_edges = [ribbon_edge_at(head.col, r, xy) for r in roads]
     if None in base_edges or None in head_edges:
         return False
     if not all(_same_plan_position(base_edges[0], e) for e in [*base_edges, *head_edges]):
         return False
-    drops_per_ribbon = [[h[2] - b[2] for b, h in zip(be, he)] for be, he in zip(base_edges, head_edges)]
-    first = drops_per_ribbon[0]
-    same_delta = all(abs(d - f) <= DIST_TOL_M for drops in drops_per_ribbon for d, f in zip(drops, first))
-    return same_delta and max(first) < -DIST_TOL_M
+    return _lowered_equally(base_edges, head_edges)
 
 
 def pinned_shared_edge_swap(base: Any, head: Any, index: int, xy: tuple[float, float],
