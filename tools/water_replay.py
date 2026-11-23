@@ -119,6 +119,7 @@ FOOTPRINT_RADIUS_M = 1.0   # triangles this close to the pinned ray must keep th
 Z_RISE_TOL_M = 1e-6        # a local vertex may not rise by more than float noise
 PIN_XY_TOL_M = 0.05        # a ray matches a pin within 5 cm of the pinned XY
 
+BANK_OBJECT_PREFIX = "bank:"   # shore ramps (map_builder.core.shore) are terrain objects named bank:<body id>
 Hit = tuple[float, str, str]   # (distance, object name, class)
 
 
@@ -261,6 +262,11 @@ def _moved_down(name: str, cls_: str, t: float, h_hits: list[Hit]) -> bool:
 
 
 
+def _bank_ramp_raised(b: Hit | None, h: Hit, ctx: Context, xy: tuple[float, float]) -> bool:
+    """HEAD hits a shore ramp (``bank:<body>`` terrain) above the terrain BASE hit first, close to water."""
+    return (b is not None and b[2] == h[2] == "terrain" and h[1].startswith(BANK_OBJECT_PREFIX)
+            and h[0] < b[0] - DIST_TOL_M and ctx.near_any_water(*xy))
+
 def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
     """None when the nearest hits are equivalent, else the change-set label, or ``unlisted``. ``b_hits``/``h_hits``
     are every hit of the ray, nearest first. A difference is accepted only when each BASE object nearer than the
@@ -290,6 +296,8 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
         winner_was_on_base_ray = any(n == h[1] and c == "road" and h[0] > t + DIST_TOL_M for t, n, c in b_hits)
         lowered = winner_was_on_base_ray and h[0] >= b[0] - DIST_TOL_M
         return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
+    if _bank_ramp_raised(b, h, ctx, xy):
+        return "bank ramp"
     label = None
     for t, name, cls_ in nearer:
         if cls_ == "road" and h[2] == "water" and _moved_down(name, cls_, t, h_hits):

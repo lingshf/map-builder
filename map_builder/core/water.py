@@ -24,6 +24,7 @@ from .dem import ElevationGrid
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
+from .shore import shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
 Pt = tuple[float, float]
@@ -45,6 +46,7 @@ VIOLATION_TOL_M = 1e-9
 AREA_EPS = 1e-9
 WATER_COLOR = (0.05, 0.14, 0.24)
 MATERIAL = "MB Water"
+BANK_MATERIAL = "MB Terrain"
 SAMPLE_MASK_BUFFER_M = 15.0   # dsm.BUILDING_BUFFER_M / BRIDGE_BUFFER_M: the DSM mask the samples avoid
 
 
@@ -410,6 +412,8 @@ class Body:
     shore: list[tuple[Pt, Pt]] = field(default_factory=list)   # clipped-ring edges that are polygon edges
     carve: dict[int, float] = field(default_factory=dict)
     blend: dict[int, float] = field(default_factory=dict)
+    bank: list[Tri] = field(default_factory=list)           # terrain ramp from the shore edge down to the bank
+    cascade: list[Tri] = field(default_factory=list)        # water ramp down to an abutting lower body
     info: dict[str, object] = field(default_factory=dict)
     mesh_counts: tuple[int, int] = (0, 0)
 
@@ -555,16 +559,23 @@ class WaterModel:
 
     def mesh(self, body: Body) -> MeshData:
         """The body's ``MB Water`` mesh (local z = absolute - z_offset; welded vertices; normals +Z)."""
-        m = MeshData(f"water:{body.id}")
+        return self._welded(f"water:{body.id}", (*body.tris, *body.cascade), MATERIAL, WATER_COLOR)
+
+    def bank_mesh(self, body: Body, color: tuple[float, float, float]) -> MeshData:
+        """The terrain ramps from the body's shore down to the bank (``MB Terrain``)."""
+        return self._welded(f"bank:{body.id}", body.bank, BANK_MATERIAL, color)
+
+    def _welded(self, name: str, tris: Iterable[Tri], material: str, color: tuple[float, float, float]) -> MeshData:
+        m = MeshData(name)
         idx: dict[tuple[float, float, float], int] = {}  # welded to 1 um: platform libm differences must not change the vertex set
-        for t in body.tris:
+        for t in tris:
             ids = []
             for x, y, z in t:
                 key = (round(x, 6), round(y, 6), round(z, 6))
                 if key not in idx:
                     idx[key] = m.add_vertex(x, y, z - self.z_offset)
                 ids.append(idx[key])
-            m.add_face(tuple(ids), MATERIAL, WATER_COLOR)
+            m.add_face(tuple(ids), material, color)
         return m
 
 
@@ -744,8 +755,35 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
     cut = _CarveContext(model, blend_masks, carve_depth)
     cut.prepare()
     cut.settle(refund)
+    _attach_ramps(model, blend_masks, charge)
     model._build_index()
     return model
+
+
+def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, int], None] | None) -> None:
+    """Give every built body its shore ramps on the final terrain; ramps over the budget are left out (noted)."""
+    def water_level(x: float, y: float) -> float | None:
+        """The sheet of whichever body covers the point (a ramp must not run over its own pinched water either)."""
+        return next((o.level.at(x, y) for o in model.active() if _inside_pieces(o, x, y)), None)  # type: ignore[union-attr]
+
+    def ground(x: float, y: float) -> float:
+        return _ground(model.carved, x, y)
+
+    def covered(x: float, y: float) -> bool:
+        return masks.hit_footprint(x, y, 0.0) or masks.hit_line(x, y, 0.0)
+
+    for b in model.active():
+        ramps = shore_ramps(b.shore, b.level.at, ground, covered, water_level)  # type: ignore[union-attr]
+        b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
+        triangles = ramps.bank + ramps.cascade
+        try:
+            if charge is not None and triangles:
+                charge(f"shore-ramps:{b.id}", len({v for t in triangles for v in t}), len(triangles))
+        except LimitError as e:
+            b.notes.append(f"shore ramps left out: {e}")
+            continue
+        b.bank, b.cascade = ramps.bank, ramps.cascade
+        b.info["shore_ramp_triangles"] = len(triangles)
 
 
 def _make_level(b: Body, grid: ElevationGrid, extent: Rect, all_bodies: Sequence[Body], masks: _Masks,

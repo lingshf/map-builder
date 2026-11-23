@@ -64,6 +64,15 @@ class RayLabelTest(unittest.TestCase):
         self.assertEqual(wr.ray_label([T0], [T1], (400, 400), c), "unlisted")
         self.assertEqual(wr.ray_label([T1], [T0], (120, 50), c), "unlisted")     # terrain rose
 
+    def test_a_shore_ramp_above_the_base_terrain_near_water_is_a_bank_ramp(self) -> None:
+        c = ctx()
+        ramp = (9.5, "bank:osm:way/1", "terrain")
+        self.assertEqual(wr.ray_label([T0], [ramp, T0], (120, 50), c), "bank ramp")
+        self.assertEqual(wr.ray_label([T0], [ramp, T0], (400, 400), c), "unlisted")                  # dry
+        self.assertEqual(wr.ray_label([T0], [(10.5, "bank:osm:way/1", "terrain")], (120, 50), c), "unlisted")  # lower
+        self.assertEqual(wr.ray_label([T0], [(9.5, "ramp:osm:way/1", "terrain")], (120, 50), c), "unlisted")  # not a bank
+        self.assertEqual(wr.ray_label([(10.0, "bld", "building")], [ramp], (120, 50), c), "unlisted")  # over a structure
+
     def test_terrain_replaced_by_bridge_needs_the_terrain_to_go_down(self) -> None:
         c = ctx()
         deck = (12.0, DECK, "bridge")
