@@ -125,12 +125,16 @@ class RoadLoweredTest(unittest.TestCase):
 
 
 class SharedEdgeRoadsStub:
-    """Collision stub: ribbon A is a triangle whose edge x=0, y in [0, 1] is shared with ribbon B."""
+    """Collision stub: ribbon A is a triangle whose edge x=0, y in [0, 1] is shared with ribbon B; A has a second
+    local triangle, away from the shared edge, whose Z is 5 + ``local_rise``."""
 
-    def __init__(self, drop_a: float, drop_b: float, gap: float = 0.0, swap_sides: bool = False) -> None:
+    def __init__(self, drop_a: float, drop_b: float, gap: float = 0.0, swap_sides: bool = False,
+                 local_rise: float = 0.0) -> None:
         self.objects = [{"name": "road_a"}, {"name": "road_b"}]
         far_a, far_b = (1.0, -1.0) if swap_sides else (-1.0, 1.0)
-        self.tris = {"road_a": [((far_a, 0.0, 5.0 - drop_a), (0.0, 0.0, 5.0 - drop_a), (0.0, 1.0, 5.0 - drop_a))],
+        z = 5.0 + local_rise
+        self.tris = {"road_a": [((far_a, 0.0, 5.0 - drop_a), (0.0, 0.0, 5.0 - drop_a), (0.0, 1.0, 5.0 - drop_a)),
+                                ((-1.0, 0.0, z), (-1.0, 1.0, z), (-0.5, 1.0, z))],
                      "road_b": [((gap, 0.0, 5.0 - drop_b), (far_b, 0.0, 5.0 - drop_b), (gap, 1.0, 5.0 - drop_b))]}
 
     def object_triangles(self, entry: dict) -> list:
@@ -166,6 +170,9 @@ class PinnedSharedEdgeTest(unittest.TestCase):
 
     def test_ribbons_swapping_sides_of_the_shared_edge_are_rejected(self) -> None:
         self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1, swap_sides=True)))
+
+    def test_a_local_triangle_rising_while_the_shared_edge_drops_is_rejected(self) -> None:
+        self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1, local_rise=0.2)))
 
     def test_a_lateral_move_leaving_a_1_5_mm_gap_is_rejected(self) -> None:
         self.assertFalse(self.swap(SharedEdgeRoadsStub(0.1, 0.1, gap=0.0015)))

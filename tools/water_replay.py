@@ -116,6 +116,7 @@ DIST_TOL_M = 1e-3     # spec section 7(a): hit distances are compared to 1 mm
 BLEND_PAD_M = 65.0    # water bbox padding inside which the terrain bed may have moved (carve + blend, 2 cells)
 SHARED_EDGE_TOL_M = 1e-4   # vertices closer than this are the same vertex; a ray this close is on the edge
 FOOTPRINT_RADIUS_M = 1.0   # triangles this close to the pinned ray must keep their plan position
+Z_RISE_TOL_M = 1e-6        # a local vertex may not rise by more than float noise
 PIN_XY_TOL_M = 5e-4        # the pinned ray position is recorded to 3 decimals
 
 Hit = tuple[float, str, str]   # (distance, object name, class)
@@ -364,13 +365,14 @@ def local_footprint(col: Collision, road: str) -> list[Any] | None:
     return None if entry is None else list(col.object_triangles(entry))
 
 
-def footprint_unchanged(base_tris: list[Any], head_tris: list[Any], xy: tuple[float, float]) -> bool:
-    """Every vertex of the triangles around ``xy`` (the hit triangle and its neighbours) has the same plan position
-    on BASE and HEAD within 1e-4 m, so the ribbon keeps its side of the shared edge and only Z may differ."""
+def footprint_only_lowered(base_tris: list[Any], head_tris: list[Any], xy: tuple[float, float]) -> bool:
+    """Every vertex of the triangles around ``xy`` (near on BASE or on HEAD) has the same plan position on both
+    within 1e-4 m, so the ribbon keeps its side of the shared edge, and none of them rose."""
     if len(base_tris) != len(head_tris):
         return False
     return all(abs(b[0] - h[0]) <= SHARED_EDGE_TOL_M and abs(b[1] - h[1]) <= SHARED_EDGE_TOL_M
-               for b_tri, h_tri in zip(base_tris, head_tris) if _near_plan(b_tri, xy)
+                and h[2] <= b[2] + Z_RISE_TOL_M
+               for b_tri, h_tri in zip(base_tris, head_tris) if _near_plan(b_tri, xy) or _near_plan(h_tri, xy)
                for b, h in zip(b_tri, h_tri))
 
 
@@ -381,10 +383,11 @@ def _lowered_equally(base_edges: list[list[Vertex]], head_edges: list[list[Verte
 
 
 def lowered_together_on_shared_edge(base: Any, head: Any, roads: list[str], xy: tuple[float, float]) -> bool:
-    """The ribbons share a boundary edge at ``xy`` on BASE and HEAD, each ribbon's local footprint is unchanged in
-    plan position per vertex and per road id, and the shared-edge vertices were lowered by the same delta on both."""
+    """The ribbons share a boundary edge at ``xy`` on BASE and HEAD, each ribbon's local footprint kept its plan
+    position per vertex and per road id without any vertex rising, and the shared-edge vertices were lowered by
+    the same delta on both."""
     footprints = [(local_footprint(base.col, r), local_footprint(head.col, r)) for r in roads]
-    if any(b is None or h is None or not footprint_unchanged(b, h, xy) for b, h in footprints):
+    if any(b is None or h is None or not footprint_only_lowered(b, h, xy) for b, h in footprints):
         return False
     base_edges = [ribbon_edge_at(base.col, r, xy) for r in roads]
     head_edges = [ribbon_edge_at(head.col, r, xy) for r in roads]
