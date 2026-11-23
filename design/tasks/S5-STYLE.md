@@ -155,7 +155,7 @@ evidence quickly and is **not** a hardware budget.
 * **Visual import:** the same glTF feature set (`COLOR_0`, base colour, metallic-roughness, no extension), which
   glTFast imports as today. With no textures it is cheaper. If normals are dropped, that is standard glTF; the C#
   reader and the glTF-Validator proxy (D66) confirm it.
-* **S5-DECOR:** decoration is visual-only. Consumers can identify it by its marking, it has no collision, and the
+* **S5-DECOR:** decoration is visual-only. Consumers find it as a separate submesh with material `MB Decor` and can hide it (proven with glTFast in step 1b); it has no collision, and the
   simulator's `.mbcol` queries never see it.
 * **Format:** schema stays 2.1.0 unless S5-DECOR's feasibility step fails (see that task). `package_id` changes
   for every stylized package.
@@ -276,49 +276,87 @@ Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing w
 
 ### S5-DECOR: visual-only decoration ≤ 0.3 m (last; contingent)
 
-The user allowed it (U2, D142). It runs last, and nothing else waits on it.
+The user allowed it (U2, D142). It runs last and nothing else waits on it. If any step below fails, DECOR
+**stops and escalates** to the coordinator, with Design proposing the minimal format change. BASE, PALETTE, WATER
+and REVIEW are never blocked by it.
 
-**Step 1, feasibility (no merge).** Today a triangle node without a same-name collision object is rejected by the
-validator (`core/package.py:1747`) and by the frozen readers. A separate decoration node is therefore not possible
-in 2.x, and D110 forbids new package members. The candidate within 2.1.0 is:
+**Representation (the candidate within 2.1.0).** Decoration is one **additional primitive** in an existing
+terrain node's mesh:
 
-* decoration is an **additional primitive inside an existing terrain node's mesh**;
-* the primitive uses material `MB Decor` and carries primitive `extras.mb_decor = true`;
-* its triangles always lie inside the host node's collision AABB, within the existing tolerance.
+* its own material, `MB Decor`, used by nothing else;
+* primitive `extras.mb_decor = true`;
+* every triangle inside the host node's collision AABB, within the existing tolerance.
 
-The developer builds a **genuine exported package**: the real exporter path, not a hand-made GLB. The fixture must
-show all of these:
+There are no new nodes or package members (D110), and the node name binding to `.mbcol` is unchanged.
+
+**Marking that consumers can act on.** glTF importers, glTFast included, do not reliably expose `extras`, so the
+**material name `MB Decor`** is the normative marker for consumers. `extras.mb_decor` serves readers that parse
+the glTF JSON. Both are documented in `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md`.
+
+**Step 1a, format compatibility (no merge).** The developer builds a **genuine exported package** with
+decoration: the real exporter path, not a hand-made GLB. The fixture must show all of these:
 
 * the current Python validator and C# reader report no new error or warning;
 * the frozen v0.3.0 Python and C# readers accept it (the D101 positive fixture);
-* the current exporter's 1:1 GLB-to-`.mbcol` name binding still holds;
+* the exporter's 1:1 GLB-to-`.mbcol` name binding still holds;
 * the orientation probes pass;
 * glTF-Validator is clean.
 
-If any check fails, stop. Design then writes the minimal minor-format change (for example 2.2.0, declaring decor
-primitives) and flags it to the coordinator. BASE, PALETTE, WATER and REVIEW are not blocked.
+**Step 1b, the consumer can hide it (no merge).** This needs a minimal Unity project with **glTFast at the
+simulator's pinned version** (URP). It lives outside the repository or under `tools/` as a script, never in the
+simulator repo. The project imports the step-1a fixture, and its log, attached to the PR, shows:
 
-**Step 2, implementation (only after step 1 passes):**
+* the terrain node imports as one mesh with a **separate submesh** whose material name is `MB Decor`;
+* hiding that submesh alone leaves the terrain submesh and its triangle count unchanged. Hiding means removing
+  the submesh or assigning a renderer material that draws nothing.
 
-* Content: small grass tufts, flowers and pebbles, placed deterministically (seeded by area id) on grass and
-  forest landcover only.
-* Height: each instance ≤ 0.3 m above the terrain under it. A test enforces this on the emitted triangles.
-* Exclusions, each enforced by a test: never on road ribbons, water bodies, `bank:` ramps, bridge decks or building
-  footprints; never inside a passage-probe capsule's swept volume dilated by 1 m.
-* The exporter exempts only primitives marked `mb_decor`, and only from the 1:1 triangle correspondence. The node
-  name binding and every other check stay.
-* Documented in `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md`: consumers may hide decoration by its
-  marking, and it is never collidable.
-* **ACs:**
-  1. G0 holds: decoration never touches `.mbcol` or `.mbhf`.
-  2. Classic identity: no decoration in classic mode.
-  3. The DECOR budget rows.
-  4. The step-1 fixture is persisted as a CI test.
-  5. Contact sheet.
-* **Conflict domain:** `core/decor.py` (new); `core/generate.py` (decor call only); `core/glb.py` (extra
-  primitive); `core/package.py` (exporter exemption); `docs/PACKAGE_FORMAT.md`; `docs/UNITY_CORE_HANDOFF.md`;
-  `tests/test_decor.py`; the format-policy fixture tests.
-* **Dependencies:** S5-STYLE-REVIEW GO.
+No Unity runs in CI (D66), so this is recorded PR evidence. If the pinned glTFast cannot be run, or does not
+expose a separate submesh and material, DECOR stops and escalates.
+
+**Flight corridors (designated, decoration-free).** The corridor set is the union of these XY regions, each
+over the full height:
+
+| Corridor | Region |
+|---|---|
+| Roads | every road ribbon's collision footprint, dilated 1.0 m |
+| Water and banks | every built water body piece (outer minus holes) and every `bank:` ramp, dilated 1.0 m |
+| Bridges and tunnels | the XY footprint of every `bridge`, `tunnel` and `structure` object (deck, piers, portals and approaches as emitted), dilated 2.0 m |
+| Buildings | every building footprint, dilated 0.5 m |
+| Passage probes | every passage-probe capsule (`manifest.passage_probes`): the swept segment dilated by capsule radius + 1.0 m clearance |
+
+**Step 2, implementation (only after steps 1a and 1b pass).**
+
+* Content: grass tufts, flowers and pebbles, placed deterministically (seeded by area id) on grass and forest
+  landcover only.
+* **Exclusion is tested on the emitted triangles,** using the exact area test in `core/overlap.py`: no
+  decoration triangle overlaps or touches the corridor set. Boundary contact counts as overlap here, which is
+  conservative.
+* **Height cap:** every decoration vertex is ≤ 0.3 m above the terrain surface directly below it, and ≥ 0 m.
+* The exporter exempts only `MB Decor` primitives, and only from the 1:1 triangle correspondence; every other
+  check stays.
+
+**ACs:**
+
+1. G0 holds: `.mbcol` and `.mbhf` are byte-identical with and without decoration.
+2. Classic identity: no decoration in classic mode.
+3. The DECOR budget rows (draw submissions ≤ baseline + 2 %, triangles and GLB ≤ baseline + 10 %).
+4. The steps 1a and 1b fixture and its evidence: 1a persisted as a CI test, 1b attached to the PR.
+5. On the sample, Munich and Pittsburgh: 0 decoration triangles in the corridor set, and a maximum decoration
+   height ≤ 0.3 m, both reported.
+6. Contact sheet.
+
+**Tests (≤ 5 s each), all on synthetic inputs:**
+
+* a decoration triangle partly inside a dilated road, inside a probe capsule plus clearance, or on a bridge
+  envelope is rejected;
+* a 0.31 m decoration instance is rejected, and a 0.30 m one is accepted;
+* the exporter exempts `MB Decor` primitives only; an unmarked extra primitive still fails the binding.
+
+**Conflict domain:** `core/decor.py` (new); `core/generate.py` (decor call only); `core/glb.py` (extra
+primitive); `core/package.py` (exporter exemption); `docs/PACKAGE_FORMAT.md`; `docs/UNITY_CORE_HANDOFF.md`;
+`tests/test_decor.py`; the format-policy fixture tests.
+
+**Dependencies:** S5-STYLE-REVIEW GO.
 
 ### Deferred (not scheduled)
 
@@ -334,7 +372,7 @@ primitives) and flags it to the coordinator. BASE, PALETTE, WATER and REVIEW are
 | # | Decision | Who |
 |---|---|---|
 | D141 | U1: stylized is the default; classic stays available and is whole-archive byte-identical to pre-S5 main. | U |
-| D142 | U2: visual-only decoration ≤ 0.3 m is allowed, as the last task S5-DECOR, within D101/D110, contingent on the step-1 fixture; otherwise a minimal minor change is specified and flagged, without blocking other tasks. | U (overrides the Design recommendation) |
+| D142 | U2: visual-only decoration ≤ 0.3 m is allowed, as the last task S5-DECOR, within D101/D110, contingent on the step-1a format fixture and the step-1b glTFast hide proof; it is kept out of the designated flight corridors (tested on its triangles). If any step fails, it stops and escalates, without blocking other tasks. | U (overrides the Design recommendation) |
 | D143 | U3: the shore band is colour only on existing triangles; no water re-triangulation; `.mbcol` and `.mbhf` byte-identical. | C (delegated by the user) |
 | D144 | U4: lit materials first; `KHR_materials_unlit` may be revisited after S5-STYLE-REVIEW. | C |
 | D145 | Trees are appearance-only in S5; no S5 task changes collision geometry. A tree shape change (S5-F1) or any other geometry change needs explicit user approval. | C (user delegated open points; user may change) |
