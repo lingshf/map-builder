@@ -12,7 +12,8 @@
     hit sets (``--probe-work``). Python and C# must agree on every query. Every BASE/HEAD difference is classified
     individually and printed (``--show N``, all in ``--diffs FILE``); each label must match the object, class and
     direction actually hit: new water hit (a water object new on HEAD over a terrain or missed ray), bed moved
-    (terrain on both sides within the padded water box, or carved below a deck), deck raised (same bridge, reported
+    (terrain on both sides within the padded water box, or carved below a deck), road lowered (the same road,
+    near water, hit farther down because it is draped on the carved bed), deck raised (same bridge, reported
     in water_decks_raised, lowered by at most the reported rise). Anything else is ``unlisted`` and fails.
 (b) Regenerated-passage replay. The sets are compared exactly: every dropped, new or newly blocked id must be
     listed, and every listed id must really be one. Each listed reason must be non-empty and quote the generator's
@@ -124,6 +125,7 @@ class Context:
                  bridges: tuple[dict[str, Any], dict[str, Any]] | None = None) -> None:
         self.new_water = {e["name"]: e["aabb"] for e in head.col.objects
                           if e["class"] == "water" and e["name"] not in base_names}
+        self.water_boxes = [e["aabb"] for e in head.col.objects if e["class"] == "water"]
         self.raised = dict(head.raised)
         self.present = set(head.names)
         self.base_bridge, self.head_bridge = bridges if bridges is not None else ({}, {})
@@ -158,8 +160,16 @@ class Context:
         return False
 
     def near_water(self, x: float, y: float) -> bool:
-        return any(b[0] - BLEND_PAD_M <= x <= b[3] + BLEND_PAD_M and b[1] - BLEND_PAD_M <= y <= b[4] + BLEND_PAD_M
-                   for b in self.new_water.values())
+        return _in_padded_box(self.new_water.values(), x, y)
+
+    def near_any_water(self, x: float, y: float) -> bool:
+        """Within the carve + blend padding of any water body of HEAD (new or already on BASE)."""
+        return _in_padded_box(self.water_boxes, x, y)
+
+
+def _in_padded_box(boxes: Any, x: float, y: float) -> bool:
+    return any(b[0] - BLEND_PAD_M <= x <= b[3] + BLEND_PAD_M and b[1] - BLEND_PAD_M <= y <= b[4] + BLEND_PAD_M
+               for b in boxes)
 
 
 def bridge_geometry(col: Collision) -> dict[str, Any]:
@@ -240,9 +250,10 @@ def ray_disagreement(py_h: Hit | None, cs: Hit | None, col: Collision) -> str:
     return ""
 
 
-def _terrain_moved_down(name: str, t: float, h_hits: list[Hit]) -> bool:
-    """HEAD hits the same terrain object farther down on this ray (the carve lowered it)."""
-    return any(hn == name and hc == "terrain" and ht > t + DIST_TOL_M for ht, hn, hc in h_hits)
+def _moved_down(name: str, cls_: str, t: float, h_hits: list[Hit]) -> bool:
+    """HEAD hits the same object farther down on this ray (the carve lowered terrain, or a road draped on it)."""
+    return any(hn == name and hc == cls_ and ht > t + DIST_TOL_M for ht, hn, hc in h_hits)
+
 
 
 def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
@@ -268,9 +279,14 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
         if raise_m > 0 and ctx.near_water(*xy) and 0 < b[0] - h[0] <= raise_m + DIST_TOL_M:
             return "deck raised"
         return "unlisted"
+    if b is not None and b[2] == h[2] == "road":      # overlapping roads may swap names, as in ray_disagreement
+        lowered = 0 < h[0] - b[0]
+        return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
     label = None
     for t, name, cls_ in nearer:
-        if cls_ == "terrain" and ctx.near_water(*xy) and _terrain_moved_down(name, t, h_hits):
+        if cls_ == "road" and h[2] == "water" and _moved_down(name, cls_, t, h_hits):
+            label = "road lowered"    # a road that hovered over water now follows the carved bed below it
+        elif cls_ == "terrain" and ctx.near_water(*xy) and _moved_down(name, cls_, t, h_hits):
             label = "bed moved"
         else:
             return "unlisted"

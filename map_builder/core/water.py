@@ -7,7 +7,8 @@ mesh, clipped to the area, at a level taken from the pre-carve DEM along its sho
 river of at least 300 m with one consistent ``waterway`` centreline gets an isotonic (non-increasing downstream)
 profile instead of one level. The terrain mesh is then carved ``CARVE_DEPTH_M`` below the water wherever it overlaps
 a body and blended into the banks, so no terrain triangle is above a water triangle (checked exactly, bounded
-remedy, then fallback to today's painted cells). Roads, buildings, bridges and probes keep using the pre-carve grid.
+remedy, then fallback to today's painted cells). Roads follow the carved terrain mesh, so none hovers over a bed;
+buildings, bridges and probes keep using the pre-carve grid.
 
 Pure Python, no I/O. ``generate.py`` calls :func:`build_water` and passes the callbacks that would otherwise make
 this module import it.
@@ -1156,8 +1157,8 @@ class _CarveContext:
 def at_grade_roads(model: WaterModel, roads: Iterable[tuple[str, Sequence[Pt]]], lift: float,
                    step: float = 2.0) -> dict[str, list[str]]:
     """Per built body, ``at-grade road over water: <id>, <n> m inside, <m> m below L`` for every at-grade road
-    (not a bridge or tunnel) whose centreline runs inside it. The road stays draped on the pre-carve ground at
-    ``lift`` (D115); this only reports it, as an OSM data issue (ford, untagged causeway)."""
+    (not a bridge or tunnel) whose centreline runs inside it. The road follows the carved bed at ``lift``; this
+    only reports it, as an OSM data issue (ford, untagged causeway)."""
     out: dict[str, list[str]] = {}
     for b in model.active():
         if b.level is None:
