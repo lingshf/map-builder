@@ -47,6 +47,7 @@ from col_degen_replay import DOWN, build_probes, csharp, names  # noqa: E402
 from map_builder.core.collision import Collision, read_collision  # noqa: E402
 from map_builder.core.bridges import capsule_polygon  # noqa: E402
 from map_builder.core.query import capsule_hits, ray_cast  # noqa: E402
+from map_builder.core.shore import MAX_WIDTH_M as RAMP_REACH_M  # noqa: E402
 from map_builder.core.water import AREA_EPS, _area2, _clip_poly_tri  # noqa: E402
 
 
@@ -120,6 +121,7 @@ Z_RISE_TOL_M = 1e-6        # a local vertex may not rise by more than float nois
 PIN_XY_TOL_M = 0.05        # a ray matches a pin within 5 cm of the pinned XY
 
 BANK_OBJECT_PREFIX = "bank:"   # shore ramps (map_builder.core.shore) are terrain objects named bank:<body id>
+WATER_OBJECT_PREFIX = "water:"   # ... and a body's sheet is water:<body id>
 Hit = tuple[float, str, str]   # (distance, object name, class)
 
 
@@ -132,6 +134,9 @@ class Context:
         self.new_water = {e["name"]: e["aabb"] for e in head.col.objects
                           if e["class"] == "water" and e["name"] not in base_names}
         self.water_boxes = [e["aabb"] for e in head.col.objects if e["class"] == "water"]
+        self.water_box_by_name = {e["name"]: e["aabb"] for e in head.col.objects if e["class"] == "water"}
+        self.bank_box_by_name = {e["name"]: e["aabb"] for e in head.col.objects
+                                 if e["class"] == "terrain" and e["name"].startswith(BANK_OBJECT_PREFIX)}
         self.raised = dict(head.raised)
         self.present = set(head.names)
         self.base_bridge, self.head_bridge = bridges if bridges is not None else ({}, {})
@@ -171,6 +176,22 @@ class Context:
     def near_any_water(self, x: float, y: float) -> bool:
         """Within the carve + blend padding of any water body of HEAD (new or already on BASE)."""
         return _in_padded_box(self.water_boxes, x, y)
+
+    def is_ramp_of_a_built_body(self, bank_name: str, xy: tuple[float, float]) -> bool:
+        """``bank_name`` is a ramp object of HEAD whose body (``water:<same id>``) is built, the ramp lies within
+        ramp reach of that body's plan box, rises no higher than the body's sheet, and the ray is over it."""
+        bank = self.bank_box_by_name.get(bank_name)
+        water = self.water_box_by_name.get(WATER_OBJECT_PREFIX + bank_name[len(BANK_OBJECT_PREFIX):])
+        if bank is None or water is None:
+            return False
+        near_shore = (bank[0] >= water[0] - RAMP_REACH_M and bank[1] >= water[1] - RAMP_REACH_M
+                      and bank[3] <= water[3] + RAMP_REACH_M and bank[4] <= water[4] + RAMP_REACH_M)
+        under_sheet = bank[5] <= water[5] + DIST_TOL_M
+        return near_shore and under_sheet and _in_box(bank, *xy)
+
+
+def _in_box(box: Any, x: float, y: float) -> bool:
+    return box[0] - DIST_TOL_M <= x <= box[3] + DIST_TOL_M and box[1] - DIST_TOL_M <= y <= box[4] + DIST_TOL_M
 
 
 def _in_padded_box(boxes: Any, x: float, y: float) -> bool:
@@ -262,10 +283,15 @@ def _moved_down(name: str, cls_: str, t: float, h_hits: list[Hit]) -> bool:
 
 
 
-def _bank_ramp_raised(b: Hit | None, h: Hit, ctx: Context, xy: tuple[float, float]) -> bool:
-    """HEAD hits a shore ramp (``bank:<body>`` terrain) above the terrain BASE hit first, close to water."""
-    return (b is not None and b[2] == h[2] == "terrain" and h[1].startswith(BANK_OBJECT_PREFIX)
-            and h[0] < b[0] - DIST_TOL_M and ctx.near_any_water(*xy))
+def _bank_ramp_raised(b: Hit | None, h: Hit, h_hits: list[Hit], ctx: Context, xy: tuple[float, float]) -> bool:
+    """HEAD hits a ramp of a built body above the terrain BASE hit first, and the terrain below it is kept (the
+    ramp is added on top, so the HEAD ray still reaches terrain at or below the base surface)."""
+    if b is None or not (b[2] == h[2] == "terrain" and h[0] < b[0] - DIST_TOL_M):
+        return False
+    terrain_kept = any(c == "terrain" and not n.startswith(BANK_OBJECT_PREFIX) and t >= b[0] - DIST_TOL_M
+                       for t, n, c in h_hits)
+    return h[1].startswith(BANK_OBJECT_PREFIX) and ctx.is_ramp_of_a_built_body(h[1], xy) and terrain_kept
+
 
 def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
     """None when the nearest hits are equivalent, else the change-set label, or ``unlisted``. ``b_hits``/``h_hits``
@@ -296,7 +322,7 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
         winner_was_on_base_ray = any(n == h[1] and c == "road" and h[0] > t + DIST_TOL_M for t, n, c in b_hits)
         lowered = winner_was_on_base_ray and h[0] >= b[0] - DIST_TOL_M
         return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
-    if _bank_ramp_raised(b, h, ctx, xy):
+    if _bank_ramp_raised(b, h, h_hits, ctx, xy):
         return "bank ramp"
     label = None
     for t, name, cls_ in nearer:

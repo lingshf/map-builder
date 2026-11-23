@@ -24,6 +24,7 @@ from .dem import ElevationGrid
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
+from .overlap import point_segment_distance, triangle_touches
 from .shore import shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
@@ -157,6 +158,12 @@ class _Index:
 
     def at(self, x: float, y: float) -> Sequence[int]:
         return self.map.get((int(math.floor(x / self.cell)), int(math.floor(y / self.cell))), ())
+
+    def in_box(self, box: tuple[float, float, float, float]) -> set[int]:
+        c = self.cell
+        cells = ((i, j) for i in range(int(math.floor(box[0] / c)), int(math.floor(box[2] / c)) + 1)
+                 for j in range(int(math.floor(box[1] / c)), int(math.floor(box[3] / c)) + 1))
+        return {k for cell in cells for k in self.map.get(cell, ())}
 
 
 # --- Clipping a polygon with holes to the terrain rectangle ---------------------------------------------------------
@@ -646,24 +653,26 @@ class _Masks:
                 return True
         return False
 
+    def hit_triangle(self, tri: Sequence[Pt]) -> bool:
+        """Whether a plan triangle overlaps a footprint or comes within a line's half width, interior included."""
+        xs, ys = [v[0] for v in tri], [v[1] for v in tri]
+        box = (min(xs), min(ys), max(xs), max(ys))
+        if any(triangle_touches(tri, self.footprints[i].outer, 0.0, closed=True) for i in self.foot_idx.in_box(box)):
+            return True
+        return any(triangle_touches(tri, self.lines[i][0], self.lines[i][1], closed=False)
+                   for i in self.line_idx.in_box(box))
+
     def hit_line(self, x: float, y: float, extra: float) -> bool:
         for i in self.line_idx.at(x, y):
             pl, hw = self.lines[i]
             for k in range(len(pl) - 1):
-                if _dist_seg(x, y, pl[k], pl[k + 1]) <= hw + extra:
+                if point_segment_distance(x, y, pl[k], pl[k + 1]) <= hw + extra:
                     return True
         return False
 
 
-def _dist_seg(x: float, y: float, a: Pt, b: Pt) -> float:
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    ll = dx * dx + dy * dy
-    u = 0.0 if ll == 0 else min(1.0, max(0.0, ((x - a[0]) * dx + (y - a[1]) * dy) / ll))
-    return math.hypot(x - a[0] - u * dx, y - a[1] - u * dy)
-
-
 def _dist_ring(x: float, y: float, ring: Sequence[Pt]) -> float:
-    return min(_dist_seg(x, y, ring[k], ring[(k + 1) % len(ring)]) for k in range(len(ring)))
+    return min(point_segment_distance(x, y, ring[k], ring[(k + 1) % len(ring)]) for k in range(len(ring)))
 
 
 # --- The builder ----------------------------------------------------------------------------------------------
@@ -769,11 +778,8 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
 
-    def covered(x: float, y: float) -> bool:
-        return masks.hit_footprint(x, y, 0.0) or masks.hit_line(x, y, 0.0)
-
     for b in model.active():
-        ramps = shore_ramps(b.shore, b.level.at, ground, covered, water_level)  # type: ignore[union-attr]
+        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_level)  # type: ignore[union-attr]
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:
@@ -1091,7 +1097,7 @@ class _CarveContext:
                     if (min(p[0], q[0]) - reach > x or max(p[0], q[0]) + reach < x
                             or min(p[1], q[1]) - reach > y or max(p[1], q[1]) + reach < y):
                         continue
-                    d = _dist_seg(x, y, p, q)
+                    d = point_segment_distance(x, y, p, q)
                     if d < best:
                         best, bp = d, (p, q)
                 if bp is None:

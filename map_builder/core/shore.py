@@ -25,7 +25,7 @@ Tri = tuple[Vec3, Vec3, Vec3]
 Surface = Callable[[float, float], float]
 
 RAMP_SLOPE = 0.5          # rise / run: the capped slope of an embankment or cascade
-FREEBOARD_M = 0.1         # a bank ramp starts this far under the sheet, so terrain never pokes through it
+FREEBOARD_M = 0.02        # a bank ramp starts this far under the sheet: terrain never pokes through it, yet no gap shows at grazing angles
 MAX_WIDTH_M = 12.0        # a ramp that has not met its surface by then ends there, steeper than RAMP_SLOPE
 ALONG_STEP_M = 2.0        # shore edges are cut into ramp segments at most this long
 ACROSS_STEP_M = 0.5       # the surface below is probed at this spacing away from the shore
@@ -34,6 +34,7 @@ CORNER_TOL_M = 1e-6       # consecutive shore edges share their corner within th
 FAN_STEP_RAD = math.radians(15)   # a convex corner is covered by cross-sections turning in steps of this
 MIN_PLAN_AREA_M2 = 1e-6   # a ramp triangle thinner than this in plan would not face up
 MIN_DROP_M = 0.2         # a bank closer than this to the sheet needs no ramp
+MIXED_SPLITS = 3          # a strip whose ends differ in kind is halved at most this many times
 
 
 @dataclass
@@ -56,41 +57,53 @@ class _Node:
 
 
 def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Surface,
-                blocked_at: Callable[[float, float], bool], other_level_at: Callable[[float, float], float | None],
+                blocked_by: Callable[[Sequence[Pt]], bool], other_level_at: Callable[[float, float], float | None],
                 ) -> ShoreRamps:
     """Ramps along ``edges`` (water on the left of each p->q). ``level_at``: the body's sheet; ``ground_at``: the
-    final terrain; ``blocked_at``: a footprint, road or bridge that must not be covered; ``other_level_at``: the
-    sheet of another water body at a point, or None."""
+    final terrain; ``blocked_by``: whether a plan triangle overlaps a footprint, road or bridge that must not be
+    covered; ``other_level_at``: the sheet of another water body at a point, or None."""
     out = ShoreRamps()
+    normals = [_right_normal(p, q) for p, q in edges]
 
     def section(pt: Pt, normal: Pt) -> _Node:
         return _node(pt, normal, level_at, ground_at, other_level_at)
 
-    normals = [_right_normal(p, q) for p, q in edges]
     for (p, q), normal in zip(edges, normals):
-        _place_strip(out, [section(pt, normal) for pt in _cut(p, q)], blocked_at, other_level_at)
+        nodes = [section(pt, normal) for pt in _cut(p, q)]
+        for a, b in zip(nodes, nodes[1:]):
+            for part in _split_mixed(a, b, lambda pt: section(pt, normal)):
+                _place_strip(out, *part, blocked_by, other_level_at)
     for i, (_, corner) in enumerate(edges):
         following = (i + 1) % len(edges)
         if _same_point(corner, edges[following][0]) and _turns_towards_water(normals[i], normals[following]):
             fan = [section(corner, n) for n in _fan_normals(normals[i], normals[following])]
-            _place_strip(out, fan, blocked_at, other_level_at)
+            for a, b in zip(fan, fan[1:]):
+                _place_strip(out, a, b, blocked_by, other_level_at)
     return out
 
 
-def _place_strip(out: ShoreRamps, nodes: list[_Node], blocked_at: Callable[[float, float], bool],
-                 water_at: Callable[[float, float], float | None]) -> None:
-    """Sort the strips into bank / cascade; a bank strip that would cover water or a structure is left out."""
-    for a, b in zip(nodes, nodes[1:]):
-        if not (a.width or b.width):
-            continue
-        tris = _ramp_tris(a, b)
-        if a.cascade:
-            out.cascade.extend(tris)
-        elif _covers_water(a, b, water_at) or any(blocked_at(v[0], v[1]) for t in tris for v in t):
-            out.blocked_m += math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
-        else:
-            out.bank.extend(tris)
+def _split_mixed(a: _Node, b: _Node, section: Callable[[Pt], _Node], depth: int = MIXED_SPLITS,
+                 ) -> list[tuple[_Node, _Node]]:
+    """Halve a strip whose ends differ in kind (bank / cascade) until each part is of one kind, so that the kind
+    of a strip is never taken from one end alone. A part still mixed after ``depth`` halvings is a bank strip."""
+    if a.cascade == b.cascade or depth == 0:
+        return [(a, b)]
+    middle = section(((a.top[0] + b.top[0]) / 2, (a.top[1] + b.top[1]) / 2))
+    return _split_mixed(a, middle, section, depth - 1) + _split_mixed(middle, b, section, depth - 1)
 
+
+def _place_strip(out: ShoreRamps, a: _Node, b: _Node, blocked_by: Callable[[Sequence[Pt]], bool],
+                 water_at: Callable[[float, float], float | None]) -> None:
+    """Add the strip between two cross-sections as a cascade (both ends cascade) or a bank ramp. A strip that
+    overlaps a footprint, road or bridge, or a bank strip that would cover water, is left out."""
+    tris = _ramp_tris(a, b)
+    if not tris:
+        return
+    cascade = a.cascade and b.cascade
+    if any(blocked_by([(v[0], v[1]) for v in t]) for t in tris) or (not cascade and _covers_water(a, b, water_at)):
+        out.blocked_m += math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
+    else:
+        (out.cascade if cascade else out.bank).extend(tris)
 
 def _covers_water(a: _Node, b: _Node, water_at: Callable[[float, float], float | None]) -> bool:
     """Whether the strip between two cross-sections passes over water, judged along its middle line."""

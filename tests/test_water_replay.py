@@ -24,7 +24,11 @@ WTRI = [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)]
 def head_pkg(report: dict | None = None, probes: list | None = None, raised: dict | None = None) -> SimpleNamespace:
     objects = [{"name": "terrain", "class": "terrain", "aabb": [-500, -500, 0, 500, 500, 9]},
                {"name": WATER, "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
-               {"name": DECK, "class": "bridge", "aabb": [200, 0, 0, 260, 10, 9]}]
+               {"name": DECK, "class": "bridge", "aabb": [200, 0, 0, 260, 10, 9]},
+               {"name": "bank:osm:way/1", "class": "terrain", "aabb": [90, 40, 0, 105, 60, 0.98]},
+               {"name": "water:osm:way/2", "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
+               {"name": "bank:osm:way/2", "class": "terrain", "aabb": [90, 40, 0, 105, 60, 5.0]},
+               {"name": "bank:osm:way/999", "class": "terrain", "aabb": [90, 40, 0, 105, 60, 0.98]}]
     return SimpleNamespace(col=SimpleNamespace(objects=objects), raised=raised if raised is not None else {DECK: 0.5},
                            names={o["name"] for o in objects} | {"osm:way/9", "bld"},
                            mbids={"osm:way/9"}, probes=probes or [], report=report or {})
@@ -64,15 +68,27 @@ class RayLabelTest(unittest.TestCase):
         self.assertEqual(wr.ray_label([T0], [T1], (400, 400), c), "unlisted")
         self.assertEqual(wr.ray_label([T1], [T0], (120, 50), c), "unlisted")     # terrain rose
 
-    def test_a_shore_ramp_above_the_base_terrain_near_water_is_a_bank_ramp(self) -> None:
+    def test_a_shore_ramp_of_a_built_body_above_the_base_terrain_is_a_bank_ramp(self) -> None:
         c = ctx()
         ramp = (9.5, "bank:osm:way/1", "terrain")
-        self.assertEqual(wr.ray_label([T0], [ramp, T0], (120, 50), c), "bank ramp")
-        self.assertEqual(wr.ray_label([T0], [ramp, T0], (400, 400), c), "unlisted")                  # dry
-        self.assertEqual(wr.ray_label([T0], [(10.5, "bank:osm:way/1", "terrain")], (120, 50), c), "unlisted")  # lower
-        self.assertEqual(wr.ray_label([T0], [(9.5, "ramp:osm:way/1", "terrain")], (120, 50), c), "unlisted")  # not a bank
-        self.assertEqual(wr.ray_label([(10.0, "bld", "building")], [ramp], (120, 50), c), "unlisted")  # over a structure
+        self.assertEqual(wr.ray_label([T0], [ramp, T0], (100, 50), c), "bank ramp")
+        self.assertEqual(wr.ray_label([T0], [ramp, T1], (100, 50), c), "bank ramp")      # the carve lowered the terrain below it
+        self.assertEqual(wr.ray_label([T0], [(10.5, "bank:osm:way/1", "terrain")], (100, 50), c), "unlisted")  # lower
+        self.assertEqual(wr.ray_label([T0], [(9.5, "ramp:osm:way/1", "terrain")], (100, 50), c), "unlisted")  # not a bank
+        self.assertEqual(wr.ray_label([(10.0, "bld", "building")], [ramp], (100, 50), c), "unlisted")  # over a structure
 
+    def test_an_invented_bank_is_unlisted(self) -> None:
+        c = ctx()
+        kept = [T0]
+        for name, why in (("bank:osm:way/999", "no such body"), ("bank:osm:way/2", "ramp taller than its sheet"),
+                          ("bank:osm:way/1", "ray outside the ramp")):
+            xy = (400, 400) if why == "ray outside the ramp" else (100, 50)
+            self.assertEqual(wr.ray_label([T0], [(1.0, name, "terrain"), *kept], xy, c), "unlisted", why)
+
+    def test_a_bank_that_replaces_the_terrain_is_unlisted(self) -> None:
+        self.assertEqual(wr.ray_label([T0], [(1.0, "bank:osm:way/1", "terrain")], (100, 50), ctx()), "unlisted")
+        self.assertEqual(wr.ray_label([T0], [(1.0, "bank:osm:way/1", "terrain"), (9.0, "terrain", "terrain")],
+                                      (100, 50), ctx()), "unlisted")   # the terrain below rose
     def test_terrain_replaced_by_bridge_needs_the_terrain_to_go_down(self) -> None:
         c = ctx()
         deck = (12.0, DECK, "bridge")

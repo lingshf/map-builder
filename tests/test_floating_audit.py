@@ -76,6 +76,15 @@ class RoadClassificationTest(unittest.TestCase):
         self.assertEqual(road_findings(0.05), {})
 
 
+class MapExtentTest(unittest.TestCase):
+    def test_cells_past_the_terrain_edge_are_off_the_map(self):
+        class Col:
+            objects = [{"name": "bank:osm:way/1", "aabb": [0, 0, 0, 99, 99, 1]},
+                       {"name": "terrain", "aabb": [0, 0, 0, 10, 20, 1]}]
+        on_map = fa._on_map(Col, np.array([5.5, 10.5]), np.array([0.5, 19.5, 20.5]))
+        self.assertEqual(on_map.tolist(), [[True, False], [True, False], [False, False]])
+
+
 class SampleAuditTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
