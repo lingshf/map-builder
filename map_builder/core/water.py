@@ -771,21 +771,23 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
 
 def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, int], None] | None) -> None:
     """Give every built body its shore ramps on the final terrain; ramps over the budget are left out (noted)."""
-    def water_level(x: float, y: float) -> float | None:
-        """The sheet of whichever body covers the point (a ramp must not run over its own pinched water either)."""
-        return next((o.level.at(x, y) for o in model.active() if _inside_pieces(o, x, y)), None)  # type: ignore[union-attr]
-
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
 
-    wet_pieces = [(_ring_box(o), o, hs) for body in model.active() for o, hs in body.pieces]
-
-    def wet_by(tri: Sequence[Pt]) -> bool:
-        box = _ring_box(tri)
-        return any(_boxes_meet(box, pb) and triangle_overlaps_region(tri, o, hs) for pb, o, hs in wet_pieces)
+    wet_pieces = [(body.id, _ring_box(o), o, hs) for body in model.active() for o, hs in body.pieces]
 
     for b in model.active():
-        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_level, wet_by)  # type: ignore[union-attr]
+        def water_receiver(x: float, y: float, src: Body = b) -> tuple[str, float] | None:
+            covers = [(o.id, o.level.at(x, y)) for o in model.active() if _inside_pieces(o, x, y) and o.level is not None]
+            return max(covers, key=lambda pair: (pair[1], pair[0])) if covers else None
+
+        def wet_by(tri: Sequence[Pt], receiver_id: str | None, src_id: str = b.id) -> bool:
+            box = _ring_box(tri)
+            allowed = {src_id} if receiver_id is None else {receiver_id}
+            return any(_boxes_meet(box, pb) and body_id not in allowed and triangle_overlaps_region(tri, o, hs)
+                       for body_id, pb, o, hs in wet_pieces)
+
+        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_receiver, wet_by)  # type: ignore[union-attr]
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:

@@ -10,7 +10,6 @@ from collections.abc import Iterator, Sequence
 from .osm import point_in_ring
 
 Pt = tuple[float, float]
-SHRINK = 1e-3   # relative; far above rounding along a shared edge, far below any patch worth ramping around
 
 
 def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
@@ -33,16 +32,43 @@ def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, close
 
 
 def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
-    """Whether the triangle and the region (``outer`` minus ``holes``) share area. A triangle whose edge lies on
-    the region's boundary does not: it is shrunk a little first, so rounding along that edge is not an overlap."""
-    centre = (sum(p[0] for p in tri) / 3, sum(p[1] for p in tri) / 3)
-    core = [(centre[0] + (x - centre[0]) * (1 - SHRINK), centre[1] + (y - centre[1]) * (1 - SHRINK)) for x, y in tri]
-    rings = [outer, *holes]
-    if any(point_in_ring(x, y, core) for ring in rings for x, y in ring):
+    """Whether the triangle and the region (``outer`` minus ``holes``) share positive area.
+
+    Boundary-only touch is not overlap. The test is exact in plan, without shrinking.
+    """
+    if any(_in_region_strict(p, outer, holes) for p in tri):
         return True
-    if any(_segments_cross(a, b, c, d) for ring in rings for a, b in _edges(ring, True) for c, d in _edges(core, True)):
+    if any(_in_triangle_strict((x, y), tri) for x, y in outer):
         return True
-    return point_in_ring(*centre, outer) and not any(point_in_ring(*centre, h) for h in holes)
+    if any(_segments_cross(a, b, c, d) for a, b in _edges(outer, True) for c, d in _edges(tri, True)):
+        return True
+    return any(_segments_cross(a, b, c, d) for hole in holes for a, b in _edges(hole, True) for c, d in _edges(tri, True))
+
+
+def _in_region_strict(p: Pt, outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
+    if _on_ring_boundary(p, outer) or any(_on_ring_boundary(p, h) for h in holes):
+        return False
+    return point_in_ring(*p, outer) and not any(point_in_ring(*p, h) for h in holes)
+
+
+def _in_triangle_strict(p: Pt, tri: Sequence[Pt]) -> bool:
+    return point_in_ring(*p, tri) and not any(_point_on_segment(p, a, b) for a, b in _edges(tri, True))
+
+
+def _on_ring_boundary(p: Pt, ring: Sequence[Pt]) -> bool:
+    return any(_point_on_segment(p, a, b) for a, b in _edges(ring, True))
+
+
+def _point_on_segment(p: Pt, a: Pt, b: Pt) -> bool:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    cross = dx * (p[1] - a[1]) - dy * (p[0] - a[0])
+    if abs(cross) > 1e-12:
+        return False
+    dot = (p[0] - a[0]) * dx + (p[1] - a[1]) * dy
+    if dot < 0:
+        return False
+    ll = dx * dx + dy * dy
+    return dot <= ll
 
 def _padded_box(points: Sequence[Pt], pad: float) -> tuple[float, float, float, float]:
     xs, ys = [p[0] for p in points], [p[1] for p in points]

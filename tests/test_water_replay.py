@@ -27,6 +27,8 @@ RAY_TOP = 10.0
 
 def sheet_triangles(entry: dict) -> list:
     """Every water body is the triangle x + y <= 100, so its real shoreline is far from its bbox corner."""
+    if entry["name"] == "water:osm:way/3":
+        return [[(0.0, 0.0, 0.0), (100.0, 0.0, 10.0), (0.0, 100.0, 0.0)]]
     return [[(x, y, SHEET_Z[entry["name"]]) for x, y in WTRI]]
 
 
@@ -37,6 +39,8 @@ def head_pkg(report: dict | None = None, probes: list | None = None, raised: dic
                {"name": "bank:osm:way/1", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 0.98]},
                {"name": "water:osm:way/2", "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
                {"name": "bank:osm:way/2", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 5.0]},
+               {"name": "water:osm:way/3", "class": "water", "aabb": [0, 0, 0, 100, 100, 10]},
+               {"name": "bank:osm:way/3", "class": "terrain", "aabb": [44, 44, 0, 57, 57, 10]},
                {"name": "bank:osm:way/999", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 0.98]}]
     return SimpleNamespace(col=SimpleNamespace(objects=objects, object_triangles=sheet_triangles), raised=raised if raised is not None else {DECK: 0.5},
                            names={o["name"] for o in objects} | {"osm:way/9", "bld"},
@@ -107,6 +111,11 @@ class RayLabelTest(unittest.TestCase):
 
     def test_a_ramp_hit_above_the_local_sheet_is_unlisted(self) -> None:
         self.assertEqual(wr.ray_label([T0], [(0.5, "bank:osm:way/1", "terrain"), T0], (98, 5), ctx()), "unlisted")
+
+    def test_a_ramp_hit_above_the_projected_shore_height_is_unlisted(self) -> None:
+        # On water:3 the nearest shore edge slopes from z=0 to z=10, so at (50, 50) the local sheet is z=5.
+        self.assertEqual(wr.ray_label([T0], [(3.0, "bank:osm:way/3", "terrain"), T0], (50, 50), ctx()), "unlisted")
+        self.assertEqual(wr.ray_label([T0], [(5.0, "bank:osm:way/3", "terrain"), T0], (50, 50), ctx()), "bank ramp")
 
     def test_a_bank_that_replaces_the_terrain_is_unlisted(self) -> None:
         self.assertEqual(wr.ray_label([T0], [(1.0, "bank:osm:way/1", "terrain")], (98, 5), ctx()), "unlisted")
