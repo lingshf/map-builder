@@ -36,7 +36,7 @@ import sys
 import tempfile
 import zipfile
 from collections import Counter
-from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -114,7 +114,8 @@ def water_rays(head: Package, top: float) -> list[tuple[float, float, float]]:
 
 DIST_TOL_M = 1e-3     # spec section 7(a): hit distances are compared to 1 mm
 BLEND_PAD_M = 65.0    # water bbox padding inside which the terrain bed may have moved (carve + blend, 2 cells)
-EDGE_TIE_M = 2e-3     # a ray this close to a road ribbon's edge may report either of two abutting ribbons
+SHARED_EDGE_TOL_M = 1e-4   # vertices closer than this are the same vertex; a ray this close is on the edge
+PIN_XY_TOL_M = 5e-4        # the pinned ray position is recorded to 3 decimals
 
 Hit = tuple[float, str, str]   # (distance, object name, class)
 
@@ -258,18 +259,7 @@ def _moved_down(name: str, cls_: str, t: float, h_hits: list[Hit]) -> bool:
 
 
 
-def edge_tied_roads(col: Collision, o: tuple[float, float, float], dist: float, on_ray: list[Hit]) -> list[Hit]:
-    """Road hits within EDGE_TIE_M of the ray that the ray itself does not report: two abutting road ribbons
-    share an edge, and a ray exactly on it reports only one of them."""
-    known = {h[1] for h in on_ray}
-    tied: list[Hit] = []
-    for dx, dy in ((EDGE_TIE_M, 0.0), (-EDGE_TIE_M, 0.0), (0.0, EDGE_TIE_M), (0.0, -EDGE_TIE_M)):
-        tied += [h for h in py_hits(col, (o[0] + dx, o[1] + dy, o[2]), dist) if h[2] == "road" and h[1] not in known]
-    return tied
-
-
-def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context,
-              edge_tied: Sequence[Hit] = ()) -> str | None:
+def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
     """None when the nearest hits are equivalent, else the change-set label, or ``unlisted``. ``b_hits``/``h_hits``
     are every hit of the ray, nearest first. A difference is accepted only when each BASE object nearer than the
     new nearest hit is explained: terrain near new water that HEAD hits again farther down (the bed moved), or
@@ -295,8 +285,7 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
     if b is not None and b[2] == h[2] == "road":
         # The head winner must itself be a road already on the base ray that moved down, and the nearest hit
         # must not rise; a road that was not on the base ray is an unexplained replacement.
-        base_roads = [x for x in [*b_hits, *edge_tied] if x[2] == "road"]
-        winner_was_on_base_ray = any(n == h[1] and h[0] > t + DIST_TOL_M for t, n, _c in base_roads)
+        winner_was_on_base_ray = any(n == h[1] and c == "road" and h[0] > t + DIST_TOL_M for t, n, c in b_hits)
         lowered = winner_was_on_base_ray and h[0] >= b[0] - DIST_TOL_M
         return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
     label = None
@@ -313,6 +302,79 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
     if h[2] == "terrain" or h[1] in base_names:
         return label or "unlisted"
     return "unlisted"
+
+
+@dataclass(frozen=True)
+class SharedEdgeSwap:
+    """One ray exactly on the shared edge of two abutting road ribbons: it reports either ribbon, so the nearest
+    hit's name may flip between BASE and HEAD although both ribbons were lowered together."""
+    package: str
+    ray: int
+    xy: tuple[float, float]
+    roads: frozenset[str]
+    reason: str
+
+
+PINNED_SHARED_EDGE_SWAPS = (
+    SharedEdgeSwap("pittsburgh", 71, (458.888, 379.118),
+                   frozenset({"road_way_1568643371", "road_way_1568643374"}),
+                   "Pittsburgh CLI: the ray lies on the boundary shared by two ribbons that both follow the carved bed"),
+)
+
+Vertex = tuple[float, float, float]
+
+
+def _distance_to_segment(px: float, py: float, a: Vertex, b: Vertex) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length_sq = dx * dx + dy * dy
+    u = 0.0 if length_sq == 0 else min(1.0, max(0.0, ((px - a[0]) * dx + (py - a[1]) * dy) / length_sq))
+    return math.hypot(px - a[0] - u * dx, py - a[1] - u * dy)
+
+
+def ribbon_edge_at(col: Collision, road: str, xy: tuple[float, float]) -> list[Vertex] | None:
+    """The two vertices, sorted by plan position, of the edge of ``road`` that passes through ``xy``."""
+    entry = next((e for e in col.objects if e["name"] == road), None)
+    if entry is None:
+        return None
+    for tri in col.object_triangles(entry):
+        for a, b in zip(tri, (*tri[1:], tri[0])):
+            if _distance_to_segment(xy[0], xy[1], a, b) <= SHARED_EDGE_TOL_M:
+                return sorted((a, b), key=lambda v: (v[0], v[1]))
+    return None
+
+
+def _same_plan_position(edge: list[Vertex], other: list[Vertex]) -> bool:
+    return all(abs(p[0] - q[0]) <= SHARED_EDGE_TOL_M and abs(p[1] - q[1]) <= SHARED_EDGE_TOL_M
+               for p, q in zip(edge, other))
+
+
+def lowered_together_on_shared_edge(base: Any, head: Any, roads: list[str], xy: tuple[float, float]) -> bool:
+    """Both ribbons have the same boundary vertices (plan, within 1e-4 m) on BASE and on HEAD at ``xy``, and every
+    ribbon's vertices moved down by the same amount as the other ribbon's matching vertices (within 1 mm)."""
+    base_edges = [ribbon_edge_at(base.col, r, xy) for r in roads]
+    head_edges = [ribbon_edge_at(head.col, r, xy) for r in roads]
+    if None in base_edges or None in head_edges:
+        return False
+    if not all(_same_plan_position(base_edges[0], e) for e in [*base_edges, *head_edges]):
+        return False
+    drops_per_ribbon = [[h[2] - b[2] for b, h in zip(be, he)] for be, he in zip(base_edges, head_edges)]
+    first = drops_per_ribbon[0]
+    same_delta = all(abs(d - f) <= DIST_TOL_M for drops in drops_per_ribbon for d, f in zip(drops, first))
+    return same_delta and max(first) < -DIST_TOL_M
+
+
+def pinned_shared_edge_swap(base: Any, head: Any, index: int, xy: tuple[float, float],
+                            base_nearest: Hit | None, head_nearest: Hit | None) -> bool:
+    """True only for a ray listed in PINNED_SHARED_EDGE_SWAPS whose two nearest hits are the pinned road pair and
+    whose geometry still shows the two ribbons sharing an edge and lowered together."""
+    if base_nearest is None or head_nearest is None:
+        return False
+    for pin in PINNED_SHARED_EDGE_SWAPS:
+        is_pinned_ray = (head.manifest.get("name"), index) == (pin.package, pin.ray) and \
+            abs(xy[0] - pin.xy[0]) <= PIN_XY_TOL_M and abs(xy[1] - pin.xy[1]) <= PIN_XY_TOL_M
+        if is_pinned_ray and {base_nearest[1], head_nearest[1]} == pin.roads:
+            return lowered_together_on_shared_edge(base, head, sorted(pin.roads), xy)
+    return False
 
 
 def capsule_labels(b: list[tuple[str, str]], h: list[tuple[str, str]], path: list[Any], radius: float,
@@ -447,8 +509,9 @@ def main() -> int:
                                            and abs(bh[0] - hh[0]) <= DIST_TOL_M):
             continue
         base_hits = py_hits(base.col, o, dist)
-        lab = ray_label(base_hits, py_hits(head.col, o, dist), (o[0], o[1]), ctx,
-                        edge_tied_roads(base.col, o, dist, base_hits))
+        lab = ray_label(base_hits, py_hits(head.col, o, dist), (o[0], o[1]), ctx)
+        if lab == "unlisted" and pinned_shared_edge_swap(base, head, i, (o[0], o[1]), bh, hh):
+            lab = "road lowered"
         if lab:
             record("ray", i, (o[0], o[1]), bh, hh, lab)
     for i, (path, qr) in enumerate(queries):
