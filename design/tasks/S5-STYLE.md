@@ -320,7 +320,7 @@ Order (D156, D161): **BASE** (in parallel with S4-F8 and S5-F3 step 1) → S5-PE
     **no geometry code**); `core/glb.py` (normals and welding); `core/uv.py` and `core/textures.py` (mode switch
     only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option).
   * Soft: sample slot (D103).
-* **Dependencies:** S5-STYLE-BASE, **S5-PERF-GATE** and **S5-F3** (D161: Factoria water/bank findings classified and any real defect fixed) merged (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
+* **Dependencies:** S5-STYLE-BASE, **S5-PERF-GATE** and the **verified closure of S5-F3** (D161: the measured `water_above_bank`/`water_buried` zero gate passed on main, plus the rebaseline if packages changed; an implementation merge only if one was needed) (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
 
 ### S5-STYLE-WATER: cyan water, terrain-side shore band, sandy banks (colour only)
 
