@@ -109,7 +109,7 @@ Machine-readable: [evidence.json](evidence.json). Kit summaries:
 | Python validator | `VALID: 0 error(s), 1 warning(s)` (degenerate triangles) | `VALID: 0 error(s), 1 warning(s)` (degenerate triangles) |
 | Passage probes | 3 exported, all PASS; 26 blocked and reported | 11 exported, all PASS; 31 blocked and reported (v0.4.0: 13 and 29) |
 | C# reference reader | `OK`, 3/3 PASS, 0 `mb_id` warnings | `OK`, 11/11 PASS, 0 `mb_id` warnings |
-| Headless Blender, generate + export | textured and untextured `VALID` (56 degenerate); C# `OK`, 3/3 PASS, same probe ids as the CLI | textured and untextured `VALID` (71 degenerate); C# `OK`, 11/11 PASS, same probe ids as the CLI; export 23.3 s textured, 19.4 s untextured |
+| Headless Blender, generate + export | textured and untextured `VALID` (56 degenerate); C# `OK`, 3/3 PASS, same probe ids as the CLI | textured and untextured `VALID` (69 degenerate); C# `OK`, 11/11 PASS, same probe ids as the CLI; export 23.3 s textured, 19.4 s untextured |
 | CPU renders | 10 renders + panel: 268 s | 6 renders: 150 s |
 
 All renders together took 7 min 0 s on the CPU (budget 30 min). Each CLI
@@ -131,11 +131,11 @@ notes list sizes and package_ids.
 | `pittsburgh-0.5.0.mbmap` | CLI | on | `BE4374B0EC3A02DDB58895AD0CFD4E80E7395365D67AAF5238B1E7463A547AAE` |
 | `munich-altstadt-0.5.0-notex.mbmap` | CLI | off | `FDC561E9428F6058701B162D1E4BBC45F976B20AD3F88DD1371DB5564B29D68F` |
 | `pittsburgh-0.5.0-notex.mbmap` | CLI | off | `DF89A8E7E405E07C321D6216EE49EDC477122AA240F92875DB7E715FBC2C4A3D` |
-| `munich-altstadt-0.5.0-blender.mbmap` | headless Blender | on | `91A48B4C9AC4D58FF96A0A0ADE8552C62E3F3EDF1DBD36FD8876ABBA0FC69671` |
-| `munich-altstadt-0.5.0-blender-notex.mbmap` | headless Blender | off | `0FA83406C096F9770DD87301CAD4B73C3E6F40EAA7790EB21963FCBC0BDF230A` |
-| `pittsburgh-0.5.0-blender.mbmap` | headless Blender | on | `8E11533D27836DC522118EFFE639FD5704D219730154523B66C047535608CF7F` |
-| `pittsburgh-0.5.0-blender-notex.mbmap` | headless Blender | off | `C7BB0436CB6BE2080859F85CAA40E13EDBB18B8E35B9D076BFFBF44B4B4E9230` |
-| `map_builder-0.5.0.zip` (local clean build from this head) | | | `075825556339EAFEA58496F7273D55E1E54AF09CC43BF055E2BB36DBCC0910D6` (886,813 bytes) |
+| `munich-altstadt-0.5.0-blender.mbmap` | headless Blender | on | `E5274457FA2807C3F59143CCDCF625B5491507927F1513CF64C3A4B144BFFB26` |
+| `munich-altstadt-0.5.0-blender-notex.mbmap` | headless Blender | off | `16441E4347A64ED39E8744751506AA081B2A406F75CF5389804E6D4E65DF7F49` |
+| `pittsburgh-0.5.0-blender.mbmap` | headless Blender | on | `CE21882E434ACE94CEA2E348BFD3A85B8581CFD763888BD5530B58012AE74707` |
+| `pittsburgh-0.5.0-blender-notex.mbmap` | headless Blender | off | `A7906066ED150F14BDC561435BE92514900F196F1564A7A0639B478E69AAE224` |
+| `map_builder-0.5.0.zip` (local clean build from this head) | | | `92DAED23A95E43E4E517B7440FD07D64F405DF4424C823E8301000F658CD3344` (886,813 bytes) |
 
 **Credits:** (c) OpenStreetMap contributors, ODbL 1.0. Copernicus DEM
 GLO-30 / WorldDEM-30: (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space
