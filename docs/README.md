@@ -13,7 +13,7 @@ and quick start remain in the [root README](../README.md), which links here.
 |---|---|
 | **A user** generating a map | [Install](user/install.md) → [Generate](user/generate.md) → [Export](user/export.md) → [CLI](user/cli.md) → [Structures](user/structures.md) → [Limits](../README.md#limits) |
 | **A consumer** (Unity, simulator Core) | [Package contract](PACKAGE_FORMAT.md) → [Unity / Core handoff](UNITY_CORE_HANDOFF.md) → [reference reader](../examples/README.md) → [Simulator preview](user/simulator.md) |
-| **A new developer or maintainer** | [Architecture](architecture/README.md) → [Developer guide](dev/README.md) → [Validation](VALIDATION.md) → [Backlog and DoD](../design/tasks/README.md) → [decision record](../design/roadmap.md#decision-record) |
+| **A new developer or maintainer** | [Architecture](architecture/README.md) → [Developer guide](dev/README.md) → [Validation](VALIDATION.md) → [Backlog](../design/tasks/README.md) → [Definition of Done (charter §4)](../design/team-charter.md#4-definition-of-done) → [decision record](../design/roadmap.md#decision-record) |
 | **Taking over the team** | [Team charter](../design/team-charter.md) → [Backlog](../design/tasks/README.md) → [latest close review](../design/reviews/REL-v0.5.0-close.md) → this matrix's gaps |
 | **Preparing a release** | [Releases](releases/README.md) → [Demo recipe](DEMO.md) → [Platform submission](PLATFORM_SUBMISSION.md) → [Sprint close](../design/tasks/SPRINT_CLOSE.md) |
 
@@ -70,8 +70,8 @@ every row. No completion percentage is implied.
 | CLI | covered | covered | n/a (shares the core, D1) | covered | user/cli; README §CLI | — |
 | Package format and consumer contract | covered | covered | covered (D101, D110 format policy) | covered | PACKAGE_FORMAT (normative); UNITY_CORE_HANDOFF | — |
 | C# reference reader | covered | covered | covered | covered | examples/README; PACKAGE_FORMAT | — |
-| Validation and tests | covered | **stale**: dev guide CI description omits the mypy step and format-policy job | covered | covered; VALIDATION.md line 117 has a stray control character (`\b` from a backtick) in the S4-COL-DEGEN row | VALIDATION; dev/README §checks | DOC-DEV |
-| Contribution workflow and DoD | covered | n/a | covered | **conflict**: dev/README §Workflow paraphrases the old DoD; the [team charter](../design/team-charter.md) §4 and the [Backlog DoD](../design/tasks/README.md#definition-of-done-every-code-task-d28) differ (QA acceptance, knowledge check) | team charter §4 (authoritative from migration) | DOC-DOD |
+| Validation and tests | covered | **stale**: dev guide CI description omits the mypy step (Python 3.12 leg) and the format-policy step (C# job) | covered | covered; VALIDATION.md line 117 has a stray control character (`\b` from a backtick) in the S4-COL-DEGEN row | VALIDATION; dev/README §checks | DOC-DEV |
+| Contribution workflow and DoD | covered | n/a | covered | covered: [team charter §4](../design/team-charter.md#4-definition-of-done) is the only DoD; the Backlog and dev guide link to it (deduplicated in this change) | team charter §4 | — |
 | Developer tools: `floating_audit`, `water_replay`, `water_check`, `design/bench` | gap | **gap**: no developer-facing usage page; only VALIDATION rows and task specs | covered in specs and decisions | **gap** | VALIDATION rows; task specs | DOC-TOOLS |
 | Performance method (D91, D106, D147, D153) | covered (roadmap) | gap (S5-PERF-GATE tool not built yet) | covered | stale: dev/README has no performance section | roadmap; S5-PERF-GATE spec | DOC-PERF (after S5-PERF-GATE) |
 | Release and extension packaging | covered | covered | covered (D100) | covered | releases/README; PLATFORM_SUBMISSION; SPRINT_CLOSE | — |
@@ -80,8 +80,8 @@ every row. No completion percentage is implied.
 
 **Deduplication decisions:**
 
-* **Definition of Done:** the [team charter](../design/team-charter.md#4-definition-of-done) is authoritative. The
-  Backlog DoD and dev/README §Workflow should link to it, not paraphrase it (DOC-DOD).
+* **Definition of Done:** the [team charter §4](../design/team-charter.md#4-definition-of-done) is the only DoD. The
+  Backlog section and dev/README §Workflow now only link to it.
 * **Decision record:** the roadmap's decision table is the only authority. architecture §"Decision map" stays a
   short pointer list (DOC-ARCH removes its stale status claims).
 * **Water design:** the authoritative explanation goes into the architecture page, not a new standalone document.
