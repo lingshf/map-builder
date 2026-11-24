@@ -44,8 +44,10 @@ calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in 
   60 warm-up + 300 measured frames) against `viewer/frame_time_proxy.html`, using one fixed camera
   from a preset and verifying the reported WebGL renderer contains `SwiftShader`.
 * `style_contact_sheet.py` builds one same-camera contact sheet from `reference/base/head` renders.
-* `style_render_recipe.py` renders `before/after` with Blender EEVEE and writes per-camera contact
-  sheets plus fixed-region palette ΔE2000 reports.
+* `style_render_recipe.py` renders `before/after` with deterministic Cycles CPU by default
+  (`--engine CYCLES --samples 8 --seed 1 --denoise off`), and writes per-camera contact
+  sheets plus fixed-region palette ΔE2000 reports and `timing.json` (per-output timing vs
+  the 120 s budget). EEVEE stays available via `--engine BLENDER_EEVEE`.
 * Added preset: `bellevue-factoria` (D157 final: center 47.5790/-122.1790, 1600 x 1400 m).
 * Added style camera presets: `style-sample-forest-edge`, `style-pittsburgh-river-bend`,
   `style-munich-roofscape`.

@@ -28,6 +28,8 @@
     const qs = new URLSearchParams(location.search);
     const warmup = Math.max(0, parseInt(qs.get("warmup") || "60", 10));
     const frames = Math.max(1, parseInt(qs.get("frames") || "300", 10));
+    const runId = qs.get("run_id") || "";
+    const glbSha256 = qs.get("glb_sha256") || "";
     const status = document.getElementById("status");
 
     const canvas = document.getElementById("c");
@@ -94,7 +96,14 @@
         renderer.setAnimationLoop(null);
         const sorted = [...samples].sort((a, b) => a - b);
         const median = sorted[Math.floor(sorted.length / 2)];
-        const result = { warmup_frames: warmup, measured_frames: frames, median_ms: median, renderer: rendererInfo };
+        const result = {
+          run_id: runId,
+          glb_sha256: glbSha256,
+          warmup_frames: warmup,
+          measured_frames: frames,
+          median_ms: median,
+          renderer: rendererInfo
+        };
         status.textContent = `median ${median.toFixed(3)}ms`;
         try {
           await postResult(result);

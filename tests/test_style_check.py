@@ -52,7 +52,7 @@ def _build_valid_mbmap(path: str) -> None:
         },
         "passage_probes": probes,
     }
-    report = {"passage_probes_blocked": [], "passage_probes_dropped": []}
+    report = {"passage_probes_blocked": [], "passage_probes_dropped": [], "terrain_stats": {"triangles": 1}}
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, sort_keys=True).encode("utf-8"))
         z.writestr("report.json", json.dumps(report, sort_keys=True).encode("utf-8"))
@@ -168,6 +168,38 @@ class StyleCheckTests(unittest.TestCase):
             ))
             ok, failures = style_check.g0_check(head, head)
             self.assertTrue(ok, failures)
+
+    def test_g0_allows_style_only_report_change(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "base.mbmap")
+            head = os.path.join(td, "head.mbmap")
+            _build_valid_mbmap(base)
+
+            def mut_report_style(members):
+                report = json.loads(members["report.json"])
+                report["style"] = {"mode": "stylized"}
+                report["options"] = {"style": "stylized", "material": "flat"}
+                members["report.json"] = json.dumps(report).encode("utf-8")
+
+            _mutate(base, head, mut_report_style)
+            ok, failures = style_check.g0_check(base, head)
+            self.assertTrue(ok, failures)
+
+    def test_g0_fails_when_report_flight_key_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "base.mbmap")
+            head = os.path.join(td, "head.mbmap")
+            _build_valid_mbmap(base)
+
+            def mut_report_flight_key(members):
+                report = json.loads(members["report.json"])
+                report["terrain_stats"]["triangles"] = 2
+                members["report.json"] = json.dumps(report).encode("utf-8")
+
+            _mutate(base, head, mut_report_flight_key)
+            ok, failures = style_check.g0_check(base, head)
+            self.assertFalse(ok)
+            self.assertTrue(any("non-style keys differ" in f for f in failures), failures)
 
     def test_g0_rejects_cross_path_comparison(self) -> None:
         with tempfile.TemporaryDirectory() as td:

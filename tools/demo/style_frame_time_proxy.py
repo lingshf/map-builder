@@ -10,6 +10,7 @@ It supports:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.server
 import json
 import os
@@ -18,8 +19,8 @@ import subprocess
 import threading
 import time
 import urllib.parse
-import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -28,6 +29,8 @@ from demo_bundle import Preset, PresetCamera, load_preset
 
 @dataclass(frozen=True)
 class RunResult:
+    run_id: str
+    glb_sha256: str
     median_ms: float
     renderer: str
 
@@ -36,6 +39,9 @@ def _http_serve(directory: str, host: str, port: int) -> socketserver.TCPServer:
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, directory=directory, **kwargs)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler name
             if self.path != "/frame_time_proxy_result.json":
@@ -54,13 +60,16 @@ def _http_serve(directory: str, host: str, port: int) -> socketserver.TCPServer:
     return httpd
 
 
-def _wait_result(url: str, timeout_s: float) -> dict[str, object]:
+def _wait_result(url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int) -> dict[str, object]:
     end = time.time() + timeout_s
     while time.time() < end:
         try:
             with urllib.request.urlopen(url, timeout=2) as r:
                 if r.status == 200:
                     data = cast("dict[str, object]", json.loads(r.read().decode("utf-8")))
+                    if not _matches_expected_result(data, run_id, glb_sha256, warmup, frames):
+                        time.sleep(0.2)
+                        continue
                     return data
         except OSError:
             pass
@@ -68,7 +77,21 @@ def _wait_result(url: str, timeout_s: float) -> dict[str, object]:
     raise TimeoutError("frame-time proxy did not publish results before timeout")
 
 
-def _run_once(chrome: str, url: str, timeout_s: float) -> RunResult:
+def _matches_expected_result(data: dict[str, object], run_id: str, glb_sha256: str, warmup: int, frames: int) -> bool:
+    if str(data.get("run_id", "")) != run_id:
+        return False
+    if str(data.get("glb_sha256", "")) != glb_sha256:
+        return False
+    warmup_raw = data.get("warmup_frames", -1)
+    if not isinstance(warmup_raw, (int, float)) or int(warmup_raw) != warmup:
+        return False
+    frames_raw = data.get("measured_frames", -1)
+    if not isinstance(frames_raw, (int, float)) or int(frames_raw) != frames:
+        return False
+    return isinstance(data.get("median_ms"), (int, float))
+
+
+def _run_once(chrome: str, url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int) -> RunResult:
     parsed = urllib.parse.urlparse(url)
     result_url = urllib.parse.urlunparse(parsed._replace(path="/frame_time_proxy_result.json", query=""))
     p = subprocess.Popen(
@@ -86,15 +109,19 @@ def _run_once(chrome: str, url: str, timeout_s: float) -> RunResult:
         stderr=subprocess.DEVNULL,
     )
     try:
-        out = _wait_result(result_url, timeout_s)
+        out = _wait_result(result_url, timeout_s, run_id, glb_sha256, warmup, frames)
         renderer = str(out.get("renderer", "unknown"))
         median_raw = out.get("median_ms")
         if not isinstance(median_raw, (int, float)):
             raise SystemExit("frame_time_proxy_result.json missing numeric median_ms")
-        return RunResult(median_ms=float(median_raw), renderer=renderer)
+        return RunResult(run_id=run_id, glb_sha256=glb_sha256, median_ms=float(median_raw), renderer=renderer)
     finally:
         p.terminate()
-        p.wait(timeout=5)
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=5)
 
 
 def _camera_from_preset(preset: Preset, camera_name: str | None) -> PresetCamera:
@@ -106,23 +133,42 @@ def _camera_from_preset(preset: Preset, camera_name: str | None) -> PresetCamera
     raise SystemExit(f"camera not found in preset: {camera_name}")
 
 
-def _make_url(host: str, port: int, camera: PresetCamera) -> str:
+def _enu_to_gltf(v: list[float]) -> list[float]:
+    return [float(v[0]), float(v[2]), float(-v[1])]
+
+
+def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, glb_sha256: str, warmup: int, frames: int) -> str:
     eye = camera["eye"]
     target = camera["target"]
+    eye_gltf = _enu_to_gltf(eye)
+    target_gltf = _enu_to_gltf(target)
     qs = urllib.parse.urlencode(
         {
-            "warmup": 60,
-            "frames": 300,
-            "eye_x": eye[0],
-            "eye_y": eye[1],
-            "eye_z": eye[2],
-            "target_x": target[0],
-            "target_y": target[1],
-            "target_z": target[2],
+            "run_id": run_id,
+            "glb_sha256": glb_sha256,
+            "warmup": warmup,
+            "frames": frames,
+            "eye_x": eye_gltf[0],
+            "eye_y": eye_gltf[1],
+            "eye_z": eye_gltf[2],
+            "target_x": target_gltf[0],
+            "target_y": target_gltf[1],
+            "target_z": target_gltf[2],
             "lens_mm": camera.get("lens_mm", 35),
         }
     )
     return f"http://{host}:{port}/frame_time_proxy.html?{qs}"
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, object]:
@@ -133,21 +179,46 @@ def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, ob
         raise SystemExit("viewer-dir must contain frame_time_proxy.html")
     httpd = _http_serve(viewer, args.host, args.port)
     try:
-        url = _make_url(args.host, args.port, camera)
+        warmup = int(args.warmup)
+        frames = int(args.frames)
         result_file = os.path.join(viewer, "frame_time_proxy_result.json")
+        glb_sha256 = _sha256_file(os.path.join(viewer, "map.glb"))
         vals: list[float] = []
+        run_results: list[dict[str, object]] = []
         renderer = "unknown"
         for _ in range(args.runs):
+            run_id = str(uuid.uuid4())
+            url = _make_url(args.host, args.port, camera, run_id, glb_sha256, warmup, frames)
             if os.path.exists(result_file):
                 os.remove(result_file)
-            out = _run_once(args.chrome, url, args.timeout)
+            out = _run_once(args.chrome, url, args.timeout, run_id, glb_sha256, warmup, frames)
             vals.append(out.median_ms)
             renderer = out.renderer
+            run_results.append(
+                {
+                    "run_id": out.run_id,
+                    "glb_sha256": out.glb_sha256,
+                    "median_ms": out.median_ms,
+                    "renderer": out.renderer,
+                }
+            )
         if "swiftshader" not in renderer.lower():
             raise SystemExit(f"renderer is not SwiftShader: {renderer}")
         median = sorted(vals)[len(vals) // 2]
         spread_pct = 0.0 if median == 0 else (max(vals) - min(vals)) / median * 100.0
-        return {"mode": "single", "runs_ms": vals, "median_ms": median, "spread_pct": spread_pct, "renderer": renderer}
+        return {
+            "mode": "single",
+            "runs_ms": vals,
+            "run_results": run_results,
+            "median_ms": median,
+            "spread_pct": spread_pct,
+            "renderer": renderer,
+            "execution_label": "swiftshader",
+            "interpretation": "relative-only",
+            "warmup_frames": warmup,
+            "measured_frames": frames,
+            "glb_sha256": glb_sha256,
+        }
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -164,22 +235,70 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
     base_httpd = _http_serve(base, args.host, base_port)
     head_httpd = _http_serve(head, args.host, head_port)
     try:
-        base_url = _make_url(args.host, base_port, camera)
-        head_url = _make_url(args.host, head_port, camera)
+        warmup = int(args.warmup)
+        frames = int(args.frames)
+        base_glb_sha = _sha256_file(os.path.join(base, "map.glb"))
+        head_glb_sha = _sha256_file(os.path.join(head, "map.glb"))
         base_runs: list[float] = []
         head_runs: list[float] = []
+        base_run_results: list[dict[str, object]] = []
+        head_run_results: list[dict[str, object]] = []
         renderer = "unknown"
+        base_result_file = os.path.join(base, "frame_time_proxy_result.json")
+        head_result_file = os.path.join(head, "frame_time_proxy_result.json")
         for _ in range(args.alternating_pairs):
-            out_b = _run_once(args.chrome, base_url, args.timeout)
-            out_h = _run_once(args.chrome, head_url, args.timeout)
+            base_run_id = str(uuid.uuid4())
+            base_url = _make_url(args.host, base_port, camera, base_run_id, base_glb_sha, warmup, frames)
+            if os.path.exists(base_result_file):
+                os.remove(base_result_file)
+            out_b = _run_once(args.chrome, base_url, args.timeout, base_run_id, base_glb_sha, warmup, frames)
+            head_run_id = str(uuid.uuid4())
+            head_url = _make_url(args.host, head_port, camera, head_run_id, head_glb_sha, warmup, frames)
+            if os.path.exists(head_result_file):
+                os.remove(head_result_file)
+            out_h = _run_once(args.chrome, head_url, args.timeout, head_run_id, head_glb_sha, warmup, frames)
             base_runs.append(out_b.median_ms)
             head_runs.append(out_h.median_ms)
+            base_run_results.append(
+                {
+                    "run_id": out_b.run_id,
+                    "glb_sha256": out_b.glb_sha256,
+                    "median_ms": out_b.median_ms,
+                    "renderer": out_b.renderer,
+                }
+            )
+            head_run_results.append(
+                {
+                    "run_id": out_h.run_id,
+                    "glb_sha256": out_h.glb_sha256,
+                    "median_ms": out_h.median_ms,
+                    "renderer": out_h.renderer,
+                }
+            )
             renderer = out_h.renderer
-        repeat_url = head_url if args.repeat_target == "head" else base_url
         repeat_runs: list[float] = []
+        repeat_run_results: list[dict[str, object]] = []
         for _ in range(args.repeats):
-            out = _run_once(args.chrome, repeat_url, args.timeout)
+            repeat_run_id = str(uuid.uuid4())
+            if args.repeat_target == "head":
+                repeat_url = _make_url(args.host, head_port, camera, repeat_run_id, head_glb_sha, warmup, frames)
+                if os.path.exists(head_result_file):
+                    os.remove(head_result_file)
+                out = _run_once(args.chrome, repeat_url, args.timeout, repeat_run_id, head_glb_sha, warmup, frames)
+            else:
+                repeat_url = _make_url(args.host, base_port, camera, repeat_run_id, base_glb_sha, warmup, frames)
+                if os.path.exists(base_result_file):
+                    os.remove(base_result_file)
+                out = _run_once(args.chrome, repeat_url, args.timeout, repeat_run_id, base_glb_sha, warmup, frames)
             repeat_runs.append(out.median_ms)
+            repeat_run_results.append(
+                {
+                    "run_id": out.run_id,
+                    "glb_sha256": out.glb_sha256,
+                    "median_ms": out.median_ms,
+                    "renderer": out.renderer,
+                }
+            )
             renderer = out.renderer
         if "swiftshader" not in renderer.lower():
             raise SystemExit(f"renderer is not SwiftShader: {renderer}")
@@ -189,12 +308,21 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
             "mode": "alternating",
             "base_runs_ms": base_runs,
             "head_runs_ms": head_runs,
+            "base_run_results": base_run_results,
+            "head_run_results": head_run_results,
             "base_median_ms": sorted(base_runs)[len(base_runs) // 2],
             "head_median_ms": sorted(head_runs)[len(head_runs) // 2],
             "repeat_target": args.repeat_target,
             "repeat_runs_ms": repeat_runs,
+            "repeat_run_results": repeat_run_results,
             "repeat_spread_pct": repeat_spread_pct,
             "renderer": renderer,
+            "execution_label": "swiftshader",
+            "interpretation": "relative-only",
+            "warmup_frames": warmup,
+            "measured_frames": frames,
+            "base_glb_sha256": base_glb_sha,
+            "head_glb_sha256": head_glb_sha,
         }
     finally:
         base_httpd.shutdown()
@@ -218,6 +346,8 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8781)
     ap.add_argument("--timeout", type=float, default=60.0)
+    ap.add_argument("--warmup", type=int, default=60)
+    ap.add_argument("--frames", type=int, default=300)
     args = ap.parse_args()
 
     if args.viewer_dir and (args.base_viewer_dir or args.head_viewer_dir):

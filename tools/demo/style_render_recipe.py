@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
-"""S5 style render harness: fixed preset cameras, Blender EEVEE, contact sheets, palette ΔE2000 report."""
+"""S5 style render harness: fixed preset cameras, deterministic Cycles/EEVEE renders, contact sheets, palette ΔE2000 report."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import math
 import os
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -113,7 +114,17 @@ def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
     return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
 
 
-def _render(pkg: db.Package, preset: db.Preset, suffix: str, out_dir: str, engine: str = "BLENDER_EEVEE") -> list[str]:
+def _render(
+    pkg: db.Package,
+    preset: db.Preset,
+    suffix: str,
+    out_dir: str,
+    *,
+    engine: str = "CYCLES",
+    samples: int = 8,
+    seed: int = 1,
+    denoise: bool = False,
+) -> tuple[list[str], dict[str, float]]:
     import bpy
     from mathutils import Vector
 
@@ -123,7 +134,13 @@ def _render(pkg: db.Package, preset: db.Preset, suffix: str, out_dir: str, engin
         engine = "BLENDER_EEVEE_NEXT"
     scene.render.engine = engine
     if engine in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"):
-        scene.eevee.taa_render_samples = db.SAMPLES
+        scene.eevee.taa_render_samples = int(samples)
+    elif engine == "CYCLES":
+        scene.cycles.device = "CPU"
+        scene.cycles.samples = int(samples)
+        scene.cycles.use_denoising = bool(denoise)
+        scene.cycles.use_adaptive_sampling = False
+        scene.cycles.seed = int(seed)
     scene.render.resolution_x, scene.render.resolution_y = db.RENDER_SIZE
     scene.render.image_settings.file_format = "PNG"
     scene.view_settings.view_transform = "AgX"
@@ -157,6 +174,7 @@ def _render(pkg: db.Package, preset: db.Preset, suffix: str, out_dir: str, engin
     cam.clip_end = 5000
 
     names: list[str] = []
+    render_seconds: dict[str, float] = {}
     for c in preset["cameras"]:
         eye = Vector(c["eye"])
         target = Vector(c["target"])
@@ -165,9 +183,11 @@ def _render(pkg: db.Package, preset: db.Preset, suffix: str, out_dir: str, engin
         cam.lens = c.get("lens_mm", 35)
         name = f"render-{c['name']}-{suffix}.png"
         scene.render.filepath = os.path.join(out_dir, name)
+        t0 = time.perf_counter()
         bpy.ops.render.render(write_still=True)
+        render_seconds[name] = time.perf_counter() - t0
         names.append(name)
-    return names
+    return names, render_seconds
 
 
 def _make_sheet(reference_path: str, base_path: str, head_path: str, out_path: str) -> None:
@@ -250,35 +270,88 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--reference", required=True, help="reference image to place on contact sheets")
     ap.add_argument("--palette-regions", required=True, help="json file listing fixed regions and target colors")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--engine", choices=("CYCLES", "BLENDER_EEVEE"), default="CYCLES")
+    ap.add_argument("--samples", type=int, default=8)
+    ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--denoise", action="store_true", default=False)
+    ap.add_argument("--max-seconds-per-output", type=float, default=120.0)
     args = ap.parse_args(argv)
 
     os.makedirs(args.out, exist_ok=True)
     preset = db.load_preset(args.preset)
     before = db.read_package(args.before)
     after = db.read_package(args.after)
-    _render(before, preset, "before", args.out, engine="BLENDER_EEVEE")
-    _render(after, preset, "after", args.out, engine="BLENDER_EEVEE")
+    _, before_seconds = _render(
+        before,
+        preset,
+        "before",
+        args.out,
+        engine=args.engine,
+        samples=args.samples,
+        seed=args.seed,
+        denoise=args.denoise,
+    )
+    _, after_seconds = _render(
+        after,
+        preset,
+        "after",
+        args.out,
+        engine=args.engine,
+        samples=args.samples,
+        seed=args.seed,
+        denoise=args.denoise,
+    )
 
-    for cam in preset["cameras"]:
-        name = cam["name"]
-        _make_sheet(
-            args.reference,
-            os.path.join(args.out, f"render-{name}-before.png"),
-            os.path.join(args.out, f"render-{name}-after.png"),
-            os.path.join(args.out, f"contact-sheet-{name}.png"),
+    timing_rows: list[dict[str, object]] = []
+    for name, sec in sorted({**before_seconds, **after_seconds}.items()):
+        timing_rows.append(
+            {
+                "file": name,
+                "seconds": round(float(sec), 3),
+                "within_120s": bool(sec <= float(args.max_seconds_per_output)),
+            }
         )
+    notes: list[str] = []
+    try:
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        notes.append("Pillow not available in Blender Python; skipped contact sheets and palette reports.")
+    else:
+        for cam in preset["cameras"]:
+            name = cam["name"]
+            _make_sheet(
+                args.reference,
+                os.path.join(args.out, f"render-{name}-before.png"),
+                os.path.join(args.out, f"render-{name}-after.png"),
+                os.path.join(args.out, f"contact-sheet-{name}.png"),
+            )
 
-    regions = _load_regions(args.palette_regions)
-    for cam in preset["cameras"]:
-        camera_name = cam["name"]
-        camera_regions = [r for r in regions if r.camera == camera_name]
-        if not camera_regions:
-            continue
-        _palette_report(
-            os.path.join(args.out, f"render-{camera_name}-after.png"),
-            camera_regions,
-            os.path.join(args.out, f"palette-{camera_name}.json"),
+        regions = _load_regions(args.palette_regions)
+        for cam in preset["cameras"]:
+            camera_name = cam["name"]
+            camera_regions = [r for r in regions if r.camera == camera_name]
+            if not camera_regions:
+                continue
+            _palette_report(
+                os.path.join(args.out, f"render-{camera_name}-after.png"),
+                camera_regions,
+                os.path.join(args.out, f"palette-{camera_name}.json"),
+            )
+    with open(os.path.join(args.out, "timing.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(
+            {
+                "engine": args.engine,
+                "samples": int(args.samples),
+                "seed": int(args.seed),
+                "denoise": bool(args.denoise),
+                "max_seconds_per_output": float(args.max_seconds_per_output),
+                "rows": timing_rows,
+                "notes": notes,
+            },
+            f,
+            indent=2,
         )
+        f.write("\n")
     return 0
 
 
