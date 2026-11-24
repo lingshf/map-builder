@@ -517,6 +517,35 @@ them. The user then delegated the remaining open points to the coordinator ("其
 Spec, palette, the G0 flight-data gate, budgets, acceptance method and tasks: [tasks/S5-STYLE.md](tasks/S5-STYLE.md).
 Order (D149, D156, D161, D164): S4-F8 ∥ S5-STYLE-BASE (∥ S5-F3 step 1 ∥ S5-F4, test-only, in parallel) → S5-PERF-GATE → S5-F3 fix (if any) → PALETTE (also after S5-F4's verified closure) → WATER → S5-PERF-WATER → S5-STYLE-REVIEW (GO/NO-GO), then S5-DECOR last; nothing waits on DECOR. v0.5.0 close review: [reviews/REL-v0.5.0-close.md](reviews/REL-v0.5.0-close.md).
 
+### Milestone M-S5 "stylized look": goal baseline (D169)
+
+**Goal.** The map has the reference's stylized low-poly look by default, with classic mode byte-identical and the
+flight data exact (G0), within the low-end budgets (D137–D141). The milestone may span Sprints and is not a version.
+
+**Closure.** M-S5 closes when every **must** item below is `accepted` (QA verdict on its criteria) and every
+**deferrable** item is either `accepted` or explicitly deferred with an owner and a reason recorded in the Backlog.
+S5-STYLE-REVIEW's GO is one of the must items. A Sprint end or a tag is **not** closure. Closure triggers
+[M-S5-RETRO](tasks/README.md#milestone-retros).
+
+Must/deferrable classification: De (proposed; Team Leader confirms, user may change).
+
+| Item | Class | Acceptance (canonical criteria in the linked spec) |
+|---|---|---|
+| [S5-STYLE-BASE](tasks/S5-STYLE.md#s5-style-base-baselines-metrics-g0-checker-and-acceptance-harness) | must | Spec ACs; `done` also needs the Factoria ponds-camera QA verdict delivered in PALETTE step 1 (D163) |
+| [S5-PERF-GATE](tasks/S5-PERF-GATE.md) | must | Spec ACs: the D153 work vector and F1–F6 rules, byte-identical output |
+| [S5-F3](tasks/S5-F3.md) | must (correctness) | `water_above_bank` = 0 and `water_buried` = 0 measured by the audit on all four presets and both paths; per-region evidence; rebaseline if packages change (D161, D162) |
+| [S5-F4](tasks/S5-F4.md) | must (correctness) | AC1–AC5: full headless integration suite `OK: 0 failure(s)` on merged main; positive and negative cases; pinned-clock identity (D164) |
+| [S5-STYLE-PALETTE](tasks/S5-STYLE.md#s5-style-palette-style-option-default-stylized-palette-faceting-terrain-buildings-roads-and-trees) | must | Spec ACs: G0 and classic identity, per-PR budgets, CLI/Blender parity, palette evidence, ponds camera re-framed |
+| [S5-STYLE-WATER](tasks/S5-STYLE.md#s5-style-water-cyan-water-terrain-side-shore-band-sandy-banks-colour-only) | must | Spec ACs: colour-only water and shore band, G0 and classic identity |
+| [S5-PERF-WATER](tasks/S5-PERF-WATER.md) | must (a STYLE-REVIEW dependency, D156) | Spec ACs: byte-identical output, per-unit work targets (AC3) |
+| [S5-STYLE-REVIEW](tasks/S5-STYLE.md#s5-style-review-design-milestone-review-gono-go) | must | Explicit GO with the listed evidence; a NO-GO names S5-Fn fix tasks, which join this baseline as must |
+| [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) | deferrable (contingent, D142) | Spec steps 1a/1b pass, else stop and escalate; deferral records owner and reason |
+| DOC-PERF | deferrable | Usage of the D153 gate documented after S5-PERF-GATE, with owner check and QA rehearsal |
+| DOC-TOOLS-F1 | deferrable | `floating_audit` output-write errors exit 2 or create parent directories; doc note updated |
+| [M-S5-RETRO](tasks/README.md#milestone-retros) | must (closes the milestone record) | The retro acceptance in the Backlog (D169) |
+
+Out of the baseline: S5-F1 and S5-F2 (deferred, need user approval or data review), DOC-USER-STRUCT (release-owned).
+
 ### Sprint 5 decisions
 
 | # | Decision | Who | Status |
@@ -552,6 +581,9 @@ Order (D149, D156, D161, D164): S4-F8 ∥ S5-STYLE-BASE (∥ S5-F3 step 1 ∥ S5
 | D164 | New Backlog item **S5-F4**, P1 correctness (Team Leader request). It comes from the QA rehearsal of #92: on main `f1178f8` with Blender 4.2.23, the headless integration suite `tests/blender/run_integration.py` exits 1 with `FAIL terrain vertex edit exported` (`tests/blender/checks_core.py:308`). The failure predates #92. Because it concerns exported terrain, it is treated as a collision and height risk. Step 1 is a read-only root cause that classifies it as R (real export defect) or T (test artefact). One hypothesis, not a finding: since #77, `bank:<id>` objects are also class `terrain`, so the check may select one of them. An R fix that changes collision needs explicit user approval (G0, D145) and a rebaseline. A T fix is test-only and carries a negative test. Order: S5-F4 is P1 and lands before S5-STYLE-PALETTE; an R fix would have been serialised after S5-PERF-GATE and S5-F3. Updated sprint 5 order: S4-F8 ∥ S5-STYLE-BASE (∥ S5-F3 step 1 ∥ S5-F4, test-only, in parallel) → S5-PERF-GATE → S5-F3 fix (if any) → S5-STYLE-PALETTE (also after S5-F4's verified closure) → S5-STYLE-WATER → S5-PERF-WATER → S5-STYLE-REVIEW → S5-DECOR. PALETTE also waits for S5-F4's verified closure (AC1–AC4 on merged main). **Step 1 result** (Developer, coordinator-reported): class **T**; first bad commit db9db44 (#77); the exported `terrain:grid` collision, the `.mbhf` and the GLB all match the edit, and the check selected another `terrain`-class object. The fix is a test-only selector change in `tests/blender/`. Being test-only, it runs in parallel (it does not wait for S5-PERF-GATE or an S5-F3 fix); it still lands before PALETTE. The per-object step-1 evidence is **pending capture** on the S5-F4 fix PR. Spec: [tasks/S5-F4.md](tasks/S5-F4.md). | C (Team Leader request); De (order, spec) | decided |
 | D165 | Recorded facts (batch). #89 merged at 469de19. #90 merged at f1178f8. DOC-ARCH and DOC-WATER-DESIGN are `merged` (f1178f8) and `done`. The Team Leader's DoD check found: code review APPROVED, QA accepted, and the Developer fact check (#90 comment 7145359397) verified the requested water facts. That check covered exactly the requested water facts: carve depth 1.5 m, p20 level, the 300 m / 1 % profile rule, ramp slope 0.5 / 12 m / 0.02 m, the two-grid rule and the masks. Only those facts are owner-verified in the matrix; acquisition/DSM, roofs, textures/UVs, Blender export and the other water design and trade-off facts stay structurally covered with the owner check pending. D115's pre-carve clause for roads was superseded by #76 (D126): roads drape on the carved grid (`core/generate.py:2052`), confirmed by the coordinator during that fact check. | C (Team Leader DoD check); KL (record) | decided |
 | D166 | Retro item (S5-F4 step 1): #77 (db9db44) merged with the headless Blender integration suite failing (`FAIL terrain vertex edit exported`), because its Blender evidence came from targeted runs rather than the full suite, and the DoD item allowed that. From now on, any PR touching generator or export code (`map_builder/core/`, `map_builder/blender/`) posts a **full** headless integration run on the **exact head** with `OK: 0 failure(s)`; charter §4 item 11 is updated. Applies to new heads from this record on; in-flight heads post it before their next review round. | C (coordinator retro) | decided |
+| D167 | #93 review: after R2 (the last round), the coordinator personally verified the R2 fix commit 00152ca → 7736f05 (design/ only: AC3 positive and the three negatives, AC4 pinned clock with a member-level fallback that excludes only `created_utc` and the package ID, step-1 evidence pending capture, order aligned, D165 scoped) and authorised the merge (bc829f3), a one-off exception to D133. | C (coordinator) | decided (one-off) |
+| D168 | Recorded facts (batch). #92 merged at 197335d. DOC-TOOLS and DOC-DEV are `merged` (197335d) and `done`: code review APPROVED and QA accepted at R3 on the exact head cad5815; the Developer fact check (#92 comment 7146488121, at 9b0219c) found no mismatch, and the cad5815 delta changed only the two lines QA re-ran. Their matrix rows are owner-verified (7146488121) and QA-rehearsed (#92 R2/R3). | C (Team Leader DoD check); KL (record) | decided |
+| D169 | Milestone retros. Source: an **M2 relay** of user text via the Team Leader, not a direct user message: "每个开发团队在这次milestone完成后，都安排一次retro，回顾已完成任务，整体目标，进度多少，有没有偏离；每个角色都要检查自己完成的代码，文档，是否有outdated，missed，或者需要refine的。各组的leader要注意每个成员都on same page，保证信息的一致性。后续按照规范项M2汇报". Every milestone closes with a retro owned by the Team Leader (first: M-S5-RETRO, Backlog §Milestone retros): outcomes against the goal baseline, deviation causes, every role's self-check of its own outputs, the Knowledge Lead's coverage and learning-path audit, the Team Leader's per-member consistency confirmation, and improvement items entered in the Backlog. M2 reporting goes through the Team Leader only (charter §3). The M-S5 goal baseline and closure rule are recorded in §v5 above; they refine charter §3's "reached at the S5-STYLE-REVIEW GO": the GO is necessary but not sufficient. No new permission, no scheduled task, retained exceptions unchanged. | U (via M2 relay); C (registration); De (baseline, proposed classification) | decided |
 
 ## Decisions that need the user
 

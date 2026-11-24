@@ -161,9 +161,9 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 |---|---|---|---|---|---|---|
 | DOC-ARCH | S5 | Developer + Product/Design / Knowledge Lead | — | `docs/architecture/README.md` | merged (f1178f8); done (D165) | #90 (f1178f8) |
 | DOC-WATER-DESIGN | S5 | Product/Design (D112–D129) + Developer (code entries) / Knowledge Lead | DOC-ARCH (same page; serialise) | `docs/architecture/README.md` (water section) | merged (f1178f8); done (D165) | #90 (f1178f8) |
-| DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | review (facts: Developer check; QA command rehearsal) | |
+| DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | merged (197335d); done (D168) | #92 (197335d) |
 | DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | merged (7cf6f45); done | #87 (7cf6f45) |
-| DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | review (facts: Developer check; QA command rehearsal) | |
+| DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | merged (197335d); done (D168) | #92 (197335d) |
 | DOC-TOOLS-F1 | later | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then `docs/dev/tools.md` exit-code note | ready: floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
 | DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
 | DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/README.md` (performance section) | blocked | |
@@ -188,6 +188,31 @@ Details for each row:
   one run.
 * **DOC-USER-STRUCT:** the title says v0.3.0, but the body cites v0.5.0.
 * **DOC-PERF:** document the D153 gate's usage once the tool exists.
+
+## Milestone retros
+
+D169 (an M2 relay of user text; see the decision record). Every milestone closes with one retro, owned by the
+Team Leader. The retro is a written record, not a scheduled task.
+
+| id | milestone | owner | trigger (dependency) | conflict domain (hard) | status | PR |
+|---|---|---|---|---|---|---|
+| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 closure: every must item in the [goal baseline](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169) `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | blocked (milestone open) | |
+
+**M-S5-RETRO acceptance:**
+
+* **Outcomes against the goal baseline:** each item marked accepted, unfinished, added or deferred. Progress is
+  shown as separate counts of `merged` and `accepted` items. No percentage unless it has a stated denominator.
+* **Deviation:** each deviation from the goal or the order, its cause and its impact.
+* **Self-check by every role** of its own outputs (code, tests, specs, docs, records) for outdated, missed or
+  needs-refine, with evidence or a not-applicable reason: Team Leader, Product/Design, each Developer, QA, Code
+  Reviewer, Delivery/Release, Knowledge Lead.
+* **Knowledge Lead audit:** cross-module coverage-matrix recheck and the learning paths in `docs/README.md`.
+* **Consistency:** the Team Leader confirms per member that each role works from the same baseline, Backlog and
+  decisions.
+* **Improvements:** each one entered in this Backlog with owner, priority, acceptance and target milestone.
+* **Constraints:** no new permissions; no refactors outside the quality gates; the retained exceptions
+  ([charter §5](../team-charter.md#5-retained-project-rules-exceptions-to-the-shared-defaults)) stay; no scheduled
+  task. The M2 report goes through the Team Leader only.
 
 ## Dependency order and parallel waves (max 3 devs)
 
