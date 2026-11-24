@@ -16,6 +16,7 @@ from os import PathLike
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypedDict, overload
 
 from .errors import FormatError, LimitError
+from . import perf_counters
 
 if TYPE_CHECKING:
     from .cache import CacheLike
@@ -352,6 +353,8 @@ def ring_area(ring: Sequence[Pt]) -> float:
 def point_in_ring(x: float, y: float, ring: Sequence[Pt]) -> bool:
     inside = False
     n = len(ring)
+    if perf_counters.ENABLED:
+        perf_counters.inc("ring_edge_tests", n)
     j = n - 1
     for i in range(n):
         xi, yi = ring[i]
@@ -373,6 +376,8 @@ def _clean_ring(pts: Iterable[Pt]) -> Ring:
 
 
 def _segments_intersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt) -> bool:
+    if perf_counters.ENABLED:
+        perf_counters.inc("ring_edge_tests")
     def orient(a: Pt, b: Pt, c: Pt) -> float:
         return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
     d1, d2 = orient(p3, p4, p1), orient(p3, p4, p2)

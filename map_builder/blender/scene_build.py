@@ -22,6 +22,7 @@ import bpy
 
 from ..core import textures as tex
 from ..core import uv as core_uv
+from ..core import perf_counters
 from ..core.errors import MapBuilderError
 from ..core.generate import MATERIALS
 from ..core.glb import node_scale
@@ -189,6 +190,8 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
         ``textures`` selects the textured materials."""
     me = bpy.data.meshes.new(name or md.name)
     created_meshes.append(me)
+    if perf_counters.ENABLED:
+        perf_counters.inc("bpy_mesh_vertices", len(md.vertices))
     me.from_pydata(md.vertices, [], md.faces)
     if me.validate(clean_customdata=False) or len(me.polygons) != len(md.faces):
         raise MapBuilderError(f"generated mesh {md.name!r} was altered by Blender's mesh validation; "

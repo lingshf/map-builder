@@ -25,6 +25,7 @@ from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
 from .overlap import point_segment_distance, triangle_overlaps_region, triangle_touches
+from . import perf_counters
 from .shore import shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
@@ -79,6 +80,8 @@ def _lerp_canon(a: Pt, b: Pt, t: float) -> Pt:
 
 def _clip_half(poly: Sequence[Pt], nx: float, ny: float, c: float, keep_ge: bool) -> list[Pt]:
     """Keep the part of convex ``poly`` where nx*x + ny*y >= c (or <= c). Intersections are canonical."""
+    if perf_counters.ENABLED:
+        perf_counters.inc("clip_steps", len(poly))
     out: list[Pt] = []
     sgn = 1.0 if keep_ge else -1.0
     n = len(poly)
@@ -658,10 +661,16 @@ class _Masks:
         """Whether a plan triangle overlaps a footprint or comes within a line's half width, interior included."""
         xs, ys = [v[0] for v in tri], [v[1] for v in tri]
         box = (min(xs), min(ys), max(xs), max(ys))
-        if any(triangle_touches(tri, self.footprints[i].outer, 0.0, closed=True) for i in self.foot_idx.in_box(box)):
+        foot_candidates = self.foot_idx.in_box(box)
+        if perf_counters.ENABLED:
+            perf_counters.inc("candidate_pairs", len(foot_candidates))
+        if any(triangle_touches(tri, self.footprints[i].outer, 0.0, closed=True) for i in foot_candidates):
             return True
+        line_candidates = self.line_idx.in_box(box)
+        if perf_counters.ENABLED:
+            perf_counters.inc("candidate_pairs", len(line_candidates))
         return any(triangle_touches(tri, self.lines[i][0], self.lines[i][1], closed=False)
-                   for i in self.line_idx.in_box(box))
+                   for i in line_candidates)
 
     def hit_line(self, x: float, y: float, extra: float) -> bool:
         for i in self.line_idx.at(x, y):

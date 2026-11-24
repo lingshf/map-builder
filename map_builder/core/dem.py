@@ -23,6 +23,7 @@ from array import array
 from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, BinaryIO, Protocol, TypeAlias
 
+from . import perf_counters
 from .cache import check_cache_dataset_id
 from .errors import CoverageError, FormatError, LimitError, NoDataError
 from .geodesy import utm_forward
@@ -214,6 +215,8 @@ def _sample_grid(area: Area, spacing: float, rasters: Sequence[_Raster],
                     first_missing = (lat, lon)
                 v = 0.0
             row.append(v)
+        if perf_counters.ENABLED:
+            perf_counters.inc("grid_cells", nx)
         heights.append(row)
         if progress:
             progress((j + 1) / ny)
