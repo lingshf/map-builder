@@ -500,6 +500,22 @@ def pairs(spec: list[str]) -> dict[str, str]:
     return out
 
 
+def path_points_from_manifest(entry: dict[str, Any], field: str) -> list[tuple[float, float, float]]:
+    """Parse a manifest path field into validated XYZ points (fails fast on malformed package data)."""
+    raw = entry.get(field)
+    if not isinstance(raw, list):
+        raise SystemExit(f"probe {entry.get('id')}: {field} is not a list")
+    out: list[tuple[float, float, float]] = []
+    for i, p in enumerate(raw):
+        if not isinstance(p, (list, tuple)) or len(p) != 3:
+            raise SystemExit(f"probe {entry.get('id')}: {field}[{i}] is not a 3D point")
+        x, y, z = p
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not isinstance(z, (int, float)):
+            raise SystemExit(f"probe {entry.get('id')}: {field}[{i}] has non-numeric coordinates")
+        out.append((float(x), float(y), float(z)))
+    return out
+
+
 def d21_backing(row: dict[str, Any] | None, head: Any) -> tuple[str | None, str]:
     """The generator's own D21 text of a report row (``reason`` of a dropped row, ``blocker`` of a blocked row) and
     a problem string. A blocker must name an object of HEAD (collision name or mb_id); an empty row has no backing."""
@@ -569,16 +585,16 @@ def main() -> int:
     top = rays[0][2] if rays else max(v[2] for v in base.col.vertices) + 10.0
     wrays = water_rays(head, top)
     all_rays = rays + wrays
-    passages_base = [(p["path_map"], float(p["radius_m"])) for p in base.probes]
-    queries: list[tuple[list, float]] = caps + passages_base
-    head_passages = [(p["path_map"], float(p["radius_m"])) for p in head.probes]
+    passages_base = [(path_points_from_manifest(p, "path_map"), float(p["radius_m"])) for p in base.probes]
+    queries: list[tuple[list[tuple[float, float, float]], float]] = caps + passages_base
+    head_passages = [(path_points_from_manifest(p, "path_map"), float(p["radius_m"])) for p in head.probes]
     ctx = Context(base.names, head, top, bridges=(bridge_geometry(base.col), bridge_geometry(head.col)))
 
     py: dict[str, list[list[tuple[str, str]]]] = {}
     for key, pkg in (("base", base), ("head", head)):
-        py[key] = [names(pkg.col, capsule_hits(pkg.col, path, r)) for path, r in queries]   # type: ignore[arg-type]  # path_map comes from manifest JSON (`list[Any]`), but runtime shape is [x,y,z] points.
+        py[key] = [names(pkg.col, capsule_hits(pkg.col, path, r)) for path, r in queries]
     py_rays = {key: [py_hit(pkg.col, o, dist) for o in all_rays] for key, pkg in (("base", base), ("head", head))}
-    py_head_passage = [capsule_hits(head.col, p, r) for p, r in head_passages]   # type: ignore[arg-type]  # passage paths are manifest JSON arrays; validation in Package() guarantees structure before replay.
+    py_head_passage = [capsule_hits(head.col, p, r) for p, r in head_passages]
     fails += [f"passage {p['id']} not clear on HEAD (python)" for p, hit in zip(head.probes, py_head_passage) if hit]
     for k, (o, hh) in enumerate(zip(wrays, py_rays["head"][len(rays):])):
         if hh is None or hh[2] != "water":
