@@ -105,8 +105,10 @@ each lifecycle fact separately: `implementation_complete`, `merged`, `accepted`,
      Python **and** C# reader runs of the real Pittsburgh package (D47).
 10. **Sample.** `examples/synthetic_sample.mbmap` is regenerated only under the D103 merge-time slot, with the
     command in `examples/README.md`, and `tests/test_examples.py` is green.
-11. **Blender.** Headless Blender 4.2.23 (`tests/blender/run_integration.py`) reports `OK: 0 failure(s)` when the
-    task touches generation or Blender code; the result is appended to `docs/VALIDATION.md`.
+11. **Blender.** Any PR that touches generator or export code (`map_builder/core/`, `map_builder/blender/`) posts a
+    **full** headless Blender 4.2.23 integration run (`tests/blender/run_integration.py`, the whole suite, not targeted
+    checks) on the **exact head**, reporting `OK: 0 failure(s)`, in the PR evidence (D166); the result is appended to
+    `docs/VALIDATION.md` at release.
 12. **Package and reader compatibility.** Format changes follow D101 and D110, with a positive frozen-reader fixture
     for any minor bump.
 13. **Knowledge.** The changed scope's facts are updated in the canonical page: `PACKAGE_FORMAT.md`, README Limits,
