@@ -54,8 +54,13 @@ The 0.05 m tolerance belongs to the audit's labelling. It is **not** a design bo
 `INFO_KINDS` in the source; every other kind fails. The tool also prints each water body's level, bed depth and bank
 gap. This table is the canonical explanation of the audit categories; other pages link here.
 
-**Exit codes:** 0 when no failing kind is found; 1 otherwise; 2 when the audit raises any error (a missing or
-unreadable package, for example).
+**Exit codes:**
+
+* 0: the audit completed and found no failing kind;
+* 1: the audit completed with a failing finding. **Also 1** for an error writing `--json`: the file is written
+  after the guarded audit, so a missing output directory ends with an uncaught `FileNotFoundError` and exit 1, not 2
+  (DOC-TOOLS-F1). Create the `--json` directory first. `--png-dir` is created by the tool;
+* 2: the audit itself raised an error, for example a missing or unreadable package.
 
 ## Water replay
 
@@ -132,7 +137,7 @@ py -3.12 tools\style_check.py palette-regions --image RENDER.png --regions REGIO
 | `g0` | The [G0 flight-data gate](../../design/tasks/S5-STYLE.md#g0-the-flight-data-gate-every-s5-task-no-waivers): `.mbcol` and `.mbhf` byte-identical, and the georeference, passage probes and blocked and dropped lists equal | 0 / 1 |
 | `classic-identity` | Whole-archive byte identity (D141) | 0 / 1 |
 | `mode-diff` | Member diff between classic and stylized | 0 (report) |
-| `metrics` | Style budget rows (D139): materials, draw submissions, triangles, vertices, and `render_memory_bytes`, a **proxy**: the GLB buffer views referenced by drawn primitives plus embedded image bytes. The packaged sizes are separate: `texture_bytes`, `glb_bytes`, `package_bytes` | 0 (report) |
+| `metrics` | Style budget rows (D139): materials, draw submissions, triangles, vertices, and `render_memory_bytes`, a **proxy**: the GLB buffer views referenced by drawn primitives plus embedded image bytes. Sizes: `texture_bytes`, `glb_bytes`, and `package_bytes`, the sum of the **uncompressed** archive members, which is not the on-disk `.mbmap` size (the committed sample: 1,369,164 vs 709,216 bytes). Compare `package_bytes` between packages; use the file size for download size | 0 (report) |
 | `parity` | Per-node material and colour parity between CLI and Blender | 0 / 1 |
 | `palette-regions` | ΔE2000 of fixed screen regions against the target palette (information, D140); needs Pillow | 0 (report) |
 

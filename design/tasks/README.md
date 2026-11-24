@@ -164,6 +164,7 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 | DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | review (facts: Developer check; QA command rehearsal) | |
 | DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | merged (7cf6f45); done | #87 (7cf6f45) |
 | DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | review (facts: Developer check; QA command rehearsal) | |
+| DOC-TOOLS-F1 | later | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then `docs/dev/tools.md` exit-code note | ready: floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
 | DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
 | DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/README.md` (performance section) | blocked | |
 
