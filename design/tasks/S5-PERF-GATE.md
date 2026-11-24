@@ -94,7 +94,8 @@ tunnels } > `build_scene` (Blender) > package write > `validate_package`
 
 ## Failure rules
 
-These checks run per series, for Munich and Pittsburgh.
+These checks run per series, for Munich and Pittsburgh, the **gating presets**. The sample and Bellevue-Factoria
+are evidence-only (visuals and G0, D157) and are not part of this gate.
 
 **The revision fails if:**
 
