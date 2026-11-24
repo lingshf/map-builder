@@ -121,7 +121,7 @@ Pittsburgh probes that v0.4.0 exported and v0.5.0 does not
 
 ## Release asset candidates
 
-Built from the RC (preliminary until S4-COL-FLOAT); only the PNGs, summaries,
+Built from the RC; only the PNGs, summaries,
 the camera presets, the evidence and this README are committed. The release
 notes list sizes and package_ids.
 
