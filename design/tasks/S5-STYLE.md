@@ -318,11 +318,12 @@ Order (D156, D161): **BASE** (in parallel with S4-F8 and S5-F3 step 1) → S5-PE
   * Hard: `core/style.py` (new); `core/generate.py` (the `LANDCOVER_COLORS`, `MATERIALS`, `FACADE_PALETTE` and
     `ROOF_PALETTE` constants and the colour choice in `build_terrain`, buildings, roads and `tree_mesh` colours;
     **no geometry code**); `core/glb.py` (normals and welding); `core/uv.py` and `core/textures.py` (mode switch
-    only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option).
+    only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option);
+    `tools/demo/presets/bellevue-factoria.json` (ponds camera, D163).
   * Soft: sample slot (D103).
 * **Dependencies:** S5-STYLE-BASE, **S5-PERF-GATE** and the **verified closure of S5-F3** (D161: the measured `water_above_bank`/`water_buried` zero gate passed on main, plus the rebaseline if packages changed; an implementation merge only if one was needed) (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
 * **Step 1 also (D163):** re-frame the Factoria ponds camera so it shows the southern Mercer Slough ponds (the
-  #85 framing shows grey foreground only). Record the new camera in `tools/demo/presets/` before any stylized evidence.
+  #85 framing shows grey foreground only). Record the new camera in `tools/demo/presets/bellevue-factoria.json` before any stylized evidence; QA's verdict on that camera closes S5-STYLE-BASE's `done` (D163).
 
 ### S5-STYLE-WATER: cyan water, terrain-side shore band, sandy banks (colour only)
 
