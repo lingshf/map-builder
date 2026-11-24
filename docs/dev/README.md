@@ -1,7 +1,6 @@
 # Developer guide
 
-This guide describes main as audited at `44cde701123a78f2cf714663f0f4b8605cb1e19d`
-(after the skeleton module merged). The pure core and headless CLI need CPython
+This guide describes main at `f1178f8` (after v0.5.0, S5-STYLE-BASE and the architecture refresh). The pure core and headless CLI need CPython
 3.11+ and use the standard library. Blender integration targets Blender 4.2 LTS;
 the reference reader targets .NET 8 and uses C# 8-compatible code and
 `System.Text.Json`.
@@ -41,10 +40,16 @@ actual Blender integration and writes test artifacts to the specified folder.
 See the [CLI guide](../user/cli.md) for the verified fixture build and validate
 commands and [installation](../user/install.md) for extension packaging.
 
-CI runs the Python suite on 3.11 and 3.12, builds and validates a synthetic
-package, and runs the C# reader, Python/C# capsule parity and tamper rejection.
-Headless Blender and network acquisition are not PR CI jobs. Release automation
-is tag-triggered; consult the workflow files for the exact current commands.
+PR CI (`.github/workflows/ci.yml`) has two jobs:
+
+| Job | Steps |
+|---|---|
+| **Python unit tests** (3.11 and 3.12 matrix) | install numpy (developer tools only); **mypy 2.4.1** (`python -m mypy`, configured in `pyproject.toml`; 3.12 leg only); the unit suite with `-W error::ResourceWarning`; build and validate the synthetic fixture with the CLI |
+| **C# reference reader** | read and self-test the committed sample; Python/C# capsule parity; **format-policy fixtures** (future minor, major 3, frozen v0.3.0 readers; D101, D110); tamper rejection; frozen v0.3.0 readers accept a textured 2.1.0 package; glTF-Validator on the textured fixture (the glTFast proxy, D66) |
+
+Headless Blender and network acquisition are not PR CI jobs. Release automation is tag-triggered. Run mypy
+locally with `py -3.12 -m pip install mypy==2.4.1` and then `py -3.12 -m mypy`. The package-checking tools
+(audit, replays, style and benchmarks) are documented in [Developer tools](tools.md).
 
 ## Workflow and Definition of Done
 

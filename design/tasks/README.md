@@ -161,9 +161,9 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 |---|---|---|---|---|---|---|
 | DOC-ARCH | S5 | Developer + Product/Design / Knowledge Lead | — | `docs/architecture/README.md` | merged (f1178f8); done (D165) | #90 (f1178f8) |
 | DOC-WATER-DESIGN | S5 | Product/Design (D112–D129) + Developer (code entries) / Knowledge Lead | DOC-ARCH (same page; serialise) | `docs/architecture/README.md` (water section) | merged (f1178f8); done (D165) | #90 (f1178f8) |
-| DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | ready | |
+| DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | review (facts: Developer check; QA command rehearsal) | |
 | DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | merged (7cf6f45); done | #87 (7cf6f45) |
-| DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | ready | |
+| DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | review (facts: Developer check; QA command rehearsal) | |
 | DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
 | DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/README.md` (performance section) | blocked | |
 
