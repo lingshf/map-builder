@@ -255,7 +255,7 @@ information and nothing is gated on time.
 and C at their pinned commits, the merge-base SHA, the interpreter, and all four presets) as a roadmap row next to
 D153. Every later S5 task compares its own base against that row as well as against its own merge-base.
 
-Order (D156, D161): **BASE** (in parallel with S4-F8 and S5-F3 step 1) → S5-PERF-GATE → S5-F3 fix (if any) → **PALETTE** → **WATER** → S5-PERF-WATER → **REVIEW**, then **DECOR** last. Nothing waits on DECOR.
+Order (D156, D161, D164): **BASE** (in parallel with S4-F8, S5-F3 step 1 and S5-F4 step 1) → S5-PERF-GATE → S5-F3 fix (if any) → [S5-F4](S5-F4.md) fix → **PALETTE** → **WATER** → S5-PERF-WATER → **REVIEW**, then **DECOR** last. Nothing waits on DECOR.
 
 ### S5-STYLE-BASE: baselines, metrics, G0 checker and acceptance harness
 
@@ -321,7 +321,7 @@ Order (D156, D161): **BASE** (in parallel with S4-F8 and S5-F3 step 1) → S5-PE
     only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option);
     `tools/demo/presets/bellevue-factoria.json` (ponds camera, D163).
   * Soft: sample slot (D103).
-* **Dependencies:** S5-STYLE-BASE **merged** (fba2509 baseline; not its `done`, which PALETTE step 1 closes, D163), **S5-PERF-GATE** and the **verified closure of S5-F3** (D161: the measured `water_above_bank`/`water_buried` zero gate passed on main, plus the rebaseline if packages changed; an implementation merge only if one was needed) (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
+* **Dependencies:** S5-STYLE-BASE **merged** (fba2509 baseline; not its `done`, which PALETTE step 1 closes, D163), **S5-PERF-GATE**, the verified closure of [S5-F4](S5-F4.md) (D164: the Blender integration suite passes on merged main) and the **verified closure of S5-F3** (D161: the measured `water_above_bank`/`water_buried` zero gate passed on main, plus the rebaseline if packages changed; an implementation merge only if one was needed) (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
 * **Step 1 also (D163):** re-frame the Factoria ponds camera so it shows the southern Mercer Slough ponds (the
   #85 framing shows grey foreground only). Record the new camera in `tools/demo/presets/bellevue-factoria.json` before any stylized evidence; **Acceptance criterion of step 1:** a QA verdict of accepted on that camera; the same verdict closes S5-STYLE-BASE's `done` (D163).
 
