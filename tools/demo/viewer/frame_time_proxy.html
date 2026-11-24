@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>frame-time-proxy</title>
+  <style>
+    html, body, canvas { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    #status { position: fixed; top: 6px; left: 8px; color: #fff; background: rgba(0,0,0,0.4); padding: 4px 6px; font: 12px monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="status">starting...</div>
+  <script type="module">
+    import * as THREE from "./vendor/three.module.min.js";
+    import { GLTFLoader } from "./vendor/jsm/loaders/GLTFLoader.js";
+
+    const qs = new URLSearchParams(location.search);
+    const warmup = Math.max(0, parseInt(qs.get("warmup") || "60", 10));
+    const frames = Math.max(1, parseInt(qs.get("frames") || "300", 10));
+    const status = document.getElementById("status");
+
+    const canvas = document.getElementById("c");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(1280, 720, false);
+    renderer.setPixelRatio(1);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x9fc4e8);
+    scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x777766, 1.0));
+    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    sun.position.set(-300, 500, 250);
+    scene.add(sun);
+    const camera = new THREE.PerspectiveCamera(55, 1280 / 720, 0.5, 20000);
+
+    function placeCamera(root) {
+      const box = new THREE.Box3().setFromObject(root);
+      const c = box.getCenter(new THREE.Vector3());
+      const s = box.getSize(new THREE.Vector3()).length();
+      camera.position.set(c.x + s * 0.45, c.y + s * 0.4, c.z + s * 0.55);
+      camera.lookAt(c);
+    }
+
+    async function postResult(result) {
+      await fetch("/frame_time_proxy_result.json", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(result),
+      });
+    }
+
+    const gltf = await new GLTFLoader().loadAsync("./map.glb");
+    scene.add(gltf.scene);
+    placeCamera(gltf.scene);
+
+    const samples = [];
+    let index = 0;
+    let last = performance.now();
+    status.textContent = "running...";
+    renderer.setAnimationLoop(async (now) => {
+      const dt = now - last;
+      last = now;
+      renderer.render(scene, camera);
+      if (index >= warmup) samples.push(dt);
+      index += 1;
+      if (samples.length >= frames) {
+        renderer.setAnimationLoop(null);
+        const sorted = [...samples].sort((a, b) => a - b);
+        const median = sorted[Math.floor(sorted.length / 2)];
+        const result = { warmup_frames: warmup, measured_frames: frames, median_ms: median };
+        status.textContent = `median ${median.toFixed(3)}ms`;
+        try {
+          await postResult(result);
+        } finally {
+          document.title = `done ${median.toFixed(3)}ms`;
+        }
+      }
+    });
+  </script>
+</body>
+</html>

@@ -38,6 +38,13 @@ is never left behind; without a configured copy, or if the run fails, the step i
 `summary.md` records why instead of faking the UI. The tab click is a simulated event
 calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in `panel_shot.py`.
 
+## S5 style acceptance helpers
+
+* `style_frame_time_proxy.py` runs the frame-time proxy (headless Chromium + SwiftShader, 1280x720,
+  60 warm-up + 300 measured frames) against `viewer/frame_time_proxy.html`.
+* `style_contact_sheet.py` builds one same-camera contact sheet from `reference/base/head` renders.
+* Added preset: `bellevue-factoria` (initial 1x1 km around Factoria, Bellevue).
+
 `make_probe_sample.py out.mbmap` derives a small package with three passage probes (PASS, BLOCKED, and
 an id containing markup) from the synthetic sample, for viewer smoke tests.
 
