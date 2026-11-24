@@ -24,6 +24,8 @@ import math
 import os
 import sys
 import zipfile
+from collections.abc import Iterable, Iterator, Sequence
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -34,26 +36,27 @@ from map_builder.core.water import AREA_EPS, VIOLATION_TOL_M, _area2, _clip_poly
 CELL = 32.0
 
 
-def _box(t):
+def _box(t: Sequence[tuple[float, float, float]]) -> tuple[float, float, float, float]:
     xs, ys = [p[0] for p in t], [p[1] for p in t]
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def _cells(b, pad=0.0):
+def _cells(b: tuple[float, float, float, float], pad: float = 0.0) -> Iterator[tuple[int, int]]:
     for i in range(int((b[0] - pad) // CELL), int((b[2] + pad) // CELL) + 1):
         for j in range(int((b[1] - pad) // CELL), int((b[3] + pad) // CELL) + 1):
             yield i, j
 
 
-def _index(tris):
-    idx: dict = {}
+def _index(tris: Sequence[Sequence[tuple[float, float, float]]]) -> dict[tuple[int, int], list[int]]:
+    idx: dict[tuple[int, int], list[int]] = {}
     for k, t in enumerate(tris):
         for c in _cells(_box(t)):
             idx.setdefault(c, []).append(k)
     return idx
 
 
-def _near(idx, tris, b, pad=0.0):
+def _near(idx: dict[tuple[int, int], list[int]], tris: Sequence[Any],
+          b: tuple[float, float, float, float], pad: float = 0.0) -> Iterable[Any]:
     seen: set[int] = set()
     for c in _cells(b, pad):
         for k in idx.get(c, ()):
@@ -62,7 +65,7 @@ def _near(idx, tris, b, pad=0.0):
                 yield tris[k]
 
 
-def invariant(col) -> dict[str, float]:
+def invariant(col: Any) -> dict[str, float]:
     terrain = [t for e in col.objects if e["class"] == "terrain" for t in col.object_triangles(e)]
     tidx = _index(terrain)
     out: dict[str, float] = {}
@@ -83,7 +86,8 @@ def invariant(col) -> dict[str, float]:
     return out
 
 
-def wet_clearance(col, probes, min_clear: float, pre_col) -> list[tuple[str, float, float, bool]]:
+def wet_clearance(col: Any, probes: Sequence[dict[str, Any]], min_clear: float, pre_col: Any
+                  ) -> list[tuple[str, float, float, bool]]:
     """(id, clearance over the exact pre-carve ground and water, clearance over the emitted terrain and water,
     ok) of each emitted wet ``:under`` probe. The pre-carve ground is the terrain of ``pre_col``: a package of
     the same inputs built without water (the base commit), whose terrain mesh is the uncarved grid."""

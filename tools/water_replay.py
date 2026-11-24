@@ -440,10 +440,12 @@ def lowered_together_on_shared_edge(base: Any, head: Any, roads: list[str], xy: 
     footprints = [(local_footprint(base.col, r), local_footprint(head.col, r)) for r in roads]
     if any(b is None or h is None or not footprint_only_lowered(b, h, xy) for b, h in footprints):
         return False
-    base_edges = [ribbon_edge_at(base.col, r, xy) for r in roads]
-    head_edges = [ribbon_edge_at(head.col, r, xy) for r in roads]
-    if None in base_edges or None in head_edges:
+    base_edges_opt = [ribbon_edge_at(base.col, r, xy) for r in roads]
+    head_edges_opt = [ribbon_edge_at(head.col, r, xy) for r in roads]
+    if any(e is None for e in base_edges_opt) or any(e is None for e in head_edges_opt):
         return False
+    base_edges: list[list[Vertex]] = [e for e in base_edges_opt if e is not None]
+    head_edges: list[list[Vertex]] = [e for e in head_edges_opt if e is not None]
     if not all(_same_plan_position(base_edges[0], e) for e in [*base_edges, *head_edges]):
         return False
     return _lowered_equally(base_edges, head_edges)
@@ -517,7 +519,7 @@ def passage_check(base: Any, head: Any, drop: dict[str, str], new: dict[str, str
     problems: list[str] = []
     b = {str(p["id"]) for p in base.probes}
     h = {str(p["id"]) for p in head.probes}
-    rows = {}
+    rows: dict[str, dict[str, Any]] = {}
     for key in ("passage_probes_dropped", "passage_probes_blocked"):
         for e in head.report.get(key) or []:
             rows.setdefault(str(e.get("id")), e)
@@ -572,7 +574,7 @@ def main() -> int:
     head_passages = [(p["path_map"], float(p["radius_m"])) for p in head.probes]
     ctx = Context(base.names, head, top, bridges=(bridge_geometry(base.col), bridge_geometry(head.col)))
 
-    py = {}
+    py: dict[str, list[list[tuple[str, str]]]] = {}
     for key, pkg in (("base", base), ("head", head)):
         py[key] = [names(pkg.col, capsule_hits(pkg.col, path, r)) for path, r in queries]   # type: ignore[arg-type]
     py_rays = {key: [py_hit(pkg.col, o, dist) for o in all_rays] for key, pkg in (("base", base), ("head", head))}
@@ -621,12 +623,12 @@ def main() -> int:
             cs_head_passage = csharp(head.mbcol, head_passages, w2) if head_passages else []
             rb, rh = csharp_rays(base.mbcol, all_rays, dist, w1), csharp_rays(head.mbcol, all_rays, dist, w2)
         cs_ran = True
-        for key, got, pkg in (("base", cb, base), ("head", ch, head)):
-            for i, idx in enumerate(got):
+        for key, got_caps, pkg in (("base", cb, base), ("head", ch, head)):
+            for i, idx in enumerate(got_caps):
                 if names(pkg.col, idx) != py[key][i]:
                     fails.append(f"C# and Python disagree on {key} query {i}")
-        for key, got, pkg in (("base", rb, base), ("head", rh, head)):
-            for i, cs in enumerate(got):
+        for key, got_rays, pkg in (("base", rb, base), ("head", rh, head)):
+            for i, cs in enumerate(got_rays):
                 msg = ray_disagreement(py_rays[key][i], cs, pkg.col)
                 if msg:
                     fails.append(f"C# and Python disagree on {key} ray {i}: {msg}")

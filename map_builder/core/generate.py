@@ -223,6 +223,9 @@ class ScenePlanReport(TypedDict, total=False):
     building_outlines_partially_represented: list[OutlinePartial]
     passage_probes_blocked: list[ProbeBlock]
     passage_probes_dropped: list[dict[str, str]]
+    water_decks_raised: list[dict[str, object]]
+    water_bodies: list[dict[str, object]]
+    water_buildings: list[dict[str, str]]
     z_offset_m: float
     budget: dict[str, int]
 
@@ -1968,7 +1971,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
             if "elevated" in prov and not getattr(f, "passage_upper", False):
                 passages.elevated_probe(plan, ctx, f)
             if "water_carve" in prov:
-                plan.report.setdefault("water_buildings", []).append({"id": f.id, "note": prov["water_carve"]})
+                plan.report.setdefault("water_buildings", []).append({"id": f.id, "note": str(prov["water_carve"])})
             if "terrain_warning" in prov:
                 plan.report["warnings"].append(f"{f.id}: {prov['terrain_warning']}")
             if "rejected_tags" in prov:

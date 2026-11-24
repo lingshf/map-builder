@@ -186,9 +186,9 @@ def terrain(rng: random.Random) -> Rows:
     """Terrain detail: neutral greyscale luminance only (8 m tile, D99). The landcover vertex colour
     (water, grass, sand, forest) carries the hue, so the image must not."""
     low, detail, grain = fbm(rng, [(4, 3), (8, 2), (16, 1)]), value_noise(rng, 64), white(rng)
-    rows = []
+    rows: Rows = []
     for y in range(SIZE):
-        row = []
+        row: list[Rgb] = []
         for x in range(SIZE):
             v = 190.0 * (0.80 + 0.22 * low[y][x] + 0.14 * (detail[y][x] - 0.5) + 0.12 * (grain[y][x] - 0.5))
             g = _clamp(v)

@@ -355,7 +355,7 @@ class Level:
 
     def cut_lines(self) -> list[tuple[float, float, float]]:
         """(nx, ny, c) half-plane lines nx*x+ny*y = c perpendicular to the chain at each interior station centre."""
-        out = []
+        out: list[tuple[float, float, float]] = []
         if self.flat is not None:
             return out
         for t in self.st_t:
@@ -779,6 +779,10 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
                   for body in model.active() for piece_idx, (o, hs) in enumerate(body.pieces)]
 
     for b in model.active():
+        if b.level is None:
+            continue
+        level = b.level
+
         def water_receiver(x: float, y: float, src: Body = b) -> tuple[str, float] | None:
             covers = [(o.id, o.level.at(x, y)) for o in model.active() if _inside_pieces(o, x, y) and o.level is not None]
             return max(covers, key=lambda pair: (pair[1], pair[0])) if covers else None
@@ -796,8 +800,8 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
                 return True
             return False
 
-        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_receiver, wet_by,
-                            edge_sources=b.shore_source_piece)  # type: ignore[union-attr]
+        ramps = shore_ramps(b.shore, level.at, ground, masks.hit_triangle, water_receiver, wet_by,
+                            edge_sources=b.shore_source_piece)
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:
@@ -964,7 +968,10 @@ def _pav(vals: Sequence[float], wts: Sequence[float]) -> list[tuple[int, int, fl
     return [(int(b[0]), int(b[1]), b[2] / b[3]) for b in blocks]
 
 
-def _centreline(b: Body, waterways: Sequence[Feature]):
+Centreline = tuple[list[Pt], list[float], float, float, float]
+
+
+def _centreline(b: Body, waterways: Sequence[Feature]) -> tuple[Centreline | None, str | None]:
     """((points, cumulative length, s_in, s_out, length inside), note) of the single consistent chain of
     waterway parts with >= 50 % of their length inside the body, or (None, note|None) for a flat body."""
     parts: list[Feature] = []
@@ -1006,25 +1013,37 @@ def _chain_parts(parts: Sequence[Feature]) -> list[Pt] | None:
     """Concatenate parts end to start by node id; None if more than one chain or a part is reversed."""
     if len(parts) == 1:
         return list(parts[0].geometry)
-    starts = {p.node_ids[0]: p for p in parts if p.node_ids}
-    ends = {p.node_ids[-1]: p for p in parts if p.node_ids}
-    if len(starts) != len(parts) or len(ends) != len(parts):
-        return None
-    heads = [p for p in parts if p.node_ids[0] not in ends]
+    chainable: list[tuple[Feature, int, int]] = []
+    for p in parts:
+        ids = p.node_ids
+        if ids is None or ids[0] is None or ids[-1] is None:
+            return None
+        chainable.append((p, int(ids[0]), int(ids[-1])))
+    starts = {start: p for p, start, _ in chainable}
+    ends = {end for _p, _start, end in chainable}
+    heads = [(p, end) for p, start, end in chainable if start not in ends]
     if len(heads) != 1:
         return None
-    out = list(heads[0].geometry)
-    cur = heads[0]
+    cur, cur_end = heads[0]
+    out = list(cur.geometry)
     used = 1
-    while cur.node_ids[-1] in starts and used < len(parts):
-        cur = starts[cur.node_ids[-1]]
+    while cur_end in starts and used < len(parts):
+        cur = starts[cur_end]
+        ids = cur.node_ids
+        if ids is None or ids[-1] is None:
+            return None
+        cur_end = int(ids[-1])
         out.extend(cur.geometry[1:])
         used += 1
     return out if used == len(parts) else None
 
 
 def _triangulate_body(b: Body) -> None:
-    cuts = b.level.cut_lines() if b.level is not None else []
+    if b.level is None:
+        b.tris = []
+        return
+    level = b.level
+    cuts = level.cut_lines()
     tris: list[Tri] = []
     for outer, holes in b.pieces:
         rings = [dedupe_ring(outer)] + [dedupe_ring(h) for h in holes]
@@ -1048,7 +1067,10 @@ def _triangulate_body(b: Body) -> None:
                 for m in range(1, len(p) - 1):
                     tri = (p[0], p[m], p[m + 1])
                     if _area2(tri) > AREA_EPS:
-                        tris.append(tuple((x, y, b.level.at(x, y)) for x, y in tri))   # type: ignore[arg-type]
+                        p0, p1, p2 = tri
+                        tris.append(((p0[0], p0[1], level.at(p0[0], p0[1])),
+                                     (p1[0], p1[1], level.at(p1[0], p1[1])),
+                                     (p2[0], p2[1], level.at(p2[0], p2[1]))))
     b.tris = tris
 
 
