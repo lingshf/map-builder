@@ -90,8 +90,11 @@ each lifecycle fact separately: `implementation_complete`, `merged`, `accepted`,
    * the CI time;
    * a **behavior-change table** (before / after / why, including sample and report changes);
    * a **"User-visible changes"** section, written "none" if there are none.
-8. **Backlog row updated.** The merging PR updates its task row in [tasks/README.md](tasks/README.md): status, PR
-   and merge SHA.
+8. **Backlog facts recorded after the merge.** A merging PR does **not** record its own squash SHA or Backlog
+   status; its PR body carries the evidence only. After the merge, the Team Leader records `merged` (with the squash
+   SHA) and, separately, `done` on the same row in [tasks/README.md](tasks/README.md). Product/Design makes those
+   edits in the next design PR, batched. Developer PRs never edit `design/` (D125). `merged` does not imply `done`:
+   `done` needs the Team Leader's check of this DoD, including the QA verdict.
 
 **Project-specific evidence (where relevant)**
 
