@@ -213,7 +213,7 @@ budgets table and the visual evidence, but not in the D153 gate.
 
 **Cache custody.** The Factoria caches are acquired once and frozen **outside the repository**, with the same
 location and custody as the existing frozen caches (`cache-munich`, `cache-pittsburgh`; roadmap "Measured
-baselines", pinned setup): kept by the release manager on the team's build host, never committed, copied fresh
+baselines", pinned setup): kept in the Team Leader Project's files (`frozen-caches/`, with `MANIFEST-sha256.txt`; D163) because the release manager is on demand, never committed, copied fresh
 for every run, and identified only by their acquisition SHA-256 (per file and combined). The repository holds only
 `tools/demo/presets/bellevue-factoria.json` and the recorded hashes (in the BASE PR and the D157 row). CI never needs
 the caches. **Allowed adjustment:** if the first build shows the mall or the
@@ -321,6 +321,8 @@ Order (D156, D161): **BASE** (in parallel with S4-F8 and S5-F3 step 1) → S5-PE
     only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option).
   * Soft: sample slot (D103).
 * **Dependencies:** S5-STYLE-BASE, **S5-PERF-GATE** and the **verified closure of S5-F3** (D161: the measured `water_above_bank`/`water_buried` zero gate passed on main, plus the rebaseline if packages changed; an implementation merge only if one was needed) (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
+* **Step 1 also (D163):** re-frame the Factoria ponds camera so it shows the southern Mercer Slough ponds (the
+  #85 framing shows grey foreground only). Record the new camera in `tools/demo/presets/` before any stylized evidence.
 
 ### S5-STYLE-WATER: cyan water, terrain-side shore band, sandy banks (colour only)
 
