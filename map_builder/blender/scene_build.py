@@ -51,12 +51,19 @@ def _is_generated(mat: bpy.types.Material, name: str, textured: bool) -> bool:
     return mat.get("mb_material") == name and mat.library is None and bool(mat.get("mb_textured")) == textured
 
 
-def ensure_image(name: str, created_images: list[bpy.types.Image] | None = None) -> bpy.types.Image:
+def ensure_image(name: str, created_images: list[bpy.types.Image] | None = None,
+                 cache: dict[str, bpy.types.Image] | None = None) -> bpy.types.Image:
     """The packed image of the texture of material ``name`` (PNG bytes from core/textures, never a file on
     disk); one datablock per PNG file, shared by materials that use the same file (concrete)."""
     fname = tex.TEXTURES[name][0]
+    if cache is not None:
+        cached = cache.get(fname)
+        if cached is not None and cached.library is None:
+            return cached
     img = next((i for i in bpy.data.images if i.get("mb_image") == fname and i.library is None), None)
     if img is not None:
+        if cache is not None:
+            cache[fname] = img
         return img
     fd, path = tempfile.mkstemp(suffix=".png")
     try:
@@ -69,13 +76,15 @@ def ensure_image(name: str, created_images: list[bpy.types.Image] | None = None)
         img.pack()
         img.filepath = ""
         img["mb_image"] = fname
+        if cache is not None:
+            cache[fname] = img
     finally:
         os.remove(path)
     return img
 
 
 def _textured_nodes(nt: bpy.types.NodeTree, bsdf: bpy.types.Node, name: str,
-                    created_images: list[bpy.types.Image] | None) -> None:
+                    created_images: list[bpy.types.Image] | None, image_cache: dict[str, bpy.types.Image] | None) -> None:
     """Principled Base Color <- Mix(Multiply)(Image Texture, Mix(Divide)(Vertex Colour, texture mean albedo)).
     The divide is the viewport twin of the exporter's COLOR_0 compensation (core.uv), clamped to 1 like it."""
     x, y = bsdf.location.x, bsdf.location.y
@@ -91,7 +100,7 @@ def _textured_nodes(nt: bpy.types.NodeTree, bsdf: bpy.types.Node, name: str,
     uvmap.uv_map = UV_MAP
     uvmap.location = (x - 900, y + 100)
     image = nt.nodes.new("ShaderNodeTexImage")
-    image.image = ensure_image(name, created_images)
+    image.image = ensure_image(name, created_images, image_cache)
     image.interpolation = "Linear"
     image.extension = "REPEAT"
     image.location = (x - 700, y + 100)
@@ -107,16 +116,27 @@ def _textured_nodes(nt: bpy.types.NodeTree, bsdf: bpy.types.Node, name: str,
 
 
 def ensure_material(name: str, created: list[bpy.types.Material] | None = None, textures: bool = False,
-                    created_images: list[bpy.types.Image] | None = None) -> bpy.types.Material:
+                    created_images: list[bpy.types.Image] | None = None,
+                    cache: dict[tuple[str, bool], bpy.types.Material] | None = None,
+                    image_cache: dict[str, bpy.types.Image] | None = None) -> bpy.types.Material:
     """The generated material ``name``; reuses an existing generated one (tagged ``mb_material``), never
     modifies or adopts a user material that happens to have the same name. ``textures`` builds the textured
     node tree for the materials of ``core.textures`` (the others are unaffected)."""
     textured = bool(textures) and name in tex.TEXTURES
+    key = (name, textured)
+    if cache is not None:
+        cached = cache.get(key)
+        if cached is not None and _is_generated(cached, name, textured):
+            return cached
     mat = bpy.data.materials.get(name)
     if mat is not None and _is_generated(mat, name, textured):
+        if cache is not None:
+            cache[key] = mat
         return mat
     mat = next((m for m in bpy.data.materials if _is_generated(m, name, textured)), None)
     if mat is not None:
+        if cache is not None:
+            cache[key] = mat
         return mat
     if textured:   # the CLI writer's factors, so both paths emit the same material
         base, rough, metal = MATERIALS.get(name, ((0.8, 0.8, 0.8), tex.roughness(name), 0.0))
@@ -132,7 +152,7 @@ def ensure_material(name: str, created: list[bpy.types.Material] | None = None, 
     bsdf.inputs["Metallic"].default_value = metal
     bsdf.inputs["Base Color"].default_value = (*base, 1.0)
     if textured:
-        _textured_nodes(nt, bsdf, name, created_images)
+        _textured_nodes(nt, bsdf, name, created_images, image_cache)
         mat["mb_textured"] = True
     else:
         attr = nt.nodes.new("ShaderNodeVertexColor")
@@ -140,6 +160,8 @@ def ensure_material(name: str, created: list[bpy.types.Material] | None = None, 
         attr.location = (bsdf.location.x - 300, bsdf.location.y)
         nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
     mat["mb_material"] = name
+    if cache is not None:
+        cache[key] = mat
     return mat
 
 
@@ -155,7 +177,9 @@ def uv_source(md: MeshData, origin: tuple[float, float, float]) -> MeshData | No
 def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.types.Material],
                    created_meshes: list[bpy.types.Mesh], textures: bool = False,
                    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
-                   created_images: list[bpy.types.Image] | None = None) -> bpy.types.Mesh:
+                   created_images: list[bpy.types.Image] | None = None,
+                   material_cache: dict[tuple[str, bool], bpy.types.Material] | None = None,
+                   image_cache: dict[str, bpy.types.Image] | None = None) -> bpy.types.Mesh:
     """Blender mesh with exactly the plan's faces (the generator's closed, CCW-outward shells).
 
     The new mesh is appended to ``created_meshes`` right after it is allocated (before anything that can
@@ -170,9 +194,9 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
         raise MapBuilderError(f"generated mesh {md.name!r} was altered by Blender's mesh validation; "
                               "refusing to create a scene that differs from the plan")
     for m in md.materials:
-        me.materials.append(ensure_material(m, created_materials, textures, created_images))
+        me.materials.append(ensure_material(m, created_materials, textures, created_images, material_cache, image_cache))
     me.polygons.foreach_set("material_index", md.face_materials)
-    uvsrc = uv_source(md, origin)
+    uvsrc = uv_source(md, origin) if any(m in tex.TEXTURES for m in md.materials) else None
     if uvsrc is not None:
         flat: list[float] = []
         for face, fuv in zip(uvsrc.faces, cast("list[tuple[UV, ...] | None]", uvsrc.face_uvs)):  # uv_source only returns meshes with face_uvs
@@ -232,6 +256,8 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
     created_colls: list[bpy.types.Collection] = []
     created_mats: list[bpy.types.Material] = []
     created_images: list[bpy.types.Image] = []
+    material_cache: dict[tuple[str, bool], bpy.types.Material] = {}
+    image_cache: dict[str, bpy.types.Image] = {}
     try:
         root = bpy.data.collections.new(unique_collection_name(f"MapBuilder {map_name}"))
         created_colls.append(root)
@@ -247,14 +273,15 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
                 subs[coll_name] = coll
             if spec.mesh is not None:
                 me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes, textures, spec.location,
-                                    created_images)
+                                    created_images, material_cache, image_cache)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)
                 key = spec.mesh_key
                 if key is None:
                     raise KeyError(key)
                 me = shared.get(key)
                 if me is None:
-                    me = shared[key] = mesh_from_data(plan.shared_meshes[key], key, created_mats, created_meshes)
+                    me = shared[key] = mesh_from_data(plan.shared_meshes[key], key, created_mats, created_meshes,
+                                                      material_cache=material_cache, image_cache=image_cache)
             # Blender may suffix the name (".001") when another map is already in the file; identities
             # live in mb_id, so the object name only has to be unique, which Blender guarantees.
             ob = bpy.data.objects.new(spec.name, me)
