@@ -576,9 +576,9 @@ def main() -> int:
 
     py: dict[str, list[list[tuple[str, str]]]] = {}
     for key, pkg in (("base", base), ("head", head)):
-        py[key] = [names(pkg.col, capsule_hits(pkg.col, path, r)) for path, r in queries]   # type: ignore[arg-type]
+        py[key] = [names(pkg.col, capsule_hits(pkg.col, path, r)) for path, r in queries]   # type: ignore[arg-type]  # path_map comes from manifest JSON (`list[Any]`), but runtime shape is [x,y,z] points.
     py_rays = {key: [py_hit(pkg.col, o, dist) for o in all_rays] for key, pkg in (("base", base), ("head", head))}
-    py_head_passage = [capsule_hits(head.col, p, r) for p, r in head_passages]   # type: ignore[arg-type]
+    py_head_passage = [capsule_hits(head.col, p, r) for p, r in head_passages]   # type: ignore[arg-type]  # passage paths are manifest JSON arrays; validation in Package() guarantees structure before replay.
     fails += [f"passage {p['id']} not clear on HEAD (python)" for p, hit in zip(head.probes, py_head_passage) if hit]
     for k, (o, hh) in enumerate(zip(wrays, py_rays["head"][len(rays):])):
         if hh is None or hh[2] != "water":

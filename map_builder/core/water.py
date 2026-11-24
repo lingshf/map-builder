@@ -1013,26 +1013,26 @@ def _chain_parts(parts: Sequence[Feature]) -> list[Pt] | None:
     """Concatenate parts end to start by node id; None if more than one chain or a part is reversed."""
     if len(parts) == 1:
         return list(parts[0].geometry)
-    chainable: list[tuple[Feature, int, int]] = []
-    for p in parts:
-        ids = p.node_ids
-        if ids is None or ids[0] is None or ids[-1] is None:
-            return None
-        chainable.append((p, int(ids[0]), int(ids[-1])))
-    starts = {start: p for p, start, _ in chainable}
-    ends = {end for _p, _start, end in chainable}
-    heads = [(p, end) for p, start, end in chainable if start not in ends]
+    starts_raw = {p.node_ids[0]: p for p in parts if p.node_ids}
+    ends_raw = {p.node_ids[-1]: p for p in parts if p.node_ids}
+    # Keep the base control flow: reject duplicate start/end ids by cardinality checks.
+    if len(starts_raw) != len(parts) or len(ends_raw) != len(parts):
+        return None
+    if any(k is None for k in starts_raw) or any(k is None for k in ends_raw):
+        return None
+    starts = {k: v for k, v in starts_raw.items() if k is not None}
+    ends = {k: v for k, v in ends_raw.items() if k is not None}
+    heads = [p for p in parts if p.node_ids and p.node_ids[0] not in ends]
     if len(heads) != 1:
         return None
-    cur, cur_end = heads[0]
-    out = list(cur.geometry)
+    out = list(heads[0].geometry)
+    cur = heads[0]
     used = 1
-    while cur_end in starts and used < len(parts):
-        cur = starts[cur_end]
+    while cur.node_ids and cur.node_ids[-1] in starts and used < len(parts):
+        cur = starts[cur.node_ids[-1]]
         ids = cur.node_ids
         if ids is None or ids[-1] is None:
             return None
-        cur_end = int(ids[-1])
         out.extend(cur.geometry[1:])
         used += 1
     return out if used == len(parts) else None
