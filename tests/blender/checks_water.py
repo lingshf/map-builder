@@ -13,7 +13,7 @@ import zipfile
 
 import bpy
 
-from checks_core import FIXTURES, HEIGHT, LAT, LON, REPO, check, run_op
+from checks_core import FIXTURES, HEIGHT, LAT, LON, REPO, check, run_op, terrain_grid_object
 
 sys.path.insert(0, os.path.join(REPO, "tools"))
 
@@ -57,13 +57,18 @@ def run(out_dir):
         rows = json.loads(z.read("report.json"))["water_bodies"]
     fallback = [r["id"] for r in rows if str(r["outcome"]).startswith("fallback")]
     built = [r["id"] for r in rows if str(r["outcome"]).startswith("built")]
-    terrain = next((o for o in s.export_collection.all_objects if o.get("mb_class") == "terrain"), None)
+    terrain = None
+    try:
+        terrain = terrain_grid_object(s.export_collection.all_objects)
+    except ValueError as e:
+        check(False, f"water bank: live terrain:grid selection failed: {e}")
     check(terrain is not None and built and not fallback, f"water bank: fixture has a built body and no fallback "
                                                           f"({built}, {fallback})")
-    me, wc = terrain.data, LANDCOVER_COLORS["water"]
-    buf = [0.0] * (4 * len(me.loops))
-    me.color_attributes["mb_color"].data.foreach_get("color", buf)
-    painted = sum(1 for p in me.polygons
-                  if all(max(abs(buf[4 * l + k] - wc[k]) for k in range(3)) < 1e-4 for l in p.loop_indices))
-    check(painted == 0, f"water bank: no Blender terrain face carries the water colour under a built body "
-                        f"({painted} do)")
+    if terrain is not None:
+        me, wc = terrain.data, LANDCOVER_COLORS["water"]
+        buf = [0.0] * (4 * len(me.loops))
+        me.color_attributes["mb_color"].data.foreach_get("color", buf)
+        painted = sum(1 for p in me.polygons
+                      if all(max(abs(buf[4 * l + k] - wc[k]) for k in range(3)) < 1e-4 for l in p.loop_indices))
+        check(painted == 0, f"water bank: no Blender terrain face carries the water colour under a built body "
+                            f"({painted} do)")

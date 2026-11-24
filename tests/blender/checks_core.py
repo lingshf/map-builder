@@ -65,6 +65,43 @@ def by_id(root, mb_id):
     return next(o for o in root.all_objects if o.get("mb_id") == mb_id)
 
 
+def terrain_grid_object(objects):
+    matches = [o for o in objects if o.get("mb_id") == "terrain:grid"]
+    if len(matches) != 1:
+        ids = [o.get("mb_id") for o in objects if o.get("mb_class") == "terrain"]
+        raise ValueError(f"expected exactly one terrain:grid object, got {len(matches)} (terrain-class ids: {ids})")
+    return matches[0]
+
+
+def terrain_grid_entry(col_objects):
+    matches = [e for e in col_objects if e.get("mb_id") == "terrain:grid"]
+    if len(matches) != 1:
+        ids = [e.get("mb_id") for e in col_objects if e.get("class") == "terrain"]
+        raise ValueError(f"expected exactly one terrain:grid object, got {len(matches)} (terrain-class ids: {ids})")
+    return matches[0]
+
+
+def ray_hit_terrain_grid_z(col, x, y):
+    from map_builder.core.query import ray_cast
+
+    z_top = col.bounds[1][2] + 100.0
+    z_bottom = col.bounds[0][2] - 100.0
+    hit = ray_cast(col, (x, y, z_top), (0.0, 0.0, -1.0), z_top - z_bottom)
+    if hit is None:
+        return None, "not covered"
+    entry = col.objects[hit.object]
+    mb_id = entry["mb_id"]
+    if mb_id != "terrain:grid":
+        return None, f"hit {mb_id}"
+    return z_top - hit.t, None
+
+
+def nearest_hf_node(hf, x, y):
+    i = max(0, min(hf["nx"] - 1, int(round((x - hf["x0"]) / hf["spacing"]))))
+    j = max(0, min(hf["ny"] - 1, int(round((y - hf["y0"]) / hf["spacing"]))))
+    return i, j, hf["x0"] + i * hf["spacing"], hf["y0"] + j * hf["spacing"], hf["z"][j][i]
+
+
 def world_triangles(ob):
     """Evaluated (modifiers applied) world-space triangles, CCW outward (flipped for mirrored matrices)."""
     deps = bpy.context.evaluated_depsgraph_get()
@@ -109,14 +146,22 @@ def scene_state():
     return state
 
 
-def read_package(path):
-    from map_builder.core.collision import read_collision
+def read_package(path, include_hf=False):
+    from map_builder.core.collision import read_collision, read_heightfield
     from map_builder.core.glb import read_glb
     with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        for required in ("report.json", "collision/map.mbcol", "visual/map.glb"):
+            if required not in names:
+                raise ValueError(f"missing package member {required!r}")
+        if include_hf and "collision/terrain.mbhf" not in names:
+            raise ValueError("missing package member 'collision/terrain.mbhf'")
         report = json.loads(z.read("report.json"))
         col = read_collision(z.read("collision/map.mbcol"))
         _, nodes = read_glb(z.read("visual/map.glb"))
-        names = z.namelist()
+        hf = read_heightfield(z.read("collision/terrain.mbhf")) if include_hf else None
+    if include_hf:
+        return report, col, nodes, names, hf
     return report, col, nodes, names
 
 
@@ -251,9 +296,16 @@ def run(out_dir):
     bev.width = 0.2
     bev.segments = 2
     root.objects.link(user)
-    terrain = next(o for o in root.all_objects if o.get("mb_class") == "terrain")
-    terrain.data.vertices[len(terrain.data.vertices) // 2].co.z += 15.0
+    try:
+        terrain = terrain_grid_object(root.all_objects)
+    except ValueError as e:
+        check(False, f"live terrain:grid selection failed: {e}")
+        return
+    edited_vi = len(terrain.data.vertices) // 2
+    pre_edit_world_z = (terrain.matrix_world @ terrain.data.vertices[edited_vi].co).z
+    terrain.data.vertices[edited_vi].co.z += 15.0
     terrain.data.update()
+    edited_world = terrain.matrix_world @ terrain.data.vertices[edited_vi].co
     # selection / active state the export must not change
     vl = bpy.context.view_layer
     for o in vl.objects:
@@ -271,7 +323,11 @@ def run(out_dir):
                                    "selection, active object)")
     r = validate_package(pkg)
     check(r.ok, "validate_package: " + r.summary().splitlines()[0])
-    report, col, nodes, names = read_package(pkg)
+    try:
+        report, col, nodes, names, hf = read_package(pkg, include_hf=True)
+    except ValueError as e:
+        check(False, f"package member presence check failed: {e}")
+        return
     m = r.manifest
     ents = {e["mb_id"]: e for e in col.objects}
     by_name = {e["name"]: e for e in col.objects}
@@ -303,9 +359,45 @@ def run(out_dir):
     check(vol_c > 0 and abs(vol_v - vol_c) <= 1e-3 * abs(vol_c),
           f"mirrored building is outward-wound in collision ({vol_c:.2f}) and visuals ({vol_v:.2f})")
     check(mirrored.name in report["blender_export"]["mirrored_objects"], "mirrored object listed in the report")
-    te = next(e for e in col.objects if e["class"] == "terrain")
-    zmax = max((terrain.matrix_world @ v.co).z for v in terrain.data.vertices)
-    check(abs(te["aabb"][5] - zmax) <= 1e-3, "terrain vertex edit exported")
+    check(terrain_grid_entry([{"class": "terrain", "mb_id": "bank:foo"}, {"class": "terrain", "mb_id": "terrain:grid"}])
+          ["mb_id"] == "terrain:grid", "terrain:grid selection ignores terrain-class order")
+    try:
+        terrain_grid_entry([{"class": "terrain", "mb_id": "bank:only"}])
+        check(False, "terrain:grid selection fails when missing")
+    except ValueError:
+        check(True, "terrain:grid selection fails when missing")
+    try:
+        te = terrain_grid_entry(col.objects)
+    except ValueError as e:
+        check(False, f"terrain:grid selection failed: {e}")
+        te = None
+    check(te is not None, "terrain:grid exists exactly once in collision")
+    hit_z, hit_err = ray_hit_terrain_grid_z(col, edited_world.x, edited_world.y)
+    check(hit_err is None, f"terrain:grid ray at edited vertex ({hit_err or 'ok'})")
+    stale = hit_err is None and abs(hit_z - edited_world.z) > 1e-3 and abs(hit_z - pre_edit_world_z) <= 1e-3
+    if stale:
+        check(False, "terrain:grid stale at edited vertex: "
+              f"exported z={hit_z:.9f}, expected edited z={edited_world.z:.9f}, pre-edit z={pre_edit_world_z:.9f}")
+    elif hit_err is None:
+        check(hit_err is None and abs(hit_z - edited_world.z) <= 1e-3, "terrain vertex edit exported")
+    from map_builder.core.collision import ColObject, read_collision, write_collision
+    x, y, z = edited_world.x, edited_world.y, edited_world.z
+    wrong_hit = read_collision(write_collision([
+        ColObject("terrain", "terrain:grid", "terrain",
+                  [(x - 1.0, y - 1.0, z), (x + 1.0, y - 1.0, z), (x, y + 1.0, z)], [(0, 1, 2)]),
+        ColObject("occluder", "user:wrong-hit", "user",
+                  [(x - 0.5, y - 0.5, z + 2.0), (x + 0.5, y - 0.5, z + 2.0), (x, y + 0.5, z + 2.0)], [(0, 1, 2)]),
+    ]))
+    _, other_err = ray_hit_terrain_grid_z(wrong_hit, edited_world.x, edited_world.y)
+    check(other_err is not None and other_err.startswith("hit "), f"non-terrain ray hit is rejected ({other_err})")
+    if hit_err is None and not stale:
+        i, j, hx, hy, hz = nearest_hf_node(hf, edited_world.x, edited_world.y)
+        if math.isnan(hz):
+            check(False, f"heightfield node ({i}, {j}) not covered")
+        else:
+            hf_hit_z, hf_hit_err = ray_hit_terrain_grid_z(col, hx, hy)
+            check(hf_hit_err is None, f"heightfield node ({i}, {j}) covered by terrain:grid ({hf_hit_err or 'ok'})")
+            check(hf_hit_err is None and abs(hf_hit_z - hz) <= 1e-3, "heightfield matches terrain:grid at a grid node")
     check(m["generator"].get("blender") == bpy.app.version_string, "Blender version recorded")
     check("collision/terrain.mbhf" in names and m.get("heightfield"), "heightfield exported and validated")
     check(set(by_name) == {n.name for n in nodes if n.triangles}, "every collision object has its glTF node")
