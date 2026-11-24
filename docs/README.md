@@ -13,7 +13,7 @@ and quick start remain in the [root README](../README.md), which links here.
 |---|---|
 | **A user** generating a map | [Install](user/install.md) → [Generate](user/generate.md) → [Export](user/export.md) → [CLI](user/cli.md) → [Structures](user/structures.md) → [Limits](../README.md#limits) |
 | **A consumer** (Unity, simulator Core) | [Package contract](PACKAGE_FORMAT.md) → [Unity / Core handoff](UNITY_CORE_HANDOFF.md) → [reference reader](../examples/README.md) → [Simulator preview](user/simulator.md) |
-| **A new developer or maintainer** | [Architecture](architecture/README.md) → [Developer guide](dev/README.md) → [Validation](VALIDATION.md) → [Backlog](../design/tasks/README.md) → [Definition of Done (charter §4)](../design/team-charter.md#4-definition-of-done) → [decision record](../design/roadmap.md#decision-record) |
+| **A new developer or maintainer** | [Architecture](architecture/README.md) → [Developer guide](dev/README.md) → [Developer tools](dev/tools.md) → [Validation](VALIDATION.md) → [Backlog](../design/tasks/README.md) → [Definition of Done (charter §4)](../design/team-charter.md#4-definition-of-done) → [decision record](../design/roadmap.md#decision-record) |
 | **Taking over the team** | [Team charter](../design/team-charter.md) → [Backlog](../design/tasks/README.md) → [latest close review](../design/reviews/REL-v0.5.0-close.md) → this matrix's gaps |
 | **Preparing a release** | [Releases](releases/README.md) → [Demo recipe](DEMO.md) → [Platform submission](PLATFORM_SUBMISSION.md) → [Sprint close](../design/tasks/SPRINT_CLOSE.md) |
 
@@ -26,6 +26,7 @@ and quick start remain in the [root README](../README.md), which links here.
 | [flows/](flows/overview.md) | Workflow diagrams (generate, export, fly-through, consumer) | users | Delivery/Release |
 | [architecture/README.md](architecture/README.md) | Pipeline, export paths, package and consumer, decision map | developers | Product/Design (architecture); Developer (code entries) |
 | [dev/README.md](dev/README.md) | Repository map, local checks, workflow, adding a feature type, licence | developers | Developer |
+| [dev/tools.md](dev/tools.md) | Usage of the audit, replay, check, style and benchmark tools | developers, QA | Developer |
 | [PACKAGE_FORMAT.md](PACKAGE_FORMAT.md) | **Normative** `.mbmap` contract, format policy | consumers, developers | Developer (facts); Product/Design (format decisions) |
 | [UNITY_CORE_HANDOFF.md](UNITY_CORE_HANDOFF.md) | Consumer integration guide and checklist | consumers | Developer |
 | [VALIDATION.md](VALIDATION.md) | What is tested, how to run, recorded results, what is not validated | developers, QA | QA (results); Developer (commands) |
@@ -70,9 +71,9 @@ every row. No completion percentage is implied.
 | CLI | covered | covered | n/a (shares the core, D1) | covered | user/cli; README §CLI | — |
 | Package format and consumer contract | covered | covered | covered (D101, D110 format policy) | covered | PACKAGE_FORMAT (normative); UNITY_CORE_HANDOFF | — |
 | C# reference reader | covered | covered | covered | covered | examples/README; PACKAGE_FORMAT | — |
-| Validation and tests | covered | **stale**: dev guide CI description omits the mypy step (Python 3.12 leg) and the format-policy step (C# job) | covered | covered; VALIDATION.md line 117 has a stray control character (`\b` from a backtick) in the S4-COL-DEGEN row | VALIDATION; dev/README §checks | DOC-DEV |
+| Validation and tests | covered | covered (pending owner check): [dev/README §Verified local checks](dev/README.md#verified-local-checks) lists both CI jobs and their steps, mypy and format policy included | covered | covered; `docs/VALIDATION.md` line 117 still has a stray control character (release-owned) | VALIDATION; dev/README | DOC-DEV (review) |
 | Contribution workflow and DoD | covered | n/a | covered | covered: [team charter §4](../design/team-charter.md#4-definition-of-done) is the only DoD; the Backlog and dev guide link to it (deduplicated in this change) | team charter §4 | — |
-| Developer tools: `floating_audit`, `water_replay`, `water_check`, `design/bench` | gap | **gap**: no developer-facing usage page; only VALIDATION rows and task specs | covered in specs and decisions | **gap** | VALIDATION rows; task specs | DOC-TOOLS |
+| Developer tools: `floating_audit`, `water_replay`, `water_check`, `style_check`, `design/bench` | covered (architecture §Water and shores, S5 specs) | covered (pending owner check): [dev/tools.md](dev/tools.md) | covered in specs and decisions | covered (pending owner check and QA rehearsal): [dev/tools.md](dev/tools.md); `tools/perf/` pending #91 | dev/tools.md | DOC-TOOLS (review) |
 | Performance method (D91, D106, D147, D153) | covered (roadmap) | gap (S5-PERF-GATE tool not built yet) | covered | stale: dev/README has no performance section | roadmap; S5-PERF-GATE spec | DOC-PERF (after S5-PERF-GATE) |
 | Release and extension packaging | covered | covered | covered (D100) | covered | releases/README; PLATFORM_SUBMISSION; SPRINT_CLOSE | — |
 | Stylized look (S5, planned) | covered (spec) | n/a (not built) | covered (D136–D157) | n/a (not built) | design/tasks/S5-STYLE.md | user docs are added by each S5 task |
