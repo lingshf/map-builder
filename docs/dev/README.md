@@ -48,20 +48,7 @@ is tag-triggered; consult the workflow files for the exact current commands.
 
 ## Workflow and Definition of Done
 
-Read the relevant task and [Definition of Done](../../design/tasks/README.md#definition-of-done-every-code-task-d28).
-Use one branch and PR per feature or documentation batch (D6), with acceptance
-evidence, user-visible changes, and relevant performance information. Complex
-geometry work defines acceptance cases first. Code tasks update their task row.
-Where applicable regenerate the sample rather than hand-merging it (D20), run
-headless Blender, and update the contract and validation documentation.
-
-Every PR, **including documentation-only PRs**, needs green CI and an
-independent reviewer's `VERDICT: APPROVED` on the exact head; only the
-coordinator authorizes merging (D33, D34, D38, D47). The coordinator gate
-also checks mergeability and freshness (D53). Do not self-merge. Probe or
-query-accounting changes require real Pittsburgh results from both validators
-(D47). Check the task-specific criteria for details, rather than treating this
-summary as a replacement for them.
+The single Definition of Done, the merge gate and the operation permissions are in the [team charter](../../design/team-charter.md#4-definition-of-done) (§4 DoD, §6 permissions). Read your task's spec in the [Backlog](../../design/tasks/README.md) for its acceptance criteria. Use one branch and PR per task (D6); do not self-merge.
 
 ## Adding a feature type
 

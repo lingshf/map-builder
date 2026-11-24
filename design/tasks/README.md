@@ -1,6 +1,6 @@
 # v2 task table
 
-Maintained by the Design role. Approach, sprints and decisions: [../roadmap.md](../roadmap.md).
+Maintained by the Design role. Approach, sprints and decisions: [../roadmap.md](../roadmap.md). This is the **single Backlog authority**; process, roles, cadence and permissions are in the [team charter](../team-charter.md).
 Status values: `blocked` (dependency open), `ready`, `in progress`, `review`, `done`.
 
 Every task doc lists its acceptance criteria, performance considerations, expected tests and
@@ -150,6 +150,42 @@ the #75 sample slot, so those tasks never edit the shared files at the same time
 Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) → coordinator retro
 → tag/Release**; see [SPRINT_CLOSE.md](SPRINT_CLOSE.md). REL tasks run alone.
 
+## Knowledge gaps
+
+From the Knowledge Lead coverage audit of main `873aa36` (2026-11-24); see the matrix in [docs/README.md](../../docs/README.md#coverage-matrix-four-goals).
+Each row needs facts from its owner, integration by the Knowledge Lead, and a non-author review. Usage rows also need a QA rehearsal.
+
+| id | sprint | owner (facts / integration) | dependencies | conflict domain (hard) | status | PR |
+|---|---|---|---|---|---|---|
+| DOC-ARCH | S5 | Developer + Product/Design / Knowledge Lead | — | `docs/architecture/README.md` | ready | |
+| DOC-WATER-DESIGN | S5 | Product/Design (D112–D129) + Developer (code entries) / Knowledge Lead | DOC-ARCH (same page; serialise) | `docs/architecture/README.md` (water section) | ready | |
+| DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | ready | |
+| DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | done in the charter PR | #87 |
+| DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | ready | |
+| DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
+| DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/README.md` (performance section) | blocked | |
+
+Details for each row:
+
+* **DOC-ARCH:** refresh the architecture page from the audited head `44cde70` to current main.
+  * Roofs, textures and UVs are delivered, not "planned".
+  * Add the water stage to the pipeline diagram.
+  * Update the code entries.
+  * Trim the decision map to pointers.
+  * AC: every stage in `generate.build_plan` and every `core/` module appears or is deliberately omitted; the
+    owner verifies the facts; a non-author reviews.
+* **DOC-WATER-DESIGN:** one authoritative explanation of the water design: the two grids, the carved bed, the
+  levels, the bank colour, the shore ramps and cascades, and the masks. It covers data flow, code entries,
+  invariants and the trade-offs: why ramps, not a skirt or a confined carve.
+* **DOC-DEV:** update the developer guide's CI and local checks: the mypy step on the 3.12 leg, the format-policy and frozen-reader steps in the C# job,
+  and the current interpreter versions. Also fix the stray control character in `docs/VALIDATION.md` line 117 (`\b` in place of the backtick before `build_plan`; release-owned file, so the fix goes in the next release-manager PR or with coordinator approval).
+* **DOC-DOD:** done in #87: the team charter §4 is the single DoD; the other copies now only link to it.
+* **DOC-TOOLS:** developer usage for `tools/floating_audit.py`, `tools/water_replay.py`, `tools/water_check.py` and
+  `design/bench/`: what each checks, how to run it on frozen caches, and how to read the output. QA rehearses
+  one run.
+* **DOC-USER-STRUCT:** the title says v0.3.0, but the body cites v0.5.0.
+* **DOC-PERF:** document the D153 gate's usage once the tool exists.
+
 ## Dependency order and parallel waves (max 3 devs)
 
 1. Wave 1 (now): **S1-DEMOKIT**; after #11 merges: **REL-v0.1.0** (alone), then **S1-SEAMS** ∥
@@ -174,38 +210,5 @@ were checked for hunk overlap; anything else touching `generate.py` must be seri
 
 ## Definition of Done (every code task, D28)
 
-Each task doc keeps its own acceptance criteria and performance considerations; a task is done
-only when all of the following hold:
+The single canonical Definition of Done is in the [team charter §4](../team-charter.md#4-definition-of-done) (owned by the Team Leader). This section only keeps the anchor for older links.
 
-1. **Acceptance criteria tested:** every criterion maps to an automated test or a recorded run
-   linked in the PR.
-2. **CI green on the final head** (Python 3.11 + 3.12 unit tests, CLI build + validate of the
-   synthetic fixture `VALID`, C# reader on the committed sample). Local evidence may support a
-   review, never a merge (D38).
-3. **No wall-clock or p95 gates in the PR suite**; performance is measured and quoted in the
-   PR, not asserted in CI.
-4. **New tests ≤ 5 s each** (no Blender, no network in PR CI).
-5. **PR body** contains: CI time, a **behavior-change table** (before / after / why, including
-   the sample and report changes) and a **"User-visible changes"** section (used by the
-   release manager for CHANGELOG and `docs/user/`; "none" if none).
-6. **Reviewer `VERDICT: APPROVED` comment on the exact head** (gpt-6.2-sol, D5, D33).
-7. **Merge only through the coordinator's gate** (D34, D47): approval on the exact head and
-   green CI, then the coordinator authorizes. Applies to every PR, design and docs-only
-   included. Squash-merge, delete branch (D6).
-8. **The PR that merges a task updates that task's row** in this table (status and PR).
-9. **Probes / work accounting:** a task that touches passage probes or query work accounting
-   runs the real Pittsburgh package (D26 preset) through the Python validator **and** the C#
-   reader in the PR and attaches both results (D47).
-10. **Complex geometry tasks write their acceptance cases first:** real-data excerpts (OSM
-    ids from the demo area) plus counterexamples, committed as tests before the
-    implementation.
-
-Also expected where relevant:
-
-* `examples/synthetic_sample.mbmap` regenerated with the command in `examples/README.md` if the
-  output changed (D20); `tests/test_examples.py` green.
-* Headless Blender 4.2.23 run (`tests/blender/run_integration.py`) `OK: 0 failure(s)` when the
-  task touches generation or Blender code; result appended to `docs/VALIDATION.md`.
-* PACKAGE_FORMAT.md, README Limits, UNITY_CORE_HANDOFF.md and VALIDATION.md updated for the
-  behaviour the task changes.
-* No release, demo render, CHANGELOG or version bump in feature PRs (release manager, D28).
