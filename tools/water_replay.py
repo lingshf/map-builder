@@ -512,6 +512,10 @@ def path_points_from_manifest(entry: dict[str, Any], field: str) -> list[tuple[f
         x, y, z = p
         if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not isinstance(z, (int, float)):
             raise SystemExit(f"probe {entry.get('id')}: {field}[{i}] has non-numeric coordinates")
+        if isinstance(x, bool) or isinstance(y, bool) or isinstance(z, bool):
+            raise SystemExit(f"probe {entry.get('id')}: {field}[{i}] has boolean coordinates")
+        if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(z):
+            raise SystemExit(f"probe {entry.get('id')}: {field}[{i}] has non-finite coordinates")
         out.append((float(x), float(y), float(z)))
     return out
 
