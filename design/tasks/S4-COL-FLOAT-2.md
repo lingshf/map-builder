@@ -59,7 +59,7 @@ offline; `created_utc = "2026-11-20T00:00:00Z"`). Base = main at the PR's merge-
    0 `unlisted` on all six package/path runs; Python and C# agree on every query.
 6. **Munich and packages without water** are byte-identical on both paths. The sample is regenerated only under the
    D103 slot and the PR lists the member changes.
-7. **Performance (D91, D106) on the exact merge head.** Three alternating offline base/head rounds per preset,
+7. **Performance (D91, D106; pass/fail metric per D147) on the exact merge head.** On a shared host, gates are judged on CPU time over 5 alternating rounds (D147), with wall time posted. Three alternating offline base/head rounds per preset,
    whole path. Three series are reported: CLI whole Generate (`design/bench/cli_time.py`, acquire through strict
    validation), Blender **Generate**, and Blender **Generate+Export** (`design/bench/bl_time.py`). D91 tracks the
    last two separately. Each median of per-round medians stays within **+5 %** of the base and within the Sprint 4
