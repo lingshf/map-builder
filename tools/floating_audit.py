@@ -40,6 +40,7 @@ import argparse
 import json
 import math
 import os
+import struct
 import sys
 import zipfile
 from collections import Counter, deque
@@ -52,7 +53,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from map_builder.core.collision import CLASS_NAMES, CLASSES, read_collision, read_heightfield  # noqa: E402
-from map_builder.core.glb import read_glb  # noqa: E402
+from map_builder.core.query import ray_cast  # noqa: E402
 from map_builder.core.water import CARVE_DEPTH_M  # noqa: E402
 
 NAN = np.nan
@@ -62,7 +63,9 @@ ROOF_NORMAL_MIN = 0.1           # a roof face is one whose normal points up by a
 WATER_BANK_BAND_M = 2.0         # how far outside a water body the bank is looked at
 SHORE_STEP_M = CARVE_DEPTH_M    # terrain at the shore cells may lie this far below the sheet: the designed bed
 SHORE_STEP_TOL_M = 0.05
-INFO_KINDS = ("hf_below_ground:water", "hf_coverage", "water_shore_step:col", "water_shore_step:vis")
+INFO_KINDS = ("hf_below_ground:water", "hf_coverage", "water_shore_step:col", "water_shore_step:vis",
+              "edge_ambiguous_collision_visual")
+EDGE_AMBIGUITY_M = 1e-4
 
 
 BARY_EPS = 1e-9            # barycentric slack: a ray through a shared edge hits both triangles
@@ -143,6 +146,7 @@ class Raster:
         self.xs, self.ys = xs, ys
         self.z = np.full((len(ys), len(xs)), -np.inf)
         self.owner = np.full((len(ys), len(xs)), -1, dtype=np.int32)
+        self.triangle = np.full((len(ys), len(xs)), -1, dtype=np.int32)
 
     def add(self, tris: np.ndarray, owners: np.ndarray) -> None:
         """Ray-cast every cell centre against ``tris`` (T, 3, 3), keeping the highest hit and its ``owners`` (T,)."""
@@ -152,22 +156,24 @@ class Raster:
         for batch in _batches(ranges.counts):
             tri, column, row = _candidate_cells(ranges, batch)
             heights = _plane_heights(tris[tri], self.xs[column], self.ys[row])
-            self._keep_highest(row * len(self.xs) + column, heights, owners[tri])
+            self._keep_highest(row * len(self.xs) + column, heights, owners[tri], tri)
 
-    def _keep_highest(self, flat_cell: np.ndarray, heights: np.ndarray, owners: np.ndarray) -> None:
+    def _keep_highest(self, flat_cell: np.ndarray, heights: np.ndarray, owners: np.ndarray,
+                      tri_ids: np.ndarray) -> None:
         hit = np.isfinite(heights)
-        flat_cell, heights, owners = flat_cell[hit], heights[hit], owners[hit]
+        flat_cell, heights, owners, tri_ids = flat_cell[hit], heights[hit], owners[hit], tri_ids[hit]
         best = self.z.reshape(-1)
         np.maximum.at(best, flat_cell, heights)
         wins = heights >= best[flat_cell] - HEIGHT_TIE_EPS
         self.owner.reshape(-1)[flat_cell[wins]] = owners[wins]
+        self.triangle.reshape(-1)[flat_cell[wins]] = tri_ids[wins]
 
     def final(self) -> np.ndarray:
         return np.where(np.isfinite(self.z), self.z, NAN)
 
 
 
-def _load(path: str) -> tuple[dict[str, Any], Any, Any, tuple[Any, Any]]:
+def _load(path: str) -> tuple[dict[str, Any], Any, Any, bytes]:
     with zipfile.ZipFile(path) as z:
         manifest = json.loads(z.read("manifest.json"))
         names = z.namelist()
@@ -175,13 +181,94 @@ def _load(path: str) -> tuple[dict[str, Any], Any, Any, tuple[Any, Any]]:
         hf = None
         if manifest.get("heightfield") and manifest["heightfield"].get("path") in names:
             hf = read_heightfield(z.read(manifest["heightfield"]["path"]))
-        glb = read_glb(z.read(manifest["visual"]["path"]))
+        glb = z.read(manifest["visual"]["path"])
     return manifest, col, hf, glb
 
 
 def _map_tris(tris: Any) -> np.ndarray:
     a = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
     return np.stack([a[..., 0], -a[..., 2], a[..., 1]], axis=-1)
+
+
+def _f32_mat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return (a @ b).astype(np.float32)
+
+
+def _f32_trs(node: dict[str, Any]) -> np.ndarray:
+    if "matrix" in node:
+        m = np.asarray(node["matrix"], dtype=np.float32).reshape(4, 4, order="F")
+        return m
+    t = np.asarray(node.get("translation", [0, 0, 0]), dtype=np.float32)
+    x, y, z, w = np.asarray(node.get("rotation", [0, 0, 0, 1]), dtype=np.float32)
+    s = np.asarray(node.get("scale", [1, 1, 1]), dtype=np.float32)
+    r = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                  [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                  [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]], dtype=np.float32)
+    out = np.eye(4, dtype=np.float32)
+    out[:3, :3] = r * s[np.newaxis, :]
+    out[:3, 3] = t
+    return out
+
+
+def _glb_json_bin(glb: bytes) -> tuple[dict[str, Any], bytes]:
+    if len(glb) < 20:
+        raise ValueError("glb too short")
+    magic, ver, total = struct.unpack_from("<III", glb, 0)
+    if magic != 0x46546C67 or ver != 2 or total != len(glb):
+        raise ValueError("bad glb header")
+    offset = 12
+    js, binb = None, b""
+    while offset < len(glb):
+        clen, ctype = struct.unpack_from("<II", glb, offset)
+        offset += 8
+        chunk = glb[offset:offset + clen]
+        offset += clen
+        if ctype == 0x4E4F534A:
+            js = chunk.rstrip(b" ")
+        elif ctype == 0x004E4942:
+            binb = bytes(chunk)
+    if js is None:
+        raise ValueError("missing glb json chunk")
+    return cast(dict[str, Any], json.loads(js)), binb
+
+
+def _accessor_data(gl: dict[str, Any], binb: bytes, accessor_index: int) -> np.ndarray:
+    accessors = cast(list[dict[str, Any]], gl.get("accessors", []))
+    views = cast(list[dict[str, Any]], gl.get("bufferViews", []))
+    acc = accessors[accessor_index]
+    view = views[int(acc["bufferView"])]
+    comps = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}[str(acc["type"])]
+    ctype = int(acc["componentType"])
+    dtype = {5121: np.uint8, 5123: np.uint16, 5125: np.uint32, 5126: np.float32}[ctype]
+    count = int(acc["count"])
+    stride = int(view.get("byteStride", np.dtype(dtype).itemsize * comps))
+    base = int(view.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
+    item = np.dtype(dtype).itemsize * comps
+    if stride == item:
+        return np.frombuffer(binb, dtype=dtype, count=count * comps, offset=base).reshape(count, comps)
+    out = np.empty((count, comps), dtype=dtype)
+    for i in range(count):
+        start = base + i * stride
+        out[i] = np.frombuffer(binb, dtype=dtype, count=comps, offset=start)
+    return out
+
+
+def _mesh_local_tris_f32(gl: dict[str, Any], binb: bytes, mesh_index: int) -> np.ndarray:
+    meshes = cast(list[dict[str, Any]], gl.get("meshes", []))
+    tris: list[np.ndarray] = []
+    for p in cast(list[dict[str, Any]], meshes[mesh_index].get("primitives", [])):
+        if int(p.get("mode", 4)) != 4:
+            continue
+        attrs = cast(dict[str, Any], p["attributes"])
+        pos = _accessor_data(gl, binb, int(attrs["POSITION"])).astype(np.float32, copy=False)
+        if "indices" in p:
+            ids = _accessor_data(gl, binb, int(p["indices"])).reshape(-1).astype(np.int64, copy=False)
+        else:
+            ids = np.arange(len(pos), dtype=np.int64)
+        if len(ids) % 3:
+            continue
+        tris.append(pos[ids.reshape(-1, 3)])
+    return np.concatenate(tris) if tris else np.zeros((0, 3, 3), dtype=np.float32)
 
 
 def _regions(mask: np.ndarray, value: np.ndarray, cell: float, owner: np.ndarray, names: list[str],
@@ -234,6 +321,15 @@ class Surfaces:
     vis_by_category: dict[str, Raster]
     col_names: list[str]
     vis_names: list[str]
+    col_obj_classes: list[str]
+    col_tris: np.ndarray
+    col_tri_owner: np.ndarray
+    vis_tris: np.ndarray
+    vis_owner: np.ndarray
+    vis_category: np.ndarray
+    col_raw: Any
+    ray_origin_z: float
+    ray_max_dist: float
 
     def terrain(self, side: str) -> np.ndarray:
         rasters = self.col_by_class if side == "col" else self.vis_by_category
@@ -252,15 +348,23 @@ class Findings:
         mask = mask & np.isfinite(value)
         self.layers[kind] = np.where(mask, value, NAN)
         if mask.any():
-            self.regions[kind] = _regions(mask, np.where(mask, value, 0.0), self.cell, owner, names,
-                                          self.xs, self.ys, self.min_area)
+            kept = _regions(mask, np.where(mask, value, 0.0), self.cell, owner, names,
+                            self.xs, self.ys, self.min_area)
+            if kept:
+                self.regions[kind] = kept
+            elif kind in self.regions:
+                del self.regions[kind]
 
     def flag_nodes(self, kind: str, value: np.ndarray, mask: np.ndarray, owner: np.ndarray, names: list[str],
                    hf: dict[str, Any]) -> None:
         """Heightfield findings live on the node grid, which has its own spacing."""
         if mask.any():
-            self.regions[kind] = _regions(mask, np.where(mask, value, 0.0), hf["spacing"], owner, names,
-                                          _node_axis(hf, "x"), _node_axis(hf, "y"), self.min_area)
+            kept = _regions(mask, np.where(mask, value, 0.0), hf["spacing"], owner, names,
+                            _node_axis(hf, "x"), _node_axis(hf, "y"), self.min_area)
+            if kept:
+                self.regions[kind] = kept
+            elif kind in self.regions:
+                del self.regions[kind]
 
 
 def _node_axis(hf: dict[str, Any], axis: str) -> np.ndarray:
@@ -287,29 +391,56 @@ def _is_roof(tris: np.ndarray, categories: np.ndarray) -> np.ndarray:
     return (categories == "building") & upward
 
 
-def _visual_triangles(nodes: Sequence[Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """(triangles, node index, category, node names) of every GLB node, in the map frame."""
-    tris, owners, categories, names = [], [], [], []
-    for index, node in enumerate(nodes):
-        names.append(str(node.extras.get("mb_id") or node.name))
-        if not node.triangles:
-            continue
-        mapped = _map_tris(node.triangles)
-        tris.append(mapped)
-        owners.append(np.full(len(mapped), index, dtype=np.int32))
-        categories.append(np.full(len(mapped), str(node.extras.get("mb_class") or "user"), dtype=object))
+def _visual_triangles_float32(glb: bytes) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+    """Visual triangles transformed with consumer-equivalent float32 node composition and vertex transform."""
+    gl, binb = _glb_json_bin(glb)
+    nodes = cast(list[dict[str, Any]], gl.get("nodes", []))
+    names = [str(cast(dict[str, Any], n).get("extras", {}).get("mb_id") or n.get("name") or f"node{i}")
+             for i, n in enumerate(nodes)]
+    roots: list[int]
+    scenes = cast(list[dict[str, Any]], gl.get("scenes", []))
+    if scenes:
+        si = int(gl.get("scene", 0))
+        roots = [int(x) for x in cast(list[Any], scenes[si].get("nodes", []))]
+    else:
+        roots = list(range(len(nodes)))
+    tris, owners, categories = [], [], []
+    mesh_cache: dict[int, np.ndarray] = {}
+    ident = np.eye(4, dtype=np.float32)
+    stack: list[tuple[int, np.ndarray]] = [(int(i), ident.copy()) for i in reversed(roots)]
+    while stack:
+        ni, parent = stack.pop()
+        node = nodes[ni]
+        world = _f32_mat_mul(parent, _f32_trs(node))
+        if "mesh" in node:
+            mesh_index = int(node["mesh"])
+            if mesh_index not in mesh_cache:
+                mesh_cache[mesh_index] = _mesh_local_tris_f32(gl, binb, mesh_index)
+            local = mesh_cache[mesh_index]
+            if len(local):
+                linear = world[:3, :3]
+                trans = world[:3, 3]
+                world_tris = (local.reshape(-1, 3) @ linear.T + trans).astype(np.float32).reshape(-1, 3, 3)
+                if float(np.linalg.det(linear.astype(np.float64))) < 0.0:
+                    world_tris = world_tris[:, [0, 2, 1], :]
+                tris.append(_map_tris(world_tris))
+                owners.append(np.full(len(world_tris), ni, dtype=np.int32))
+                cat = str(cast(dict[str, Any], node.get("extras", {})).get("mb_class") or "user")
+                categories.append(np.full(len(world_tris), cat, dtype=object))
+        for child in reversed(cast(list[Any], node.get("children", []))):
+            stack.append((int(child), world))
     if not tris:
         return np.zeros((0, 3, 3)), np.zeros(0, dtype=np.int32), np.zeros(0, dtype=object), names
     return np.concatenate(tris), np.concatenate(owners), np.concatenate(categories), names
 
 
-def _build_surfaces(col: Any, nodes: Sequence[Any], xs: np.ndarray, ys: np.ndarray) -> Surfaces:
+def _build_surfaces(col: Any, visual_glb: bytes, xs: np.ndarray, ys: np.ndarray) -> Surfaces:
     ctris, cclasses, cowners = _collision_triangles(col)
     col_by_class = {}
     for class_id in np.unique(cclasses):
         sel = cclasses == class_id
         col_by_class[CLASS_NAMES[int(class_id)]] = _raster_of(ctris[sel], cowners[sel], xs, ys)
-    vtris, vowners, vcats, vis_names = _visual_triangles(nodes)
+    vtris, vowners, vcats, vis_names = _visual_triangles_float32(visual_glb)
     vis_by_category = {}
     for category in sorted(set(vcats.tolist())):
         sel = vcats == category
@@ -318,15 +449,108 @@ def _build_surfaces(col: Any, nodes: Sequence[Any], xs: np.ndarray, ys: np.ndarr
     if roofs.any():
         vis_by_category["roof"] = _raster_of(vtris[roofs], vowners[roofs], xs, ys)
     col_names = [o["mb_id"] or o["name"] for o in col.objects]
+    lo, hi = col.bounds
     return Surfaces(xs, ys, _raster_of(ctris, cowners, xs, ys), col_by_class, _raster_of(vtris, vowners, xs, ys),
-                    vis_by_category, col_names, vis_names)
+                    vis_by_category, col_names, vis_names, [o["class"] for o in col.objects], ctris, cowners, vtris,
+                    vowners, vcats, col, float(hi[2]) + 1000.0, float(hi[2] - lo[2]) + 2000.0)
+
+
+def _segment_distance_xy(x: float, y: float, a: np.ndarray, b: np.ndarray) -> float:
+    dx, dy = float(b[0] - a[0]), float(b[1] - a[1])
+    den = dx * dx + dy * dy
+    if den == 0.0:
+        return math.hypot(x - float(a[0]), y - float(a[1]))
+    t = min(1.0, max(0.0, ((x - float(a[0])) * dx + (y - float(a[1])) * dy) / den))
+    qx, qy = float(a[0]) + t * dx, float(a[1]) + t * dy
+    return math.hypot(x - qx, y - qy)
+
+
+def _triangle_edge_distance_xy(tri: np.ndarray, x: float, y: float) -> float:
+    return min(_segment_distance_xy(x, y, tri[k], tri[(k + 1) % 3]) for k in range(3))
+
+
+def _triangle_plane_z_xy(tri: np.ndarray, x: float, y: float) -> float:
+    (ax, ay, az), (bx, by, bz), (cx, cy, cz) = tri
+    det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    if abs(float(det)) <= DEGENERATE_DET:
+        return NAN
+    w_a = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / det
+    w_b = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / det
+    w_c = 1.0 - w_a - w_b
+    return float(w_a * az + w_b * bz + w_c * cz)
+
+
+def _top_surface_tris_by_object(s: Surfaces) -> dict[int, np.ndarray]:
+    normals = np.cross(s.col_tris[:, 1] - s.col_tris[:, 0], s.col_tris[:, 2] - s.col_tris[:, 0])
+    up = np.abs(normals[:, 2]) > ROOF_NORMAL_MIN * np.maximum(np.linalg.norm(normals, axis=1), 1e-12)
+    out: dict[int, np.ndarray] = {}
+    for oi in np.unique(s.col_tri_owner):
+        sel = (s.col_tri_owner == oi) & up
+        if sel.any():
+            out[int(oi)] = s.col_tris[sel]
+    return out
+
+
+def _buried_edge_ambiguous(s: Surfaces, buried: np.ndarray, threshold: float, tol: float) -> np.ndarray:
+    """Edge-ambiguous buried cells satisfy both:
+    (a) near an edge of the matched collision top-surface triangle(s) at the visual hit height,
+    (b) one of the four ±tol x/y shifted collision rays reaches the visual height within ``threshold``."""
+    out = np.zeros_like(buried, dtype=bool)
+    col_index = {name: i for i, name in enumerate(s.col_names)}
+    top_tris = _top_surface_tris_by_object(s)
+    top_tri_mask = np.zeros(len(s.col_tris), dtype=bool)
+    for oi, _tris in top_tris.items():
+        own = np.nonzero(s.col_tri_owner == oi)[0]
+        if len(own):
+            normals = np.cross(s.col_tris[own, 1] - s.col_tris[own, 0], s.col_tris[own, 2] - s.col_tris[own, 0])
+            up = np.abs(normals[:, 2]) > ROOF_NORMAL_MIN * np.maximum(np.linalg.norm(normals, axis=1), 1e-12)
+            top_tri_mask[own[up]] = True
+    for j, i in zip(*np.nonzero(buried)):
+        vi = int(s.vis.owner[j, i])
+        if vi < 0:
+            continue
+        vis_name = s.vis_names[vi]
+        coi = col_index.get(vis_name)
+        if coi is None or coi not in top_tris:
+            continue
+        if s.col_obj_classes[coi] == "terrain":
+            continue
+        x, y = float(s.xs[i]), float(s.ys[j])
+        visual_z = float(s.vis.z[j, i])
+        candidates = [t for t in top_tris[coi]
+                      if _triangle_edge_distance_xy(t, x, y) <= tol
+                      and abs(_triangle_plane_z_xy(t, x, y) - visual_z) <= threshold]
+        if not candidates:
+            continue
+        hit = ray_cast(s.col_raw, (x, y, s.ray_origin_z), (0.0, 0.0, -1.0), s.ray_max_dist)
+        if hit is not None and int(hit.object) == coi:
+            tri = s.col_tris[int(hit.triangle)]
+            if _triangle_edge_distance_xy(tri, x, y) > tol or abs(_triangle_plane_z_xy(tri, x, y) - visual_z) > threshold:
+                continue
+        for dx, dy in ((tol, tol), (tol, -tol), (-tol, tol), (-tol, -tol)):
+            h = ray_cast(s.col_raw, (x + dx, y + dy, s.ray_origin_z), (0.0, 0.0, -1.0), s.ray_max_dist)
+            if h is None:
+                continue
+            if int(h.object) != coi or not top_tri_mask[int(h.triangle)]:
+                continue
+            shifted_tri = s.col_tris[int(h.triangle)]
+            if _triangle_edge_distance_xy(shifted_tri, x + dx, y + dy) > tol:
+                continue
+            z = s.ray_origin_z - float(h.t)
+            if abs(z - visual_z) <= threshold:
+                out[j, i] = True
+                break
+    return out
 
 
 def _check_collision_vs_visual(s: Surfaces, f: Findings, threshold: float) -> None:
     c, v = s.col.final(), s.vis.final()
     d = c - v
+    buried = d < -threshold
+    edge_ambiguous = _buried_edge_ambiguous(s, buried, threshold, EDGE_AMBIGUITY_M)
+    f.flag("edge_ambiguous_collision_visual", d, edge_ambiguous, s.vis.owner, s.vis_names)
     f.flag("floating_collision", d, d > threshold, s.col.owner, s.col_names)
-    f.flag("buried_collision", d, d < -threshold, s.vis.owner, s.vis_names)
+    f.flag("buried_collision", d, buried & ~edge_ambiguous, s.vis.owner, s.vis_names)
     for category in COMPARE:
         cr, vr = s.col_by_class.get(category), s.vis_by_category.get(category)
         if cr is not None and vr is not None:
@@ -342,8 +566,7 @@ def _check_roads(s: Surfaces, f: Findings, threshold: float) -> None:
             f.flag(f"ground_above_terrain:road:{side}", above, above > threshold, rasters["road"].owner, names)
 
 
-def _check_heightfield(s: Surfaces, f: Findings, hf: dict[str, Any], col: Any, nodes: Sequence[Any],
-                       threshold: float, hf_tol: float) -> None:
+def _check_heightfield(s: Surfaces, f: Findings, hf: dict[str, Any], col: Any, threshold: float, hf_tol: float) -> None:
     hx, hy = _node_axis(hf, "x"), _node_axis(hf, "y")
     hz = np.asarray(hf["z"], dtype=np.float64)
     ctris, cclasses, cowners = _collision_triangles(col)
@@ -358,9 +581,8 @@ def _check_heightfield(s: Surfaces, f: Findings, hf: dict[str, Any], col: Any, n
     one_sided = np.isnan(hz) != np.isnan(col_terrain.final())
     f.flag_nodes("hf_coverage", np.ones_like(hz), one_sided, col_terrain.owner, s.col_names, hf)
 
-    vtris, vowners, vcats, _ = _visual_triangles(nodes)
-    vis = vcats == "terrain"
-    vis_terrain = at_nodes(vtris[vis], vowners[vis])
+    vis = s.vis_category == "terrain"
+    vis_terrain = at_nodes(s.vis_tris[vis], s.vis_owner[vis])
     diff = hz - vis_terrain.final()
     f.flag_nodes("hf_vs_visual", diff, np.abs(diff) > threshold, vis_terrain.owner, s.vis_names, hf)
 
@@ -445,29 +667,34 @@ def _grid_axes(col: Any, cell: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _summarise(regions: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, float | int]]:
-    return {kind: {"regions": len(found), "area_m2": round(sum(r["area_m2"] for r in found), 1),
-                   "max_offset_m": max((r["max_offset_m"] for r in found), key=abs)}
-            for kind, found in regions.items()}
+    out: dict[str, dict[str, float | int]] = {}
+    for kind, found in regions.items():
+        if not found:
+            continue
+        out[kind] = {"regions": len(found), "area_m2": round(sum(r["area_m2"] for r in found), 1),
+                     "max_offset_m": max((r["max_offset_m"] for r in found), key=abs)}
+    return out
 
 
 def audit(path: str, cell: float = 1.0, threshold: float = 0.2, hf_tol: float = 0.05, min_area: float = 0.0,
           png_dir: str | None = None, crops: int = 0) -> dict:
-    manifest, col, hf, (_glb, nodes) = _load(path)
+    manifest, col, hf, visual_glb = _load(path)
     xs, ys = _grid_axes(col, cell)
-    surfaces = _build_surfaces(col, nodes, xs, ys)
+    surfaces = _build_surfaces(col, visual_glb, xs, ys)
     findings = Findings(cell, xs, ys, min_area)
     with np.errstate(invalid="ignore"):
         _check_collision_vs_visual(surfaces, findings, threshold)
         _check_roads(surfaces, findings, threshold)
         if hf is not None:
-            _check_heightfield(surfaces, findings, hf, col, nodes, threshold, hf_tol)
+            _check_heightfield(surfaces, findings, hf, col, threshold, hf_tol)
         _check_water(surfaces, findings, threshold, cell, _on_map(col, xs, ys))
+    summary = _summarise(findings.regions)
     result = {"package": os.path.basename(path), "cell_m": cell, "threshold_m": threshold, "hf_tol_m": hf_tol,
               "grid": [len(xs), len(ys)],
-              "triangles": {"collision": int(len(col.indices) // 3), "visual": int(sum(len(n.triangles) for n in nodes))},
-              "findings_summary": _summarise(findings.regions), "findings": findings.regions,
+              "triangles": {"collision": int(len(col.indices) // 3), "visual": int(len(surfaces.vis_tris))},
+              "findings_summary": summary, "findings": findings.regions,
               "water_bodies": _water_bodies(surfaces),
-              "ok": not any(kind not in INFO_KINDS for kind in findings.regions)}
+              "ok": not any(kind not in INFO_KINDS for kind in summary)}
     if png_dir:
         vis_terrain = surfaces.terrain("vis")
         _render(png_dir, os.path.splitext(os.path.basename(path))[0], xs, ys, findings.layers,
