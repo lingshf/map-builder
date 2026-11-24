@@ -60,13 +60,13 @@ every row. No completion percentage is implied.
 
 | Component / scope | Design | Implementation | Trade-offs | Usage | Authoritative page(s) | Gap rows |
 |---|---|---|---|---|---|---|
-| Acquisition and DSM (DEM, OSM, cache, DSM correction) | covered | stale | covered | covered | architecture §1; `design/roadmap.md` D15; user/generate §DSM | DOC-ARCH |
-| Terrain, roads, vegetation, buildings | covered | stale | covered | covered | architecture §1; user/generate | DOC-ARCH |
-| Roofs (skeleton, gabled/hipped, vertical-cut ends, named fallbacks) | **stale**: architecture says skeleton roofs are "planned" | stale | covered (D54–D107) | covered | architecture §1; user/generate §roofs; roadmap S3/S4 | DOC-ARCH |
+| Acquisition and DSM (DEM, OSM, cache, DSM correction) | covered | covered (pending owner check) | covered | covered | architecture §1; `design/roadmap.md` D15; user/generate §DSM | DOC-ARCH |
+| Terrain, roads, vegetation, buildings | covered | covered (pending owner check) | covered | covered | architecture §1; user/generate | DOC-ARCH |
+| Roofs (skeleton, gabled/hipped, vertical-cut ends, named fallbacks) | covered (pending owner check) | covered (pending owner check) | covered (D54–D107) | covered | architecture §1; user/generate §roofs; roadmap S3/S4 | DOC-ARCH |
 | Bridges, tunnels, passages, probes | covered | covered | covered (D18–D25) | **stale**: title says v0.3.0, body cites v0.5.0 | user/structures; architecture §1 | DOC-USER-STRUCT |
-| Water: surfaces, carved bed, bank colour, shore ramps, cascades | **gap**: no water stage in the architecture | **gap**: no code entry for `core/water.py`, `shore.py`, `overlap.py` | covered (D112–D118, D126–D129, D151) but only in the decision record | covered (user/generate §water); consumer covered (PACKAGE_FORMAT, UNITY_CORE_HANDOFF) | roadmap; user/generate §water | DOC-ARCH, DOC-WATER-DESIGN |
-| Textures and UVs | **stale**: "planned" in architecture | stale | covered (D57–D65, D86, D99, D124) | covered (user/generate §textures) | user/generate; PACKAGE_FORMAT §textures | DOC-ARCH |
-| Blender add-on (panel, scene build, bake, export) | covered | stale | covered | covered | architecture §2; user/ guides | DOC-ARCH |
+| Water: surfaces, carved bed, bank colour, shore ramps, cascades | covered (pending owner check): [architecture §Water and shores](architecture/README.md#water-and-shores) | covered (pending owner check) | covered: architecture trade-off table, with full rationale in the decision record | covered (user/generate §water); consumer covered (PACKAGE_FORMAT, UNITY_CORE_HANDOFF) | roadmap; user/generate §water | DOC-ARCH, DOC-WATER-DESIGN |
+| Textures and UVs | covered (pending owner check) | covered (pending owner check) | covered (D57–D65, D86, D99, D124) | covered (user/generate §textures) | user/generate; PACKAGE_FORMAT §textures | DOC-ARCH |
+| Blender add-on (panel, scene build, bake, export) | covered | covered (pending owner check) | covered | covered | architecture §2; user/ guides | DOC-ARCH |
 | CLI | covered | covered | n/a (shares the core, D1) | covered | user/cli; README §CLI | — |
 | Package format and consumer contract | covered | covered | covered (D101, D110 format policy) | covered | PACKAGE_FORMAT (normative); UNITY_CORE_HANDOFF | — |
 | C# reference reader | covered | covered | covered | covered | examples/README; PACKAGE_FORMAT | — |
