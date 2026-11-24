@@ -59,17 +59,24 @@ offline; `created_utc = "2026-11-20T00:00:00Z"`). Base = main at the PR's merge-
    0 `unlisted` on all six package/path runs; Python and C# agree on every query.
 6. **Munich and packages without water** are byte-identical on both paths. The sample is regenerated only under the
    D103 slot and the PR lists the member changes.
-7. **Performance (D91, D106) on the exact merge head.** Three alternating offline base/head rounds per preset,
-   whole path. Three series are reported: CLI whole Generate (`design/bench/cli_time.py`, acquire through strict
-   validation), Blender **Generate**, and Blender **Generate+Export** (`design/bench/bl_time.py`). D91 tracks the
-   last two separately. Each median of per-round medians stays within **+5 %** of the base and within the Sprint 4
-   floors against v0.4.0 (roadmap budgets table). A head that changes shared generator geometry needs fresh
-   numbers on every series, because numbers from an earlier head do not carry over (R3.4). An exception is
-   recorded as a coordinator decision; it is never left out silently. Stages may move inside the +5 % (D109).
-9. **Merge gate (D133, D135).** The D89 ruling limits rounds and scope only. The final head still needs an approval
-   on that exact head, green CI, mergeability with current main and the coordinator's authorization.
+7. **Performance (D91, D106, D147) on the exact merge head.** One rule: **5 alternating offline base/head rounds**
+   per preset, judged on the median of **CPU time** (`time.process_time`); elapsed wall time is posted for the record.
+   Three series, each judged separately:
+   * CLI whole Generate (`design/bench/cli_time.py`, acquisition through package write and strict validation);
+   * Blender **Generate**, measured inside Blender (`design/bench/bl_time.py`);
+   * Blender **Generate+Export**, measured inside Blender (`design/bench/bl_time.py`).
+
+   * **Per-PR gate:** each series is within **+5 % CPU** of the base. A head that changes shared generator geometry
+     needs fresh numbers on every series, because numbers from an earlier head do not carry over (R3.4). Stages
+     may move inside the +5 % (D109). An exception is recorded as a coordinator decision, never left out silently.
+   * **Release floor (not a per-PR gate):** the Sprint 4 v0.4.0 floors are checked once, at the release candidate
+     (REL-v0.5.0, #75). They use matched CPU time on the same host against a v0.4.0 (18f0822) CPU baseline (D147).
+     #77 deferred its floor check to #75.
 8. **Docs.** `docs/PACKAGE_FORMAT.md` and `docs/UNITY_CORE_HANDOFF.md` describe `bank:<id>` objects and ramps;
    the `.mbcol` and `.mbhf` formats are unchanged (D101, D110).
+9. **Merge gate (D133, D135).** The D89 ruling limits rounds and scope only. The final head still needs an approval
+   on that exact head, green CI, mergeability with current main and the coordinator's authorization. #77 merged
+   under the one-off exception recorded in D146.
 
 ## Tests (≤ 5 s each, no wall-clock asserts, no duplicates)
 

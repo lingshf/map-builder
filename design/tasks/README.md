@@ -82,7 +82,7 @@ S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touchin
 
 ## Sprint 4 (v0.5.0)
 
-Theme D93; decisions D94–D135 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+Theme D93; decisions D94–D148 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
@@ -101,14 +101,15 @@ Theme D93; decisions D94–D135 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-
 | [S4-REVIEW](S4-REVIEW.md) | S4 | design | the pre-review lanes A–C: ROOF-SPIKE/NAMED/ENDS, PERF-PKG, BLENDER-HYGIENE, COL-DEGEN, WATER-SURFACE, TEX-WATER, PERF-UV, TEST-HYGIENE, FORMAT-POLICY, EXT-READY (WATER-BANK, COL-FLOAT, COL-FLOAT-2 and MYPY follow the review) | `design/` only | done (GO after S4-WATER-BANK, D123) | #73 |
 | [S4-WATER-BANK](S4-WATER-BANK.md) | S4 (S4-F1, **v0.5.0 blocker**, D123) | dev | S4-WATER-SURFACE | `core/generate.py` (`build_terrain` colour choice, its call in `build_plan`), `tests/test_water.py`, `tests/blender/checks_water.py`; soft: sample slot (D103). Crops are PR evidence, no `docs/demo/` | done | #74 (7c24dc3) |
 | S4-COL-FLOAT | S4 (**v0.5.0 blocker**, D126) | dev | S4-WATER-BANK | `core/generate.py` (road drape source), `tools/floating_audit.py` (new), `tools/water_replay.py`; soft: sample slot (D103), VALIDATION | done (no spec; criteria in the PR) | #76 (53c54d3) |
-| [S4-COL-FLOAT-2](S4-COL-FLOAT-2.md) | S4 (**v0.5.0 blocker**, D126, D129) | dev | S4-COL-FLOAT | `core/shore.py`, `core/overlap.py` (new), `core/water.py`, `core/generate.py` (water stage, ramp objects), `core/package.py` (`_MB_ID`), `tools/floating_audit.py`, `tools/water_replay.py`, their tests, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION | review (D89 cap reached at R3; D135: one coordinator-verified fix commit, no R4; exact-head Blender timing; D133 gate) | #77 |
-| [S4-MYPY](S4-MYPY.md) | S4 (**v0.5.0 blocker**, D128) | dev | **S4-COL-FLOAT-2** (shared `core/` files); read-only triage allowed before | `pyproject.toml` (`[tool.mypy]`), `.github/workflows/ci.yml` (mypy step), the files with mypy errors after #77 | blocked (triage only) | |
+| [S4-COL-FLOAT-2](S4-COL-FLOAT-2.md) | S4 (**v0.5.0 blocker**, D126, D129) | dev | S4-COL-FLOAT | `core/shore.py`, `core/overlap.py` (new), `core/water.py`, `core/generate.py` (water stage, ramp objects), `core/package.py` (`_MB_ID`), `tools/floating_audit.py`, `tools/water_replay.py`, their tests, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION | done (merged under D135 coordinator verification, D146) | #77 (db9db44) |
+| [S4-MYPY](S4-MYPY.md) | S4 (**v0.5.0 blocker**, D128) | dev | **S4-COL-FLOAT-2** (merged, db9db44) | `pyproject.toml` (`[tool.mypy]`), `.github/workflows/ci.yml` (mypy step), the files with mypy errors after #77 | ready | |
 | S4-F2 | later (D124) | dev | S4-WATER-BANK | `core/water.py` (UVs), `map_builder/assets/textures/`, NOTICES | → S5-TEX-WATER: texture "MB Water" | |
 | S4-F3 | later | dev | — | `core/water.py`, `core/osm.py` | → S5 water coverage: standalone `water=*`, riverbank multipolygons, coastline | |
 | S4-F4 | later | dev | — | `core/generate.py` (landcover colours), `core/textures.py` | → S5: default tint for untagged ground (near-white since D99) | |
 | S4-F5 | later or REL docs | dev | — | `docs/PACKAGE_FORMAT.md` | → stale C# line citations (+50 after #72) | |
 | S4-F6 | later | dev | S4-F4 | `core/generate.py` (`build_terrain`) | → S5: landcover edge staircase (per-cell colours) | |
 | S4-F7 | later | dev | — | `tests/test_col_degen.py` | → test hygiene: 6.1 s incl. C# build | |
+| S4-F8 | later (D148) | dev | — (investigation first) | `tools/floating_audit.py` (classification), then the owning generator stage once known | → investigate the Pittsburgh CLI `buried_collision` singleton `osm:way/537242388` (class null), present on main 6fc2f02; #76 called it an audit-ray edge graze. Outcome: either a fix or a documented audit exception | |
 | [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2, S4-MYPY (D133) | version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `blender_manifest.toml`), `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md`, `docs/PACKAGE_FORMAT.md` (shared with COL-FLOAT-2), `docs/VALIDATION.md`, `examples/README.md`, the D103 sample slot (`examples/synthetic_sample.mbmap`) | RC open; final after S4-COL-FLOAT-2 and S4-MYPY | #75 (RC) |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
