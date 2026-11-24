@@ -22,11 +22,14 @@ WTRI = [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)]
 
 
 SHEET_Z = {WATER: 1.0, "water:osm:way/2": 0.4}
+SLOPED_SHEET = "water:osm:way/3"     # its shoreline falls from z 9 at the corners to z 5 at (100, 0)
 RAY_TOP = 10.0
 
 
 def sheet_triangles(entry: dict) -> list:
     """Every water body is the triangle x + y <= 100, so its real shoreline is far from its bbox corner."""
+    if entry["name"] == SLOPED_SHEET:
+        return [[(0.0, 0.0, 9.0), (100.0, 0.0, 5.0), (0.0, 100.0, 9.0)]]
     return [[(x, y, SHEET_Z[entry["name"]]) for x, y in WTRI]]
 
 
@@ -37,6 +40,8 @@ def head_pkg(report: dict | None = None, probes: list | None = None, raised: dic
                {"name": "bank:osm:way/1", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 0.98]},
                {"name": "water:osm:way/2", "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
                {"name": "bank:osm:way/2", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 5.0]},
+               {"name": SLOPED_SHEET, "class": "water", "aabb": [0, 0, 5, 100, 100, 9]},
+               {"name": "bank:osm:way/3", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 7]},
                {"name": "bank:osm:way/999", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 0.98]}]
     return SimpleNamespace(col=SimpleNamespace(objects=objects, object_triangles=sheet_triangles), raised=raised if raised is not None else {DECK: 0.5},
                            names={o["name"] for o in objects} | {"osm:way/9", "bld"},
@@ -99,6 +104,11 @@ class RayLabelTest(unittest.TestCase):
         self.assertEqual(wr.ray_label([T0], [ramp, T0], (98, 5), ctx()), "bank ramp")
         # inside the ramp bbox and the sheet bbox, but 35 m from the triangular sheet's nearest edge
         self.assertEqual(wr.ray_label([T0], [ramp, T0], (98, -35), ctx()), "unlisted")
+
+    def test_the_sheet_height_is_taken_at_the_closest_shore_point_not_the_higher_end(self) -> None:
+        low, high = (RAY_TOP - 5.0, "bank:osm:way/3", "terrain"), (RAY_TOP - 7.0, "bank:osm:way/3", "terrain")
+        self.assertEqual(wr.ray_label([T0], [low, T0], (98, 5), ctx()), "bank ramp")
+        self.assertEqual(wr.ray_label([T0], [high, T0], (98, 5), ctx()), "unlisted")     # 7 m over a 5 m shore
 
     def test_a_bank_over_a_replaced_terrain_object_is_unlisted(self) -> None:
         ramp = (9.5, "bank:osm:way/1", "terrain")

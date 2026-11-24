@@ -10,7 +10,7 @@ from collections.abc import Iterator, Sequence
 from .osm import point_in_ring
 
 Pt = tuple[float, float]
-SHRINK = 1e-3   # relative; far above rounding along a shared edge, far below any patch worth ramping around
+WET_SHRINK = 1e-3   # tolerance: a wet overlap thinner than this fraction of the triangle (~1 mm per m) is ignored
 
 
 def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
@@ -36,7 +36,7 @@ def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequ
     """Whether the triangle and the region (``outer`` minus ``holes``) share area. A triangle whose edge lies on
     the region's boundary does not: it is shrunk a little first, so rounding along that edge is not an overlap."""
     centre = (sum(p[0] for p in tri) / 3, sum(p[1] for p in tri) / 3)
-    core = [(centre[0] + (x - centre[0]) * (1 - SHRINK), centre[1] + (y - centre[1]) * (1 - SHRINK)) for x, y in tri]
+    core = [(centre[0] + (x - centre[0]) * (1 - WET_SHRINK), centre[1] + (y - centre[1]) * (1 - WET_SHRINK)) for x, y in tri]
     rings = [outer, *holes]
     if any(point_in_ring(x, y, core) for ring in rings for x, y in ring):
         return True

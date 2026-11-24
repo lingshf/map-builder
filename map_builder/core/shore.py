@@ -36,6 +36,11 @@ MIN_DROP_M = 0.2         # a bank closer than this to the sheet needs no ramp
 MIXED_SPLITS = 3          # a strip whose ends differ in kind is halved at most this many times
 
 
+# (plan triangle, a point on each body a cascade lands on; empty for a bank ramp) -> whether the triangle covers water.
+# A bank ramp must not cover any body; a cascade may cover only its own body and the one it lands on.
+WetCheck = Callable[[Sequence[Pt], Sequence[Pt]], bool]
+
+
 @dataclass
 class ShoreRamps:
     bank: list[Tri] = field(default_factory=list)
@@ -57,11 +62,11 @@ class _Node:
 
 def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Surface,
                 blocked_by: Callable[[Sequence[Pt]], bool], other_level_at: Callable[[float, float], float | None],
-                wet_by: Callable[[Sequence[Pt]], bool]) -> ShoreRamps:
+                wet_by: WetCheck) -> ShoreRamps:
     """Ramps along ``edges`` (water on the left of each p->q). ``level_at``: the body's sheet; ``ground_at``: the
     final terrain; ``blocked_by``: whether a plan triangle overlaps a footprint, road or bridge that must not be
     covered; ``other_level_at``: the sheet of another water body at a point, or None; ``wet_by``: whether a plan
-    triangle shares area with any water body (a bank ramp must not cover water)."""
+    triangle shares area with a water body other than the ones it connects (see ``WetCheck``)."""
     out = ShoreRamps()
     normals = [_right_normal(p, q) for p, q in edges]
 
@@ -93,15 +98,16 @@ def _split_mixed(a: _Node, b: _Node, section: Callable[[Pt], _Node], depth: int 
 
 
 def _place_strip(out: ShoreRamps, a: _Node, b: _Node, blocked_by: Callable[[Sequence[Pt]], bool],
-                 wet_by: Callable[[Sequence[Pt]], bool]) -> None:
+                 wet_by: WetCheck) -> None:
     """Add the strip between two cross-sections as a cascade (both ends cascade) or a bank ramp. A strip that
-    overlaps a footprint, road or bridge, or a bank strip that would cover water, is left out."""
+    overlaps a footprint, road or bridge, or covers water it does not connect, is left out."""
     tris = _ramp_tris(a, b)
     if not tris:
         return
     cascade = a.cascade and b.cascade
     plan = [[(v[0], v[1]) for v in t] for t in tris]
-    if any(blocked_by(t) or (not cascade and wet_by(t)) for t in plan):
+    landings = (a.foot[:2], b.foot[:2]) if cascade else ()
+    if any(blocked_by(t) or wet_by(t, landings) for t in plan):
         out.blocked_m += math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
     else:
         (out.cascade if cascade else out.bank).extend(tris)

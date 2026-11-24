@@ -25,7 +25,7 @@ from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
 from .overlap import point_segment_distance, triangle_overlaps_region, triangle_touches
-from .shore import shore_ramps
+from .shore import WetCheck, shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
 Pt = tuple[float, float]
@@ -778,14 +778,19 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
 
-    wet_pieces = [(_ring_box(o), o, hs) for body in model.active() for o, hs in body.pieces]
+    wet_pieces = [(body, _ring_box(o), o, hs) for body in model.active() for o, hs in body.pieces]
 
-    def wet_by(tri: Sequence[Pt]) -> bool:
-        box = _ring_box(tri)
-        return any(_boxes_meet(box, pb) and triangle_overlaps_region(tri, o, hs) for pb, o, hs in wet_pieces)
+    def wet_by_for(own: Body) -> WetCheck:
+        def wet_by(tri: Sequence[Pt], landings: Sequence[Pt]) -> bool:
+            box = _ring_box(tri)
+            is_cascade = bool(landings)
+            return any(_boxes_meet(box, pb) and triangle_overlaps_region(tri, o, hs)
+                       for body, pb, o, hs in wet_pieces
+                       if not (is_cascade and (body is own or _lands_on(landings, o, hs))))
+        return wet_by
 
     for b in model.active():
-        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_level, wet_by)  # type: ignore[union-attr]
+        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_level, wet_by_for(b))  # type: ignore[union-attr]
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:
@@ -796,6 +801,10 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
             continue
         b.bank, b.cascade = ramps.bank, ramps.cascade
         b.info["shore_ramp_triangles"] = len(triangles)
+
+
+def _lands_on(points: Sequence[Pt], outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
+    return any(point_in_ring(x, y, outer) and not any(point_in_ring(x, y, h) for h in holes) for x, y in points)
 
 
 def _ring_box(ring: Sequence[Pt]) -> tuple[float, float, float, float]:

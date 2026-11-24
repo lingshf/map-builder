@@ -197,9 +197,17 @@ class Context:
         water_name = WATER_OBJECT_PREFIX + bank_name[len(BANK_OBJECT_PREFIX):]
         if bank is None or water_name not in self.water_entry_by_name or not _in_box(bank, *xy):
             return False
-        distance, sheet = min(((point_segment_distance(*xy, a[:2], b[:2]), max(a[2], b[2]))
-                               for a, b in self.shore_of(water_name)), key=lambda d: d[0])
+        distance, sheet = min((_distance_and_edge_z(xy, a, b) for a, b in self.shore_of(water_name)),
+                              key=lambda d: d[0])
         return distance <= RAMP_REACH_M and self.ray_top - hit_t <= sheet + DIST_TOL_M
+
+
+def _distance_and_edge_z(xy: tuple[float, float], a: Any, b: Any) -> tuple[float, float]:
+    """Distance from `xy` to the edge a-b in plan, and the edge's z interpolated at the closest point."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    u = 0.0 if length2 == 0 else min(1.0, max(0.0, ((xy[0] - a[0]) * dx + (xy[1] - a[1]) * dy) / length2))
+    return point_segment_distance(*xy, a[:2], b[:2]), a[2] + u * (b[2] - a[2])
 
 
 def _in_box(box: Any, x: float, y: float) -> bool:

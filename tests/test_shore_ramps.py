@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from map_builder.core import shore
+from map_builder.core import overlap, shore
 from map_builder.core.overlap import triangle_overlaps_region, triangle_touches
 from map_builder.core.query import ray_cast
 from map_builder.core.structures import plan_collision
@@ -16,7 +16,7 @@ SHEET = 10.0
 SHORE_EDGE = ((0.0, 0.0), (0.0, 10.0))        # water on the left, so the bank lies at x > 0
 NO_OTHER_BODY = lambda x, y: None             # noqa: E731
 NOT_BLOCKED = lambda tri: False               # noqa: E731
-DRY = lambda tri: False                       # noqa: E731
+DRY = lambda tri, landings: False                       # noqa: E731
 
 
 def ramps(edges=(SHORE_EDGE,), ground=lambda x, y: 6.0, blocked=NOT_BLOCKED, other=NO_OTHER_BODY, wet=DRY):
@@ -96,7 +96,7 @@ class StripMaskTest(unittest.TestCase):
     def test_a_strip_between_a_cascade_and_a_bank_is_split_at_the_edge_of_the_other_body(self):
         other_body = [(0.2, -5.0), (20.0, -5.0), (20.0, 5.0), (0.2, 5.0)]
         out = ramps(other=lambda x, y: 4.0 if x > 0.2 and y < 5.0 else None,
-                    wet=lambda tri: triangle_overlaps_region(tri, other_body, []))
+                    wet=lambda tri, landings: not landings and triangle_overlaps_region(tri, other_body, []))
         self.assertTrue(out.cascade and out.bank)
         self.assertLessEqual(max(v[1] for t in out.cascade for v in t), 5.0)
         self.assertGreaterEqual(min(v[1] for t in out.bank for v in t if v[0] > 0.3), 5.0 - 1e-9)
@@ -107,7 +107,7 @@ class WetPatchTest(unittest.TestCase):
 
     @staticmethod
     def wet_where(outer):
-        return lambda tri: triangle_overlaps_region(tri, outer, [])
+        return lambda tri, landings: triangle_overlaps_region(tri, outer, [])
 
     def test_a_small_patch_inside_a_strip_blocks_it(self):
         patch = [(2.0, 0.55), (2.1, 0.55), (2.1, 0.65), (2.0, 0.65)]
@@ -118,6 +118,28 @@ class WetPatchTest(unittest.TestCase):
     def test_the_bodys_own_sheet_edge_is_not_wet_cover(self):
         own_water = [(-5.0, 0.0), (0.0, 0.0), (0.0, 10.0), (-5.0, 10.0)]
         self.assertTrue(ramps(wet=self.wet_where(own_water)).bank)
+
+
+class CascadeWetTest(unittest.TestCase):
+    def test_a_cascade_crossing_a_third_body_before_its_landing_is_left_out(self):
+        third_body = [(0.1, -5.0), (0.3, -5.0), (0.3, 15.0), (0.1, 15.0)]
+        out = ramps(other=lambda x, y: 4.0 if x > 0.2 else None,
+                    wet=lambda tri, landings: bool(landings) and triangle_overlaps_region(tri, third_body, []))
+        self.assertEqual(out.cascade, [])
+        self.assertAlmostEqual(out.blocked_m, 10.0)
+
+
+class WetToleranceTest(unittest.TestCase):
+    """The shrink that keeps a shared edge from counting as overlap also forgives a sliver this deep."""
+    TRI = [(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]
+
+    def overlapped_by(self, depth):
+        return triangle_overlaps_region(self.TRI, [(-5.0, -5.0), (depth, -5.0), (depth, 15.0), (-5.0, 15.0)], [])
+
+    def test_a_sliver_inside_the_tolerance_is_not_overlap_and_one_outside_it_is(self):
+        edge_depth = overlap.WET_SHRINK * 10.0 / 3     # the shrunk triangle's edge, from the centroid at x = 10/3
+        self.assertFalse(self.overlapped_by(edge_depth * 0.5))
+        self.assertTrue(self.overlapped_by(edge_depth * 2.0))
 
 
 class LakeBankTest(unittest.TestCase):
