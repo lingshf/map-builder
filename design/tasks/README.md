@@ -82,7 +82,7 @@ S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touchin
 
 ## Sprint 4 (v0.5.0)
 
-Theme D93; decisions D94–D135 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+Theme D93; decisions D94–D148 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
@@ -109,6 +109,7 @@ Theme D93; decisions D94–D135 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-
 | S4-F5 | later or REL docs | dev | — | `docs/PACKAGE_FORMAT.md` | → stale C# line citations (+50 after #72) | |
 | S4-F6 | later | dev | S4-F4 | `core/generate.py` (`build_terrain`) | → S5: landcover edge staircase (per-cell colours) | |
 | S4-F7 | later | dev | — | `tests/test_col_degen.py` | → test hygiene: 6.1 s incl. C# build | |
+| S4-F8 | later (D148) | dev | — (investigation first) | `tools/floating_audit.py` (classification), then the owning generator stage once known | → investigate the Pittsburgh CLI `buried_collision` singleton `osm:way/537242388` (class null), present on main 6fc2f02; #76 called it an audit-ray edge graze. Outcome: either a fix or a documented audit exception | |
 | [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2, S4-MYPY (D133) | version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `blender_manifest.toml`), `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md`, `docs/PACKAGE_FORMAT.md` (shared with COL-FLOAT-2), `docs/VALIDATION.md`, `examples/README.md`, the D103 sample slot (`examples/synthetic_sample.mbmap`) | RC open; final after S4-COL-FLOAT-2 and S4-MYPY | #75 (RC) |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
