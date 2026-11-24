@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
 """S5 style render harness: fixed preset cameras, Blender EEVEE, contact sheets, palette ΔE2000 report."""
 
