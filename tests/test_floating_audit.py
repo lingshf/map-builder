@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 
 import numpy as np
@@ -43,7 +45,8 @@ def surfaces(road_z: float) -> fa.Surfaces:
     ctris = np.concatenate((square(0.0), road))
     cowners = np.array([0, 0, 1, 1], dtype=np.int32)
     return fa.Surfaces(GRID, GRID, everything, by_kind, everything, by_kind, names, names,
-                       ["terrain", "road"], ctris, cowners, ctris)
+                       ["terrain", "road"], ctris, cowners, ctris, cowners,
+                       np.array(["terrain", "road", "terrain", "road"], dtype=object), object(), 1000.0, 2000.0)
 
 
 def road_findings(road_z: float) -> dict[str, list[dict]]:
@@ -78,12 +81,35 @@ class RasterTest(unittest.TestCase):
 
 
 class CollisionVisualBoundaryTest(unittest.TestCase):
+    @staticmethod
+    def _col_raw(tris: np.ndarray, owners: np.ndarray):
+        class Col:
+            pass
+        c = Col()
+        verts, indices = [], []
+        for t in tris:
+            o = len(verts)
+            verts.extend([tuple(map(float, t[0])), tuple(map(float, t[1])), tuple(map(float, t[2]))])
+            indices.extend([o, o + 1, o + 2])
+        c.vertices = verts
+        c.indices = indices
+        c.bounds = (np.min(tris.reshape(-1, 3), axis=0), np.max(tris.reshape(-1, 3), axis=0))
+        c.objects = []
+        for owner in sorted(set(owners.tolist())):
+            tri_ids = np.where(owners == owner)[0]
+            flat = tris[tri_ids].reshape(-1, 3)
+            lo = np.min(flat, axis=0)
+            hi = np.max(flat, axis=0)
+            c.objects.append({"aabb": [float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2])],
+                              "tri_start": int(tri_ids.min()), "tri_count": int(len(tri_ids))})
+        return c
+
     def _surfaces(self, xs: np.ndarray, ys: np.ndarray, col_layers: list[tuple[np.ndarray, int]],
                   vis_layers: list[tuple[np.ndarray, int]], names: list[str], classes: list[str]) -> fa.Surfaces:
         col = fa.Raster(xs, ys)
         vis = fa.Raster(xs, ys)
         ctris, cowners = [], []
-        vtris = []
+        vtris, vowners, vcats = [], [], []
         for tris, owner in col_layers:
             col.add(tris, np.full(len(tris), owner, dtype=np.int32))
             ctris.append(tris)
@@ -91,19 +117,28 @@ class CollisionVisualBoundaryTest(unittest.TestCase):
         for tris, owner in vis_layers:
             vis.add(tris, np.full(len(tris), owner, dtype=np.int32))
             vtris.append(tris)
+            vowners.append(np.full(len(tris), owner, dtype=np.int32))
+            vcats.append(np.full(len(tris), classes[owner], dtype=object))
         col_by_class = {"terrain": fa.Raster(xs, ys)}
         col_by_class["terrain"].add(col_layers[0][0], np.zeros(len(col_layers[0][0]), dtype=np.int32))
         vis_by_category = {"terrain": fa.Raster(xs, ys)}
         vis_by_category["terrain"].add(vis_layers[0][0], np.zeros(len(vis_layers[0][0]), dtype=np.int32))
+        col_tris = np.concatenate(ctris)
+        col_owners = np.concatenate(cowners)
+        order = np.argsort(col_owners, kind="stable")
+        col_tris = col_tris[order]
+        col_owners = col_owners[order]
+        col_raw = self._col_raw(col_tris, col_owners)
         return fa.Surfaces(xs, ys, col, col_by_class, vis, vis_by_category, names, names, classes,
-                           np.concatenate(ctris), np.concatenate(cowners), np.concatenate(vtris))
+                           col_tris, col_owners, np.concatenate(vtris), np.concatenate(vowners),
+                           np.concatenate(vcats), col_raw, 1000.0, 2000.0)
 
     def test_buried_edge_case_is_reported_as_edge_ambiguous(self):
         xs = np.array([0.0], dtype=float)
         ys = np.array([0.0], dtype=float)
         terrain = square(0.0, -2.0, 2.0)
         vis_roof = np.array([[(0.0, -1.0, 10.0), (0.0, 1.0, 10.0), (1.0, 0.0, 10.0)]], dtype=float)
-        col_roof = np.array([[(1.1e-5, -1.0, 10.0), (1.1e-5, 1.0, 10.0), (1.000011, 0.0, 10.0)]], dtype=float)
+        col_roof = np.array([[(5.0e-5, -1.5, 10.0), (5.0e-5, 1.5, 10.0), (1.50005, 0.0, 10.0)]], dtype=float)
         s = self._surfaces(xs, ys, [(terrain, 0), (col_roof, 1)], [(terrain, 0), (vis_roof, 1)],
                            ["terrain:grid", "osm:way/537242388"], ["terrain", "building"])
         f = fa.Findings(1.0, xs, ys, 0.0)
@@ -123,6 +158,33 @@ class CollisionVisualBoundaryTest(unittest.TestCase):
         fa._check_collision_vs_visual(s, f, 0.2)
         self.assertIn("floating_collision", f.regions)
         self.assertAlmostEqual(f.regions["floating_collision"][0]["max_offset_m"], 8.0, places=3)
+
+    def test_10m_buried_repro_is_not_downgraded_by_unrelated_wall_edge(self):
+        xs = np.array([0.0], dtype=float)
+        ys = np.array([0.0], dtype=float)
+        terrain = square(0.0, -2.0, 2.0)
+        wall = np.array([[(0.0, -0.01, 0.0), (0.0, 0.01, 10.0), (0.0, 0.02, 0.0)]], dtype=float)
+        far_roof = np.array([[(0.5, -1.0, 10.0), (0.5, 1.0, 10.0), (1.5, 0.0, 10.0)]], dtype=float)
+        vis_roof = np.array([[(-0.5, -1.0, 10.0), (-0.5, 1.0, 10.0), (0.5, 0.0, 10.0)]], dtype=float)
+        s = self._surfaces(xs, ys, [(terrain, 0), (wall, 1), (far_roof, 1)], [(terrain, 0), (vis_roof, 1)],
+                           ["terrain:grid", "osm:way/repro10"], ["terrain", "building"])
+        f = fa.Findings(1.0, xs, ys, 0.0)
+        fa._check_collision_vs_visual(s, f, 0.2)
+        self.assertIn("buried_collision", f.regions)
+        self.assertNotIn("edge_ambiguous_collision_visual", f.regions)
+
+    def test_edge_ambiguity_requires_within_documented_tolerance(self):
+        xs = np.array([0.0], dtype=float)
+        ys = np.array([0.0], dtype=float)
+        terrain = square(0.0, -2.0, 2.0)
+        vis_roof = np.array([[(0.0, -1.0, 10.0), (0.0, 1.0, 10.0), (1.0, 0.0, 10.0)]], dtype=float)
+        col_roof = np.array([[(1.1e-4, -1.0, 10.0), (1.1e-4, 1.0, 10.0), (1.00011, 0.0, 10.0)]], dtype=float)
+        s = self._surfaces(xs, ys, [(terrain, 0), (col_roof, 1)], [(terrain, 0), (vis_roof, 1)],
+                           ["terrain:grid", "osm:way/tol"], ["terrain", "building"])
+        f = fa.Findings(1.0, xs, ys, 0.0)
+        fa._check_collision_vs_visual(s, f, 0.2)
+        self.assertIn("buried_collision", f.regions)
+        self.assertNotIn("edge_ambiguous_collision_visual", f.regions)
 
 
 class RoadClassificationTest(unittest.TestCase):
@@ -159,6 +221,18 @@ class SampleAuditTest(unittest.TestCase):
 
     def test_findings_are_json_serialisable_without_infinities(self):
         json.dumps(self.result, allow_nan=False)
+
+    def test_min_area_does_not_crash_summary_or_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            out_json = os.path.join(td, "out.json")
+            run = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "tools", "floating_audit.py"), SAMPLE, "--min-area", "2", "--json", out_json],
+                capture_output=True, text=True, check=False
+            )
+            self.assertNotEqual(run.returncode, 2, run.stderr)
+            with open(out_json, encoding="utf-8") as f:
+                payload = json.load(f)
+            self.assertIsInstance(payload["findings_summary"], dict)
 
 
 if __name__ == "__main__":
