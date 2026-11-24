@@ -1,6 +1,6 @@
 # S5-STYLE: stylized low-poly look for the GLB visuals (direction and tasks)
 
-Owner: design (direction); dev (tasks below) · sprint S5 · decisions D136–D145
+Owner: design (direction); dev (tasks below) · sprint S5 · decisions D136–D145, D153, D156, D157
 
 ## User direction (verbatim)
 
@@ -25,7 +25,8 @@ image is not committed. Its palette is sampled below, and the coordinator holds 
 Flight depends on height and collision, so G0 sits above all three priorities. It is one gate, run by
 `tools/style_check.py` (S5-STYLE-BASE) on the task's base and head.
 
-* **Packages:** the sample, Munich and Pittsburgh.
+* **Packages:** the sample, Munich, Pittsburgh and Bellevue-Factoria (D157). Wherever this spec lists
+  "the sample, Munich and Pittsburgh", Bellevue-Factoria is included from S5-STYLE-BASE onwards.
 * **Paths:** the CLI and headless Blender.
 * **Modes:** stylized and classic.
 * **Pinned settings:** frozen caches, seed 1, DSM on, offline, `created_utc = "2026-11-20T00:00:00Z"`, and the
@@ -115,13 +116,13 @@ How each element is styled:
 
 ## Low-end budgets (D139)
 
-S5-STYLE-BASE measures every baseline on main at the S5 start, both modes, for the sample, Munich and Pittsburgh
-(D90). Pittsburgh is the sizing case.
+S5-STYLE-BASE measures every baseline on main at the S5 start, both modes, for the sample, Munich, Pittsburgh and
+Bellevue-Factoria (D90, D157). Pittsburgh is the sizing case; Bellevue-Factoria is the main visual example.
 
 **Cumulative rule.** Each implementation task reports every row twice:
 
 * against the S5-BASE baseline: cumulative, and this must stay within the floor;
-* against its own base: incremental, reported with D106 alternating rounds for timing.
+* against its own base: incremental. Generation cost uses the timing rule below.
 
 | Item | How it is counted | Floor (must, cumulative) |
 |---|---|---|
@@ -133,7 +134,8 @@ S5-STYLE-BASE measures every baseline on main at the S5 start, both modes, for t
 | Visual vertices | from the GLB | ≤ baseline × 2 (unwelding) |
 | Embedded texture bytes (stylized) | images in the GLB | 0 |
 | GLB size | bytes | ≤ baseline; S5-DECOR ≤ baseline + 10 % |
-| Generate time (D91, D106) | **CLI whole Generate**, **Blender Generate** and **Blender Generate+Export**, each reported separately | each ≤ +5 % vs the task's base |
+| Generation work (D153 gate) | D153 work vector for **CLI whole Generate**, **Blender Generate** and **Blender Generate+Export**, each separately, base = merge-base + counter commit C | F1–F3 pass; F4 and F6 answered |
+| CPU sanity (D147, F5 only) | D147 CPU medians, 5 alternating rounds, the same three series | ≤ +5 % or explained under F5; not a gate |
 
 Shaders: standard glTF PBR only, as imported by glTFast with its default URP shaders, mobile included. No custom
 or required-extension shaders.
@@ -163,8 +165,9 @@ evidence quickly and is **not** a hardware budget.
 
 ## Visual acceptance method (D140)
 
-1. **Cameras:** the demokit presets plus three style cameras: a Pittsburgh river bend with banks, a Munich
-   roofscape and a forest edge on the sample. Cameras are stored in `tools/demo/presets/`.
+1. **Cameras:** the demokit presets plus five style cameras: a Pittsburgh river bend with banks, a Munich
+   roofscape, a forest edge on the sample, and two Bellevue-Factoria views (D157). Cameras are stored in
+   `tools/demo/presets/`. **Every** S5 task's before/after evidence includes the Factoria cameras.
 2. **Render:** Blender EEVEE, one sun and the world colour as soft ambient, 64 samples, 1280 × 720.
 3. **Contact sheet:** for each camera, the reference crop (held by the coordinator), the base render and the head
    render side by side. It is attached to the PR, not committed (`docs/demo/` is for REL only).
@@ -172,6 +175,35 @@ evidence quickly and is **not** a hardware budget.
    information only; a value above 15 is flagged to the reviewer.
 5. **Verdict:** the reviewer judges the sheet against the user's priority order. **S5-STYLE-REVIEW is an explicit
    GO/NO-GO** on the G0 evidence, classic identity, the cumulative budgets and the sheets.
+
+## Acceptance example: Bellevue-Factoria (D157, user request)
+
+> 后期检验效果的时候，生成一张Bellevue， factoria，这一片的map，作为example
+
+| Field | Value |
+|---|---|
+| Preset id | `bellevue-factoria` (`tools/demo/presets/bellevue-factoria.json`) |
+| Centre | 47.5790 N, 122.1790 W |
+| Extent | 1600 m (E–W) × 1400 m (N–S); bbox S 47.5727, N 47.5853, W −122.1897, E −122.1683 |
+| Settings | as the other presets: seed 1, DSM correction on, terrain 10 m, heightfield 2 m, textured, `created_utc` pinned |
+
+Why this area (checked against OSM on 2026-11-24):
+
+* **I-90/I-405 interchange edge:** the motorway junctions on I-90 (exits 10, 10A, 10B, 11) lie at about
+  47.579–47.583 N, 122.177–122.189 W, inside the box; the 405 ramps run along the west part.
+* **Factoria commercial buildings:** Marketplace at Factoria (`shop=mall`, centre 47.5745 N, 122.1726 W) and the
+  surrounding commercial blocks south of I-90.
+* **Residential streets and trees** east and south-east of the mall.
+* **Water:** the southern `natural=water` ponds of the Mercer Slough area (ways 1537086924, 1537086925,
+  1537086926 and 1062196544, at 47.584–47.586 N) and Richards Creek (`waterway=stream`) near the east edge.
+  Mercer Slough's main multipolygon (relation 2315576) lies further north and is mostly outside; streams and
+  standalone water polygons outside D113's built set are reported, not built (S4-F3).
+
+Size: 2.24 km², about 1.9× Pittsburgh's area, inside the D3 limits (50–2000 m sides). The build must stay within
+≤ 120 s per path (D102.9); BASE reports the time. **Allowed adjustment:** if the first build shows the mall or the
+pond group clipped, BASE may move the centre or change a side by at most 200 m; the PR records the final values
+and Design updates this table and D157 before PALETTE starts. Multi-level interchanges beyond `layer` clearance
+are a v2 non-goal: they appear in `unsupported_features` and do not fail the build.
 
 ## Scheduling and shared files (D136)
 
@@ -192,9 +224,20 @@ evidence quickly and is **not** a hardware budget.
 
 ## Tasks
 
-Every implementation task meets **G0**, **classic identity**, the **cumulative budgets** and **D91 timing**
-(three series), and attaches the contact sheet and the palette report. Test budget: D134 (≤ 5 s per test, no
+Every implementation task meets **G0**, **classic identity**, the **cumulative budgets** and the **timing rule**
+(below), and attaches the contact sheet and the palette report. Test budget: D134 (≤ 5 s per test, no
 wall-clock asserts, no duplicate cases; renders and real-data runs are PR evidence only).
+
+**Timing rule (D153, D147).** The **gate** is the D153 deterministic work vector (F1–F3 must pass; F4 and F6 are
+answered in review), measured with the checker and counter commit C pinned in D153 against base = merge-base + C.
+**D147 CPU time** (5 alternating rounds, three series) is the **F5 sanity check only**: a series above +5 % must be
+explained, but CPU time never passes or fails a task by itself. This replaces every earlier "D91/D106 timing,
+≤ +5 % per series" rule in this spec. Before S5-PERF-GATE merges (S5-STYLE-BASE only), CPU timing is recorded for
+information and nothing is gated on time.
+
+**Pinned work-vector baseline.** S5-STYLE-PALETTE's first step records the S5 work-vector baseline (D153 checker
+and C at their pinned commits, the merge-base SHA, the interpreter, and all four presets) as a roadmap row next to
+D153. Every later S5 task compares its own base against that row as well as against its own merge-base.
 
 Order (D156): **BASE** (in parallel with S4-F8) → S5-PERF-GATE → **PALETTE** → **WATER** → S5-PERF-WATER → **REVIEW**, then **DECOR** last. Nothing waits on DECOR.
 
@@ -206,10 +249,22 @@ Order (D156): **BASE** (in parallel with S4-F8) → S5-PERF-GATE → **PALETTE**
     vertices, texture bytes, GLB size); per-node CLI-versus-Blender colour and material parity; and the palette
     regions for given renders;
   * the runtime frame-time proxy runner (headless Chromium, SwiftShader, the vendored viewer);
-  * the three style cameras and the render and contact-sheet recipe in `tools/demo/`.
+  * the three style cameras and the render and contact-sheet recipe in `tools/demo/`;
+  * the **`bellevue-factoria` preset** (D157): `tools/demo/presets/bellevue-factoria.json` and two Factoria
+    cameras (an interchange-and-mall overview, and a low street-level view with trees and water). The preset's
+    caches are acquired **once** and then frozen and used offline, like the other presets; the PR records the
+    acquisition SHA-256 per cache file and the combined hash.
 * **ACs:**
-  1. The baseline table (every budget row, both modes, the sample, Munich and Pittsburgh, CLI and Blender, plus
-     the three D91 series) is posted in the PR. Design records it in the roadmap.
+  1. The baseline table (every budget row, both modes, the sample, Munich, Pittsburgh and Bellevue-Factoria, CLI
+     and Blender, plus D147 CPU time for the three series, information only) is posted in the PR. Design records it
+     in the roadmap. **Conditional refresh:** if S4-F8 merges as case (B) and changes any package, AC1 is re-measured
+     on the post-S4-F8 main before PALETTE starts; if S4-F8 is case (A), the AC1 table stands.
+  1a. **Bellevue-Factoria builds VALID** on the CLI and Blender, classic mode, offline from its frozen caches. G0
+     data (`.mbcol`, `.mbhf`, georeference, probes) is recorded as the classic baseline. Unsupported features (for
+     example a multi-level interchange beyond `layer` clearance, a v2 non-goal) are listed in
+     `report.json` `unsupported_features` and are not a failure; a failure to build or validate is. The
+     floating audit result is posted, and any finding becomes an S5-Fn row. The build stays within the v1.0
+     target of ≤ 120 s per path (D102.9).
   2. `tests/test_style_check.py` covers each G0 negative case and one classic-identity negative case (a single
      GLB byte change).
   3. The frame-time proxy repeats within ±5 % over three runs of the same package on the pinned host; otherwise
@@ -217,8 +272,9 @@ Order (D156): **BASE** (in parallel with S4-F8) → S5-PERF-GATE → **PALETTE**
   4. The render recipe produces all cameras in ≤ 2 min.
   5. No generator output changes; the sample is byte-identical.
 * **Conflict domain:** `tools/style_check.py`, `tests/test_style_check.py` (both new), `tools/demo/` (presets,
-  recipe, proxy runner). No `core/` edits.
-* **Dependencies:** #75 merged (D136; done at 6535f38). Runs in parallel with S4-F8 (D156): the domains are disjoint while S4-F8 stays case (A), which edits only `tools/floating_audit.py` and its tests. If S4-F8 becomes case (B) and changes packages, the AC1 baseline is re-measured on the post-S4-F8 main before PALETTE starts. BASE changes no product code, so its baseline timing is D147 CPU time for information. The generation work-vector baseline is taken with the pinned D153 checker after S5-PERF-GATE merges, as PALETTE's first step.
+  including the new `bellevue-factoria.json`, recipe, proxy runner); soft: `tests/test_demo_bundle.py` preset rows
+  if that test enumerates presets. No `core/` edits.
+* **Dependencies:** #75 merged (D136; done at 6535f38). Runs in parallel with S4-F8 (D156): the domains are disjoint while S4-F8 stays case (A), which edits only `tools/floating_audit.py` and its tests. AC1's conditional refresh covers S4-F8 case (B). BASE changes no product code and runs before the counters exist, so its timing is D147 CPU time for information; the gated work-vector baseline is pinned by PALETTE's first step (timing rule above).
 
 ### S5-STYLE-PALETTE: style option (default stylized), palette, faceting, terrain, buildings, roads and trees
 
@@ -271,6 +327,9 @@ Order (D156): **BASE** (in parallel with S4-F8) → S5-PERF-GATE → **PALETTE**
 * **Scope:** `design/` only.
 * **Evidence:** G0 and classic identity for every package, path and mode; cumulative budgets against the S5-BASE
   baseline; the contact sheets; and the test audit (D134).
+* **Main visual example (D157):** Bellevue-Factoria, classic vs stylized, from the two Factoria cameras, shown to the
+  user next to the contact sheet against the reference. The GO/NO-GO states how Factoria reads against the user's
+  priorities (looks good, low cost, fidelity).
 * **Verdict:** explicit **GO or NO-GO**. A NO-GO names the failing evidence and the S5-Fn fix tasks.
 * **Dependencies:** S5-STYLE-BASE, PALETTE and WATER, then S5-PERF-WATER (D156; byte-identical, so the review evidence is unchanged). S5-DECOR is not a dependency.
 
@@ -388,3 +447,4 @@ primitive); `core/package.py` (exporter exemption); `docs/PACKAGE_FORMAT.md`; `d
 | D143 | U3: the shore band is colour only on existing triangles; no water re-triangulation; `.mbcol` and `.mbhf` byte-identical. | C (delegated by the user) |
 | D144 | U4: lit materials first; `KHR_materials_unlit` may be revisited after S5-STYLE-REVIEW. | C |
 | D145 | Trees are appearance-only in S5; no S5 task changes collision geometry. A tree shape change (S5-F1) or any other geometry change needs explicit user approval. | C (user delegated open points; user may change) |
+| D157 | Third real-data preset `bellevue-factoria` (user request) for S5 acceptance; see the roadmap. | U |
