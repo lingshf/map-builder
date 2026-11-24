@@ -38,6 +38,20 @@ is never left behind; without a configured copy, or if the run fails, the step i
 `summary.md` records why instead of faking the UI. The tab click is a simulated event
 calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in `panel_shot.py`.
 
+## S5 style acceptance helpers
+
+* `style_frame_time_proxy.py` runs the frame-time proxy (headless Chromium + SwiftShader, 1280x720,
+  60 warm-up + 300 measured frames) against `viewer/frame_time_proxy.html`, using one fixed camera
+  from a preset and verifying the reported WebGL renderer contains `SwiftShader`.
+* `style_contact_sheet.py` builds one same-camera contact sheet from `reference/base/head` renders.
+* `style_render_recipe.py` renders `before/after` with deterministic Cycles CPU by default
+  (`--engine CYCLES --samples 8 --seed 1 --denoise off`), and writes per-camera contact
+  sheets plus fixed-region palette ΔE2000 reports and `timing.json` (per-output timing vs
+  the 120 s budget). EEVEE stays available via `--engine BLENDER_EEVEE`.
+* Added preset: `bellevue-factoria` (D157 final: center 47.5790/-122.1790, 1600 x 1400 m).
+* Added style camera presets: `style-sample-forest-edge`, `style-pittsburgh-river-bend`,
+  `style-munich-roofscape`.
+
 `make_probe_sample.py out.mbmap` derives a small package with three passage probes (PASS, BLOCKED, and
 an id containing markup) from the synthetic sample, for viewer smoke tests.
 

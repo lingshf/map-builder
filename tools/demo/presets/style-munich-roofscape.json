@@ -1,0 +1,8 @@
+{
+  "name": "style-munich-roofscape",
+  "description": "S5 style camera: Munich roofscape color readability view",
+  "area": {"lat": 48.1395, "lon": 11.5764, "width_m": 400, "height_m": 400},
+  "cameras": [
+    {"name": "roofscape", "eye": [-145, 40, 86], "target": [-95, -30, 26], "lens_mm": 28}
+  ]
+}

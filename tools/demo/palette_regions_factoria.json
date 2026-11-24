@@ -1,0 +1,10 @@
+{
+  "regions": [
+    {"camera": "overview", "label": "grass-mid", "target_hex": "#96b671", "x": 0.36, "y": 0.58, "w": 0.06, "h": 0.08},
+    {"camera": "overview", "label": "water-open", "target_hex": "#6dc0e7", "x": 0.62, "y": 0.53, "w": 0.05, "h": 0.07},
+    {"camera": "factoria-interchange", "label": "road-light", "target_hex": "#d4b590", "x": 0.45, "y": 0.62, "w": 0.08, "h": 0.07},
+    {"camera": "factoria-interchange", "label": "foliage-mid", "target_hex": "#39864c", "x": 0.18, "y": 0.55, "w": 0.06, "h": 0.08},
+    {"camera": "factoria-ponds", "label": "water-shore", "target_hex": "#ceeef6", "x": 0.48, "y": 0.60, "w": 0.06, "h": 0.08},
+    {"camera": "factoria-ponds", "label": "grass-light", "target_hex": "#b9d17a", "x": 0.30, "y": 0.64, "w": 0.06, "h": 0.08}
+  ]
+}
