@@ -29,19 +29,19 @@ flowchart LR
 
 | Stage | Code entry | What it does |
 |---|---|---|
-| Acquire | `core/pipeline.py` `acquire`; `dem.py`, `tiff.py`, `http.py`, `cache.py`, `osm.py` | Loads Copernicus DEM and Overpass OSM, online or from the cache, or local files. Required-data errors stop the run. The optional wider DSM-mask request may fail with a warning only. |
-| Classify | `core/osm.py` | Turns tags into buildings, roads, areas (landcover and water), waterways, structures and trees. Unsupported and invalid features are reported, not dropped silently. |
-| DSM correction | `core/dsm.py` | Lowers masked heights (buildings, trees, forest, bridges) toward the surrounding ground and never raises them. The result is inferred terrain, not a true DTM (D15). |
-| Water stage | `generate._water_stage` → `core/water.py` `build_water`; `core/shore.py`; `core/overlap.py` | Builds flat water bodies on a carved bed, plus shore ramps. See [Water and shores](#water-and-shores). |
-| Terrain | `generate.build_terrain` | Builds the terrain grid mesh on the **carved** grid when water exists, and picks the landcover colour per cell (D123: no water colour under a built body). |
-| Buildings and roofs | `generate.build_building`; `core/roofs.py`, `core/skeleton.py` | Footprints on the **pre-carve** ground. Flat, skillion, gabled, hipped and pyramidal roofs, including straight-skeleton roofs on non-rectangular footprints and vertical-cut gable ends (D54–D107). A roof that cannot be built carries a named fallback reason. |
-| Roads and vegetation | `generate.build_road`, `tree_mesh`, scatter | Roads are draped on the **carved** terrain (#76, D126). Trees are shared-mesh instances with class `vegetation` collision. |
-| Structures | `core/bridges.py`, `tunnels.py`, `passages.py`, `structures.py` | Bridge decks and piers, tunnel tubes and portals, building passages. `structures.py` shares stage context and checks passage probes on the finished scene (D18, D21). |
-| Plan | `generate.build_plan` → `ScenePlan` | Runs the stages in order under vertex and triangle budgets (`SceneBudget`); every object is an `ObjectSpec` with a stable `mb_id`, class and provenance. |
-| Textures and UVs | `core/uv.py` `assign_uvs`, `core/textures.py` | Optional textures (export setting). Luminance-only detail textures; the hue comes from vertex colours (D99). Package schema 2.1.0 (D57, D86). |
+| Acquire | [`map_builder/core/pipeline.py`](../../map_builder/core/pipeline.py) `acquire`; helpers `dem.py`, `tiff.py`, `http.py`, `cache.py` in the same package | Loads Copernicus DEM and Overpass OSM, online or from the cache, or local files. Required-data errors stop the run. The optional wider DSM-mask request may fail with a warning only. |
+| Classify | [`map_builder/core/osm.py`](../../map_builder/core/osm.py) `classify` | Turns tags into buildings, roads, areas (landcover and water), waterways, structures and trees. Unsupported and invalid features are reported, not dropped silently. |
+| DSM correction | [`map_builder/core/dsm.py`](../../map_builder/core/dsm.py) `apply_correction` | Lowers masked heights (buildings, trees, forest, bridges) toward the surrounding ground and never raises them. The result is inferred terrain, not a true DTM (D15). |
+| Water stage | [`map_builder/core/generate.py`](../../map_builder/core/generate.py) `_water_stage` → [`map_builder/core/water.py`](../../map_builder/core/water.py) `build_water`; [`map_builder/core/shore.py`](../../map_builder/core/shore.py) `shore_ramps`; [`map_builder/core/overlap.py`](../../map_builder/core/overlap.py) | Builds flat water bodies on a carved bed, plus shore ramps. See [Water and shores](#water-and-shores). |
+| Terrain | [`map_builder/core/generate.py`](../../map_builder/core/generate.py) `build_terrain` | Builds the terrain grid mesh on the **carved** grid when water exists, and picks the landcover colour per cell (D123: no water colour under a built body). |
+| Buildings and roofs | [`map_builder/core/generate.py`](../../map_builder/core/generate.py) `build_building`; [`map_builder/core/roofs.py`](../../map_builder/core/roofs.py), [`map_builder/core/skeleton.py`](../../map_builder/core/skeleton.py) | Footprints on the **pre-carve** ground. Flat, skillion, gabled, hipped and pyramidal roofs, including straight-skeleton roofs on non-rectangular footprints and vertical-cut gable ends (D54–D107). A roof that cannot be built carries a named fallback reason. |
+| Roads and vegetation | [`map_builder/core/generate.py`](../../map_builder/core/generate.py) `build_road`, `tree_mesh`, `scatter_points` | Roads are draped on the **carved** terrain (#76, D126). Trees are shared-mesh instances with class `vegetation` collision. |
+| Structures | [`map_builder/core/bridges.py`](../../map_builder/core/bridges.py), [`map_builder/core/tunnels.py`](../../map_builder/core/tunnels.py), [`map_builder/core/passages.py`](../../map_builder/core/passages.py), [`map_builder/core/structures.py`](../../map_builder/core/structures.py) | Bridge decks and piers, tunnel tubes and portals, building passages. `structures.py` shares stage context and checks passage probes on the finished scene (D18, D21). |
+| Plan | [`map_builder/core/generate.py`](../../map_builder/core/generate.py) `build_plan` → `ScenePlan` | Runs the stages in order under vertex and triangle budgets (`SceneBudget`); every object is an `ObjectSpec` with a stable `mb_id`, class and provenance. |
+| Textures and UVs | [`map_builder/core/uv.py`](../../map_builder/core/uv.py) `assign_uvs`, [`map_builder/core/textures.py`](../../map_builder/core/textures.py) | Optional textures (export setting). Luminance-only detail textures; the hue comes from vertex colours (D99). Package schema 2.1.0 (D57, D86). |
 
-Shared helpers: `mesh.py` (mesh data), `triangulate.py` (polygon triangulation), `geodesy.py` (local ENU frame and
-area limits), `query.py` (ray and capsule queries, used by probes and the tools).
+Shared helpers in `map_builder/core/`: `mesh.py` (mesh data), `triangulate.py` (polygon triangulation), `geodesy.py`
+(local ENU frame and area limits), `query.py` (ray and capsule queries, used by probes and the tools).
 
 ## Water and shores
 
@@ -78,6 +78,15 @@ cushion.
    * against other water, by positive area, where a cascade may overlap only its lower receiving body.
 
    A blocked strip is skipped, and its length is added to `info["shore_ramp_blocked_m"]`.
+
+   **Coverage limits, as implemented.** Ramps are attempted, not guaranteed:
+   * a strip that meets a mask is left out;
+   * if the scene triangle budget is exceeded, a body's ramps are left out entirely, with the note "shore ramps
+     left out" (`water._attach_ramps`);
+   * standalone `water=*` and other unsupported water stay unbuilt (S4-F3).
+
+   The design target is "no sheet edge above the bank". Whether a given package meets it is measured by the audit
+   below, not assumed from this design.
 6. **Objects** (`generate._water_objects`). One `water:<id>` object per built body (collision class 5 `water`,
    material `MB Water`), plus one `bank:<id>` terrain object if ramps exist. `report.json` `water_bodies` gives
    each body's outcome. `.mbhf` stays terrain-only and therefore shows the bed (D117); consumers use the `.mbcol`
@@ -85,12 +94,26 @@ cushion.
 
 **Checks:**
 
-* `tools/floating_audit.py` ray-casts collision, heightfield and visual surfaces on a grid. Its categories are
-  floating, `buried_collision`, `water_above_bank` (contract 0), `water_buried` (contract 0) and `water_shore_step`
-  (information only, ≤ 1.5 m by design), plus edge-ambiguity classes (D159).
-* `tools/water_replay.py` replays fixed queries between two packages in Python and C# and labels every difference
-  (§7, `bank ramp`, `road lowered`).
-* `tools/water_check.py` checks the bed and clearance invariants.
+* [`tools/floating_audit.py`](../../tools/floating_audit.py) ray-casts collision, heightfield and visual surfaces on a grid,
+  separately for collision and visual. Its categories are floating, `buried_collision`, `water_buried` (contract 0)
+  and, in a ring around each wet area (`_check_water`), the gap between the sheet and the terrain:
+  * a gap of ≤ 1.5 m + 0.05 m (`SHORE_STEP_TOL_M`) is labelled `water_shore_step`, as information;
+  * a larger gap is labelled `water_above_bank`, with contract 0.
+
+  Edge-ambiguity classes are also reported (D159). The 0.05 m label tolerance is the audit's own and is **not** the
+  design bound: S5-F3 applies 1.5 m + 1 mm.
+* [`tools/water_replay.py`](../../tools/water_replay.py) replays fixed queries between two packages in Python and C# and labels
+  every difference (§7, `bank ramp`, `road lowered`).
+* [`tools/water_check.py`](../../tools/water_check.py) checks the bed and clearance invariants.
+
+**Measured state** (open defects, separate from the design):
+
+| Package | `water_above_bank` | `water_shore_step` |
+|---|---|---|
+| v0.5.0 release packages (Pittsburgh) | 0 | 104 regions, max 1.500 m |
+| Bellevue-Factoria classic build (#85) | **4** | **119 regions, max 1.548 m** |
+
+The Factoria findings are open under [S5-F3](../../design/tasks/S5-F3.md), which owns their disposition.
 
 **Trade-offs** (full rationale in the decision record):
 
@@ -99,13 +122,10 @@ cushion.
 | Paint water-coloured terrain (v0.4.0) | Followed the DEM dip and read as a "mat"; banks were blue (S4-F1) | — |
 | Vertical skirt at the sheet edge | Terrain, road and water are +Z-only open surfaces, and the validator rejects down-facing triangles | a down-facing surface class were added (a format change, D101) |
 | Confined carve (carve only under the sheet) | Breaks the −1.5 m bed under shore cells (D113–D118) | the bed rule were relaxed |
-| Ramps, as built | They close every gap with up-facing terrain, but add work: about +5 % of Blender Generate calls (D151) | — (cost tracked by S5-PERF-WATER) |
+| Ramps, as built | Up-facing terrain and cascades close the sheet-edge gap wherever a ramp is placed (see the coverage limits above). The cost, measured as Python primitive calls on Pittsburgh textured **Blender Generate**, is about +5.2 % (#77) out of a +13.0 % water-stage total since v0.4.0 (D151) | — (cost tracked by S5-PERF-WATER) |
 
-**Known open items:**
-
-* S5-F3: four Factoria `water_above_bank` regions and one 1.548 m shore step, being classified.
-* S4-F3: wider water coverage.
-* S5-PERF-WATER: mask cost.
+**Known open items:** [S5-F3](../../design/tasks/S5-F3.md) (the Factoria findings above), S4-F3 (wider water
+coverage), [S5-PERF-WATER](../../design/tasks/S5-PERF-WATER.md) (mask cost).
 
 ## Two export paths
 
@@ -128,17 +148,20 @@ flowchart LR
   K --> L[mbmap package]
 ```
 
-* **CLI:** `pipeline.plan_to_package` exports generated objects directly.
-* **Blender:** `blender/scene_build.py`, `export.py` and `bake.py` build the editable collection, then evaluate it,
+* **CLI:** [`map_builder/core/pipeline.py`](../../map_builder/core/pipeline.py) `plan_to_package` exports generated objects directly.
+* **Blender:** [`map_builder/blender/scene_build.py`](../../map_builder/blender/scene_build.py) `build_scene`,
+  [`export.py`](../../map_builder/blender/export.py) `export_map` and [`bake.py`](../../map_builder/blender/bake.py) `bake_object` / `export_baked` build the editable
+  collection, then evaluate it,
   including modifiers and transforms. Blender stores float32 geometry, so its packages differ in bytes from the
   CLI's but carry the same probes.
 
 Both paths export GLB and collision from the same final geometry and bind each collision object to a visual node by
 name, one-to-one.
 
-* `glb.py` writes visual meshes.
-* `collision.py` writes `.mbcol` and derives `.mbhf` from the final terrain collision.
-* `package.py` assembles, validates and atomically writes the ZIP package. A failed export keeps the previous file.
+* [`map_builder/core/glb.py`](../../map_builder/core/glb.py) writes visual meshes.
+* [`map_builder/core/collision.py`](../../map_builder/core/collision.py) writes `.mbcol`; `.mbhf` is derived from the final terrain collision.
+* [`map_builder/core/package.py`](../../map_builder/core/package.py) assembles, validates and atomically writes the ZIP package. A failed export keeps the previous
+  file.
 * `report.json` carries warnings, provenance and omissions. An otherwise `VALID` package is not proof that every
   passage is clear.
 
@@ -148,14 +171,14 @@ feature deleted in Blender as `{id, reason: "feature_deleted"}`.
 ## Package and consumer
 
 * **Versions:** the writer emits schema **2.1.0**, `.mbcol` v2 and optional `.mbhf` v1, with generator 0.5.0
-  (`core/__init__.py`).
+  ([`map_builder/core/__init__.py`](../../map_builder/core/__init__.py)).
 * **Contents:** `manifest.json` holds the georeference, objects, sources, hashes, `asset_notices` and the
   orientation and passage probes. The archive also contains `visual/map.glb`, `collision/map.mbcol`, optional
   `collision/terrain.mbhf`, `report.json` and `NOTICES.txt`.
 * **Identity:** the package ID hashes the raw manifest. Manifest file entries bind every other member by size and
   SHA-256.
-* **Format stability:** the policy is in [PACKAGE_FORMAT.md](../PACKAGE_FORMAT.md) (D101, D110). Readers reject
-  unknown major versions; a minor version adds no package members and needs a frozen-reader fixture.
+* **Format stability:** minor versions are additive and backward compatible. The normative rules are the policy in
+  [PACKAGE_FORMAT.md](../PACKAGE_FORMAT.md) (D101, D110); they are not restated here.
 
 Collision is authoritative for the consumer's Core; the GLB is for presentation (D4). Map coordinates are local ENU
 metres, and map-to-glTF is `(x, z, -y)`. Orientation probes test both position and winding. Passage probes test
