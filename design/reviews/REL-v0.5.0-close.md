@@ -40,7 +40,7 @@ Method:
 * 7 points × 5 rounds, with the point order rotated and reversed on alternate rounds;
 * cProfile on 4 of the points.
 
-Raw data: [data/REL-v0.5.0-close-cpu.jsonl](data/REL-v0.5.0-close-cpu.jsonl).
+Raw CPU data (medians only): [data/REL-v0.5.0-close-cpu.jsonl](data/REL-v0.5.0-close-cpu.jsonl).
 
 The seven points:
 
@@ -62,11 +62,20 @@ Paired medians against v0.4.0 in the same round. The rightmost column is the RC 
 | Blender Generate | 0.978 | 0.991 | 1.244 | 1.184 | 1.214 | **1.202** |
 | Blender Generate+Export | 0.897 | 0.864 | 0.970 | 1.059 | 1.000 | **0.991** |
 
-**Noise floor.** 53c54d3 and 6fc2f02 have identical product code. Their same-round ratios were 0.67–1.19 (CLI)
-and 0.65–1.23 (Blender Generate). v0.4.0's own CLI CPU time ranged from 28.3 s to 43.4 s. The host was 71–77 %
-busy with other workloads. **CPU time cannot resolve ±5 % here** (follow-up: D153).
+**Host variability (CPU timing only).** 53c54d3 and 6fc2f02 have identical product code. Their same-round CPU
+ratios (6fc2f02 / 53c54d3) per series:
 
-**Deterministic work** (Python primitive calls, the same on every run):
+| Series | Range |
+|---|---|
+| CLI whole Generate | 0.67–1.19× |
+| Blender Generate | 0.65–1.23× |
+| Blender Generate+Export | 0.84–1.29× |
+
+v0.4.0's own CLI CPU time ranged from 28.3 s to 43.4 s. The host was 71–77 % busy with other workloads. **CPU
+time cannot resolve ±5 % here** (follow-up: D153). The deterministic evidence below is a separate method and does
+not depend on these ranges.
+
+**Deterministic work (profiler evidence)** (Python primitive calls; one `cProfile` run per revision; extract with exact invocation and pins: [data/REL-v0.5.0-close-profile.json](data/REL-v0.5.0-close-profile.json)):
 
 | | v0.4.0 | d38d4e8 (#72) | 53c54d3 | e08d3e1 |
 |---|---|---|---|---|
@@ -92,8 +101,19 @@ Coordinator decision **D151** accepts (a) as a disclosed exception. **D152** fil
 
 ## 3. Coordinator retro (recorded for the coordinator)
 
-* **The merge gate held.** No PR merged without green CI on its exact head and coordinator authorisation. The
-  approval exceptions are recorded (D146) and were not repeated without a record.
+* **The merge gate held** for CI and authorisation: no PR merged without green CI on its exact head and the
+  coordinator's authorisation. The **exact-head independent approval** part of D133 was met by none of the
+  three closing code PRs. Each merged after its review-round cap with a coordinator-verified final commit. These
+  are exceptions, not D133 compliance:
+
+| PR | Merged head | Merge commit | Exception record |
+|---|---|---|---|
+| #77 | b890bae | db9db44 | D146, [evidence comment](https://github.com/lingshf/map-builder/pull/77#issuecomment-7119763236) |
+| #81 | 6b022d5 | 7b417db | the reviewer's R3 (CHANGES_REQUESTED on 6ca1b72) asked for the malformed-coordinate handling, which the final delta addresses; the coordinator verified 6ca1b72 → 6b022d5 and authorised the merge. No independent approval exists on 6b022d5. |
+| #75 | cd1112c | 6535f38 | the independent reviewer's last verdict was CHANGES_REQUESTED on 52e0806 (R3); the Design close-check **GO** is on the exact head ([comment](https://github.com/lingshf/map-builder/pull/75#issuecomment-7124840492)). The coordinator verified 52e0806 → cd1112c (docs only) and authorised the merge. |
+
+  **Lesson:** a capped review that ends in coordinator verification is recorded as an exception every time, with
+  the verified delta and a link, as D122, D146 and this table do.
 * **#77 needed six coordinator-authorised follow-up commits** (881c269 … b890bae), not the one D135 allowed. The
   heuristic overlap tests kept failing review, first by sampling, then by shrinking, then by missing a third body.
   **Lesson:** a spec states the exact geometric predicate up front: what counts as overlap or contact, and the
@@ -108,14 +128,14 @@ Coordinator decision **D151** accepts (a) as a disclosed exception. **D152** fil
 * **Measurement:** D147 replaced wall time with CPU time but still could not resolve ±5 % on a shared host.
   Deterministic counts did (D153).
 
-## 4. Follow-ups and sprint 5 order (D149, D152, D153)
+## 4. Follow-ups and sprint 5 order (D149, D152–D154)
 
-**S4-F8** → **S5-PERF-WATER** → **S5-PERF-GATE** (D153) → **S5-STYLE-BASE** → PALETTE → WATER → S5-STYLE-REVIEW,
+**S4-F8** → **S5-PERF-GATE** (D153) → **S5-PERF-WATER** → **S5-STYLE-BASE** (D154) → PALETTE → WATER → S5-STYLE-REVIEW,
 then S5-DECOR last.
 
 | Task | Why | Spec |
 |---|---|---|
-| S4-F8 | exact collision; investigate the buried singleton | [../tasks/S4-F8.md](../tasks/S4-F8.md) |
+| S4-F8 | exact collision; the singleton is an audit finding, and its impact is unproven until the step-1 A/B ray test | [../tasks/S4-F8.md](../tasks/S4-F8.md) |
 | S5-PERF-WATER | water stage back to ≤ 3.8 % of Blender Generate, byte-identical | [../tasks/S5-PERF-WATER.md](../tasks/S5-PERF-WATER.md) |
 | S5-PERF-GATE | deterministic performance gate | [../tasks/S5-PERF-GATE.md](../tasks/S5-PERF-GATE.md) |
 | (non-blocking) | add Blender Generate's 1.20× CPU figure to the notes at publication | release manager |

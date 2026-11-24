@@ -1,63 +1,121 @@
 # S5-PERF-GATE: deterministic performance gating (D153)
 
-Owner: dev (tooling) · sprint S5, after S5-PERF-WATER, before S5-STYLE-BASE (D153)
+Owner: dev (tooling) · sprint S5 · runs **after S4-F8 and before S5-PERF-WATER** (D154)
 
 ## Problem
 
-D147 judges performance on CPU time (`time.process_time`, 5 alternating rounds). On the shared host, identical code
-(53c54d3 and 6fc2f02, which differ only in `design/`) measured **0.65–1.19×** of itself in the same round. The
-host is 71–77 % busy with other workloads, and CPU time inflates under SMT and turbo contention. The +5 % gate
-therefore cannot be resolved. In the REL-v0.5.0 close check, the release dev and Design measured 1.139× and 0.948×
-for the same CLI series ([../reviews/REL-v0.5.0-close.md](../reviews/REL-v0.5.0-close.md)).
+D147 judges performance on CPU time (`time.process_time`, 5 alternating rounds). On the shared host, identical
+product code (53c54d3 vs 6fc2f02) measured, per series, in the same round:
 
-Python primitive call counts from cProfile were **deterministic**: the same code gives the same count across runs.
-They located the whole v0.5.0 increase (D151).
+| Series | Same-code ratio range |
+|---|---|
+| CLI whole Generate | 0.67–1.19× |
+| Blender Generate | 0.65–1.23× |
+| Blender Generate+Export | 0.84–1.29× |
 
-## Change
+A +5 % gate cannot be resolved on this host
+([../reviews/REL-v0.5.0-close.md](../reviews/REL-v0.5.0-close.md)). Python call counts were deterministic and
+located the v0.5.0 increase (D151). Call counts alone can still be gamed, though:
 
-Add `tools/perf/work_count.py` (a dev-owned tool; D125 keeps dev PRs out of `design/`), which runs one whole path and reports a deterministic work vector:
+* inline arithmetic in a loop adds work without adding calls;
+* repeating a native operation (deflate, `struct.pack`, list sort) adds work without changing call counts or output
+  size.
 
-* **CLI whole Generate:** acquisition, plan, package write and strict validation, as `cli_time.py`.
-* **Blender Generate** and **Blender Generate+Export:** measured inside Blender, as `bl_time.py`.
+The gate therefore counts **operations**, not just calls.
 
-For each, it reports:
+## The metric (pinned)
 
-1. Total Python primitive calls, from `cProfile` or `sys.setprofile` counting only, with no timing.
-2. Per-stage primitive calls for the named stage functions: acquire, `build_plan`, `_water_stage`, `build_terrain`,
-   buildings and roofs, roads, `build_scene`, the package writer and `validate_package`.
-3. A bounded op counter for hot native-heavy steps where Python calls under-count the work: bytes deflated, and
-   triangles and vertices emitted per class. These come from the package report or the GLB and `.mbcol` headers.
-4. CPU time, in the same run, as a sanity value.
+**Work vector.** For each series, the work vector is the following set of counters.
 
-The new gate, which replaces the D147 pass/fail rule once this merges:
+1. **Explicit operation counters in the hot loops.** Implemented as a module-level `perf_counters` registry in
+   `map_builder/core/` that costs nothing when disabled: an integer increment behind one module flag, and no I/O.
+   This is a closed, pinned list; adding or removing a counter is itself a gated change:
 
-* **Pass/fail:** each of the three series' total calls is ≤ **+5 %** of the base, and the op counters are ≤ +5 %
-  unless the PR lists the new geometry that explains them (the D35 rule). The calls are deterministic, so one run
-  per revision is enough. Two runs confirm determinism, and the gate fails if they differ.
-* **Sanity:** CPU time, 5 alternating rounds (D147). It is informational. If CPU is above +15 % while calls are
-  ≤ +5 %, the PR must explain it; the usual cause is native work that calls don't capture. It is a review flag,
-  not an automatic fail.
-* **Release floors:** the same vector against v0.4.0 (18f0822) and later tags, both measured with this tool on the
-  same interpreter.
+| Counter | Counted unit |
+|---|---|
+| `tri_emitted[class]` | collision triangles appended by `generate.py` |
+| `ring_edge_tests` | edges visited in `osm.point_in_ring`, `osm.ring_self_intersects` and `osm._segments_intersect` callers |
+| `clip_steps` | vertices processed in `generate._clip_halfplane`, `water._clip_half` and `overlap._clip_against_edge` |
+| `overlap_pairs` / `overlap_edge_tests` | triangle–mask pairs tested, and edges tested inside `core/overlap.py` |
+| `grid_cells_rasterised` | cells in `collision.rasterize_heightfield` and the DEM/DSM grid passes |
+| `deflate_in_bytes` | cumulative bytes passed **into** zlib/deflate (every call, including retries), not output size |
+| `glb_bytes_written`, `mbcol_bytes_written` | bytes written per member |
+| `validator_pairs` | `package.match_one_to_one` and `match_winding` candidate pairs examined |
+| `bpy_mesh_vertices` | vertices passed to `mesh_from_data` (Blender only) |
+
+2. **Python primitive calls**, from the same run.
+
+**Attribution (non-overlapping).** Counters and calls are attributed to the **innermost** active stage from this
+fixed stack:
+
+`acquire` > `build_plan` > { `_water_stage` > `shore_ramps`, `build_terrain`, buildings/roofs, roads, bridges,
+tunnels } > `build_scene` (Blender) > package write > `validate_package`
+
+Nested stages are subtracted from their parents, so each count lands in exactly one stage. The sum over stages
+must equal the series total, and the tool fails if it doesn't.
+
+**Pins:**
+
+* Checker: `tools/perf/work_count.py` taken from **the head being judged**, run unchanged against both base and
+  head trees. Its own changes are judged on a no-op product change.
+* Interpreter: CLI on the host's installed CPython, the exact version recorded and the same for both revisions.
+  Blender: 4.2.23 with its bundled Python.
+* Profiler backend: `cProfile` for call counts only, never timing.
+* Inputs: frozen caches (Pittsburgh `d503067d…`, Munich `2f1bcdff…`), offline guard, seed 1, DSM on, textured,
+  `created_utc` pinned.
+* Run boundaries, the same three series as D91:
+  * CLI whole Generate: acquisition through package write and strict validation;
+  * Blender Generate;
+  * Blender Generate+Export.
+
+## Failure rules
+
+A revision **fails** the gate if any of these holds. Each check runs per series, for Munich and Pittsburgh.
+
+* **F1, completeness.** A run errors, the package is not `VALID`, an expected counter or stage is missing, or two
+  runs of the same revision differ in any counter or call count. Determinism is required: one run, plus one
+  confirmation run.
+* **F2, series total.** Any operation counter's series total is **> +5.0 %** over the base (so exactly +5.0 %
+  passes), unless the PR lists new geometry that explains it under D35 and the coordinator records an exception.
+  The same rule applies to the total primitive calls.
+* **F3, stage.** Any single stage's counter or call total is **> +10.0 %** over the base and **> 1 %** of the
+  series total. This catches a doubled stage that is too small to move the series by 5 %.
+* **F4, redistribution, review gate.** Work moving between stages or counters is not a pass by itself. The PR
+  must list every stage and counter that grew by > 5 %, with the reason, and the reviewer must accept them
+  explicitly.
+* **F5, CPU sanity, review gate.** D147 CPU medians come from 5 alternating rounds. If CPU > +15 % while F2 and F3
+  pass, the PR must explain the unmeasured work (native or inline). The reviewer either accepts it or requires a
+  new counter.
 
 ## Acceptance criteria
 
-1. Two runs of `tools/perf/work_count.py` on the same revision give identical call counts and op counters, for both presets
-   and all three series.
-2. On the REL-v0.5.0 data, the tool reproduces the D151 attribution: Blender Generate calls about +13 % vs
-   v0.4.0, with the increase in `_water_stage`. The reproduced figures are posted in the PR.
-3. It detects a deliberate regression in a scratch branch, never merged: a loop that doubles `build_terrain` work
-   shows ≥ +5 % on the series that include it and names the stage.
-4. Overhead: counting adds ≤ 3× to wall time and runs once per revision. Nothing runs in PR CI.
-5. Design updates the roadmap D91, D106 and D147 text and the S4/S5 specs that cite them in a follow-up design PR,
-   based on this PR's evidence (D125), naming D153 as the gate.
+1. **Determinism:** two runs on the same revision give identical counters, calls and stage attribution for both
+   presets and all three series, and the stage sums equal the totals.
+2. **Reproduction:** on the REL-v0.5.0 data, the tool reproduces the D151 attribution. Blender Generate calls are
+   about +13 % vs v0.4.0, all in `_water_stage` and `shore_ramps`
+   ([../reviews/data/REL-v0.5.0-close-profile.json](../reviews/data/REL-v0.5.0-close-profile.json)).
+3. **Negative cases.** Each is a scratch branch that is never merged, and each must **fail**:
+   * an inline arithmetic loop in `build_terrain` with no new calls fails F3 through `clip_steps` or
+     `grid_cells_rasterised`;
+   * deflating each member twice, with identical output bytes and call counts, fails F2 through `deflate_in_bytes`;
+   * doubling `_water_stage`'s work fails F3 on that stage, even though the series grows by less than 5 %.
+4. **Clean pass:** a no-op change passes F1–F5.
+5. **Counter overhead:** with counters disabled, the packages are byte-identical and total calls equal the base.
+   With counters enabled, wall time is ≤ 3× the base. Nothing runs in PR CI.
+6. **Docs:** Design updates the roadmap D91/D106/D147 text and the specs that cite them in a follow-up design PR
+   (D125), naming D153 as the gate.
 
-## Tests
+## Tests (≤ 5 s each)
 
-* A unit test of the counter on a tiny synthetic plan: counts are stable across two calls, and the per-stage
-  attribution sums to the total. ≤ 5 s.
+* Counter registry: off by default, increments only when enabled, and resets per run.
+* Attribution on a tiny synthetic plan: nested stages are subtracted, and stage sums equal the totals.
 * No timing assertions.
 
 ## Conflict domain
 
-`tools/perf/work_count.py` (new), `tests/test_work_count.py` (new). No product code and no `design/` edits.
+`tools/perf/work_count.py` (new); `map_builder/core/perf_counters.py` (new); one-line counter increments in the
+listed hot functions of `core/osm.py`, `core/generate.py`, `core/water.py`, `core/overlap.py`, `core/collision.py`,
+`core/package.py` and `blender/scene_build.py`; `tests/test_work_count.py` (new).
+
+No output change: AC5 requires byte identity. It does not run at the same time as S4-F8 (B), which may edit
+`generate.py` or `collision.py`.

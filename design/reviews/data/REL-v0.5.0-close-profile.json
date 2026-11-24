@@ -1,0 +1,141 @@
+{
+ "method": "cProfile.Profile, one profiled run per revision; Python 3.14.4 (CLI) / Blender 4.2.23 bundled Python (Blender Generate); Pittsburgh textured, frozen cache d503067d..., offline, seed 1, DSM on; harness design/bench/cpu_cli.py <tree> <tag> <cache> <out> pittsburgh prof and blender --background --factory-startup --online-mode --python design/bench/cpu_bl.py -- <tree> <tag> <cache> <out> prof (profile covers Generate only)",
+ "revisions": {
+  "v040": "18f0822",
+  "md38": "d38d4e8",
+  "m53c": "53c54d3",
+  "rc": "e08d3e1"
+ },
+ "series": {
+  "CLI whole Generate": {
+   "v040": {
+    "primitive_calls_total": 86715488,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.1248,
+     "core/generate.py:build_plan": 0.2335,
+     "core/generate.py:build_terrain": 0.0342,
+     "core/package.py:validate_package": 0.4573
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 52199,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   },
+   "md38": {
+    "primitive_calls_total": 89009621,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.13,
+     "core/generate.py:build_plan": 0.2031,
+     "core/generate.py:_water_stage": 0.0169,
+     "core/generate.py:build_terrain": 0.0225,
+     "core/package.py:validate_package": 0.4553
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 56883,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   },
+   "m53c": {
+    "primitive_calls_total": 89022961,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.1409,
+     "core/generate.py:build_plan": 0.2623,
+     "core/generate.py:_water_stage": 0.0197,
+     "core/generate.py:build_terrain": 0.0223,
+     "core/package.py:validate_package": 0.4127
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 58911,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   },
+   "rc": {
+    "primitive_calls_total": 91396553,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.168,
+     "core/generate.py:build_plan": 0.2645,
+     "core/generate.py:_water_stage": 0.0367,
+     "core/shore.py:shore_ramps": 0.0145,
+     "core/generate.py:build_terrain": 0.0262,
+     "core/package.py:validate_package": 0.4133
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 80287,
+     "core/overlap.py:_edges": 202990,
+     "core/overlap.py:_in_box": 200692,
+     "core/overlap.py:_edge_in_box": 190471,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   }
+  },
+  "Blender Generate": {
+   "v040": {
+    "primitive_calls_total": 34118469,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.341,
+     "core/generate.py:build_plan": 0.5505,
+     "core/generate.py:build_terrain": 0.1542,
+     "blender/scene_build.py:build_scene": 0.0989
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 52199,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   },
+   "md38": {
+    "primitive_calls_total": 36634492,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.3681,
+     "core/generate.py:build_plan": 0.5728,
+     "core/generate.py:_water_stage": 0.0381,
+     "core/generate.py:build_terrain": 0.1069,
+     "blender/scene_build.py:build_scene": 0.0551
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 56883,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   },
+   "m53c": {
+    "primitive_calls_total": 36649826,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.3311,
+     "core/generate.py:build_plan": 0.5963,
+     "core/generate.py:_water_stage": 0.0384,
+     "core/generate.py:build_terrain": 0.1193,
+     "blender/scene_build.py:build_scene": 0.067
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 58911,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   },
+   "rc": {
+    "primitive_calls_total": 38537296,
+    "stage_cumulative_time_share": {
+     "core/pipeline.py:acquire": 0.2862,
+     "core/generate.py:build_plan": 0.6358,
+     "core/generate.py:_water_stage": 0.0649,
+     "core/shore.py:shore_ramps": 0.0279,
+     "core/generate.py:build_terrain": 0.124,
+     "blender/scene_build.py:build_scene": 0.0716
+    },
+    "selected_call_counts": {
+     "core/osm.py:point_in_ring": 80287,
+     "core/overlap.py:_edges": 202990,
+     "core/overlap.py:_in_box": 200692,
+     "core/overlap.py:_edge_in_box": 190471,
+     "core/osm.py:orient": 7951448,
+     "core/osm.py:_segments_intersect": 1987862
+    }
+   }
+  }
+ }
+}
