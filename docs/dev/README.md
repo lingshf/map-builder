@@ -41,7 +41,7 @@ actual Blender integration and writes test artifacts to the specified folder.
 **Known failure (S5-F4).** On main (`f1178f8`) with Blender 4.2.23 the third
 command exits 1 with `FAIL terrain vertex edit exported`
 (`tests/blender/checks_core.py:308`), observed in the QA rehearsal of #92. It
-is not a passing check until [S5-F4](../../design/tasks/README.md) is resolved
+is not a passing check until [S5-F4](../../design/tasks/S5-F4.md) (step 1 reports a test-selector artefact: the export itself matches the edit) is resolved
 and the command is rerun. The first two commands passed in that rehearsal.
 See the [CLI guide](../user/cli.md) for the verified fixture build and validate
 commands and [installation](../user/install.md) for extension packaging.
