@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
 
 import numpy as np
+from map_builder.core.glb import write_glb
+from map_builder.core.mesh import MeshData
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -56,6 +60,69 @@ def road_findings(road_z: float) -> dict[str, list[dict]]:
 
 
 class RasterTest(unittest.TestCase):
+    @staticmethod
+    def _split_glb(glb: bytes) -> tuple[dict, bytes]:
+        magic, ver, total = struct.unpack_from("<III", glb, 0)
+        assert magic == 0x46546C67 and ver == 2 and total == len(glb)
+        offset, js, binb = 12, None, b""
+        while offset < len(glb):
+            clen, ctype = struct.unpack_from("<II", glb, offset)
+            offset += 8
+            chunk = glb[offset:offset + clen]
+            offset += clen
+            if ctype == 0x4E4F534A:
+                js = json.loads(chunk.rstrip(b" "))
+            elif ctype == 0x004E4942:
+                binb = bytes(chunk)
+        assert js is not None
+        return js, binb
+
+    @staticmethod
+    def _build_glb(js: dict, binb: bytes) -> bytes:
+        j = json.dumps(js, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        j += b" " * (-len(j) % 4)
+        b = binb + b"\x00" * (-len(binb) % 4)
+        total = 12 + 8 + len(j) + 8 + len(b)
+        return struct.pack("<III", 0x46546C67, 2, total) + struct.pack("<II", len(j), 0x4E4F534A) + j \
+            + struct.pack("<II", len(b), 0x004E4942) + b
+
+    @staticmethod
+    def _f32_ref(glb: bytes) -> np.ndarray:
+        js, binb = RasterTest._split_glb(glb)
+        views = js["bufferViews"]
+        acc = js["accessors"][js["meshes"][0]["primitives"][0]["attributes"]["POSITION"]]
+        view = views[acc["bufferView"]]
+        base = int(view.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
+        count = int(acc["count"])
+        pos = np.frombuffer(binb, dtype=np.float32, count=count * 3, offset=base).reshape(count, 3)
+        idx_acc = js["accessors"][js["meshes"][0]["primitives"][0]["indices"]]
+        idx_view = views[idx_acc["bufferView"]]
+        ibase = int(idx_view.get("byteOffset", 0)) + int(idx_acc.get("byteOffset", 0))
+        ids = np.frombuffer(binb, dtype=np.uint32, count=int(idx_acc["count"]), offset=ibase).reshape(-1, 3)
+        local = pos[ids]
+        nodes = js["nodes"]
+        root, mid, leaf = nodes[0], nodes[1], nodes[2]
+
+        def trs(n: dict) -> np.ndarray:
+            t = np.asarray(n["translation"], dtype=np.float32)
+            x, y, z, w = np.asarray(n["rotation"], dtype=np.float32)
+            s = np.asarray(n["scale"], dtype=np.float32)
+            r = np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                          [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                          [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]], dtype=np.float32)
+            m = np.eye(4, dtype=np.float32)
+            m[:3, :3] = r * s[np.newaxis, :]
+            m[:3, 3] = t
+            return m
+
+        world = (trs(root) @ trs(mid)).astype(np.float32)
+        world = (world @ trs(leaf)).astype(np.float32)
+        linear = world[:3, :3]
+        trans = world[:3, 3]
+        out = (local.reshape(-1, 3) @ linear.T + trans).astype(np.float32).reshape(-1, 3, 3)
+        if float(np.linalg.det(linear.astype(np.float64))) < 0.0:
+            out = out[:, [0, 2, 1], :]
+        return np.stack([out[..., 0], -out[..., 2], out[..., 1]], axis=-1).astype(np.float32)
     def test_the_highest_surface_wins_and_names_its_owner(self):
         raster = raster_of((square(0.0), 0), (square(2.0, 2.0, 6.0), 1))
         self.assertEqual(raster.final()[0, 0], 0.0)
@@ -78,6 +145,31 @@ class RasterTest(unittest.TestCase):
         self.assertEqual(mapped[0, 0, 0], tris[0, 0, 0])
         self.assertEqual(mapped[0, 1, 0], tris[0, 1, 0])
         self.assertEqual(mapped[0, 2, 1], -tris[0, 2, 2])
+
+    def test_float32_nested_trs_visual_transform_matches_reference_bit_for_bit(self):
+        mesh = MeshData("m")
+        a = mesh.add_vertex(-1.25, 2.5, 0.75)
+        b = mesh.add_vertex(3.0, -0.5, 1.5)
+        c = mesh.add_vertex(0.25, 4.0, -2.25)
+        mesh.add_face((a, b, c), "m", (1.0, 1.0, 1.0))
+        glb = write_glb([{"name": "leaf", "mesh": mesh, "extras": {"mb_id": "osm:way/nested", "mb_class": "building"}}], {})
+        js, binb = self._split_glb(glb)
+        js["nodes"] = [
+            {"name": "root", "translation": [100000.123456, -50000.765432, 1234.5],
+             "rotation": [0.0, 0.0, math.sin(0.123 / 2.0), math.cos(0.123 / 2.0)],
+             "scale": [1.25, 0.75, 1.1], "children": [1], "extras": {"mb_id": "root", "mb_class": "structure"}},
+            {"name": "mid", "translation": [-321.125, 654.875, -98.5],
+             "rotation": [0.0, 0.0, math.sin(-0.456 / 2.0), math.cos(-0.456 / 2.0)],
+             "scale": [0.5, 1.75, 0.9], "children": [2], "extras": {"mb_id": "mid", "mb_class": "structure"}},
+            {"name": "leaf", "mesh": 0, "translation": [12.25, -7.5, 3.125],
+             "rotation": [0.0, 0.0, math.sin(1.234 / 2.0), math.cos(1.234 / 2.0)],
+             "scale": [1.1, 0.8, 1.3], "extras": {"mb_id": "osm:way/nested", "mb_class": "building"}}
+        ]
+        js["scenes"][0]["nodes"] = [0]
+        nested = self._build_glb(js, binb)
+        got, _owners, _cats, _names = fa._visual_triangles_float32(nested)
+        want = self._f32_ref(nested)
+        self.assertTrue(np.array_equal(got.astype(np.float32).view(np.uint32), want.view(np.uint32)))
 
 
 class CollisionVisualBoundaryTest(unittest.TestCase):
@@ -186,6 +278,20 @@ class CollisionVisualBoundaryTest(unittest.TestCase):
         self.assertIn("buried_collision", f.regions)
         self.assertNotIn("edge_ambiguous_collision_visual", f.regions)
 
+    def test_shifted_ray_must_hit_same_object_not_other_roof(self):
+        xs = np.array([0.0], dtype=float)
+        ys = np.array([0.0], dtype=float)
+        terrain = square(0.0, -2.0, 2.0)
+        match_roof = np.array([[(5.0e-5, -5.0e-5, 10.0), (5.0e-5, 5.0e-5, 10.0), (0.50005, 0.0, 10.0)]], dtype=float)
+        other_roof = np.array([[(9.0e-5, -1.0, 10.0), (9.0e-5, 1.0, 10.0), (1.00009, 0.0, 10.0)]], dtype=float)
+        vis_roof = np.array([[(0.0, -1.0, 10.0), (0.0, 1.0, 10.0), (1.0, 0.0, 10.0)]], dtype=float)
+        s = self._surfaces(xs, ys, [(terrain, 0), (match_roof, 1), (other_roof, 2)], [(terrain, 0), (vis_roof, 1)],
+                           ["terrain:grid", "osm:way/match", "osm:way/other"], ["terrain", "building", "building"])
+        f = fa.Findings(1.0, xs, ys, 0.0)
+        fa._check_collision_vs_visual(s, f, 0.2)
+        self.assertIn("buried_collision", f.regions)
+        self.assertNotIn("edge_ambiguous_collision_visual", f.regions)
+
 
 class RoadClassificationTest(unittest.TestCase):
     def test_a_road_hovering_above_the_terrain_is_reported_in_collision_and_visual(self):
@@ -233,6 +339,29 @@ class SampleAuditTest(unittest.TestCase):
             with open(out_json, encoding="utf-8") as f:
                 payload = json.load(f)
             self.assertIsInstance(payload["findings_summary"], dict)
+
+    def test_min_area_keeps_summary_semantics_when_nothing_is_filtered(self):
+        base = fa.audit(SAMPLE, min_area=0.0)
+        same = fa.audit(SAMPLE, min_area=0.5)
+        self.assertEqual(base["findings_summary"], same["findings_summary"])
+        self.assertEqual(base["ok"], same["ok"])
+
+    def test_min_area_summary_uses_filtered_regions(self):
+        xs = np.array([0.5, 1.5], dtype=float)
+        ys = np.array([0.5, 1.5], dtype=float)
+        f = fa.Findings(1.0, xs, ys, 2.0)
+        value = np.array([[10.0, np.nan], [np.nan, 1.0]], dtype=float)
+        mask = np.array([[True, False], [False, True]])
+        owner = np.array([[0, -1], [-1, 0]], dtype=np.int32)
+        f.flag("buried_collision", value, mask, owner, ["terrain"])
+        summary_none = fa._summarise(f.regions)
+        self.assertNotIn("buried_collision", summary_none)
+        f2 = fa.Findings(1.0, xs, ys, 1.0)
+        f2.flag("buried_collision", value, mask, owner, ["terrain"])
+        summary = fa._summarise(f2.regions)
+        self.assertEqual(summary["buried_collision"]["regions"], 2)
+        self.assertEqual(summary["buried_collision"]["area_m2"], 2.0)
+        self.assertEqual(summary["buried_collision"]["max_offset_m"], 10.0)
 
 
 if __name__ == "__main__":

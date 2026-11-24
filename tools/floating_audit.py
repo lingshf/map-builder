@@ -343,27 +343,28 @@ class Findings:
         self.cell, self.xs, self.ys, self.min_area = cell, xs, ys, min_area
         self.regions: dict[str, list[dict[str, Any]]] = {}
         self.layers: dict[str, np.ndarray] = {}
-        self.summary: dict[str, dict[str, float | int]] = {}
 
     def flag(self, kind: str, value: np.ndarray, mask: np.ndarray, owner: np.ndarray, names: list[str]) -> None:
         mask = mask & np.isfinite(value)
         self.layers[kind] = np.where(mask, value, NAN)
         if mask.any():
-            all_regions = _regions(mask, np.where(mask, value, 0.0), self.cell, owner, names,
-                                   self.xs, self.ys, 0.0)
-            self.regions[kind] = [r for r in all_regions if cast(float, r["area_m2"]) >= self.min_area]
-            self.summary[kind] = {"regions": len(all_regions), "area_m2": round(sum(r["area_m2"] for r in all_regions), 1),
-                                  "max_offset_m": max((r["max_offset_m"] for r in all_regions), key=abs)}
+            kept = _regions(mask, np.where(mask, value, 0.0), self.cell, owner, names,
+                            self.xs, self.ys, self.min_area)
+            if kept:
+                self.regions[kind] = kept
+            elif kind in self.regions:
+                del self.regions[kind]
 
     def flag_nodes(self, kind: str, value: np.ndarray, mask: np.ndarray, owner: np.ndarray, names: list[str],
                    hf: dict[str, Any]) -> None:
         """Heightfield findings live on the node grid, which has its own spacing."""
         if mask.any():
-            all_regions = _regions(mask, np.where(mask, value, 0.0), hf["spacing"], owner, names,
-                                   _node_axis(hf, "x"), _node_axis(hf, "y"), 0.0)
-            self.regions[kind] = [r for r in all_regions if cast(float, r["area_m2"]) >= self.min_area]
-            self.summary[kind] = {"regions": len(all_regions), "area_m2": round(sum(r["area_m2"] for r in all_regions), 1),
-                                  "max_offset_m": max((r["max_offset_m"] for r in all_regions), key=abs)}
+            kept = _regions(mask, np.where(mask, value, 0.0), hf["spacing"], owner, names,
+                            _node_axis(hf, "x"), _node_axis(hf, "y"), self.min_area)
+            if kept:
+                self.regions[kind] = kept
+            elif kind in self.regions:
+                del self.regions[kind]
 
 
 def _node_axis(hf: dict[str, Any], axis: str) -> np.ndarray:
@@ -497,6 +498,13 @@ def _buried_edge_ambiguous(s: Surfaces, buried: np.ndarray, threshold: float, to
     out = np.zeros_like(buried, dtype=bool)
     col_index = {name: i for i, name in enumerate(s.col_names)}
     top_tris = _top_surface_tris_by_object(s)
+    top_tri_mask = np.zeros(len(s.col_tris), dtype=bool)
+    for oi, _tris in top_tris.items():
+        own = np.nonzero(s.col_tri_owner == oi)[0]
+        if len(own):
+            normals = np.cross(s.col_tris[own, 1] - s.col_tris[own, 0], s.col_tris[own, 2] - s.col_tris[own, 0])
+            up = np.abs(normals[:, 2]) > ROOF_NORMAL_MIN * np.maximum(np.linalg.norm(normals, axis=1), 1e-12)
+            top_tri_mask[own[up]] = True
     for j, i in zip(*np.nonzero(buried)):
         vi = int(s.vis.owner[j, i])
         if vi < 0:
@@ -522,6 +530,11 @@ def _buried_edge_ambiguous(s: Surfaces, buried: np.ndarray, threshold: float, to
         for dx, dy in ((tol, tol), (tol, -tol), (-tol, tol), (-tol, -tol)):
             h = ray_cast(s.col_raw, (x + dx, y + dy, s.ray_origin_z), (0.0, 0.0, -1.0), s.ray_max_dist)
             if h is None:
+                continue
+            if int(h.object) != coi or not top_tri_mask[int(h.triangle)]:
+                continue
+            shifted_tri = s.col_tris[int(h.triangle)]
+            if _triangle_edge_distance_xy(shifted_tri, x + dx, y + dy) > tol:
                 continue
             z = s.ray_origin_z - float(h.t)
             if abs(z - visual_z) <= threshold:
@@ -653,8 +666,14 @@ def _grid_axes(col: Any, cell: float) -> tuple[np.ndarray, np.ndarray]:
     return axes[0], axes[1]
 
 
-def _summarise(summary: dict[str, dict[str, float | int]]) -> dict[str, dict[str, float | int]]:
-    return summary
+def _summarise(regions: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, float | int]]:
+    out: dict[str, dict[str, float | int]] = {}
+    for kind, found in regions.items():
+        if not found:
+            continue
+        out[kind] = {"regions": len(found), "area_m2": round(sum(r["area_m2"] for r in found), 1),
+                     "max_offset_m": max((r["max_offset_m"] for r in found), key=abs)}
+    return out
 
 
 def audit(path: str, cell: float = 1.0, threshold: float = 0.2, hf_tol: float = 0.05, min_area: float = 0.0,
@@ -669,12 +688,13 @@ def audit(path: str, cell: float = 1.0, threshold: float = 0.2, hf_tol: float = 
         if hf is not None:
             _check_heightfield(surfaces, findings, hf, col, threshold, hf_tol)
         _check_water(surfaces, findings, threshold, cell, _on_map(col, xs, ys))
+    summary = _summarise(findings.regions)
     result = {"package": os.path.basename(path), "cell_m": cell, "threshold_m": threshold, "hf_tol_m": hf_tol,
               "grid": [len(xs), len(ys)],
               "triangles": {"collision": int(len(col.indices) // 3), "visual": int(len(surfaces.vis_tris))},
-              "findings_summary": _summarise(findings.summary), "findings": findings.regions,
+              "findings_summary": summary, "findings": findings.regions,
               "water_bodies": _water_bodies(surfaces),
-              "ok": not any(kind not in INFO_KINDS for kind in findings.regions)}
+              "ok": not any(kind not in INFO_KINDS for kind in summary)}
     if png_dir:
         vis_terrain = surfaces.terrain("vis")
         _render(png_dir, os.path.splitext(os.path.basename(path))[0], xs, ys, findings.layers,
