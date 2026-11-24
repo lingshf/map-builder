@@ -218,7 +218,7 @@ Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing w
   5. No generator output changes; the sample is byte-identical.
 * **Conflict domain:** `tools/style_check.py`, `tests/test_style_check.py` (both new), `tools/demo/` (presets,
   recipe, proxy runner). No `core/` edits.
-* **Dependencies:** #75 merged (D136).
+* **Dependencies:** #75 merged (D136; done at 6535f38); S4-F8, S5-PERF-GATE and S5-PERF-WATER first (D149, D154). Timing ACs use the D153 deterministic gate once S5-PERF-GATE merges.
 
 ### S5-STYLE-PALETTE: style option (default stylized), palette, faceting, terrain, buildings, roads and trees
 
