@@ -137,7 +137,7 @@ def _enu_to_gltf(v: list[float]) -> list[float]:
     return [float(v[0]), float(v[2]), float(-v[1])]
 
 
-def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, glb_sha256: str, warmup: int, frames: int) -> str:
+def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, warmup: int, frames: int) -> str:
     eye = camera["eye"]
     target = camera["target"]
     eye_gltf = _enu_to_gltf(eye)
@@ -145,7 +145,6 @@ def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, glb_sha25
     qs = urllib.parse.urlencode(
         {
             "run_id": run_id,
-            "glb_sha256": glb_sha256,
             "warmup": warmup,
             "frames": frames,
             "eye_x": eye_gltf[0],
@@ -171,6 +170,11 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def _ensure_swiftshader_renderer(renderer: str, run_id: str) -> None:
+    if "swiftshader" not in renderer.lower():
+        raise SystemExit(f"renderer is not SwiftShader for run {run_id}: {renderer}")
+
+
 def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, object]:
     viewer = os.path.abspath(args.viewer_dir)
     if not os.path.isfile(os.path.join(viewer, "map.glb")):
@@ -188,11 +192,12 @@ def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, ob
         renderer = "unknown"
         for _ in range(args.runs):
             run_id = str(uuid.uuid4())
-            url = _make_url(args.host, args.port, camera, run_id, glb_sha256, warmup, frames)
+            url = _make_url(args.host, args.port, camera, run_id, warmup, frames)
             if os.path.exists(result_file):
                 os.remove(result_file)
             out = _run_once(args.chrome, url, args.timeout, run_id, glb_sha256, warmup, frames)
             vals.append(out.median_ms)
+            _ensure_swiftshader_renderer(out.renderer, out.run_id)
             renderer = out.renderer
             run_results.append(
                 {
@@ -202,8 +207,6 @@ def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, ob
                     "renderer": out.renderer,
                 }
             )
-        if "swiftshader" not in renderer.lower():
-            raise SystemExit(f"renderer is not SwiftShader: {renderer}")
         median = sorted(vals)[len(vals) // 2]
         spread_pct = 0.0 if median == 0 else (max(vals) - min(vals)) / median * 100.0
         return {
@@ -248,15 +251,17 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
         head_result_file = os.path.join(head, "frame_time_proxy_result.json")
         for _ in range(args.alternating_pairs):
             base_run_id = str(uuid.uuid4())
-            base_url = _make_url(args.host, base_port, camera, base_run_id, base_glb_sha, warmup, frames)
+            base_url = _make_url(args.host, base_port, camera, base_run_id, warmup, frames)
             if os.path.exists(base_result_file):
                 os.remove(base_result_file)
             out_b = _run_once(args.chrome, base_url, args.timeout, base_run_id, base_glb_sha, warmup, frames)
+            _ensure_swiftshader_renderer(out_b.renderer, out_b.run_id)
             head_run_id = str(uuid.uuid4())
-            head_url = _make_url(args.host, head_port, camera, head_run_id, head_glb_sha, warmup, frames)
+            head_url = _make_url(args.host, head_port, camera, head_run_id, warmup, frames)
             if os.path.exists(head_result_file):
                 os.remove(head_result_file)
             out_h = _run_once(args.chrome, head_url, args.timeout, head_run_id, head_glb_sha, warmup, frames)
+            _ensure_swiftshader_renderer(out_h.renderer, out_h.run_id)
             base_runs.append(out_b.median_ms)
             head_runs.append(out_h.median_ms)
             base_run_results.append(
@@ -281,15 +286,16 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
         for _ in range(args.repeats):
             repeat_run_id = str(uuid.uuid4())
             if args.repeat_target == "head":
-                repeat_url = _make_url(args.host, head_port, camera, repeat_run_id, head_glb_sha, warmup, frames)
+                repeat_url = _make_url(args.host, head_port, camera, repeat_run_id, warmup, frames)
                 if os.path.exists(head_result_file):
                     os.remove(head_result_file)
                 out = _run_once(args.chrome, repeat_url, args.timeout, repeat_run_id, head_glb_sha, warmup, frames)
             else:
-                repeat_url = _make_url(args.host, base_port, camera, repeat_run_id, base_glb_sha, warmup, frames)
+                repeat_url = _make_url(args.host, base_port, camera, repeat_run_id, warmup, frames)
                 if os.path.exists(base_result_file):
                     os.remove(base_result_file)
                 out = _run_once(args.chrome, repeat_url, args.timeout, repeat_run_id, base_glb_sha, warmup, frames)
+            _ensure_swiftshader_renderer(out.renderer, out.run_id)
             repeat_runs.append(out.median_ms)
             repeat_run_results.append(
                 {
@@ -300,8 +306,6 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
                 }
             )
             renderer = out.renderer
-        if "swiftshader" not in renderer.lower():
-            raise SystemExit(f"renderer is not SwiftShader: {renderer}")
         repeat_median = sorted(repeat_runs)[len(repeat_runs) // 2]
         repeat_spread_pct = 0.0 if repeat_median == 0 else (max(repeat_runs) - min(repeat_runs)) / repeat_median * 100.0
         return {

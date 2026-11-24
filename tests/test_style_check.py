@@ -177,8 +177,7 @@ class StyleCheckTests(unittest.TestCase):
 
             def mut_report_style(members):
                 report = json.loads(members["report.json"])
-                report["style"] = {"mode": "stylized"}
-                report["options"] = {"style": "stylized", "material": "flat"}
+                report["options"] = {"style": "stylized"}
                 members["report.json"] = json.dumps(report).encode("utf-8")
 
             _mutate(base, head, mut_report_style)
@@ -200,6 +199,40 @@ class StyleCheckTests(unittest.TestCase):
             ok, failures = style_check.g0_check(base, head)
             self.assertFalse(ok)
             self.assertTrue(any("non-style keys differ" in f for f in failures), failures)
+
+    def test_g0_rejects_nested_flight_fields_in_former_exempt_paths(self) -> None:
+        former_paths = [
+            ("style",),
+            ("material",),
+            ("materials",),
+            ("visual",),
+            ("options", "style"),
+            ("options", "material"),
+            ("options", "materials"),
+            ("options", "visual"),
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "base.mbmap")
+            _build_valid_mbmap(base)
+            for idx, path in enumerate(former_paths):
+                head = os.path.join(td, f"head-{idx}.mbmap")
+
+                def mut_nested(members, *, path=path):
+                    report = json.loads(members["report.json"])
+                    cursor = report
+                    for key in path[:-1]:
+                        node = cursor.get(key)
+                        if not isinstance(node, dict):
+                            node = {}
+                            cursor[key] = node
+                        cursor = node
+                    cursor[path[-1]] = {"passage_probes_dropped": [{"id": "p0", "reason": "removed"}], "dsm": False}
+                    members["report.json"] = json.dumps(report).encode("utf-8")
+
+                _mutate(base, head, mut_nested)
+                ok, failures = style_check.g0_check(base, head)
+                self.assertFalse(ok, f"path {'.'.join(path)} unexpectedly passed")
+                self.assertTrue(any("report.json non-style keys differ" in f for f in failures), failures)
 
     def test_g0_rejects_cross_path_comparison(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -275,6 +308,10 @@ class StyleCheckTests(unittest.TestCase):
             self.assertEqual(out["regions"][0]["label"], "grass-light")
             self.assertAlmostEqual(out["regions"][0]["deltaE2000"], 0.0, places=2)
             self.assertFalse(out["regions"][0]["flag_over_15"])
+
+    def test_parity_duplicate_identity_fails_loudly(self) -> None:
+        with self.assertRaises(ValueError):
+            style_check._assert_unique_identity([("terrain", "osm:1"), ("terrain", "osm:1")], "node identity")
 
 
 if __name__ == "__main__":

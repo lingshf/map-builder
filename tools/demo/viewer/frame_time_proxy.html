@@ -29,7 +29,6 @@
     const warmup = Math.max(0, parseInt(qs.get("warmup") || "60", 10));
     const frames = Math.max(1, parseInt(qs.get("frames") || "300", 10));
     const runId = qs.get("run_id") || "";
-    const glbSha256 = qs.get("glb_sha256") || "";
     const status = document.getElementById("status");
 
     const canvas = document.getElementById("c");
@@ -68,6 +67,12 @@
       } catch {
         return "unknown";
       }
+
+      async function sha256Hex(buffer) {
+        const digest = await crypto.subtle.digest("SHA-256", buffer);
+        const bytes = new Uint8Array(digest);
+        return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
     }
 
     async function postResult(result) {
@@ -78,7 +83,10 @@
       });
     }
 
-    const gltf = await new GLTFLoader().loadAsync("./map.glb");
+    const glbResponse = await fetch("./map.glb");
+    const glbBuffer = await glbResponse.arrayBuffer();
+    const glbSha256 = await sha256Hex(glbBuffer);
+    const gltf = await new GLTFLoader().parseAsync(glbBuffer, "./");
     scene.add(gltf.scene);
     const rendererInfo = detectRendererInfo(renderer.getContext());
 

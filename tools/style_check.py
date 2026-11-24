@@ -28,10 +28,9 @@ class PackageData:
     glb: bytes
 
 
-# report.json keys that are allowed to drift between classic/stylized while flight-data G0 still holds.
-# Everything else in report.json must remain equal.
-REPORT_ALLOWED_TOPLEVEL_KEYS = frozenset({"style", "material", "materials", "visual"})
-REPORT_ALLOWED_OPTIONS_KEYS = frozenset({"style", "material", "materials", "visual"})
+# The only report drift tolerated by G0 is report.options.style. Omission is treated as "classic"
+# for pre-style baselines. The value must be "classic" or "stylized" when present.
+ALLOWED_REPORT_OPTIONS_STYLE = frozenset({"classic", "stylized"})
 
 
 def _build_path_kind(manifest: dict[str, Any]) -> str:
@@ -93,16 +92,21 @@ def g0_check(base_path: str, head_path: str) -> tuple[bool, list[str]]:
 
 def _normalize_report_for_g0(report: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
+    options = report.get("options")
+    if options is not None:
+        if not isinstance(options, dict):
+            normalized["options"] = options
+        else:
+            style = options.get("style", "classic")
+            if style is None:
+                style = "classic"
+            if not isinstance(style, str) or style not in ALLOWED_REPORT_OPTIONS_STYLE:
+                normalized["options.style"] = style
+            keep_options = {k: v for k, v in options.items() if k != "style"}
+            if keep_options:
+                normalized["options"] = keep_options
     for key, value in report.items():
-        if key in REPORT_ALLOWED_TOPLEVEL_KEYS:
-            continue
         if key == "options":
-            if not isinstance(value, dict):
-                normalized[key] = value
-                continue
-            keep = {k: v for k, v in value.items() if k not in REPORT_ALLOWED_OPTIONS_KEYS}
-            if keep:
-                normalized[key] = keep
             continue
         normalized[key] = value
     return normalized
@@ -236,31 +240,47 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
         sig: list[dict[str, Any]] = []
         mats = gl.get("materials", [])
         meshes = gl.get("meshes", [])
-        material_payload_by_name: dict[str, dict[str, Any]] = {}
+        _assert_unique_identity(
+            [(_identity_name(m.get("name"), i, "material"), _mb_id_of(m)) for i, m in enumerate(mats) if isinstance(m, dict)],
+            "material identity",
+        )
+        _assert_unique_identity(
+            [(str(gl["nodes"][n.index].get("name", n.name)), _mb_id_of(gl["nodes"][n.index])) for n in nodes if "mesh" in gl["nodes"][n.index]],
+            "node identity",
+        )
+        material_payload_by_index: list[dict[str, Any]] = []
         for i, m in enumerate(mats):
             pbr = m.get("pbrMetallicRoughness", {}) if isinstance(m, dict) else {}
-            mat_name = m.get("name", f"material:{i}") if isinstance(m, dict) else f"material:{i}"
-            material_payload_by_name[mat_name] = {
+            mat_name = _identity_name(m.get("name") if isinstance(m, dict) else None, i, "material")
+            material_payload_by_index.append(
+                {
                 "name": mat_name,
+                "mb_id": _mb_id_of(m),
                 "baseColorFactor": pbr.get("baseColorFactor"),
                 "metallicFactor": pbr.get("metallicFactor"),
                 "roughnessFactor": pbr.get("roughnessFactor"),
                 "hasBaseColorTexture": isinstance(pbr, dict) and "baseColorTexture" in pbr,
-            }
+                }
+            )
         for n in nodes:
             njs = gl["nodes"][n.index]
             if "mesh" not in njs:
                 continue
             mesh = meshes[njs["mesh"]]
-            node_name = str(njs.get("name", n.name))
+            node_name = _identity_name(njs.get("name"), n.index, "node")
             node_mb_id = _mb_id_of(njs)
             for p in mesh.get("primitives", []):
                 attrs = p.get("attributes", {})
                 material_name = None
+                material_mb_id = None
+                material_payload = None
                 if "material" in p:
                     mat_idx = int(p["material"])
-                    mat = mats[mat_idx] if 0 <= mat_idx < len(mats) else {}
-                    material_name = mat.get("name", f"material:{mat_idx}") if isinstance(mat, dict) else f"material:{mat_idx}"
+                    if not (0 <= mat_idx < len(material_payload_by_index)):
+                        raise ValueError(f"primitive references invalid material index {mat_idx}")
+                    material_payload = material_payload_by_index[mat_idx]
+                    material_name = str(material_payload["name"])
+                    material_mb_id = material_payload["mb_id"]
                 color_hash = None
                 if "COLOR_0" in attrs:
                     color_hash = hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
@@ -270,7 +290,8 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
                         "node_mb_id": node_mb_id,
                         "primitive_mb_id": _mb_id_of(p),
                         "material_name": material_name,
-                        "material_payload": material_payload_by_name.get(material_name) if material_name else None,
+                        "material_mb_id": material_mb_id,
+                        "material_payload": material_payload,
                         "color_sha256": color_hash,
                         "mode": int(p.get("mode", 4)),
                     }
@@ -282,13 +303,17 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
                 str(x.get("node_mb_id", "")),
                 str(x.get("primitive_mb_id", "")),
                 str(x.get("material_name", "")),
+                str(x.get("material_mb_id", "")),
                 str(x.get("color_sha256", "")),
                 int(x.get("mode", 0)),
             ),
         )
 
-    cli_sig = signature(cli_gl, cli_bin, cli_nodes)
-    bl_sig = signature(bl_gl, bl_bin, bl_nodes)
+    try:
+        cli_sig = signature(cli_gl, cli_bin, cli_nodes)
+        bl_sig = signature(bl_gl, bl_bin, bl_nodes)
+    except ValueError as e:
+        return False, {"error": str(e)}
     ok = cli_sig == bl_sig
     if ok:
         return True, {"different": [], "cli_count": len(cli_sig), "blender_count": len(bl_sig)}
@@ -305,6 +330,25 @@ def _mb_id_of(item: Any) -> str | None:
         return None
     mb_id = extras.get("mb_id")
     return str(mb_id) if mb_id is not None else None
+
+
+def _identity_name(name: Any, index: int, prefix: str) -> str:
+    if isinstance(name, str) and name:
+        return name
+    return f"{prefix}:{index}"
+
+
+def _assert_unique_identity(identity_pairs: list[tuple[str, str | None]], label: str) -> None:
+    seen: set[tuple[str, str | None]] = set()
+    duplicates: set[tuple[str, str | None]] = set()
+    for pair in identity_pairs:
+        if pair in seen:
+            duplicates.add(pair)
+        else:
+            seen.add(pair)
+    if duplicates:
+        sample = ", ".join([f"{name}/{mb_id}" for name, mb_id in sorted(duplicates)[:5]])
+        raise ValueError(f"duplicate {label} detected: {sample}")
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
