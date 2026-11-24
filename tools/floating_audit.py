@@ -180,7 +180,9 @@ def _load(path: str) -> tuple[dict[str, Any], Any, Any, tuple[Any, Any]]:
 
 
 def _map_tris(tris: Any) -> np.ndarray:
-    a = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
+    # GLB vertices are float32; snap transformed triangles back to float32 before rasterising so tiny
+    # float64 transform drift does not create edge-only visual/collision mismatches.
+    a = np.asarray(tris, dtype=np.float32).reshape(-1, 3, 3).astype(np.float64)
     return np.stack([a[..., 0], -a[..., 2], a[..., 1]], axis=-1)
 
 

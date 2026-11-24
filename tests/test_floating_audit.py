@@ -64,6 +64,15 @@ class RasterTest(unittest.TestCase):
         ramp = np.array([[(0, 0, 0), (10, 0, 10), (0, 10, 0)]], dtype=float)
         self.assertAlmostEqual(raster_of((ramp, 0)).final()[0, 4], 4.5)
 
+    def test_map_tris_snaps_visual_vertices_to_float32(self):
+        tris = np.array([[[-551.21552877, 139.92381506, -21.10734338],
+                          [-552.41236655, 139.92381506, -14.34491009],
+                          [-547.81370707, 139.92381506, -13.53395873]]], dtype=np.float64)
+        mapped = fa._map_tris(tris)
+        self.assertEqual(mapped[0, 0, 0], float(np.float32(tris[0, 0, 0])))
+        self.assertEqual(mapped[0, 1, 0], float(np.float32(tris[0, 1, 0])))
+        self.assertEqual(mapped[0, 2, 1], float(np.float32(-tris[0, 2, 2])))
+
 
 class RoadClassificationTest(unittest.TestCase):
     def test_a_road_hovering_above_the_terrain_is_reported_in_collision_and_visual(self):
