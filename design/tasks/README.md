@@ -192,11 +192,11 @@ Details for each row:
 ## Milestone retros
 
 D169 (an M2 relay of user text; see the decision record). Every milestone closes with one retro, owned by the
-Team Leader. The retro is a written record, not a scheduled task.
+Team Leader. It runs after goal attainment and before the milestone record closes. It is a written record, not a scheduled task.
 
 | id | milestone | owner | trigger (dependency) | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
-| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 closure: every must item in the [goal baseline](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169) `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | blocked (milestone open) | |
+| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 **goal attainment** (step 1 of the [closure sequence](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169)): every must delivery item `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. The accepted retro then closes the milestone record (step 3). A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | blocked (milestone open) | |
 
 **M-S5-RETRO acceptance:**
 
