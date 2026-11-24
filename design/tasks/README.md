@@ -82,7 +82,7 @@ S3-TEX-BLENDER (and S3-PARITY's optional fix, serialised). Every S3 task touchin
 
 ## Sprint 4 (v0.5.0)
 
-Theme D93; decisions D94–D148 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
+Theme D93; decisions D94–D153 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-BANK, D126 and D129 add S4-COL-FLOAT and S4-COL-FLOAT-2, D128 adds S4-MYPY), measured baselines and budgets in [../roadmap.md](../roadmap.md#v4-sprint-4-v050--quality-closeout-and-publishing-readiness).
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
@@ -109,8 +109,8 @@ Theme D93; decisions D94–D148 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-
 | S4-F5 | later or REL docs | dev | — | `docs/PACKAGE_FORMAT.md` | → stale C# line citations (+50 after #72) | |
 | S4-F6 | later | dev | S4-F4 | `core/generate.py` (`build_terrain`) | → S5: landcover edge staircase (per-cell colours) | |
 | S4-F7 | later | dev | — | `tests/test_col_degen.py` | → test hygiene: 6.1 s incl. C# build | |
-| S4-F8 | later (D148) | dev | — (investigation first) | `tools/floating_audit.py` (classification), then the owning generator stage once known | → investigate the Pittsburgh CLI `buried_collision` singleton `osm:way/537242388` (class null), present on main 6fc2f02; #76 called it an audit-ray edge graze. Outcome: either a fix or a documented audit exception | |
-| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2, S4-MYPY (D133) | version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `blender_manifest.toml`), `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md`, `docs/PACKAGE_FORMAT.md` (shared with COL-FLOAT-2), `docs/VALIDATION.md`, `examples/README.md`, the D103 sample slot (`examples/synthetic_sample.mbmap`) | RC open; final after S4-COL-FLOAT-2 and S4-MYPY | #75 (RC) |
+| [S4-F8](S4-F8.md) | S5, first (D148, D149) | dev | v0.5.0 merged (6535f38) | step 1 root cause; (A) `tools/floating_audit.py` + tests, or (B) the owning generator stage named by step 1 (building section of `core/generate.py` or `core/collision.py`) + tests; soft: sample slot only if it changes | ready (dev started from D148; this spec is authoritative once merged) | |
+| [REL-v0.5.0](REL-v0.5.0.md) | S4 | release manager | S4-REVIEW, S4-WATER-BANK, S4-COL-FLOAT, S4-COL-FLOAT-2, S4-MYPY (D133) | version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `blender_manifest.toml`), `CHANGELOG.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.5.0/`, `docs/releases/v0.5.0.md`, `docs/DEMO.md`, `docs/PACKAGE_FORMAT.md` (shared with COL-FLOAT-2), `docs/VALIDATION.md`, `examples/README.md`, the D103 sample slot (`examples/synthetic_sample.mbmap`) | done (GO at cd1112c; [close review](../reviews/REL-v0.5.0-close.md); tag and publication are the user's decision) | #75 (6535f38) |
 
 Parallel safety: `core/roofs.py` belongs only to lane A (serialised); `core/package.py` only to S4-PERF-PKG
 (then FORMAT-POLICY if needed); `core/uv.py` to TEX-WATER, then PERF-UV; `blender/bake.py` and `export.py` to
@@ -137,7 +137,9 @@ the #75 sample slot, so those tasks never edit the shared files at the same time
 
 | id | sprint | owner | dependencies | conflict domain (hard; soft) | status | PR |
 |---|---|---|---|---|---|---|
-| [S5-STYLE-BASE](S5-STYLE.md#s5-style-base-baselines-metrics-g0-checker-and-acceptance-harness) | S5 | dev | #75 merged (D136) | `tools/style_check.py`, `tests/test_style_check.py` (new), `tools/demo/` (style cameras, render recipe, frame-time proxy) | blocked | |
+| [S5-PERF-WATER](S5-PERF-WATER.md) | S5 (D152) | dev | S4-F8 (shares `core/generate.py` if S4-F8 is case B) | `core/overlap.py`, `core/shore.py` (mask callbacks), `core/water.py` (mask helpers), water-stage mask construction in `core/generate.py`, `tests/test_overlap.py`; byte-identical output, no sample change | blocked | |
+| [S5-PERF-GATE](S5-PERF-GATE.md) | S5 (D153) | dev | S5-PERF-WATER | `tools/perf/work_count.py`, `tests/test_work_count.py` (new); no product code; Design updates D91/D106/D147 text afterwards | blocked | |
+| [S5-STYLE-BASE](S5-STYLE.md#s5-style-base-baselines-metrics-g0-checker-and-acceptance-harness) | S5 | dev | #75 merged (done); S5-PERF-GATE (D153) | `tools/style_check.py`, `tests/test_style_check.py` (new), `tools/demo/` (style cameras, render recipe, frame-time proxy) | blocked | |
 | [S5-STYLE-PALETTE](S5-STYLE.md#s5-style-palette-style-option-default-stylized-palette-faceting-terrain-buildings-roads-and-trees) | S5 | dev | S5-STYLE-BASE; #75 and S4-MYPY merged | `core/style.py` (new), `core/generate.py` (colour constants and colour choice only, trees included; no geometry), `core/glb.py` (normals/welding), `core/uv.py`/`core/textures.py` (mode switch), `tools/mbmap_cli.py` (flag), `blender/props.py`, `ui.py`, `scene_build.py` (option); soft: sample slot (D103, default becomes stylized, D141) | blocked | |
 | [S5-STYLE-WATER](S5-STYLE.md#s5-style-water-cyan-water-terrain-side-shore-band-sandy-banks-colour-only) | S5 | dev | S5-STYLE-PALETTE (shared files); D143 (colour-only band); #75 merged (so #77 too) | `core/style.py` (water/band colours), water-stage and `bank:` colour code in `core/generate.py`, `core/water.py`/`core/shore.py` (colour only); soft: sample slot | blocked | |
 | [S5-STYLE-REVIEW](S5-STYLE.md#s5-style-review-design-milestone-review-gono-go) | S5 | design | S5-STYLE-BASE, PALETTE, WATER | `design/` only; explicit GO/NO-GO | blocked | |
