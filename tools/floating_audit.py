@@ -43,7 +43,9 @@ import os
 import sys
 import zipfile
 from collections import Counter, deque
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, cast
 
 import numpy as np
 
@@ -165,7 +167,7 @@ class Raster:
 
 
 
-def _load(path: str):
+def _load(path: str) -> tuple[dict[str, Any], Any, Any, tuple[Any, Any]]:
     with zipfile.ZipFile(path) as z:
         manifest = json.loads(z.read("manifest.json"))
         names = z.namelist()
@@ -177,13 +179,13 @@ def _load(path: str):
     return manifest, col, hf, glb
 
 
-def _map_tris(tris) -> np.ndarray:
+def _map_tris(tris: Any) -> np.ndarray:
     a = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
     return np.stack([a[..., 0], -a[..., 2], a[..., 1]], axis=-1)
 
 
-def _regions(mask: np.ndarray, value: np.ndarray, cell: float, owner: np.ndarray, names: list[str], xs, ys,
-             min_area: float) -> list[dict]:
+def _regions(mask: np.ndarray, value: np.ndarray, cell: float, owner: np.ndarray, names: list[str],
+             xs: np.ndarray, ys: np.ndarray, min_area: float) -> list[dict[str, Any]]:
     out = []
     seen = np.zeros(mask.shape, dtype=bool)
     ny, nx = mask.shape
@@ -217,7 +219,7 @@ def _regions(mask: np.ndarray, value: np.ndarray, cell: float, owner: np.ndarray
             "objects": [{"name": names[o] if 0 <= o < len(names) else str(o), "cells": n}
                         for o, n in own.most_common(3)],
         })
-    out.sort(key=lambda r: -r["area_m2"])
+    out.sort(key=lambda r: -cast(float, r["area_m2"]))
     return out
 
 
@@ -243,7 +245,7 @@ class Findings:
 
     def __init__(self, cell: float, xs: np.ndarray, ys: np.ndarray, min_area: float) -> None:
         self.cell, self.xs, self.ys, self.min_area = cell, xs, ys, min_area
-        self.regions: dict[str, list[dict]] = {}
+        self.regions: dict[str, list[dict[str, Any]]] = {}
         self.layers: dict[str, np.ndarray] = {}
 
     def flag(self, kind: str, value: np.ndarray, mask: np.ndarray, owner: np.ndarray, names: list[str]) -> None:
@@ -254,14 +256,14 @@ class Findings:
                                           self.xs, self.ys, self.min_area)
 
     def flag_nodes(self, kind: str, value: np.ndarray, mask: np.ndarray, owner: np.ndarray, names: list[str],
-                   hf: dict) -> None:
+                   hf: dict[str, Any]) -> None:
         """Heightfield findings live on the node grid, which has its own spacing."""
         if mask.any():
             self.regions[kind] = _regions(mask, np.where(mask, value, 0.0), hf["spacing"], owner, names,
                                           _node_axis(hf, "x"), _node_axis(hf, "y"), self.min_area)
 
 
-def _node_axis(hf: dict, axis: str) -> np.ndarray:
+def _node_axis(hf: dict[str, Any], axis: str) -> np.ndarray:
     return hf[axis + "0"] + np.arange(hf["n" + axis]) * hf["spacing"]
 
 
@@ -271,7 +273,7 @@ def _raster_of(tris: np.ndarray, owners: np.ndarray, xs: np.ndarray, ys: np.ndar
     return raster
 
 
-def _collision_triangles(col) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _collision_triangles(col: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     vertices = np.asarray(col.vertices, dtype=np.float64)
     indices = np.asarray(col.indices, dtype=np.int64).reshape(-1, 3)
     classes = np.frombuffer(col.tri_class, dtype=np.uint8)[:len(indices)]
@@ -285,7 +287,7 @@ def _is_roof(tris: np.ndarray, categories: np.ndarray) -> np.ndarray:
     return (categories == "building") & upward
 
 
-def _visual_triangles(nodes) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+def _visual_triangles(nodes: Sequence[Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
     """(triangles, node index, category, node names) of every GLB node, in the map frame."""
     tris, owners, categories, names = [], [], [], []
     for index, node in enumerate(nodes):
@@ -301,7 +303,7 @@ def _visual_triangles(nodes) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[s
     return np.concatenate(tris), np.concatenate(owners), np.concatenate(categories), names
 
 
-def _build_surfaces(col, nodes, xs: np.ndarray, ys: np.ndarray) -> Surfaces:
+def _build_surfaces(col: Any, nodes: Sequence[Any], xs: np.ndarray, ys: np.ndarray) -> Surfaces:
     ctris, cclasses, cowners = _collision_triangles(col)
     col_by_class = {}
     for class_id in np.unique(cclasses):
@@ -340,7 +342,8 @@ def _check_roads(s: Surfaces, f: Findings, threshold: float) -> None:
             f.flag(f"ground_above_terrain:road:{side}", above, above > threshold, rasters["road"].owner, names)
 
 
-def _check_heightfield(s: Surfaces, f: Findings, hf: dict, col, nodes, threshold: float, hf_tol: float) -> None:
+def _check_heightfield(s: Surfaces, f: Findings, hf: dict[str, Any], col: Any, nodes: Sequence[Any],
+                       threshold: float, hf_tol: float) -> None:
     hx, hy = _node_axis(hf, "x"), _node_axis(hf, "y")
     hz = np.asarray(hf["z"], dtype=np.float64)
     ctris, cclasses, cowners = _collision_triangles(col)
@@ -426,13 +429,13 @@ def _water_bodies(s: Surfaces) -> list[dict]:
     return bodies
 
 
-def _on_map(col, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+def _on_map(col: Any, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
     """Cells over the terrain grid itself; shore ramps may spill past the map edge, where there is no ground."""
     box = next(e["aabb"] for e in col.objects if e["name"] == "terrain")
     return (((xs >= box[0]) & (xs <= box[3]))[None, :]) & (((ys >= box[1]) & (ys <= box[4]))[:, None])
 
 
-def _grid_axes(col, cell: float) -> tuple[np.ndarray, np.ndarray]:
+def _grid_axes(col: Any, cell: float) -> tuple[np.ndarray, np.ndarray]:
     lo, hi = col.bounds
     axes = []
     for k in (0, 1):
@@ -441,7 +444,7 @@ def _grid_axes(col, cell: float) -> tuple[np.ndarray, np.ndarray]:
     return axes[0], axes[1]
 
 
-def _summarise(regions: dict[str, list[dict]]) -> dict[str, dict]:
+def _summarise(regions: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, float | int]]:
     return {kind: {"regions": len(found), "area_m2": round(sum(r["area_m2"] for r in found), 1),
                    "max_offset_m": max((r["max_offset_m"] for r in found), key=abs)}
             for kind, found in regions.items()}
@@ -523,7 +526,8 @@ def _save_png(image: np.ndarray, png_dir: str, name: str) -> None:
 
 
 def _render(png_dir: str, stem: str, xs: np.ndarray, ys: np.ndarray, layers: dict[str, np.ndarray],
-            visible: np.ndarray, visible_terrain: np.ndarray, findings: dict[str, list[dict]], crops: int) -> None:
+            visible: np.ndarray, visible_terrain: np.ndarray, findings: dict[str, list[dict[str, Any]]],
+            crops: int) -> None:
     """One heatmap per finding kind, plus crops of the ``crops`` largest regions of each kind."""
     os.makedirs(png_dir, exist_ok=True)
     grey = _shade(np.where(np.isfinite(visible), visible, visible_terrain))
@@ -542,7 +546,7 @@ def _render(png_dir: str, stem: str, xs: np.ndarray, ys: np.ndarray, layers: dic
 
 
 
-def _print(res: dict, quiet: bool) -> None:
+def _print(res: dict[str, Any], quiet: bool) -> None:
     print(f"{res['package']}: grid {res['grid'][0]}x{res['grid'][1]} @ {res['cell_m']} m, threshold "
           f"{res['threshold_m']} m, triangles col {res['triangles']['collision']} / vis {res['triangles']['visual']}")
     for b in res["water_bodies"]:
@@ -559,7 +563,7 @@ def _print(res: dict, quiet: bool) -> None:
                 print(f"      {r['area_m2']:9.1f} m2  max {r['max_offset_m']:7.3f} m at {r['at_xy']}  {o}")
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("package")
     ap.add_argument("--cell", type=float, default=1.0, help="grid cell size in metres (default 1)")

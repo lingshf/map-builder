@@ -11,7 +11,7 @@ from map_builder.core import bridges, generate, water
 from map_builder.core.dem import ElevationGrid
 from map_builder.core.generate import ROAD_LIFT_M
 from map_builder.core.overlap import triangle_overlaps_region
-from map_builder.core.osm import Polygon
+from map_builder.core.osm import Feature, Polygon
 from map_builder.core.query import ray_cast
 from map_builder.core.structures import plan_collision
 
@@ -246,6 +246,17 @@ class RiverBoundaryTest(unittest.TestCase):
         plan, ids, _ = lake_scene()
         row = bodies(plan)[ids[0]]
         self.assertEqual(row["level_m"], row["shore_percentiles"][20])
+
+
+class CentrelineChainTest(unittest.TestCase):
+    def test_chain_parts_rejects_duplicate_endpoints(self):
+        a = Feature("osm:way/1", "area", {}, [(0.0, 0.0), (1.0, 0.0)])
+        b = Feature("osm:way/2", "area", {}, [(1.0, 0.0), (2.0, 0.0)])
+        c = Feature("osm:way/3", "area", {}, [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (1.0, 0.0)])
+        a.node_ids = [1, 2]
+        b.node_ids = [2, 3]
+        c.node_ids = [2, 4, 5, 2]
+        self.assertIsNone(water._chain_parts([a, b, c]))
 
 
 class SamplesAndBudgetTest(unittest.TestCase):
