@@ -24,9 +24,9 @@ through the code; see [validation coverage](../VALIDATION.md) for known gaps.
 
 ## Verified local checks
 
-Run from the repository root in PowerShell. These commands were run on the
-audited Windows checkout; the Blender path is machine-specific. Replace it
-on other machines (the substituted command is unverified until run there).
+Run from the repository root in PowerShell. The Blender path is
+machine-specific; replace it on other machines (the substituted command is
+unverified until run there).
 
 ```powershell
 py -3.12 -W error::ResourceWarning -m unittest discover -s tests -t .
@@ -37,6 +37,12 @@ dotnet run -c Release --project examples\csharp\MbmapReader -- examples\syntheti
 The first command covers unit and acceptance tests, including the CLI; the
 second checks the committed package and probes; the third exercises the
 actual Blender integration and writes test artifacts to the specified folder.
+
+**Known failure (S5-F4).** On main (`f1178f8`) with Blender 4.2.23 the third
+command exits 1 with `FAIL terrain vertex edit exported`
+(`tests/blender/checks_core.py:308`), observed in the QA rehearsal of #92. It
+is not a passing check until [S5-F4](../../design/tasks/README.md) is resolved
+and the command is rerun. The first two commands passed in that rehearsal.
 See the [CLI guide](../user/cli.md) for the verified fixture build and validate
 commands and [installation](../user/install.md) for extension packaging.
 

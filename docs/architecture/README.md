@@ -94,14 +94,11 @@ cushion.
 
 **Checks:**
 
-* [`tools/floating_audit.py`](../../tools/floating_audit.py) ray-casts collision, heightfield and visual surfaces on a grid,
-  separately for collision and visual. Its categories are floating, `buried_collision`, `water_buried` (contract 0)
-  and, in a ring around each wet area (`_check_water`), the gap between the sheet and the terrain:
-  * a gap of ≤ 1.5 m + 0.05 m (`SHORE_STEP_TOL_M`) is labelled `water_shore_step`, as information;
-  * a larger gap is labelled `water_above_bank`, with contract 0.
-
-  Edge-ambiguity classes are also reported (D159). The 0.05 m label tolerance is the audit's own and is **not** the
-  design bound: S5-F3 applies 1.5 m + 1 mm.
+* [`tools/floating_audit.py`](../../tools/floating_audit.py) ray-casts collision, heightfield and visual surfaces on a grid
+  and checks the sheet-to-terrain gap in a ring around each wet area. `water_above_bank` and `water_buried` have
+  contract 0. Its categories, thresholds and labelling tolerance are explained once, in
+  [Developer tools § Floating audit](../dev/tools.md#floating-audit). The audit's tolerance is **not** the design
+  bound: S5-F3 applies 1.5 m + 1 mm.
 * [`tools/water_replay.py`](../../tools/water_replay.py) replays fixed queries between two packages in Python and C# and labels
   every difference (§7, `bank ramp`, `road lowered`).
 * [`tools/water_check.py`](../../tools/water_check.py) checks the bed and clearance invariants.
