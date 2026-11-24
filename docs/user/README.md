@@ -13,12 +13,17 @@ visuals plus engine-neutral collision; it is not a flight simulator.
 For development see the [developer guide](../dev/README.md); for the current
 pipeline and package design see the [architecture overview](../architecture/README.md).
 
-See the [v0.4.0 demo](../demo/v0.4.0/README.md) (non-rectangular roofs and
-textures on Munich and Pittsburgh; [reproduce it](../DEMO.md)), the
+See the [v0.5.0 demo](../demo/v0.5.0/README.md) (flat rivers, banks and
+vertical-cut roof ends; [reproduce it](../DEMO.md)), the
+[v0.4.0 demo](../demo/v0.4.0/README.md) (non-rectangular roofs and
+textures on Munich and Pittsburgh), the
 [v0.3.0 real-data demo](../demo/v0.3.0/README.md), the [v0.2.0 Pittsburgh bridge/tunnel demo](../demo/v0.2.0/README.md),
 the [v0.1.0 editing demo](../demo/v0.1.0/README.md) and the
-[real Blender sidebar](../demo/v0.4.0/panel.png), plus the
+[real Blender sidebar](../demo/v0.5.0/panel.png), plus the
 [workflow overview](../flows/overview.md) and [fly-through check](../flows/flythrough.md).
+Typing is now mypy-clean and CI-enforced (#81); one known collision-audit
+exception remains in Pittsburgh CLI (`osm:way/537242388`, S4-F8), documented
+in the v0.5.0 release notes.
 The [package contract](../PACKAGE_FORMAT.md)
 is normative when implementing a reader.
 

@@ -13,7 +13,7 @@ from types import ModuleType
 bl_info = {
     "name": "Map Builder",
     "author": "map-builder contributors",
-    "version": (0, 4, 0),
+    "version": (0, 5, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > Map Builder",
     "description": "Real terrain + OpenStreetMap layout with procedural details; exports GLB + collision map packages",

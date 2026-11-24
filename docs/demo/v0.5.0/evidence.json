@@ -1,0 +1,474 @@
+{
+  "artifacts": [
+    {
+      "name": "munich-altstadt-0.5.0-blender-notex.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\munich-altstadt-0.5.0-blender-notex.mbmap",
+      "builder": "headless Blender",
+      "textures": "off",
+      "bytes": 978053,
+      "sha256": "16441E4347A64ED39E8744751506AA081B2A406F75CF5389804E6D4E65DF7F49",
+      "package_id": "sha256:d945735319afb4979bbbcaf9e78ce3d91aeb46a91075ef855bdd2f7827d07a8a",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_vis": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "buried_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "munich-altstadt-0.5.0-blender.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\munich-altstadt-0.5.0-blender.mbmap",
+      "builder": "headless Blender",
+      "textures": "on",
+      "bytes": 1622503,
+      "sha256": "E5274457FA2807C3F59143CCDCF625B5491507927F1513CF64C3A4B144BFFB26",
+      "package_id": "sha256:3b36802443b452ff40cdbb1cdec0a92f6fd2980bce74c5ba41b742a08569d540",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_vis": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "buried_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "munich-altstadt-0.5.0-notex.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\munich-altstadt-0.5.0-notex.mbmap",
+      "builder": "CLI",
+      "textures": "off",
+      "bytes": 942147,
+      "sha256": "FDC561E9428F6058701B162D1E4BBC45F976B20AD3F88DD1371DB5564B29D68F",
+      "package_id": "sha256:d526920678a4868e63ad3bdd6f0b4029d2da6bdf48d682d165d6f201dfe60e5d",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_vis": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "buried_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "munich-altstadt-0.5.0.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\munich-altstadt-0.5.0.mbmap",
+      "builder": "CLI",
+      "textures": "on",
+      "bytes": 1595997,
+      "sha256": "49C42B79F4C3A8C72F0AF2188F309350CEE268232DF32603C63401206AAA72D8",
+      "package_id": "sha256:d191a94de5663d106bc89cde24f105af72e678941e2f8ebe38dcdcccc1762976",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_vis": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "buried_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "pittsburgh-0.5.0-blender-notex.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\pittsburgh-0.5.0-blender-notex.mbmap",
+      "builder": "headless Blender",
+      "textures": "off",
+      "bytes": 5586009,
+      "sha256": "A7906066ED150F14BDC561435BE92514900F196F1564A7A0639B478E69AAE224",
+      "package_id": "sha256:65cb8584dfdc215bcaf5a48d24a199e843c239c601f9d0dcd17170f4022b9866",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "water_shore_step_vis": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "buried_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "pittsburgh-0.5.0-blender.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\pittsburgh-0.5.0-blender.mbmap",
+      "builder": "headless Blender",
+      "textures": "on",
+      "bytes": 6657987,
+      "sha256": "CE21882E434ACE94CEA2E348BFD3A85B8581CFD763888BD5530B58012AE74707",
+      "package_id": "sha256:b52c5699765b7e59f3479caa1585e7db5e38e2f73ea5f236916d4470514fe169",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "water_shore_step_vis": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "buried_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "pittsburgh-0.5.0-notex.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\pittsburgh-0.5.0-notex.mbmap",
+      "builder": "CLI",
+      "textures": "off",
+      "bytes": 4415200,
+      "sha256": "DF89A8E7E405E07C321D6216EE49EDC477122AA240F92875DB7E715FBC2C4A3D",
+      "package_id": "sha256:c16cde538d489567d6feef26ce6a0364b646405814a3ed7dc272249c92d487fc",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "water_shore_step_vis": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "buried_collision": {
+          "regions": 1,
+          "area_m2": 1.0,
+          "max_offset_m": -8.77,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": false
+    },
+    {
+      "name": "pittsburgh-0.5.0.mbmap",
+      "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\pittsburgh-0.5.0.mbmap",
+      "builder": "CLI",
+      "textures": "on",
+      "bytes": 5487675,
+      "sha256": "BE4374B0EC3A02DDB58895AD0CFD4E80E7395365D67AAF5238B1E7463A547AAE",
+      "package_id": "sha256:3124bbeeaf660cffe4f810fe0d7235608db2bfc86fd8d830e4c38c64fc3c1ead",
+      "validation": {
+        "ok": true,
+        "errors": 0,
+        "warnings": 1,
+        "verdict": "VALID"
+      },
+      "probe_replay_agreement": {
+        "python_csharp_passage": true,
+        "python_csharp_replay": true
+      },
+      "floating_audit": {
+        "floating_collision": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_above_bank": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_buried": {
+          "regions": 0,
+          "area_m2": 0.0,
+          "max_offset_m": 0.0,
+          "info": false
+        },
+        "water_shore_step_col": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "water_shore_step_vis": {
+          "regions": 104,
+          "area_m2": 2009.0,
+          "max_offset_m": 1.5,
+          "info": true
+        },
+        "buried_collision": {
+          "regions": 1,
+          "area_m2": 1.0,
+          "max_offset_m": -8.77,
+          "info": false
+        }
+      },
+      "allowed_known_issue_s4_f8": true
+    }
+  ],
+  "extension_zip": {
+    "name": "map_builder-0.5.0.zip",
+    "path": "C:\\Users\\shaoling\\.copilot\\session-state\\d3ab9f5c-b4c4-4e5e-8f50-326fbe9c03e4\\files\\release-final-once\\map_builder-0.5.0.zip",
+    "bytes": 886813,
+    "sha256": "added at publication (release workflow from the tag, D100)"
+  }
+}

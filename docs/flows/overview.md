@@ -1,6 +1,6 @@
 # Map Builder overview
 
-v0.4.0 preview. Detail: [generation](generate.md), [export](export.md),
+v0.5.0 preview. Detail: [generation](generate.md), [export](export.md),
 [fly-through check](flythrough.md), [consumer handoff](consumer.md).
 
 ```mermaid

@@ -1,0 +1,12 @@
+{
+  "name": "munich-altstadt-v050",
+  "description": "REL-v0.5.0 Munich Altstadt: the preset's overview and roofs views plus the S4-REVIEW close-ups (vertical-cut gable ends on 3 edges way 80965639 and on 2 edges way 80965543; named fallback way 79401261)",
+  "area": {"lat": 48.1395, "lon": 11.5764, "width_m": 400, "height_m": 400},
+  "cameras": [
+    {"name": "overview", "eye": [380, -420, 300], "target": [0, -20, 10], "lens_mm": 28},
+    {"name": "roofs", "eye": [-60, -20, 70], "target": [-125, -80, 20], "lens_mm": 35},
+    {"name": "vcut-3edge", "eye": [100, -75, 60], "target": [54, -28, 20], "lens_mm": 35},
+    {"name": "vcut-2edge", "eye": [70, -35, 55], "target": [29, 6, 18], "lens_mm": 35},
+    {"name": "named-fallback", "eye": [250, -230, 90], "target": [168, -135, 15], "lens_mm": 35}
+  ]
+}

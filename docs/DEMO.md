@@ -1,40 +1,42 @@
-# Real-data demo (v0.4.0)
+# Real-data demo (v0.5.0)
 
-How to rebuild and check the two v0.4.0 real-data maps, textured and
+How to rebuild and check the two v0.5.0 real-data maps, textured and
 untextured, with the recorded numbers. Images and the comparisons are in the
-[v0.4.0 demo](demo/v0.4.0/README.md). Raw evidence is in
-[evidence.json](demo/v0.4.0/evidence.json). The v0.3.0 recipe and numbers are in
-the [v0.3.0 demo](demo/v0.3.0/README.md).
+[v0.5.0 demo](demo/v0.5.0/README.md). Raw evidence is in
+[evidence.json](demo/v0.5.0/evidence.json). Earlier recipes and numbers are in
+the [v0.4.0](demo/v0.4.0/README.md) and [v0.3.0](demo/v0.3.0/README.md) demos.
+
+Rebuilt on the rebased REL-v0.5.0 head after #77 and #81.
 
 | Preset | Area | Structures |
 |---|---|---|
-| `pittsburgh` | 40.437 N, 80.016 W, 1200 x 1000 m | Fort Pitt Bridge (double deck, piers), Fort Pitt Tunnel |
-| `munich-altstadt` | 48.1395 N, 11.5764 E, 400 x 400 m | Elevated building part, Rid Passage (building passage), road tunnel, gabled and hipped roofs on non-rectangular footprints |
+| `pittsburgh` | 40.437 N, 80.016 W, 1200 x 1000 m | Fort Pitt Bridge (double deck, piers), Fort Pitt Tunnel, the Monongahela, Allegheny and Ohio as flat water |
+| `munich-altstadt` | 48.1395 N, 11.5764 E, 400 x 400 m | Elevated building part, Rid Passage (building passage), road tunnel, gabled and hipped roofs on non-rectangular footprints, vertical-cut gable ends |
 
 Presets: [tools/demo/presets/](../tools/demo/presets/). Options for both
 areas: seed 1, DSM correction on, terrain spacing 10 m, heightfield 2 m,
 `created_utc` fixed at `2026-11-20T00:00:00Z`.
 
-## Recorded results (RC, main e266a1b + release changes)
+## Recorded results (rebased REL-v0.5.0 head)
 
-Built offline from the v0.3.0 acquisition caches (2026-11-20 UTC).
+Built offline from the frozen v0.4.0 acquisition caches (2026-11-20 UTC).
 
 | | Munich Altstadt | Pittsburgh |
 |---|---|---|
-| package_id, textured | `sha256:178c1328…ac3ec3f` | `sha256:c605727a…5c1d40` |
-| package_id, `--no-textures` | `sha256:b4b8a9a0…c3a37a` | `sha256:69cf9a3a…703b45` |
-| Objects | 389 | 3290 |
-| Collision triangles (degenerate) | 23,378 (59) | 144,108 (76) |
-| Passage probes exported / blocked | 3 / 26 | 13 / 29 |
-| Tagged non-flat roofs built as tagged | 29 / 67 (v0.3.0: 1 / 67) | |
-| Build, excluding download, median of 3: textured / untextured | **4.304 s** / 3.596 s | **20.020 s** / 18.489 s |
+| package_id, textured | `sha256:d191a94d…762976` | `sha256:3124bbee…3c1ead` |
+| package_id, `--no-textures` | `sha256:d5269206…e60e5d` | `sha256:c16cde53…d487fc` |
+| Objects | 389 | 3296 (3 water) |
+| Collision triangles (degenerate) | 23,372 (57) | 145,650 (73) |
+| Passage probes exported / blocked | 3 / 26 | 11 / 31 |
+| Tagged non-flat roofs built as tagged | 45 / 67 (v0.4.0: 29 / 67) | |
+| Build, excluding download, median of 3: textured / untextured | **3.297 s** / 3.019 s | **16.031 s** / 15.197 s |
 | Python validator | `VALID`, 1 warning | `VALID`, 1 warning |
-| C# reference reader | `OK`, 3/3 probes PASS | `OK`, 13/13 probes PASS |
-| Headless Blender (generate + export), textured and untextured | `VALID`; 3/3 PASS, same probe ids | `VALID`; 13/13 PASS, same probe ids |
+| C# reference reader | `OK`, 3/3 probes PASS | `OK`, 11/11 probes PASS |
+| Headless Blender (generate + export), textured and untextured | `VALID`; 3/3 PASS, same probe ids | `VALID`; 11/11 PASS, same probe ids |
 
-The build target is 120 s or less, so both areas pass. `.mbcol` and the
-heightfield are byte-identical with textures on or off. Live OSM changes over
+The build target is 120 s or less, so both areas pass. Live OSM changes over
 time, so a fresh acquisition gives different package_ids.
+
 ## 1. Build from live data (CLI path)
 
 Run from the source root with Python 3.12. The first build downloads from
@@ -109,7 +111,7 @@ checkbox), set `export_path`, and call `bpy.ops.map_builder.generate()`,
 `bpy.ops.map_builder.export()` and `bpy.ops.map_builder.validate()`. Start
 Blender with `--online-mode`. Point **Cache folder** (`cache_dir`) at a copy of
 `$env:MB_ROOT\cache-<area>` to build from the same data as the CLI: then
-Blender exports the same passage probes (Munich 3, Pittsburgh 13), and both
+Blender exports the same passage probes (Munich 3, Pittsburgh 11), and both
 presets validate `VALID` textured and untextured. Blender packages differ in
 bytes from the CLI ones (Blender stores geometry as float32).
 
@@ -119,21 +121,22 @@ bytes from the CLI ones (Blender stores geometry as float32).
 $blender = "C:\path\to\blender.exe"
 $env:BLENDER_USER_RESOURCES = "$env:MB_ROOT\blender-profile"
 & $blender --background --factory-startup --python-exit-code 1 `
-    --python tools\demo\run_demo.py -- --preset docs\demo\v0.4.0\munich-altstadt-v040.json `
-    --after "$env:MB_ROOT\munich.mbmap" --before "$env:MB_ROOT\munich-notex.mbmap" `
-    --out "$env:MB_ROOT\demo-munich" --panel --mesa-blender "C:\path\to\blender-mesa\blender.exe"
-& $blender --background --factory-startup --python-exit-code 1 `
-    --python tools\demo\run_demo.py -- --preset tools\demo\presets\pittsburgh.json `
-    --after "$env:MB_ROOT\pittsburgh.mbmap" --before "$env:MB_ROOT\pittsburgh-notex.mbmap" `
+    --python tools\demo\run_demo.py -- --preset docs\demo\v0.5.0\pittsburgh-v050-preset.json `
+    --after "$env:MB_ROOT\pittsburgh.mbmap" --before "C:\path\to\pittsburgh-0.4.0.mbmap" `
     --out "$env:MB_ROOT\demo-pittsburgh"
+& $blender --background --factory-startup --python-exit-code 1 `
+    --python tools\demo\run_demo.py -- --preset docs\demo\v0.5.0\munich-v050-preset.json `
+    --after "$env:MB_ROOT\munich.mbmap" --before "C:\path\to\munich-altstadt-0.4.0.mbmap" `
+    --out "$env:MB_ROOT\demo-munich" --panel --mesa-blender "C:\path\to\blender-mesa\blender.exe"
 Remove-Item Env:\BLENDER_USER_RESOURCES
 ```
 
-Build both with and without `MB_TEXTURES=0` first. `--before` renders the
-same cameras from a second package. The v0.4.0 demo also rendered the Munich
-cameras with the released `munich-altstadt-0.3.0.mbmap` as `--before`, for the
-roof comparison. Rendering is Cycles CPU, 1280 x 720, 64 samples. All 28
-renders and the panel together took 14 min 25 s, within the 30-minute budget.
+`--before` renders the same cameras from a second package; the v0.5.0 demo
+uses the released v0.4.0 packages, so the pairs show what changed since
+v0.4.0. The presets add the `bridge-under` and `bank` cameras for the river and
+the `vcut-2edge`, `vcut-3edge` and `named-fallback` cameras for roof ends.
+Rendering is Cycles CPU, 1280 x 720, 64 samples. All 16 renders and the panel
+together took 7 min 0 s, within the 30-minute budget.
 To view a bundle (never port 8765):
 `py -3.12 -m http.server 8793 --bind 127.0.0.1 --directory "$env:MB_ROOT\demo-munich\viewer"`.
 ## Attribution
