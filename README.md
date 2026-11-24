@@ -16,6 +16,8 @@ physics Core) is [docs/UNITY_CORE_HANDOFF.md](docs/UNITY_CORE_HANDOFF.md).
 
 ## Documentation
 
+Start at the **[documentation entry](docs/README.md)**: reading paths, the page inventory and the coverage matrix.
+
 * [User guide](docs/user/README.md): install, generate, export, CLI, presets and consumption.
 * [Developer guide](docs/dev/README.md): repository layout, checks and contribution workflow.
 * [Architecture overview](docs/architecture/README.md): pipeline, decisions and package format.
