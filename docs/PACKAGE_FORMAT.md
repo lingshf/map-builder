@@ -325,6 +325,8 @@ names neither an exported object nor a plan feature, with an error instead of dr
 | `osm:way/123`, `osm:relation/45`, `osm:node/9` | Generated from that OSM element. Local `.osm` files may use negative ids for unsaved edits, e.g. `osm:way/-7`. |
 | `osm:relation/45#k` | Part `k` of an OSM element that was split into several objects (for example, a multipolygon with several outer rings). |
 | `osm:way/123:headwall0`, `osm:way/123:headwall1` | Portal headwall (class `structure`) at the start (0) / end (1) of the tunnel built from that way. Only `0` and `1`, and only on way ids. The `:deck`, `:under` and `:bore` suffixes appear only in passage probe ids, never as object `mb_id`s. |
+| `water:osm:way/123`, `water:osm:relation/45` | The flat water surface (class `water`) of one water body, built from that OSM element. A short cascade down to an abutting lower body is part of the same object. |
+| `bank:osm:way/123`, `bank:osm:relation/45` | The shore ramp (class `terrain`) of the water body with the same OSM id: terrain added on top of the ground along that body's shore so no gap shows under its water surface. It never rises above that body's water level. |
 | `terrain:grid` | The terrain. |
 | `scatter:<area id>#k` | A procedurally scattered tree. |
 | `<id>~<object name>` | A user duplicate of a generated object. The first object in name order keeps the plain id. |

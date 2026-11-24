@@ -24,6 +24,8 @@ from .dem import ElevationGrid
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
+from .overlap import point_segment_distance, triangle_overlaps_region, triangle_touches
+from .shore import shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
 Pt = tuple[float, float]
@@ -45,6 +47,7 @@ VIOLATION_TOL_M = 1e-9
 AREA_EPS = 1e-9
 WATER_COLOR = (0.05, 0.14, 0.24)
 MATERIAL = "MB Water"
+BANK_MATERIAL = "MB Terrain"
 SAMPLE_MASK_BUFFER_M = 15.0   # dsm.BUILDING_BUFFER_M / BRIDGE_BUFFER_M: the DSM mask the samples avoid
 
 
@@ -155,6 +158,12 @@ class _Index:
 
     def at(self, x: float, y: float) -> Sequence[int]:
         return self.map.get((int(math.floor(x / self.cell)), int(math.floor(y / self.cell))), ())
+
+    def in_box(self, box: tuple[float, float, float, float]) -> set[int]:
+        c = self.cell
+        cells = ((i, j) for i in range(int(math.floor(box[0] / c)), int(math.floor(box[2] / c)) + 1)
+                 for j in range(int(math.floor(box[1] / c)), int(math.floor(box[3] / c)) + 1))
+        return {k for cell in cells for k in self.map.get(cell, ())}
 
 
 # --- Clipping a polygon with holes to the terrain rectangle ---------------------------------------------------------
@@ -408,8 +417,11 @@ class Body:
     level: Level | None = None
     tris: list[Tri] = field(default_factory=list)          # absolute z
     shore: list[tuple[Pt, Pt]] = field(default_factory=list)   # clipped-ring edges that are polygon edges
+    shore_source_piece: list[int] = field(default_factory=list)  # piece index of each edge in ``shore``
     carve: dict[int, float] = field(default_factory=dict)
     blend: dict[int, float] = field(default_factory=dict)
+    bank: list[Tri] = field(default_factory=list)           # terrain ramp from the shore edge down to the bank
+    cascade: list[Tri] = field(default_factory=list)        # water ramp down to an abutting lower body
     info: dict[str, object] = field(default_factory=dict)
     mesh_counts: tuple[int, int] = (0, 0)
 
@@ -555,16 +567,23 @@ class WaterModel:
 
     def mesh(self, body: Body) -> MeshData:
         """The body's ``MB Water`` mesh (local z = absolute - z_offset; welded vertices; normals +Z)."""
-        m = MeshData(f"water:{body.id}")
+        return self._welded(f"water:{body.id}", (*body.tris, *body.cascade), MATERIAL, WATER_COLOR)
+
+    def bank_mesh(self, body: Body, color: tuple[float, float, float]) -> MeshData:
+        """The terrain ramps from the body's shore down to the bank (``MB Terrain``)."""
+        return self._welded(f"bank:{body.id}", body.bank, BANK_MATERIAL, color)
+
+    def _welded(self, name: str, tris: Iterable[Tri], material: str, color: tuple[float, float, float]) -> MeshData:
+        m = MeshData(name)
         idx: dict[tuple[float, float, float], int] = {}  # welded to 1 um: platform libm differences must not change the vertex set
-        for t in body.tris:
+        for t in tris:
             ids = []
             for x, y, z in t:
                 key = (round(x, 6), round(y, 6), round(z, 6))
                 if key not in idx:
                     idx[key] = m.add_vertex(x, y, z - self.z_offset)
                 ids.append(idx[key])
-            m.add_face(tuple(ids), MATERIAL, WATER_COLOR)
+            m.add_face(tuple(ids), material, color)
         return m
 
 
@@ -635,24 +654,26 @@ class _Masks:
                 return True
         return False
 
+    def hit_triangle(self, tri: Sequence[Pt]) -> bool:
+        """Whether a plan triangle overlaps a footprint or comes within a line's half width, interior included."""
+        xs, ys = [v[0] for v in tri], [v[1] for v in tri]
+        box = (min(xs), min(ys), max(xs), max(ys))
+        if any(triangle_touches(tri, self.footprints[i].outer, 0.0, closed=True) for i in self.foot_idx.in_box(box)):
+            return True
+        return any(triangle_touches(tri, self.lines[i][0], self.lines[i][1], closed=False)
+                   for i in self.line_idx.in_box(box))
+
     def hit_line(self, x: float, y: float, extra: float) -> bool:
         for i in self.line_idx.at(x, y):
             pl, hw = self.lines[i]
             for k in range(len(pl) - 1):
-                if _dist_seg(x, y, pl[k], pl[k + 1]) <= hw + extra:
+                if point_segment_distance(x, y, pl[k], pl[k + 1]) <= hw + extra:
                     return True
         return False
 
 
-def _dist_seg(x: float, y: float, a: Pt, b: Pt) -> float:
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    ll = dx * dx + dy * dy
-    u = 0.0 if ll == 0 else min(1.0, max(0.0, ((x - a[0]) * dx + (y - a[1]) * dy) / ll))
-    return math.hypot(x - a[0] - u * dx, y - a[1] - u * dy)
-
-
 def _dist_ring(x: float, y: float, ring: Sequence[Pt]) -> float:
-    return min(_dist_seg(x, y, ring[k], ring[(k + 1) % len(ring)]) for k in range(len(ring)))
+    return min(point_segment_distance(x, y, ring[k], ring[(k + 1) % len(ring)]) for k in range(len(ring)))
 
 
 # --- The builder ----------------------------------------------------------------------------------------------
@@ -744,15 +765,65 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
     cut = _CarveContext(model, blend_masks, carve_depth)
     cut.prepare()
     cut.settle(refund)
+    _attach_ramps(model, blend_masks, charge)
     model._build_index()
     return model
+
+
+def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, int], None] | None) -> None:
+    """Give every built body its shore ramps on the final terrain; ramps over the budget are left out (noted)."""
+    def ground(x: float, y: float) -> float:
+        return _ground(model.carved, x, y)
+
+    wet_pieces = [(body.id, piece_idx, _ring_box(o), o, hs)
+                  for body in model.active() for piece_idx, (o, hs) in enumerate(body.pieces)]
+
+    for b in model.active():
+        def water_receiver(x: float, y: float, src: Body = b) -> tuple[str, float] | None:
+            covers = [(o.id, o.level.at(x, y)) for o in model.active() if _inside_pieces(o, x, y) and o.level is not None]
+            return max(covers, key=lambda pair: (pair[1], pair[0])) if covers else None
+
+        def wet_by(tri: Sequence[Pt], receiver_id: str | None, source_piece_idx: int) -> bool:
+            box = _ring_box(tri)
+            for body_id, piece_idx, pb, o, hs in wet_pieces:
+                if not _boxes_meet(box, pb):
+                    continue
+                if not triangle_overlaps_region(tri, o, hs):
+                    continue
+                cascade_receiver = receiver_id is not None and body_id == receiver_id
+                if cascade_receiver:
+                    continue
+                return True
+            return False
+
+        ramps = shore_ramps(b.shore, b.level.at, ground, masks.hit_triangle, water_receiver, wet_by,
+                            edge_sources=b.shore_source_piece)  # type: ignore[union-attr]
+        b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
+        triangles = ramps.bank + ramps.cascade
+        try:
+            if charge is not None and triangles:
+                charge(f"shore-ramps:{b.id}", len({v for t in triangles for v in t}), len(triangles))
+        except LimitError as e:
+            b.notes.append(f"shore ramps left out: {e}")
+            continue
+        b.bank, b.cascade = ramps.bank, ramps.cascade
+        b.info["shore_ramp_triangles"] = len(triangles)
+
+
+def _ring_box(ring: Sequence[Pt]) -> tuple[float, float, float, float]:
+    xs, ys = [p[0] for p in ring], [p[1] for p in ring]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _boxes_meet(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
 def _make_level(b: Body, grid: ElevationGrid, extent: Rect, all_bodies: Sequence[Body], masks: _Masks,
                 waterways: Sequence[Feature], s: float) -> None:
     # shore edges and samples
     rings = [dedupe_ring(b.polygon.outer)] + [dedupe_ring(h) for h in b.polygon.holes]
-    for o, hs in b.pieces:
+    for piece_idx, (o, hs) in enumerate(b.pieces):
         for ring in [o] + hs:
             n = len(ring)
             for k in range(n):
@@ -761,6 +832,7 @@ def _make_level(b: Body, grid: ElevationGrid, extent: Rect, all_bodies: Sequence
                            or (p[1] == q[1] and p[1] in (extent[1], extent[3])))
                 if not on_edge:
                     b.shore.append((p, q))
+                    b.shore_source_piece.append(piece_idx)
 
     def collect(cells: Sequence[float]) -> list[tuple[float, float, float]]:
         out: list[tuple[float, float, float]] = []
@@ -1053,7 +1125,7 @@ class _CarveContext:
                     if (min(p[0], q[0]) - reach > x or max(p[0], q[0]) + reach < x
                             or min(p[1], q[1]) - reach > y or max(p[1], q[1]) + reach < y):
                         continue
-                    d = _dist_seg(x, y, p, q)
+                    d = point_segment_distance(x, y, p, q)
                     if d < best:
                         best, bp = d, (p, q)
                 if bp is None:

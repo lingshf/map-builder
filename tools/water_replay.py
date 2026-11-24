@@ -45,8 +45,10 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from col_degen_replay import DOWN, build_probes, csharp, names  # noqa: E402
 from map_builder.core.collision import Collision, read_collision  # noqa: E402
+from map_builder.core.overlap import point_segment_distance  # noqa: E402
 from map_builder.core.bridges import capsule_polygon  # noqa: E402
 from map_builder.core.query import capsule_hits, ray_cast  # noqa: E402
+from map_builder.core.shore import MAX_WIDTH_M as RAMP_REACH_M  # noqa: E402
 from map_builder.core.water import AREA_EPS, _area2, _clip_poly_tri  # noqa: E402
 
 
@@ -81,24 +83,26 @@ class Package:
                 self.raised[nm] = float(r["raised_m"])
 
 
-def pole(tris: list[tuple[Any, Any, Any]]) -> tuple[float, float]:
-    """The triangle centroid farthest from the boundary edges (edges used by one triangle): a deterministic
-    pole of inaccessibility of a triangulated surface."""
-    edges: Counter = Counter()
+def boundary_edges(tris: list[tuple[Any, Any, Any]]) -> list[tuple[Any, Any]]:
+    """Edges used by exactly one triangle, as 3D vertex pairs: the outline of a triangulated surface."""
+    uses: Counter = Counter()
+    by_key: dict[Any, tuple[Any, Any]] = {}
     for t in tris:
         for k in range(3):
             a, b = t[k], t[(k + 1) % 3]
-            edges[tuple(sorted(((a[0], a[1]), (b[0], b[1]))))] += 1
-    boundary = [e for e, n in edges.items() if n == 1]
+            key = tuple(sorted(((a[0], a[1]), (b[0], b[1]))))
+            uses[key] += 1
+            by_key[key] = (a, b)
+    return [by_key[key] for key, n in uses.items() if n == 1]
+
+
+def pole(tris: list[tuple[Any, Any, Any]]) -> tuple[float, float]:
+    """The triangle centroid farthest from the boundary edges: a deterministic pole of inaccessibility of a
+    triangulated surface."""
+    boundary = [((a[0], a[1]), (b[0], b[1])) for a, b in boundary_edges(tris)]
 
     def dist(x: float, y: float) -> float:
-        best = math.inf
-        for (ax, ay), (bx, by) in boundary:
-            dx, dy = bx - ax, by - ay
-            ll = dx * dx + dy * dy
-            u = 0.0 if ll == 0 else min(1.0, max(0.0, ((x - ax) * dx + (y - ay) * dy) / ll))
-            best = min(best, math.hypot(x - ax - u * dx, y - ay - u * dy))
-        return best
+        return min(point_segment_distance(x, y, a, b) for a, b in boundary)
     cands = [((t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3) for t in tris]
     return max(cands, key=lambda c: (round(dist(*c), 9), -c[0], -c[1]))
 
@@ -119,6 +123,8 @@ FOOTPRINT_RADIUS_M = 1.0   # triangles this close to the pinned ray must keep th
 Z_RISE_TOL_M = 1e-6        # a local vertex may not rise by more than float noise
 PIN_XY_TOL_M = 0.05        # a ray matches a pin within 5 cm of the pinned XY
 
+BANK_OBJECT_PREFIX = "bank:"   # shore ramps (map_builder.core.shore) are terrain objects named bank:<body id>
+WATER_OBJECT_PREFIX = "water:"   # ... and a body's sheet is water:<body id>
 Hit = tuple[float, str, str]   # (distance, object name, class)
 
 
@@ -126,11 +132,17 @@ class Context:
     """What the HEAD package says about its own changes: the water objects new on HEAD (with their plan boxes) and
     the decks it reports as raised (object name -> raised metres)."""
 
-    def __init__(self, base_names: set[str], head: Any, water_tris: list[Any] | None = None,
+    def __init__(self, base_names: set[str], head: Any, ray_top: float, water_tris: list[Any] | None = None,
                  bridges: tuple[dict[str, Any], dict[str, Any]] | None = None) -> None:
+        self.ray_top = ray_top
+        self.head_col = head.col
+        self._shore_by_name: dict[str, list[tuple[Any, Any]]] = {}
         self.new_water = {e["name"]: e["aabb"] for e in head.col.objects
                           if e["class"] == "water" and e["name"] not in base_names}
         self.water_boxes = [e["aabb"] for e in head.col.objects if e["class"] == "water"]
+        self.water_entry_by_name = {e["name"]: e for e in head.col.objects if e["class"] == "water"}
+        self.bank_box_by_name = {e["name"]: e["aabb"] for e in head.col.objects
+                                 if e["class"] == "terrain" and e["name"].startswith(BANK_OBJECT_PREFIX)}
         self.raised = dict(head.raised)
         self.present = set(head.names)
         self.base_bridge, self.head_bridge = bridges if bridges is not None else ({}, {})
@@ -170,6 +182,34 @@ class Context:
     def near_any_water(self, x: float, y: float) -> bool:
         """Within the carve + blend padding of any water body of HEAD (new or already on BASE)."""
         return _in_padded_box(self.water_boxes, x, y)
+
+    def shore_of(self, water_name: str) -> list[tuple[Any, Any]]:
+        """The outline (3D edges) of a built body's sheet, from its actual collision triangles."""
+        if water_name not in self._shore_by_name:
+            entry = self.water_entry_by_name[water_name]
+            self._shore_by_name[water_name] = boundary_edges(self.head_col.object_triangles(entry))
+        return self._shore_by_name[water_name]
+
+    def is_ramp_of_a_built_body(self, bank_name: str, xy: tuple[float, float], hit_t: float) -> bool:
+        """``bank_name`` is a ramp object of HEAD whose body (``water:<same id>``) is built, the ray is over the
+        ramp, within ramp reach of the body's real shoreline, and the hit is no higher than the sheet there."""
+        bank = self.bank_box_by_name.get(bank_name)
+        water_name = WATER_OBJECT_PREFIX + bank_name[len(BANK_OBJECT_PREFIX):]
+        if bank is None or water_name not in self.water_entry_by_name or not _in_box(bank, *xy):
+            return False
+        def nearest_sheet(a: tuple[Any, Any, Any], b: tuple[Any, Any, Any]) -> tuple[float, float]:
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            ll = dx * dx + dy * dy
+            u = 0.0 if ll == 0 else min(1.0, max(0.0, ((xy[0] - a[0]) * dx + (xy[1] - a[1]) * dy) / ll))
+            px, py = a[0] + u * dx, a[1] + u * dy
+            return math.hypot(xy[0] - px, xy[1] - py), a[2] + (b[2] - a[2]) * u
+
+        distance, sheet = min((nearest_sheet(a, b) for a, b in self.shore_of(water_name)), key=lambda d: d[0])
+        return distance <= RAMP_REACH_M and self.ray_top - hit_t <= sheet + DIST_TOL_M
+
+
+def _in_box(box: Any, x: float, y: float) -> bool:
+    return box[0] - DIST_TOL_M <= x <= box[3] + DIST_TOL_M and box[1] - DIST_TOL_M <= y <= box[4] + DIST_TOL_M
 
 
 def _in_padded_box(boxes: Any, x: float, y: float) -> bool:
@@ -261,6 +301,16 @@ def _moved_down(name: str, cls_: str, t: float, h_hits: list[Hit]) -> bool:
 
 
 
+def _bank_ramp_raised(b: Hit | None, h: Hit, h_hits: list[Hit], ctx: Context, xy: tuple[float, float]) -> bool:
+    """HEAD hits the own ramp of a built body above the BASE terrain hit, and that same terrain object is still
+    hit at or below its base surface (the ramp is added on top; an unrelated replacement does not count)."""
+    if b is None or not (b[2] == h[2] == "terrain" and h[0] < b[0] - DIST_TOL_M):
+        return False
+    terrain_kept = any(n == b[1] and c == "terrain" and t >= b[0] - DIST_TOL_M for t, n, c in h_hits)
+    return (h[1].startswith(BANK_OBJECT_PREFIX) and terrain_kept
+            and ctx.is_ramp_of_a_built_body(h[1], xy, h[0]))
+
+
 def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx: Context) -> str | None:
     """None when the nearest hits are equivalent, else the change-set label, or ``unlisted``. ``b_hits``/``h_hits``
     are every hit of the ray, nearest first. A difference is accepted only when each BASE object nearer than the
@@ -290,6 +340,8 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
         winner_was_on_base_ray = any(n == h[1] and c == "road" and h[0] > t + DIST_TOL_M for t, n, c in b_hits)
         lowered = winner_was_on_base_ray and h[0] >= b[0] - DIST_TOL_M
         return "road lowered" if lowered and ctx.near_any_water(*xy) else "unlisted"
+    if _bank_ramp_raised(b, h, h_hits, ctx, xy):
+        return "bank ramp"
     label = None
     for t, name, cls_ in nearer:
         if cls_ == "road" and h[2] == "water" and _moved_down(name, cls_, t, h_hits):
@@ -301,7 +353,7 @@ def ray_label(b_hits: list[Hit], h_hits: list[Hit], xy: tuple[float, float], ctx
     base_names = {x[1] for x in b_hits}
     if h[2] == "water" and h[1] in ctx.new_water:
         return "new water hit"
-    if h[2] == "terrain" or h[1] in base_names:
+    if h[1] in base_names:
         return label or "unlisted"
     return "unlisted"
 
@@ -518,7 +570,7 @@ def main() -> int:
     passages_base = [(p["path_map"], float(p["radius_m"])) for p in base.probes]
     queries: list[tuple[list, float]] = caps + passages_base
     head_passages = [(p["path_map"], float(p["radius_m"])) for p in head.probes]
-    ctx = Context(base.names, head, bridges=(bridge_geometry(base.col), bridge_geometry(head.col)))
+    ctx = Context(base.names, head, top, bridges=(bridge_geometry(base.col), bridge_geometry(head.col)))
 
     py = {}
     for key, pkg in (("base", base), ("head", head)):

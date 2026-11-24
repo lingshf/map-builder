@@ -21,11 +21,28 @@ DECK = "bridge_way_7"
 WTRI = [(0.0, 0.0), (100.0, 0.0), (0.0, 100.0)]
 
 
+SHEET_Z = {WATER: 1.0, "water:osm:way/2": 0.4}
+RAY_TOP = 10.0
+
+
+def sheet_triangles(entry: dict) -> list:
+    """Every water body is the triangle x + y <= 100, so its real shoreline is far from its bbox corner."""
+    if entry["name"] == "water:osm:way/3":
+        return [[(0.0, 0.0, 0.0), (100.0, 0.0, 10.0), (0.0, 100.0, 0.0)]]
+    return [[(x, y, SHEET_Z[entry["name"]]) for x, y in WTRI]]
+
+
 def head_pkg(report: dict | None = None, probes: list | None = None, raised: dict | None = None) -> SimpleNamespace:
     objects = [{"name": "terrain", "class": "terrain", "aabb": [-500, -500, 0, 500, 500, 9]},
                {"name": WATER, "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
-               {"name": DECK, "class": "bridge", "aabb": [200, 0, 0, 260, 10, 9]}]
-    return SimpleNamespace(col=SimpleNamespace(objects=objects), raised=raised if raised is not None else {DECK: 0.5},
+               {"name": DECK, "class": "bridge", "aabb": [200, 0, 0, 260, 10, 9]},
+               {"name": "bank:osm:way/1", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 0.98]},
+               {"name": "water:osm:way/2", "class": "water", "aabb": [0, 0, 1, 100, 100, 1]},
+               {"name": "bank:osm:way/2", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 5.0]},
+               {"name": "water:osm:way/3", "class": "water", "aabb": [0, 0, 0, 100, 100, 10]},
+               {"name": "bank:osm:way/3", "class": "terrain", "aabb": [44, 44, 0, 57, 57, 10]},
+               {"name": "bank:osm:way/999", "class": "terrain", "aabb": [90, -40, 0, 105, 40, 0.98]}]
+    return SimpleNamespace(col=SimpleNamespace(objects=objects, object_triangles=sheet_triangles), raised=raised if raised is not None else {DECK: 0.5},
                            names={o["name"] for o in objects} | {"osm:way/9", "bld"},
                            mbids={"osm:way/9"}, probes=probes or [], report=report or {})
 
@@ -34,7 +51,7 @@ BOX = (200.0, 0.0, 260.0, 10.0)
 
 
 def ctx(base_top: float = 9.0, head_top: float = 9.0, head_box: tuple = BOX, **kw) -> wr.Context:
-    c = wr.Context({"terrain", DECK}, head_pkg(), [WTRI],
+    c = wr.Context({"terrain", DECK}, head_pkg(), RAY_TOP, [WTRI],
                    ({DECK: (BOX, base_top)}, {DECK: (head_box, head_top)}))
     for k, v in kw.items():
         setattr(c, k, v)
@@ -64,6 +81,46 @@ class RayLabelTest(unittest.TestCase):
         self.assertEqual(wr.ray_label([T0], [T1], (400, 400), c), "unlisted")
         self.assertEqual(wr.ray_label([T1], [T0], (120, 50), c), "unlisted")     # terrain rose
 
+    def test_a_shore_ramp_of_a_built_body_above_the_base_terrain_is_a_bank_ramp(self) -> None:
+        c = ctx()
+        ramp = (9.5, "bank:osm:way/1", "terrain")
+        self.assertEqual(wr.ray_label([T0], [ramp, T0], (98, 5), c), "bank ramp")
+        self.assertEqual(wr.ray_label([T0], [ramp, T1], (98, 5), c), "bank ramp")      # the carve lowered the terrain below it
+        self.assertEqual(wr.ray_label([T0], [(10.5, "bank:osm:way/1", "terrain")], (98, 5), c), "unlisted")  # lower
+        self.assertEqual(wr.ray_label([T0], [(9.5, "ramp:osm:way/1", "terrain")], (98, 5), c), "unlisted")  # not a bank
+        self.assertEqual(wr.ray_label([(10.0, "bld", "building")], [ramp], (98, 5), c), "unlisted")  # over a structure
+
+    def test_an_invented_bank_is_unlisted(self) -> None:
+        c = ctx()
+        kept = [T0]
+        for name, why in (("bank:osm:way/999", "no such body"), ("bank:osm:way/2", "ramp taller than its sheet"),
+                          ("bank:osm:way/1", "ray outside the ramp")):
+            xy = (400, 400) if why == "ray outside the ramp" else (98, 5)
+            self.assertEqual(wr.ray_label([T0], [(1.0, name, "terrain"), *kept], xy, c), "unlisted", why)
+
+    def test_a_bank_far_from_the_real_shoreline_is_unlisted(self) -> None:
+        ramp = (9.5, "bank:osm:way/1", "terrain")
+        self.assertEqual(wr.ray_label([T0], [ramp, T0], (98, 5), ctx()), "bank ramp")
+        # inside the ramp bbox and the sheet bbox, but 35 m from the triangular sheet's nearest edge
+        self.assertEqual(wr.ray_label([T0], [ramp, T0], (98, -35), ctx()), "unlisted")
+
+    def test_a_bank_over_a_replaced_terrain_object_is_unlisted(self) -> None:
+        ramp = (9.5, "bank:osm:way/1", "terrain")
+        self.assertEqual(wr.ray_label([T0], [ramp, (10.5, "other_terrain", "terrain")], (98, 5), ctx()), "unlisted")
+        self.assertEqual(wr.ray_label([T0], [(10.5, "other_terrain", "terrain")], (98, 5), ctx()), "unlisted")
+
+    def test_a_ramp_hit_above_the_local_sheet_is_unlisted(self) -> None:
+        self.assertEqual(wr.ray_label([T0], [(0.5, "bank:osm:way/1", "terrain"), T0], (98, 5), ctx()), "unlisted")
+
+    def test_a_ramp_hit_above_the_projected_shore_height_is_unlisted(self) -> None:
+        # On water:3 the nearest shore edge slopes from z=0 to z=10, so at (50, 50) the local sheet is z=5.
+        self.assertEqual(wr.ray_label([T0], [(3.0, "bank:osm:way/3", "terrain"), T0], (50, 50), ctx()), "unlisted")
+        self.assertEqual(wr.ray_label([T0], [(5.0, "bank:osm:way/3", "terrain"), T0], (50, 50), ctx()), "bank ramp")
+
+    def test_a_bank_that_replaces_the_terrain_is_unlisted(self) -> None:
+        self.assertEqual(wr.ray_label([T0], [(1.0, "bank:osm:way/1", "terrain")], (98, 5), ctx()), "unlisted")
+        self.assertEqual(wr.ray_label([T0], [(1.0, "bank:osm:way/1", "terrain"), (9.0, "terrain", "terrain")],
+                                      (98, 5), ctx()), "unlisted")   # the terrain below rose
     def test_terrain_replaced_by_bridge_needs_the_terrain_to_go_down(self) -> None:
         c = ctx()
         deck = (12.0, DECK, "bridge")

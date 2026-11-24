@@ -387,7 +387,7 @@ def _dilate(mask: np.ndarray, steps: int) -> np.ndarray:
     return np.isfinite(_spread(np.where(mask, 0.0, NAN), steps))
 
 
-def _check_water(s: Surfaces, f: Findings, threshold: float, cell: float) -> None:
+def _check_water(s: Surfaces, f: Findings, threshold: float, cell: float, on_map: np.ndarray) -> None:
     """Water against its banks: a bank more than the carve depth below the sheet is a floating mat; the carve-depth
     step inside the shore cells is the designed bed (info)."""
     steps = max(1, int(round(WATER_BANK_BAND_M / cell)))
@@ -396,7 +396,7 @@ def _check_water(s: Surfaces, f: Findings, threshold: float, cell: float) -> Non
             continue
         water, owner = rasters["water"].final(), rasters["water"].owner
         wet = np.isfinite(water)
-        bank_ring = _dilate(wet, steps) & ~wet
+        bank_ring = _dilate(wet, steps) & ~wet & on_map
         gap = _spread(water, steps) - s.terrain(side)
         nearest = _spread(np.where(owner >= 0, owner + 1.0, NAN), steps)
         ring_owner = np.where(np.isfinite(nearest), nearest - 1, -1).astype(np.int32)
@@ -426,6 +426,12 @@ def _water_bodies(s: Surfaces) -> list[dict]:
     return bodies
 
 
+def _on_map(col, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+    """Cells over the terrain grid itself; shore ramps may spill past the map edge, where there is no ground."""
+    box = next(e["aabb"] for e in col.objects if e["name"] == "terrain")
+    return (((xs >= box[0]) & (xs <= box[3]))[None, :]) & (((ys >= box[1]) & (ys <= box[4]))[:, None])
+
+
 def _grid_axes(col, cell: float) -> tuple[np.ndarray, np.ndarray]:
     lo, hi = col.bounds
     axes = []
@@ -452,7 +458,7 @@ def audit(path: str, cell: float = 1.0, threshold: float = 0.2, hf_tol: float = 
         _check_roads(surfaces, findings, threshold)
         if hf is not None:
             _check_heightfield(surfaces, findings, hf, col, nodes, threshold, hf_tol)
-        _check_water(surfaces, findings, threshold, cell)
+        _check_water(surfaces, findings, threshold, cell, _on_map(col, xs, ys))
     result = {"package": os.path.basename(path), "cell_m": cell, "threshold_m": threshold, "hf_tol_m": hf_tol,
               "grid": [len(xs), len(ys)],
               "triangles": {"collision": int(len(col.indices) // 3), "visual": int(sum(len(n.triangles) for n in nodes))},

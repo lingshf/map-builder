@@ -1830,6 +1830,10 @@ def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classif
                                                        else "flat"),
                                        "level_source": "inferred:p20 of the shore band of the corrected DEM",
                                        "outcome": b.outcome}))
+            if b.bank:
+                bank = model.bank_mesh(b, LANDCOVER_COLORS[None])
+                add(ObjectSpec(bank.name, bank.name, "terrain", "Terrain", mesh=bank,
+                               provenance={"shore_ramp": "terrain ramp from the water edge down to the bank"}))
     plan.report["water_bodies"] = rows
 
 

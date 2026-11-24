@@ -129,7 +129,7 @@ Rules either way:
 | 2 | building | solid | crash on contact |
 | 3 | road | surface | ground; landing allowed |
 | 4 | vegetation | — | static mesh, no winding guarantee |
-| 5 | water | surface | water outcome (one object per water body, `water:<osm-id>`, a flat or downstream-sloping surface above a carved bed; the `.mbhf` heightfield is terrain-only and does not contain it) |
+| 5 | water | surface | water outcome (one object per water body, `water:<osm-id>`, a flat or downstream-sloping surface above a carved bed, with a short cascade down to an abutting lower body; the `.mbhf` heightfield is terrain-only and does not contain it; the terrain ramps that close the gap between a sheet's edge and its bank are separate class-1 terrain objects, `bank:<osm-id>`) |
 | 6 | prop | — | static mesh, no winding guarantee |
 | 7 | bridge | solid | crash on contact; the deck top is the landing side |
 | 8 | tunnel | tube | inward-facing walls; flyable inside, crash on the walls |
