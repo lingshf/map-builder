@@ -144,6 +144,7 @@ This migration grants **no new permission**. A role title never supplies authori
 
 * The primary checkout `C:\GithubCopilot\map-builder`, pre-existing worktrees and sessions, running services, local
   data, caches and frozen release inputs are read-only.
-* Frozen caches stay outside the repository, in the custody of the release manager or Team Leader on the team build
-  host.
+* Frozen caches (`cache-bellevue-factoria`, `cache-munich`, `cache-pittsburgh`) stay outside the repository, in the
+  Team Leader Project's files: `C:\Users\shaoling\.copilot\session-state\4b9ee088-73ed-46c9-9dfd-7c02a71d624c\files\frozen-caches`, with `MANIFEST-sha256.txt`. The **Team Leader** holds custody, because
+  Delivery/Release is on demand. Runs copy them fresh, and nobody edits them in place (D163).
 * The drone-flight-simulator repository is read-only.

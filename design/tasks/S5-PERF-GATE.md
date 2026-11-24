@@ -1,6 +1,6 @@
 # S5-PERF-GATE: deterministic performance gating (D153)
 
-Owner: dev (tooling) · sprint S5 · runs **after S4-F8 and S5-STYLE-BASE, before S5-STYLE-PALETTE** (D156)
+Owner: dev (tooling) · sprint S5 · runs **after S4-F8 and S5-STYLE-BASE merged (fba2509 baseline), before S5-STYLE-PALETTE** (D156, D163)
 
 ## Problem
 
