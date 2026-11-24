@@ -780,7 +780,7 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
 
     for b in model.active():
         if b.level is None:
-            continue
+            raise AssertionError("_attach_ramps: built body without level")
         level = b.level
 
         def water_receiver(x: float, y: float, src: Body = b) -> tuple[str, float] | None:
@@ -1040,8 +1040,7 @@ def _chain_parts(parts: Sequence[Feature]) -> list[Pt] | None:
 
 def _triangulate_body(b: Body) -> None:
     if b.level is None:
-        b.tris = []
-        return
+        raise AssertionError("_triangulate_body: built body without level")
     level = b.level
     cuts = level.cut_lines()
     tris: list[Tri] = []
