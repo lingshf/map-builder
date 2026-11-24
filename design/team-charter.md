@@ -45,10 +45,17 @@ These three are recorded separately; none maps one-to-one onto another.
   * **Selected:** S5-STYLE-BASE, S5-PERF-GATE, S5-STYLE-PALETTE and S5-STYLE-WATER, in the D156 order. S5-PERF-WATER,
     S5-STYLE-REVIEW and S5-DECOR follow if capacity allows.
   * **WIP:** at most 3 Developer sessions.
-* **Milestone M-S5, "stylized look":** an outcome checkpoint. It is reached at the S5-STYLE-REVIEW GO
-  ([spec](tasks/S5-STYLE.md)) and may span Sprints.
+* **Milestone M-S5, "stylized look":** an outcome checkpoint that may span Sprints. Closure is sequenced
+  ([roadmap §v5](roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169), D169): (1) goal attainment, meaning
+  every must delivery item accepted, including the S5-STYLE-REVIEW GO ([spec](tasks/S5-STYLE.md)), and every
+  deferrable item accepted or explicitly deferred with an owner; (2) the mandatory milestone retro, accepted; (3)
+  the milestone record closed by the Team Leader.
 * **Version:** not decided. The next version number and its contents are **not tied to Sprint 5**. A release needs
   its own user decision (§6).
+
+**Every milestone closes with a milestone retro** (D169), owned by the Team Leader, with the acceptance in the
+[Backlog](tasks/README.md#milestone-retros); a Sprint end or a tag does not close a milestone. Reporting to M2 goes
+through the Team Leader only, per the reporting contract; no other role reports to M2 directly.
 
 Events: Sprint Review and Retro at the end of the Sprint, as short written summaries. There are no simulated
 daily meetings, and no automation or recurring schedule.
