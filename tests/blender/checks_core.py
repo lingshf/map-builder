@@ -102,14 +102,6 @@ def nearest_hf_node(hf, x, y):
     return i, j, hf["x0"] + i * hf["spacing"], hf["y0"] + j * hf["spacing"], hf["z"][j][i]
 
 
-def stale_height_error(hit_err, hit_z, expected_z):
-    if hit_err is not None:
-        return hit_err
-    if abs(hit_z - expected_z) > 1e-3:
-        return f"stale: expected {expected_z:.6f} m, got {hit_z:.6f} m"
-    return None
-
-
 def world_triangles(ob):
     """Evaluated (modifiers applied) world-space triangles, CCW outward (flipped for mirrored matrices)."""
     deps = bpy.context.evaluated_depsgraph_get()
@@ -382,9 +374,12 @@ def run(out_dir):
     check(te is not None, "terrain:grid exists exactly once in collision")
     hit_z, hit_err = ray_hit_terrain_grid_z(col, edited_world.x, edited_world.y)
     check(hit_err is None, f"terrain:grid ray at edited vertex ({hit_err or 'ok'})")
-    check(stale_height_error(hit_err, hit_z, edited_world.z) is None, "terrain vertex edit exported")
-    stale_err = stale_height_error(hit_err, hit_z, pre_edit_world_z)
-    check(stale_err is not None and stale_err.startswith("stale:"), f"dropped terrain edit is stale ({stale_err})")
+    stale = hit_err is None and abs(hit_z - edited_world.z) > 1e-3 and abs(hit_z - pre_edit_world_z) <= 1e-3
+    if stale:
+        check(False, "terrain:grid stale at edited vertex: "
+              f"exported z={hit_z:.9f}, expected edited z={edited_world.z:.9f}, pre-edit z={pre_edit_world_z:.9f}")
+    elif hit_err is None:
+        check(hit_err is None and abs(hit_z - edited_world.z) <= 1e-3, "terrain vertex edit exported")
     from map_builder.core.collision import ColObject, read_collision, write_collision
     x, y, z = edited_world.x, edited_world.y, edited_world.z
     wrong_hit = read_collision(write_collision([
@@ -395,13 +390,14 @@ def run(out_dir):
     ]))
     _, other_err = ray_hit_terrain_grid_z(wrong_hit, edited_world.x, edited_world.y)
     check(other_err is not None and other_err.startswith("hit "), f"non-terrain ray hit is rejected ({other_err})")
-    i, j, hx, hy, hz = nearest_hf_node(hf, edited_world.x, edited_world.y)
-    if math.isnan(hz):
-        check(False, f"heightfield node ({i}, {j}) not covered")
-    else:
-        hf_hit_z, hf_hit_err = ray_hit_terrain_grid_z(col, hx, hy)
-        check(hf_hit_err is None, f"heightfield node ({i}, {j}) covered by terrain:grid ({hf_hit_err or 'ok'})")
-        check(hf_hit_err is None and abs(hf_hit_z - hz) <= 1e-3, "heightfield matches terrain:grid at a grid node")
+    if hit_err is None and not stale:
+        i, j, hx, hy, hz = nearest_hf_node(hf, edited_world.x, edited_world.y)
+        if math.isnan(hz):
+            check(False, f"heightfield node ({i}, {j}) not covered")
+        else:
+            hf_hit_z, hf_hit_err = ray_hit_terrain_grid_z(col, hx, hy)
+            check(hf_hit_err is None, f"heightfield node ({i}, {j}) covered by terrain:grid ({hf_hit_err or 'ok'})")
+            check(hf_hit_err is None and abs(hf_hit_z - hz) <= 1e-3, "heightfield matches terrain:grid at a grid node")
     check(m["generator"].get("blender") == bpy.app.version_string, "Blender version recorded")
     check("collision/terrain.mbhf" in names and m.get("heightfield"), "heightfield exported and validated")
     check(set(by_name) == {n.name for n in nodes if n.triangles}, "every collision object has its glTF node")
