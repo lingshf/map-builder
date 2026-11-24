@@ -1,6 +1,6 @@
 # S5-PERF-GATE: deterministic performance gating (D153)
 
-Owner: dev (tooling) · sprint S5 · runs **after S4-F8 and before S5-PERF-WATER** (D154)
+Owner: dev (tooling) · sprint S5 · runs **after S4-F8 and S5-STYLE-BASE, before S5-STYLE-PALETTE** (D156)
 
 ## Problem
 
@@ -94,7 +94,8 @@ tunnels } > `build_scene` (Blender) > package write > `validate_package`
 
 ## Failure rules
 
-These checks run per series, for Munich and Pittsburgh.
+These checks run per series, for Munich and Pittsburgh, the **gating presets**. The sample and Bellevue-Factoria
+are evidence-only (visuals and G0, D157) and are not part of this gate.
 
 **The revision fails if:**
 
