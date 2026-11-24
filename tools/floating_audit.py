@@ -62,7 +62,9 @@ ROOF_NORMAL_MIN = 0.1           # a roof face is one whose normal points up by a
 WATER_BANK_BAND_M = 2.0         # how far outside a water body the bank is looked at
 SHORE_STEP_M = CARVE_DEPTH_M    # terrain at the shore cells may lie this far below the sheet: the designed bed
 SHORE_STEP_TOL_M = 0.05
-INFO_KINDS = ("hf_below_ground:water", "hf_coverage", "water_shore_step:col", "water_shore_step:vis")
+INFO_KINDS = ("hf_below_ground:water", "hf_coverage", "water_shore_step:col", "water_shore_step:vis",
+              "edge_ambiguous_collision_visual")
+EDGE_AMBIGUITY_M = 1e-4
 
 
 BARY_EPS = 1e-9            # barycentric slack: a ray through a shared edge hits both triangles
@@ -143,6 +145,7 @@ class Raster:
         self.xs, self.ys = xs, ys
         self.z = np.full((len(ys), len(xs)), -np.inf)
         self.owner = np.full((len(ys), len(xs)), -1, dtype=np.int32)
+        self.triangle = np.full((len(ys), len(xs)), -1, dtype=np.int32)
 
     def add(self, tris: np.ndarray, owners: np.ndarray) -> None:
         """Ray-cast every cell centre against ``tris`` (T, 3, 3), keeping the highest hit and its ``owners`` (T,)."""
@@ -152,15 +155,17 @@ class Raster:
         for batch in _batches(ranges.counts):
             tri, column, row = _candidate_cells(ranges, batch)
             heights = _plane_heights(tris[tri], self.xs[column], self.ys[row])
-            self._keep_highest(row * len(self.xs) + column, heights, owners[tri])
+            self._keep_highest(row * len(self.xs) + column, heights, owners[tri], tri)
 
-    def _keep_highest(self, flat_cell: np.ndarray, heights: np.ndarray, owners: np.ndarray) -> None:
+    def _keep_highest(self, flat_cell: np.ndarray, heights: np.ndarray, owners: np.ndarray,
+                      tri_ids: np.ndarray) -> None:
         hit = np.isfinite(heights)
-        flat_cell, heights, owners = flat_cell[hit], heights[hit], owners[hit]
+        flat_cell, heights, owners, tri_ids = flat_cell[hit], heights[hit], owners[hit], tri_ids[hit]
         best = self.z.reshape(-1)
         np.maximum.at(best, flat_cell, heights)
         wins = heights >= best[flat_cell] - HEIGHT_TIE_EPS
         self.owner.reshape(-1)[flat_cell[wins]] = owners[wins]
+        self.triangle.reshape(-1)[flat_cell[wins]] = tri_ids[wins]
 
     def final(self) -> np.ndarray:
         return np.where(np.isfinite(self.z), self.z, NAN)
@@ -180,9 +185,7 @@ def _load(path: str) -> tuple[dict[str, Any], Any, Any, tuple[Any, Any]]:
 
 
 def _map_tris(tris: Any) -> np.ndarray:
-    # GLB vertices are float32; snap transformed triangles back to float32 before rasterising so tiny
-    # float64 transform drift does not create edge-only visual/collision mismatches.
-    a = np.asarray(tris, dtype=np.float32).reshape(-1, 3, 3).astype(np.float64)
+    a = np.asarray(tris, dtype=np.float64).reshape(-1, 3, 3)
     return np.stack([a[..., 0], -a[..., 2], a[..., 1]], axis=-1)
 
 
@@ -236,6 +239,10 @@ class Surfaces:
     vis_by_category: dict[str, Raster]
     col_names: list[str]
     vis_names: list[str]
+    col_obj_classes: list[str]
+    col_tris: np.ndarray
+    col_tri_owner: np.ndarray
+    vis_tris: np.ndarray
 
     def terrain(self, side: str) -> np.ndarray:
         rasters = self.col_by_class if side == "col" else self.vis_by_category
@@ -321,14 +328,57 @@ def _build_surfaces(col: Any, nodes: Sequence[Any], xs: np.ndarray, ys: np.ndarr
         vis_by_category["roof"] = _raster_of(vtris[roofs], vowners[roofs], xs, ys)
     col_names = [o["mb_id"] or o["name"] for o in col.objects]
     return Surfaces(xs, ys, _raster_of(ctris, cowners, xs, ys), col_by_class, _raster_of(vtris, vowners, xs, ys),
-                    vis_by_category, col_names, vis_names)
+                    vis_by_category, col_names, vis_names, [o["class"] for o in col.objects], ctris, cowners, vtris)
+
+
+def _segment_distance_xy(x: float, y: float, a: np.ndarray, b: np.ndarray) -> float:
+    dx, dy = float(b[0] - a[0]), float(b[1] - a[1])
+    den = dx * dx + dy * dy
+    if den == 0.0:
+        return math.hypot(x - float(a[0]), y - float(a[1]))
+    t = min(1.0, max(0.0, ((x - float(a[0])) * dx + (y - float(a[1])) * dy) / den))
+    qx, qy = float(a[0]) + t * dx, float(a[1]) + t * dy
+    return math.hypot(x - qx, y - qy)
+
+
+def _triangle_edge_distance_xy(tri: np.ndarray, x: float, y: float) -> float:
+    return min(_segment_distance_xy(x, y, tri[k], tri[(k + 1) % 3]) for k in range(3))
+
+
+def _buried_edge_ambiguous(s: Surfaces, buried: np.ndarray, tol: float) -> np.ndarray:
+    """Edge-ambiguous buried cells: visual says an object is above collision terrain, and the sample is within
+    ``tol`` of both the visual hit triangle edge and the matching collision object's triangle edge."""
+    out = np.zeros_like(buried, dtype=bool)
+    col_index = {name: i for i, name in enumerate(s.col_names)}
+    for j, i in zip(*np.nonzero(buried)):
+        vi = int(s.vis.owner[j, i])
+        ci = int(s.col.owner[j, i])
+        if vi < 0 or ci < 0 or s.col_obj_classes[ci] != "terrain":
+            continue
+        vis_name = s.vis_names[vi]
+        coi = col_index.get(vis_name)
+        if coi is None:
+            continue
+        vt = int(s.vis.triangle[j, i])
+        if vt < 0:
+            continue
+        x, y = float(s.xs[i]), float(s.ys[j])
+        if _triangle_edge_distance_xy(s.vis_tris[vt], x, y) > tol:
+            continue
+        tris = s.col_tris[s.col_tri_owner == coi]
+        if len(tris) and min(_triangle_edge_distance_xy(t, x, y) for t in tris) <= tol:
+            out[j, i] = True
+    return out
 
 
 def _check_collision_vs_visual(s: Surfaces, f: Findings, threshold: float) -> None:
     c, v = s.col.final(), s.vis.final()
     d = c - v
+    buried = d < -threshold
+    edge_ambiguous = _buried_edge_ambiguous(s, buried, EDGE_AMBIGUITY_M)
+    f.flag("edge_ambiguous_collision_visual", d, edge_ambiguous, s.vis.owner, s.vis_names)
     f.flag("floating_collision", d, d > threshold, s.col.owner, s.col_names)
-    f.flag("buried_collision", d, d < -threshold, s.vis.owner, s.vis_names)
+    f.flag("buried_collision", d, buried & ~edge_ambiguous, s.vis.owner, s.vis_names)
     for category in COMPARE:
         cr, vr = s.col_by_class.get(category), s.vis_by_category.get(category)
         if cr is not None and vr is not None:
