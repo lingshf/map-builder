@@ -41,9 +41,14 @@ calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in 
 ## S5 style acceptance helpers
 
 * `style_frame_time_proxy.py` runs the frame-time proxy (headless Chromium + SwiftShader, 1280x720,
-  60 warm-up + 300 measured frames) against `viewer/frame_time_proxy.html`.
+  60 warm-up + 300 measured frames) against `viewer/frame_time_proxy.html`, using one fixed camera
+  from a preset and verifying the reported WebGL renderer contains `SwiftShader`.
 * `style_contact_sheet.py` builds one same-camera contact sheet from `reference/base/head` renders.
-* Added preset: `bellevue-factoria` (initial 1x1 km around Factoria, Bellevue).
+* `style_render_recipe.py` renders `before/after` with Blender EEVEE and writes per-camera contact
+  sheets plus fixed-region palette ΔE2000 reports.
+* Added preset: `bellevue-factoria` (D157 final: center 47.5790/-122.1790, 1600 x 1400 m).
+* Added style camera presets: `style-sample-forest-edge`, `style-pittsburgh-river-bend`,
+  `style-munich-roofscape`.
 
 `make_probe_sample.py out.mbmap` derives a small package with three passage probes (PASS, BLOCKED, and
 an id containing markup) from the synthetic sample, for viewer smoke tests.

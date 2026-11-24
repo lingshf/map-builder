@@ -1,0 +1,8 @@
+{
+  "name": "style-pittsburgh-river-bend",
+  "description": "S5 style camera: Pittsburgh river bend with water and banks",
+  "area": {"lat": 40.437, "lon": -80.016, "width_m": 1200, "height_m": 1000},
+  "cameras": [
+    {"name": "river-bend", "eye": [560, -250, 125], "target": [245, -40, 28], "lens_mm": 30}
+  ]
+}

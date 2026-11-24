@@ -108,15 +108,66 @@ class StyleCheckTests(unittest.TestCase):
             _mutate(base, bad4, mut_geo)
             self.assertFalse(style_check.g0_check(base, bad4)[0])
 
-            # probe status changed: blocked / dropped
+            # blocked changed only
             bad5 = os.path.join(td, "bad5.mbmap")
-            def mut_report(members):
+            def mut_blocked(members):
                 report = json.loads(members["report.json"])
                 report["passage_probes_blocked"] = [{"id": "p0", "blocker": "osm:way/9"}]
+                members["report.json"] = json.dumps(report).encode("utf-8")
+            _mutate(base, bad5, mut_blocked)
+            self.assertFalse(style_check.g0_check(base, bad5)[0])
+
+            # dropped changed only
+            bad6 = os.path.join(td, "bad6.mbmap")
+            def mut_dropped(members):
+                report = json.loads(members["report.json"])
                 report["passage_probes_dropped"] = [{"id": "p0", "reason": "not_exported"}]
                 members["report.json"] = json.dumps(report).encode("utf-8")
-            _mutate(base, bad5, mut_report)
-            self.assertFalse(style_check.g0_check(base, bad5)[0])
+            _mutate(base, bad6, mut_dropped)
+            self.assertFalse(style_check.g0_check(base, bad6)[0])
+
+    def test_g0_fails_on_missing_required_data_even_if_missing_on_both(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "base.mbmap")
+            _build_valid_mbmap(base)
+            bad = os.path.join(td, "bad.mbmap")
+            def mut_missing(members):
+                members.pop("collision/map.mbcol", None)
+                members.pop("collision/terrain.mbhf", None)
+                members.pop("report.json", None)
+                manifest = json.loads(members["manifest.json"])
+                manifest.pop("georeference", None)
+                manifest.pop("passage_probes", None)
+                members["manifest.json"] = json.dumps(manifest).encode("utf-8")
+            _mutate(base, bad, mut_missing)
+            ok, failures = style_check.g0_check(bad, bad)
+            self.assertFalse(ok)
+            self.assertTrue(any("missing" in f for f in failures), failures)
+
+    def test_g0_rejects_same_path_different_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "base.mbmap")
+            head = os.path.join(td, "head.mbmap")
+            _build_valid_mbmap(base)
+            _mutate(base, head, lambda m: m.__setitem__(
+                "manifest.json",
+                json.dumps({**json.loads(m["manifest.json"]), "name": "other-preset"}).encode("utf-8"),
+            ))
+            ok, failures = style_check.g0_check(base, head)
+            self.assertFalse(ok)
+            self.assertTrue(any("preset mismatch" in f for f in failures), failures)
+
+    def test_g0_allows_missing_optional_blocked_and_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = os.path.join(td, "base.mbmap")
+            head = os.path.join(td, "head.mbmap")
+            _build_valid_mbmap(base)
+            _mutate(base, head, lambda m: m.__setitem__(
+                "report.json",
+                json.dumps({}).encode("utf-8"),
+            ))
+            ok, failures = style_check.g0_check(head, head)
+            self.assertTrue(ok, failures)
 
     def test_g0_rejects_cross_path_comparison(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -159,6 +210,39 @@ class StyleCheckTests(unittest.TestCase):
                                                                           "style": "stylized"}).encode("utf-8")))
             diff = style_check.mode_member_diff(base, stylized)
             self.assertIn("report.json", diff["changed"])
+
+    def test_palette_regions_report(self) -> None:
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow not installed")
+        with tempfile.TemporaryDirectory() as td:
+            image_path = os.path.join(td, "img.png")
+            regions_path = os.path.join(td, "regions.json")
+            img = Image.new("RGB", (2, 2), (185, 209, 122))
+            img.save(image_path)
+            with open(regions_path, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(
+                    {
+                        "regions": [
+                            {
+                                "camera": "overview",
+                                "label": "grass-light",
+                                "target_hex": "#b9d17a",
+                                "x": 0.0,
+                                "y": 0.0,
+                                "w": 1.0,
+                                "h": 1.0,
+                            }
+                        ]
+                    },
+                    f,
+                )
+            out = style_check.palette_regions(image_path, regions_path)
+            self.assertEqual(len(out["regions"]), 1)
+            self.assertEqual(out["regions"][0]["label"], "grass-light")
+            self.assertAlmostEqual(out["regions"][0]["deltaE2000"], 0.0, places=2)
+            self.assertFalse(out["regions"][0]["flag_over_15"])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import struct
 import sys
@@ -57,17 +58,26 @@ def g0_check(base_path: str, head_path: str) -> tuple[bool, list[str]]:
         failures.append(f"cross-path comparison rejected: base={base_kind}, head={head_kind}")
         return False, failures
 
-    for member in ("collision/map.mbcol", "collision/terrain.mbhf"):
+    for member in ("collision/map.mbcol", "collision/terrain.mbhf", "report.json"):
+        if member not in base.members or member not in head.members:
+            failures.append(f"{member} missing")
+            continue
         if base.members.get(member) != head.members.get(member):
             failures.append(f"{member} differs")
+
+    if base.manifest.get("name") != head.manifest.get("name"):
+        failures.append("manifest.name differs (preset mismatch)")
+    for key in ("georeference", "passage_probes"):
+        if key not in base.manifest or key not in head.manifest:
+            failures.append(f"manifest.{key} missing")
 
     if not _exact_equal(base.manifest.get("georeference"), head.manifest.get("georeference")):
         failures.append("manifest.georeference differs")
     if not _exact_equal(base.manifest.get("passage_probes"), head.manifest.get("passage_probes")):
         failures.append("manifest.passage_probes differs")
-    if not _exact_equal(base.report.get("passage_probes_blocked"), head.report.get("passage_probes_blocked")):
+    if not _exact_equal(base.report.get("passage_probes_blocked", []), head.report.get("passage_probes_blocked", [])):
         failures.append("report.passage_probes_blocked differs")
-    if not _exact_equal(base.report.get("passage_probes_dropped"), head.report.get("passage_probes_dropped")):
+    if not _exact_equal(base.report.get("passage_probes_dropped", []), head.report.get("passage_probes_dropped", [])):
         failures.append("report.passage_probes_dropped differs")
 
     return not failures, failures
@@ -201,6 +211,19 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
         sig: dict[str, Any] = {}
         mats = gl.get("materials", [])
         meshes = gl.get("meshes", [])
+        mat_payload: list[dict[str, Any]] = []
+        for i, m in enumerate(mats):
+            pbr = m.get("pbrMetallicRoughness", {}) if isinstance(m, dict) else {}
+            mat_payload.append(
+                {
+                    "index": i,
+                    "name": m.get("name", f"material:{i}") if isinstance(m, dict) else f"material:{i}",
+                    "baseColorFactor": pbr.get("baseColorFactor"),
+                    "metallicFactor": pbr.get("metallicFactor"),
+                    "roughnessFactor": pbr.get("roughnessFactor"),
+                    "hasBaseColorTexture": isinstance(pbr, dict) and "baseColorTexture" in pbr,
+                }
+            )
         for n in nodes:
             njs = gl["nodes"][n.index]
             if "mesh" not in njs:
@@ -209,14 +232,21 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
             parts = []
             for p in mesh.get("primitives", []):
                 attrs = p.get("attributes", {})
-                mat_name = ""
+                mat_idx = None
                 if "material" in p:
-                    mat_name = mats[p["material"]].get("name", f"material:{p['material']}")
+                    mat_idx = int(p["material"])
                 color_hash = None
                 if "COLOR_0" in attrs:
                     color_hash = hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
-                parts.append({"material": mat_name, "color_sha256": color_hash, "mode": int(p.get("mode", 4))})
-            sig[n.name] = parts
+                parts.append(
+                    {
+                        "material_index": mat_idx,
+                        "material_payload": mat_payload[mat_idx] if mat_idx is not None else None,
+                        "color_sha256": color_hash,
+                        "mode": int(p.get("mode", 4)),
+                    }
+                )
+            sig[f"{n.index}:{n.name}"] = parts
         return sig
 
     cli_sig = signature(cli_gl, cli_bin, cli_nodes)
@@ -224,6 +254,125 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
     ok = cli_sig == bl_sig
     return ok, {"cli_only": sorted(set(cli_sig) - set(bl_sig)), "blender_only": sorted(set(bl_sig) - set(cli_sig)),
                 "different": sorted([k for k in set(cli_sig) & set(bl_sig) if cli_sig[k] != bl_sig[k]])}
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
+    c = hex_color.strip().lstrip("#")
+    if len(c) != 6:
+        raise ValueError(f"invalid hex color: {hex_color}")
+    return (float(int(c[0:2], 16)), float(int(c[2:4], 16)), float(int(c[4:6], 16)))
+
+
+def _srgb_to_lab(rgb: tuple[float, float, float]) -> tuple[float, float, float]:
+    def to_linear(c: float) -> float:
+        x = c / 255.0
+        return x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (to_linear(rgb[0]), to_linear(rgb[1]), to_linear(rgb[2]))
+    x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375
+    y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
+    z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041
+    xr, yr, zr = x / 0.95047, y / 1.0, z / 1.08883
+
+    def f(t: float) -> float:
+        return t ** (1 / 3) if t > 0.008856 else (7.787 * t + 16 / 116)
+
+    fx, fy, fz = f(xr), f(yr), f(zr)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def _delta_e2000(lab1: tuple[float, float, float], lab2: tuple[float, float, float]) -> float:
+    l1, a1, b1 = lab1
+    l2, a2, b2 = lab2
+    c1 = math.sqrt(a1 * a1 + b1 * b1)
+    c2 = math.sqrt(a2 * a2 + b2 * b2)
+    c_bar = (c1 + c2) / 2
+    g = 0.5 * (1 - math.sqrt((c_bar**7) / (c_bar**7 + 25**7))) if c_bar > 0 else 0.0
+    a1p = (1 + g) * a1
+    a2p = (1 + g) * a2
+    c1p = math.sqrt(a1p * a1p + b1 * b1)
+    c2p = math.sqrt(a2p * a2p + b2 * b2)
+
+    def hp(a: float, b: float) -> float:
+        if a == 0 and b == 0:
+            return 0.0
+        ang = math.degrees(math.atan2(b, a))
+        return ang + 360 if ang < 0 else ang
+
+    h1p = hp(a1p, b1)
+    h2p = hp(a2p, b2)
+    dlp = l2 - l1
+    dcp = c2p - c1p
+    dhp = 0.0
+    if c1p * c2p != 0:
+        dh = h2p - h1p
+        if abs(dh) <= 180:
+            dhp = dh
+        elif dh > 180:
+            dhp = dh - 360
+        else:
+            dhp = dh + 360
+    dhp_rad = math.radians(dhp / 2)
+    dh_term = 2 * math.sqrt(c1p * c2p) * math.sin(dhp_rad)
+    l_bar = (l1 + l2) / 2
+    c_bar_p = (c1p + c2p) / 2
+    h_bar = h1p + h2p
+    if c1p * c2p != 0:
+        if abs(h1p - h2p) <= 180:
+            h_bar = (h1p + h2p) / 2
+        elif h1p + h2p < 360:
+            h_bar = (h1p + h2p + 360) / 2
+        else:
+            h_bar = (h1p + h2p - 360) / 2
+    t = (
+        1
+        - 0.17 * math.cos(math.radians(h_bar - 30))
+        + 0.24 * math.cos(math.radians(2 * h_bar))
+        + 0.32 * math.cos(math.radians(3 * h_bar + 6))
+        - 0.20 * math.cos(math.radians(4 * h_bar - 63))
+    )
+    sl = 1 + (0.015 * ((l_bar - 50) ** 2)) / math.sqrt(20 + (l_bar - 50) ** 2)
+    sc = 1 + 0.045 * c_bar_p
+    sh = 1 + 0.015 * c_bar_p * t
+    dtheta = 30 * math.exp(-(((h_bar - 275) / 25) ** 2))
+    rc = 2 * math.sqrt((c_bar_p**7) / (c_bar_p**7 + 25**7)) if c_bar_p > 0 else 0.0
+    rt = -math.sin(math.radians(2 * dtheta)) * rc
+    return math.sqrt((dlp / sl) ** 2 + (dcp / sc) ** 2 + (dh_term / sh) ** 2 + rt * (dcp / sc) * (dh_term / sh))
+
+
+def palette_regions(image_path: str, regions_path: str) -> dict[str, Any]:
+    from PIL import Image
+
+    with open(regions_path, "r", encoding="utf-8") as f:
+        regions_doc = json.load(f)
+    img = Image.open(image_path).convert("RGB")
+    w, h = img.size
+    rows: list[dict[str, Any]] = []
+    for raw in regions_doc.get("regions", []):
+        x = float(raw["x"])
+        y = float(raw["y"])
+        rw = float(raw["w"])
+        rh = float(raw["h"])
+        x0 = max(0, min(w - 1, int(x * w)))
+        y0 = max(0, min(h - 1, int(y * h)))
+        x1 = max(x0 + 1, min(w, int((x + rw) * w)))
+        y1 = max(y0 + 1, min(h, int((y + rh) * h)))
+        crop = img.crop((x0, y0, x1, y1))
+        px = list(crop.getdata())
+        mean = tuple(sum(p[i] for p in px) / len(px) for i in range(3))
+        target = _hex_to_rgb(str(raw["target_hex"]))
+        de = _delta_e2000(_srgb_to_lab(mean), _srgb_to_lab(target))
+        rows.append(
+            {
+                "camera": raw.get("camera"),
+                "label": raw.get("label"),
+                "target_hex": raw.get("target_hex"),
+                "mean_rgb": [round(mean[0], 1), round(mean[1], 1), round(mean[2], 1)],
+                "deltaE2000": round(de, 2),
+                "flag_over_15": de > 15.0,
+            }
+        )
+    return {"regions": rows}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,6 +398,11 @@ def main(argv: list[str] | None = None) -> int:
     par.add_argument("--cli", required=True)
     par.add_argument("--blender", required=True)
 
+    pal = sub.add_parser("palette-regions", help="palette ΔE2000 report for fixed screen regions")
+    pal.add_argument("--image", required=True)
+    pal.add_argument("--regions", required=True)
+    pal.add_argument("--output")
+
     args = ap.parse_args(argv)
     if args.cmd == "g0":
         ok, failures = g0_check(args.base, args.head)
@@ -268,6 +422,14 @@ def main(argv: list[str] | None = None) -> int:
         ok, details = cli_blender_parity(args.cli, args.blender)
         print(json.dumps({"ok": ok, "details": details}, indent=2))
         return 0 if ok else 1
+    if args.cmd == "palette-regions":
+        data = palette_regions(args.image, args.regions)
+        if args.output:
+            with open(args.output, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+        print(json.dumps(data, indent=2))
+        return 0
     return 2
 
 
