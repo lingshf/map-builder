@@ -21,6 +21,9 @@ textures on Munich and Pittsburgh), the
 the [v0.1.0 editing demo](../demo/v0.1.0/README.md) and the
 [real Blender sidebar](../demo/v0.5.0/panel.png), plus the
 [workflow overview](../flows/overview.md) and [fly-through check](../flows/flythrough.md).
+Typing is now mypy-clean and CI-enforced (#81); one known collision-audit
+exception remains in Pittsburgh CLI (`osm:way/537242388`, S4-F8), documented
+in the v0.5.0 release notes.
 The [package contract](../PACKAGE_FORMAT.md)
 is normative when implementing a reader.
 

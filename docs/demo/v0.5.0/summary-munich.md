@@ -1,8 +1,8 @@
 # Demo summary: munich-altstadt-v050
 
-* package: `munich_altstadt`, id `sha256:62e08fd1ff5e284fef9b5341e4d1ad2fcb99b3125b228e74351982a79da488af`, format 2.1.0
+* package: `munich_altstadt`, id `sha256:d191a94de5663d106bc89cde24f105af72e678941e2f8ebe38dcdcccc1762976`, format 2.1.0
 * objects: 389, collision triangles: 23372, orientation probes: 3, passage probes: 3
-* before: id `sha256:178c1328e90e3d83a3a38ac2144e12a4c81726a768bd0b62398927647ac3ec3f`, objects: 389, passage probes: 3
+* before: id `sha256:1ebda7540784c688e19c77ec7ba88d8a9672b91fa676abb9c98317129f21aaf2`, objects: 389, passage probes: 3
 
 ## Images
 
@@ -16,8 +16,7 @@
 * `render-vcut-2edge-before.png`
 * `render-named-fallback-after.png`
 * `render-named-fallback-before.png`
-* `panel.png`
-* `panel.png`: the real Map Builder sidebar in Blender's UI (software OpenGL via Mesa llvmpipe)
+* Panel screenshot: `panel.png` not produced: no Mesa (llvmpipe) Blender copy configured, and background Blender has no window or OpenGL context (see tools/demo/README.md, "Panel screenshot")
 
 ## Passage probes
 

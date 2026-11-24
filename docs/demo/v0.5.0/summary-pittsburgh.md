@@ -1,8 +1,8 @@
 # Demo summary: pittsburgh-v050
 
-* package: `pittsburgh`, id `sha256:b3fbee0c5212bafb3620b4bf35b67f604afb461d39ddf70e6d3fa5bb2e352ae1`, format 2.1.0
-* objects: 3293, collision triangles: 144145, orientation probes: 3, passage probes: 11
-* before: id `sha256:c605727a7037d60fde16604526208c5559da267eebc7f45362adabc80c5d1b40`, objects: 3290, passage probes: 13
+* package: `pittsburgh`, id `sha256:3124bbeeaf660cffe4f810fe0d7235608db2bfc86fd8d830e4c38c64fc3c1ead`, format 2.1.0
+* objects: 3296, collision triangles: 145650, orientation probes: 3, passage probes: 11
+* before: id `sha256:6fc57ee53e151a35a24a55c852d08064333b9ed5fd67c553dc4a390280dd9abf`, objects: 3290, passage probes: 13
 
 ## Images
 

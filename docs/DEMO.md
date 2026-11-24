@@ -6,8 +6,7 @@ untextured, with the recorded numbers. Images and the comparisons are in the
 [evidence.json](demo/v0.5.0/evidence.json). Earlier recipes and numbers are in
 the [v0.4.0](demo/v0.4.0/README.md) and [v0.3.0](demo/v0.3.0/README.md) demos.
 
-**Release candidate:** the numbers below are from the RC before S4-COL-FLOAT
-(D126) and will be refreshed when it merges.
+Rebuilt on the rebased REL-v0.5.0 head after #77 and #81.
 
 | Preset | Area | Structures |
 |---|---|---|
@@ -18,16 +17,16 @@ Presets: [tools/demo/presets/](../tools/demo/presets/). Options for both
 areas: seed 1, DSM correction on, terrain spacing 10 m, heightfield 2 m,
 `created_utc` fixed at `2026-11-20T00:00:00Z`.
 
-## Recorded results (RC, main 7c24dc3 + release changes)
+## Recorded results (rebased REL-v0.5.0 head)
 
 Built offline from the frozen v0.4.0 acquisition caches (2026-11-20 UTC).
 
 | | Munich Altstadt | Pittsburgh |
 |---|---|---|
-| package_id, textured | `sha256:62e08fd1…a488af` | `sha256:b3fbee0c…352ae1` |
-| package_id, `--no-textures` | `sha256:7d8ed272…64d8f` | `sha256:bff2935d…bd79a` |
-| Objects | 389 | 3293 (3 water) |
-| Collision triangles (degenerate) | 23,372 (57) | 144,145 (75) |
+| package_id, textured | `sha256:d191a94d…762976` | `sha256:3124bbee…3c1ead` |
+| package_id, `--no-textures` | `sha256:d5269206…e60e5d` | `sha256:c16cde53…d487fc` |
+| Objects | 389 | 3296 (3 water) |
+| Collision triangles (degenerate) | 23,372 (57) | 145,650 (73) |
 | Passage probes exported / blocked | 3 / 26 | 11 / 31 |
 | Tagged non-flat roofs built as tagged | 45 / 67 (v0.4.0: 29 / 67) | |
 | Build, excluding download, median of 3: textured / untextured | **3.297 s** / 3.019 s | **16.031 s** / 15.197 s |

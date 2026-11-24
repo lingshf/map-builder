@@ -1,9 +1,7 @@
 # v0.5.0 demo: rivers, banks and roof ends
 
-**Release candidate, not final.** S4-COL-FLOAT (D126) is pending and blocks
-v0.5.0. These images and numbers are from the RC before that fix; they will be
-regenerated after it merges, and the section reserved for it below will be
-filled in.
+Release-candidate assets rebuilt from the rebased REL-v0.5.0 head (after #77
+and #81) on frozen v0.4.0 caches.
 
 Both areas use the frozen v0.4.0 data caches (OSM and Copernicus GLO-30,
 acquired 2026-11-20 UTC), replayed offline, so every difference below comes
@@ -75,12 +73,12 @@ even with a vertical cut), and `provenance.roof_shape` names why.
 Source: S4-REVIEW section 1.1. Mixed roof ends are covered by synthetic tests
 only; no Munich roof has one.
 
-## S4-COL-FLOAT (D126): reserved
+## Known issue
 
-Pending. A user reported floating collision in the simulator (the drone stops
-above the ground; the gap between the river surface and the banks acts like a
-floating mat). The before/after images and probe evidence for the fix go here
-when S4-COL-FLOAT merges.
+`tools/floating_audit.py` still reports the disclosed pre-existing Pittsburgh
+CLI singleton (`osm:way/537242388`) as `buried_collision` (S4-F8). All rebuilt
+Munich packages and all rebuilt Blender packages are clean for
+`floating_collision`, `water_above_bank`, and `water_buried`.
 
 ## The three.js viewer (v0.5.0, textured)
 
@@ -102,10 +100,10 @@ Machine-readable: [evidence.json](evidence.json). Kit summaries:
 
 | Check | Munich Altstadt | Pittsburgh |
 |---|---|---|
-| package_id (textured) | `sha256:62e08fd1ff5e284fef9b5341e4d1ad2fcb99b3125b228e74351982a79da488af` | `sha256:b3fbee0c5212bafb3620b4bf35b67f604afb461d39ddf70e6d3fa5bb2e352ae1` |
-| package_id (untextured) | `sha256:7d8ed27299cd676bebe9229c6c7c927df33d2f77a059cfb200d48fd4fcd64d8f` | `sha256:bff2935d688bf8b471de38ceb2dbd8b6dad53ba7780941ef9049fd8fbd5bd79a` |
-| Objects | 389: terrain 1, building 148, road 197, tunnel 26, vegetation 17 | 3293: terrain 1, water 3, building 987, road 258, bridge 33, tunnel 5, structure 6, vegetation 2000 |
-| Collision triangles | 23,372; 57 degenerate (v0.4.0: 59) | 144,145 (43 water); 75 degenerate (v0.4.0: 76) |
+| package_id (textured) | `sha256:d191a94de5663d106bc89cde24f105af72e678941e2f8ebe38dcdcccc1762976` | `sha256:3124bbeeaf660cffe4f810fe0d7235608db2bfc86fd8d830e4c38c64fc3c1ead` |
+| package_id (untextured) | `sha256:d526920678a4868e63ad3bdd6f0b4029d2da6bdf48d682d165d6f201dfe60e5d` | `sha256:c16cde538d489567d6feef26ce6a0364b646405814a3ed7dc272249c92d487fc` |
+| Objects | 389: terrain 1, building 148, road 197, tunnel 26, vegetation 17 | 3296: terrain 1, water 3, building 987, road 258, bridge 33, tunnel 5, structure 6, vegetation 2000 |
+| Collision triangles | 23,372; 57 degenerate (v0.4.0: 59) | 145,650 (288 water); 73 degenerate (v0.4.0: 76) |
 | Build, textured, 3 runs | 3.297 / 3.260 / 3.325 s, **median 3.297 s** | 17.828 / 15.887 / 16.031 s, **median 16.031 s** |
 | Build, untextured, 3 runs | 4.187 / 3.014 / 3.019 s, **median 3.019 s** | 15.029 / 15.197 / 15.334 s, **median 15.197 s** |
 | Python validator | `VALID: 0 error(s), 1 warning(s)` (degenerate triangles) | `VALID: 0 error(s), 1 warning(s)` (degenerate triangles) |
@@ -129,15 +127,15 @@ notes list sizes and package_ids.
 
 | Asset | Path | Textures | sha256 |
 |---|---|---|---|
-| `munich-altstadt-0.5.0.mbmap` | CLI | on | `F12DC1345EE51BDAC0A5363345086E4F05BB8168E720F22B9CA5C859C4AC4CB5` |
-| `pittsburgh-0.5.0.mbmap` | CLI | on | `0EF863C5718B4E15FCE46BBCE70784D10DC6954FF2A49179690DAE19FF5ADB81` |
-| `munich-altstadt-0.5.0-notex.mbmap` | CLI | off | `5BA47765921DD56C156DAC24175D6F0405D1338D2FB22E26131DB8F7168C17AB` |
-| `pittsburgh-0.5.0-notex.mbmap` | CLI | off | `DCA3F69D00535FA8D48ADDF7622C78CA3DA16B17BEDC15B1BB4CDDF6D66EB195` |
-| `munich-altstadt-0.5.0-blender.mbmap` | headless Blender | on | `69CB5E7C057118B91376AEC690F353796C002224410995FBAB2F281C8D4A55BD` |
-| `munich-altstadt-0.5.0-blender-notex.mbmap` | headless Blender | off | `BE8F0981FDD33EB1DC63F7E837E938FB03FA0891178D1484FAB4DB5C8DA333BC` |
-| `pittsburgh-0.5.0-blender.mbmap` | headless Blender | on | `F2147A6537D2739A55A6DBBCDA3583A3B5139F0A3EED493856BC1CFDEA6CACEC` |
-| `pittsburgh-0.5.0-blender-notex.mbmap` | headless Blender | off | `A0F25D4B1DB6F9D68C1FCFAF219EF7C89BF868B1094A9D0CC7497E1D8E271EC6` |
-| `map_builder-0.5.0.zip` (RC build; the release workflow rebuilds it from the tag) | | | `DE13602CD3D910C3B60C04540FA2144DE5CE027A5FF1E7496E4900A44E49D1EB` (879,163 bytes) |
+| `munich-altstadt-0.5.0.mbmap` | CLI | on | `49C42B79F4C3A8C72F0AF2188F309350CEE268232DF32603C63401206AAA72D8` |
+| `pittsburgh-0.5.0.mbmap` | CLI | on | `BE4374B0EC3A02DDB58895AD0CFD4E80E7395365D67AAF5238B1E7463A547AAE` |
+| `munich-altstadt-0.5.0-notex.mbmap` | CLI | off | `FDC561E9428F6058701B162D1E4BBC45F976B20AD3F88DD1371DB5564B29D68F` |
+| `pittsburgh-0.5.0-notex.mbmap` | CLI | off | `DF89A8E7E405E07C321D6216EE49EDC477122AA240F92875DB7E715FBC2C4A3D` |
+| `munich-altstadt-0.5.0-blender.mbmap` | headless Blender | on | `91A48B4C9AC4D58FF96A0A0ADE8552C62E3F3EDF1DBD36FD8876ABBA0FC69671` |
+| `munich-altstadt-0.5.0-blender-notex.mbmap` | headless Blender | off | `0FA83406C096F9770DD87301CAD4B73C3E6F40EAA7790EB21963FCBC0BDF230A` |
+| `pittsburgh-0.5.0-blender.mbmap` | headless Blender | on | `8E11533D27836DC522118EFFE639FD5704D219730154523B66C047535608CF7F` |
+| `pittsburgh-0.5.0-blender-notex.mbmap` | headless Blender | off | `C7BB0436CB6BE2080859F85CAA40E13EDBB18B8E35B9D076BFFBF44B4B4E9230` |
+| `map_builder-0.5.0.zip` (local clean build from this head) | | | `075825556339EAFEA58496F7273D55E1E54AF09CC43BF055E2BB36DBCC0910D6` (886,813 bytes) |
 
 **Credits:** (c) OpenStreetMap contributors, ODbL 1.0. Copernicus DEM
 GLO-30 / WorldDEM-30: (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space

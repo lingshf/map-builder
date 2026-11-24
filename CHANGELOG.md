@@ -23,6 +23,10 @@ All notable user-visible changes are recorded here, following
   the remaining ends stay hipped (a gabled roof needs at least two gable ends). On the Munich fixture 45 of 67 roofs
   are now built as tagged (33 before); every roof that still falls back names the reason in its provenance.
   A concave footprint tagged `roof:shape=pyramidal` is now a named flat fallback.
+* **Shore ramps close water-sheet/bank gaps** (S4-COL-FLOAT-2, #77). Built water bodies now emit terrain ramp objects
+  (`bank:<osm-id>`) in the shore band so water surfaces meet the banks consistently.
+* **Mypy is clean and enforced in CI** (S4-MYPY, #81). The strict typing cleanup is merged and the CI gate now blocks
+  regressions instead of treating typing as advisory.
 
 * Licence confirmed (D13, option B): Blender add-on code (`map_builder/blender/`) is GPL-3.0-or-later;
   everything else we wrote is Apache-2.0. Added `LICENSE`, `LICENSE-GPL-3.0.txt`, `NOTICE` and SPDX
