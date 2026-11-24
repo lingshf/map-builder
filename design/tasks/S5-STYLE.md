@@ -196,7 +196,7 @@ Every implementation task meets **G0**, **classic identity**, the **cumulative b
 (three series), and attaches the contact sheet and the palette report. Test budget: D134 (≤ 5 s per test, no
 wall-clock asserts, no duplicate cases; renders and real-data runs are PR evidence only).
 
-Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing waits on DECOR.
+Order (D156): **BASE** (in parallel with S4-F8) → S5-PERF-GATE → **PALETTE** → **WATER** → S5-PERF-WATER → **REVIEW**, then **DECOR** last. Nothing waits on DECOR.
 
 ### S5-STYLE-BASE: baselines, metrics, G0 checker and acceptance harness
 
@@ -218,7 +218,7 @@ Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing w
   5. No generator output changes; the sample is byte-identical.
 * **Conflict domain:** `tools/style_check.py`, `tests/test_style_check.py` (both new), `tools/demo/` (presets,
   recipe, proxy runner). No `core/` edits.
-* **Dependencies:** #75 merged (D136; done at 6535f38); S4-F8, S5-PERF-GATE and S5-PERF-WATER first (D149, D154). Timing ACs use the D153 deterministic gate once S5-PERF-GATE merges.
+* **Dependencies:** #75 merged (D136; done at 6535f38). Runs in parallel with S4-F8 (D156): the domains are disjoint while S4-F8 stays case (A), which edits only `tools/floating_audit.py` and its tests. If S4-F8 becomes case (B) and changes packages, the AC1 baseline is re-measured on the post-S4-F8 main before PALETTE starts. BASE changes no product code, so its baseline timing is D147 CPU time for information. The generation work-vector baseline is taken with the pinned D153 checker after S5-PERF-GATE merges, as PALETTE's first step.
 
 ### S5-STYLE-PALETTE: style option (default stylized), palette, faceting, terrain, buildings, roads and trees
 
@@ -247,7 +247,7 @@ Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing w
     **no geometry code**); `core/glb.py` (normals and welding); `core/uv.py` and `core/textures.py` (mode switch
     only); `tools/mbmap_cli.py` (flag); `blender/props.py`, `ui.py` and `scene_build.py` (option).
   * Soft: sample slot (D103).
-* **Dependencies:** S5-STYLE-BASE; #75 merged; S4-MYPY merged (it shares `generate.py` and `glb.py` typing).
+* **Dependencies:** S5-STYLE-BASE and **S5-PERF-GATE** merged (D156; PALETTE shares `generate.py` and `blender/scene_build.py` with the counter commit). #75 and S4-MYPY are merged. First step: record the S5 work-vector baseline (D153 checker, merge-base + C) beside the BASE table.
 
 ### S5-STYLE-WATER: cyan water, terrain-side shore band, sandy banks (colour only)
 
@@ -272,7 +272,7 @@ Order: **BASE → PALETTE → WATER → REVIEW**, then **DECOR** last. Nothing w
 * **Evidence:** G0 and classic identity for every package, path and mode; cumulative budgets against the S5-BASE
   baseline; the contact sheets; and the test audit (D134).
 * **Verdict:** explicit **GO or NO-GO**. A NO-GO names the failing evidence and the S5-Fn fix tasks.
-* **Dependencies:** S5-STYLE-BASE, PALETTE and WATER. S5-DECOR is not a dependency.
+* **Dependencies:** S5-STYLE-BASE, PALETTE and WATER, then S5-PERF-WATER (D156; byte-identical, so the review evidence is unchanged). S5-DECOR is not a dependency.
 
 ### S5-DECOR: visual-only decoration ≤ 0.3 m (last; contingent)
 

@@ -1,6 +1,6 @@
 # S5-PERF-WATER: cheaper water and shore masks, byte-identical output
 
-Owner: dev · sprint S5 · runs **after S5-PERF-GATE** (D152, D154) · performance task: byte identity applies (D97)
+Owner: dev · sprint S5 · runs **after S5-STYLE-WATER** (D152, D156; both edit the water stage, and the style is user-visible) · performance task: byte identity applies (D97)
 
 ## Problem (REL-v0.5.0 close check, D151)
 
@@ -36,7 +36,7 @@ polygon whose padded bbox it meets.
 
 ## Acceptance criteria
 
-* **Gate:** D153 (S5-PERF-GATE, merged first per D154). D154 supersedes the order stated in D152.
+* **Gate:** D153 (S5-PERF-GATE, merged earlier). The order is D156, which supersedes D152 and D154.
 * **Base:** main at this PR's merge-base with the pinned counter commit applied.
 * D152's "≤ 3.8 % of Blender Generate" time share is **superseded by AC3** as the target. It stays as context.
   Time shares are not a gate.
