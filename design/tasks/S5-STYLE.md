@@ -255,7 +255,7 @@ information and nothing is gated on time.
 and C at their pinned commits, the merge-base SHA, the interpreter, and all four presets) as a roadmap row next to
 D153. Every later S5 task compares its own base against that row as well as against its own merge-base.
 
-Order (D156, D161, D164): **BASE** (in parallel with S4-F8, S5-F3 step 1 and S5-F4 step 1) → S5-PERF-GATE → S5-F3 fix (if any) → [S5-F4](S5-F4.md) fix → **PALETTE** → **WATER** → S5-PERF-WATER → **REVIEW**, then **DECOR** last. Nothing waits on DECOR.
+Order (D156, D161, D164): **BASE** (in parallel with S4-F8, S5-F3 step 1 and [S5-F4](S5-F4.md), test-only) → S5-PERF-GATE → S5-F3 fix (if any) → **PALETTE** (also after S5-F4's verified closure) → **WATER** → S5-PERF-WATER → **REVIEW**, then **DECOR** last. Nothing waits on DECOR.
 
 ### S5-STYLE-BASE: baselines, metrics, G0 checker and acceptance harness
 
