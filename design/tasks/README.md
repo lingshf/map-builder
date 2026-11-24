@@ -158,8 +158,8 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 
 | id | sprint | owner (facts / integration) | dependencies | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
-| DOC-ARCH | S5 | Developer + Product/Design / Knowledge Lead | — | `docs/architecture/README.md` | ready | |
-| DOC-WATER-DESIGN | S5 | Product/Design (D112–D129) + Developer (code entries) / Knowledge Lead | DOC-ARCH (same page; serialise) | `docs/architecture/README.md` (water section) | ready | |
+| DOC-ARCH | S5 | Developer + Product/Design / Knowledge Lead | — | `docs/architecture/README.md` | review (facts: Developer check; structure: Knowledge Lead) | |
+| DOC-WATER-DESIGN | S5 | Product/Design (D112–D129) + Developer (code entries) / Knowledge Lead | DOC-ARCH (same page; serialise) | `docs/architecture/README.md` (water section) | review (facts: Developer check; structure: Knowledge Lead) | |
 | DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | ready | |
 | DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | merged (7cf6f45); done | #87 (7cf6f45) |
 | DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | ready | |
