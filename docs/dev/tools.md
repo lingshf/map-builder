@@ -159,12 +159,14 @@ $env:PYTHONHASHSEED = 0
 python -m tools.perf.work_count prepare-base --counter-commit <C>      # merge-base + counter commit worktree
 python -m tools.perf.collect cli --root <tree> --cache <frozen caches> --preset munich --out-dir <dir>
 blender --background --factory-startup --online-mode --python tools/perf/collect.py -- blender --root <tree> --cache <frozen caches> --preset munich --out-dir <dir>
-python -m tools.perf.work_count compare --base <base.json> --head <head.json> --base-peer <base2.json> --head-peer <head2.json> [--cpu-rounds <json>] [--uncounted-site <text>] [--noop]
+python -m tools.perf.work_count compare --base <base.json> --head <head.json> --base-peer <base2.json> --head-peer <head2.json> (--cpu-rounds <json> | --no-cpu-evidence) [--uncounted-site <text>] [--noop]
 ```
 
 Run each preset (`munich`, `pittsburgh`) and series (`cli_generate`, `blender_generate`,
 `blender_generate_export`) twice per revision; the second run is the determinism peer, and the checker validates it
-as strictly as the first. The CLI backend refuses to run without `PYTHONHASHSEED=0`; Blender's embedded Python
+as strictly as the first. Both peers and either CPU evidence or an explicit `--no-cpu-evidence` waiver (reported as an
+F5 review item) are mandatory. The collector fails when a counter's registry total differs from the sum of its stage
+rows. The CLI backend refuses to run without `PYTHONHASHSEED=0`; Blender's embedded Python
 ignores that variable, so its determinism rests on the peer run. The cache directory holds `cache-<preset>`,
 copied afresh per run; any network access fails the run.
 
@@ -179,7 +181,7 @@ total (both fail); F4 growth above +5 % is always listed, even when F2 fails; F5
 when F2 and F3 pass; F6 lists declared uncounted work.
 
 **CPU evidence (D147).** F5 uses five alternating base/head rounds of CPU seconds, passed as
-`{"base": [5 values], "head": [5 values]}`; the median ratio is compared with +5 %.
+`{"base": [5 values], "head": [5 values]}` of positive finite numbers; the median ratio is compared with +5 %.
 
 **Reviewer dispositions.** F4, F5 and F6 never fail the gate by themselves. The reviewer records an explicit accept
 or reject for each one in the PR; an F5 needs either the named uncounted work (declared with `--uncounted-site`,

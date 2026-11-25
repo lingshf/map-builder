@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import statistics
 import subprocess
@@ -111,8 +112,9 @@ def cpu_ratio_from_rounds(raw: object) -> float:
     for side in ("base", "head"):
         rounds = raw.get(side)
         if (not isinstance(rounds, list) or len(rounds) != CPU_ROUNDS
-                or not all(isinstance(r, (int, float)) and not isinstance(r, bool) and r > 0 for r in rounds)):
-            raise ValueError(f"CPU evidence {side!r} must be {CPU_ROUNDS} positive CPU-second values")
+                or not all(isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and r > 0
+                           for r in rounds)):
+            raise ValueError(f"CPU evidence {side!r} must be {CPU_ROUNDS} positive finite CPU-second values")
         medians.append(statistics.median(rounds))
     return medians[1] / medians[0] - 1
 
@@ -161,9 +163,11 @@ def _build_parser() -> argparse.ArgumentParser:
     cmp_ap = sub.add_parser("compare", help="compare base/head work vectors under F1..F6")
     cmp_ap.add_argument("--base", required=True, help="base vector json")
     cmp_ap.add_argument("--head", required=True, help="head vector json")
-    cmp_ap.add_argument("--base-peer", help="second run of the base revision (F1 determinism)")
-    cmp_ap.add_argument("--head-peer", help="second run of the head revision (F1 determinism)")
-    cmp_ap.add_argument("--cpu-rounds", help=f"json {{'base': [..], 'head': [..]}}, {CPU_ROUNDS} CPU-second rounds each")
+    cmp_ap.add_argument("--base-peer", required=True, help="second run of the base revision (F1 determinism)")
+    cmp_ap.add_argument("--head-peer", required=True, help="second run of the head revision (F1 determinism)")
+    cpu = cmp_ap.add_mutually_exclusive_group(required=True)
+    cpu.add_argument("--cpu-rounds", help=f"json {{'base': [..], 'head': [..]}}, {CPU_ROUNDS} CPU-second rounds each")
+    cpu.add_argument("--no-cpu-evidence", action="store_true", help="explicitly skip F5; reported as a review item")
     cmp_ap.add_argument("--uncounted-site", action="append", default=[], help="declare an uncounted work site (F6)")
     cmp_ap.add_argument("--noop", action="store_true", help="assert that nothing at all is reported")
     prep_ap = sub.add_parser("prepare-base", help="create the merge-base + counter-commit worktree")
@@ -178,10 +182,11 @@ def _run_compare(args: argparse.Namespace) -> int:
     base, head = _load_vector(args.base, "base"), _load_vector(args.head, "head")
     events: list[RuleEvent] = []
     for label, vector, peer in (("base", base, args.base_peer), ("head", head, args.head_peer)):
-        if peer:
-            events.extend(check_determinism(vector, _load_vector(peer, f"{label} peer"), label))
+        events.extend(check_determinism(vector, _load_vector(peer, f"{label} peer"), label))
     cpu_ratio = None
-    if args.cpu_rounds:
+    if args.no_cpu_evidence:
+        events.append(RuleEvent(Rule.F5, "CPU evidence skipped: F5 was not checked"))
+    else:
         cpu_ratio = cpu_ratio_from_rounds(json.loads(Path(args.cpu_rounds).read_text(encoding="utf-8")))
     events.extend(compare(base, head, CompareOptions(cpu_ratio, tuple(args.uncounted_site), args.noop)))
     return _emit(events)

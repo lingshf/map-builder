@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import unittest
 
 from map_builder.core import perf_counters
+from tools.perf import work_count
+from tools.perf.collect import build_vector
 from tools.perf.stages import StageCallProfiler
 from tools.perf.work_count import CompareOptions, compare, cpu_ratio_from_rounds
 from tools.perf.work_vector import (
@@ -213,7 +216,33 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(rules(events), {Rule.F1})
 
 
+class CollectorTotalsTest(unittest.TestCase):
+    def test_a_registry_total_that_disagrees_with_its_stage_rows_is_rejected(self) -> None:
+        counters = {"grid_cells": {"total": 100, "stages": {OTHER_STAGE: 1}}}
+        with self.assertRaises(SystemExit):
+            build_vector("munich", "cli_generate", counters, {}, package_valid=True, run_error=None)
+
+    def test_a_consistent_registry_total_is_kept(self) -> None:
+        counters = {"grid_cells": {"total": 7, "stages": {OTHER_STAGE: 5, "acquire": 2}}}
+        vector = build_vector("munich", "cli_generate", counters, {}, package_valid=True, run_error=None)
+        self.assertEqual(vector["values"]["grid_cells"]["total"], 7)
+
+
+class GateModeTest(unittest.TestCase):
+    def test_peers_are_required(self) -> None:
+        with self.assertRaises(SystemExit):
+            work_count.main(["compare", "--base", "b.json", "--head", "h.json", "--no-cpu-evidence"])
+
+    def test_cpu_evidence_or_an_explicit_waiver_is_required(self) -> None:
+        with self.assertRaises(SystemExit):
+            work_count.main(["compare", "--base", "b", "--head", "h", "--base-peer", "bp", "--head-peer", "hp"])
+
+
 class CpuRoundsTest(unittest.TestCase):
+    def test_non_finite_times_are_rejected(self) -> None:
+        for bad in (math.inf, math.nan):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                cpu_ratio_from_rounds({"base": [bad] * 5, "head": [bad] * 5})
     def test_median_ratio_of_five_rounds(self) -> None:
         evidence = {"base": [1.0, 1.0, 1.0, 9.0, 9.0], "head": [1.1, 1.1, 1.1, 1.1, 20.0]}
         self.assertAlmostEqual(cpu_ratio_from_rounds(evidence), 0.1)

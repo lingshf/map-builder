@@ -112,11 +112,19 @@ def build_vector(preset: str, series: str, counters: dict[str, Any], calls_by_st
     stray = sorted(set(calls_by_stage) - set(stages))
     if stray:
         raise SystemExit(f"primitive calls attributed to stages not applicable to {series}: {stray}")
-    values = {name: _stage_row(counters.get(name, {"total": 0, "stages": {}})["stages"], stages)
+    values = {name: _counter_row(name, counters.get(name, {"total": 0, "stages": {}}), stages)
               for name in applicable_counters(series) if name != PRIMITIVE_CALLS}
     values[PRIMITIVE_CALLS] = _stage_row(calls_by_stage, stages)
     return {"preset": preset, "series": series, "package_valid": package_valid, "run_error": run_error,
             "values": values}
+
+
+def _counter_row(name: str, entry: dict[str, Any], stages: Sequence[str]) -> dict[str, Any]:
+    """A counter's row keeps the registry's own total; a stage attribution that disagrees with it is an error."""
+    row = _stage_row(entry["stages"], stages)
+    if row["total"] != entry["total"]:
+        raise SystemExit(f"{name}: registry total {entry['total']} != sum of stage counts {row['total']}")
+    return row
 
 
 def _stage_row(by_stage: dict[str, int], stages: Sequence[str]) -> dict[str, Any]:
