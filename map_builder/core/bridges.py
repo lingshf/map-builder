@@ -183,8 +183,11 @@ def deck_underside(pts: Sequence[Vec2], tags: Mapping[str, str], width: float, t
     ground = path.wet_ground(path.ground(tz, half), half, water_max)
     lower = [gr + road_lift + clearance + DECK_THICKNESS_M for gr in ground]
     top = deck_profile(path.s, lower, path.z_a, path.z_b)
-    footprint = sweep_footprint(_sunk_ends(path.xy, inside)[0], half)
-    return DeckUnderside(path.xy, path.s, [t - DECK_THICKNESS_M for t in top], footprint)
+    swept_xy, front = _sunk_ends(path.xy, inside)
+    back = len(swept_xy) - front - len(path.xy)
+    abutment: list[float | None] = [None]
+    z = abutment * front + [t - DECK_THICKNESS_M for t in top] + abutment * back
+    return DeckUnderside(sweep_footprint(swept_xy, half), z)
 
 
 def ramp_deck_undersides(features: Iterable[Feature], terrain: ElevationGrid,

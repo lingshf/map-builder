@@ -10,7 +10,7 @@ from map_builder.core.deck_underside import DeckUnderside, trim_under_decks
 from map_builder.core.osm import point_in_ring
 from map_builder.core.overlap import convex_intersection, polygon_area, triangle_overlaps_region, triangle_touches
 from map_builder.core.query import ray_cast
-from map_builder.core.structures import plan_collision
+from map_builder.core.structures import plan_collision, sweep_footprint
 
 from .test_bridges import make_scene
 from .test_water import H, W, lake_ground, lake_scene
@@ -240,15 +240,31 @@ class DeckClearanceTest(unittest.TestCase):
 RAMP_TRI = ((0.0, 0.0, 0.0), (10.0, 0.0, 1.0), (0.0, 10.0, 2.0))
 
 
-def deck_across_ramp(underside_z):
-    """A 20 m deck along y = 4 with a 2 m half width and a flat underside at ``underside_z``."""
-    return DeckUnderside(xy=[(-5.0, 4.0), (15.0, 4.0)], s=[0.0, 20.0], z=[underside_z, underside_z],
-                         footprint=[[(-5.0, 2.0), (15.0, 2.0), (15.0, 6.0), (-5.0, 6.0)]])
+def deck_across_ramp(underside_z, abutment=False):
+    """A 20 m deck along y = 4 with a 2 m half width and a flat underside at ``underside_z``; with ``abutment``,
+    its west end is a section sunk into an abutment."""
+    z = [None if abutment else underside_z, underside_z]
+    return DeckUnderside(footprint=[[(-5.0, 6.0), (-5.0, 2.0), (15.0, 2.0), (15.0, 6.0)]], z=z)
+
+
+def mitred_deck(underside_z):
+    """A deck turning 45 degrees at (10, 0), its sections ``underside_z`` swept by the production mitre."""
+    return DeckUnderside(footprint=sweep_footprint([(0.0, 0.0), (10.0, 0.0), (20.0, 10.0)], 2.0), z=underside_z)
 
 
 class TrimUnderDecksTest(unittest.TestCase):
     def test_an_elevated_deck_keeps_the_triangle_whole(self):
         self.assertEqual(trim_under_decks(RAMP_TRI, [deck_across_ramp(10.0)]), [RAMP_TRI])
+
+    def test_an_abutment_masks_even_a_high_deck(self):
+        self.assertNotEqual(trim_under_decks(RAMP_TRI, [deck_across_ramp(10.0, abutment=True)]), [RAMP_TRI])
+
+    def test_a_low_corner_of_a_mitred_deck_is_at_grade(self):
+        # the swept underside rises 0 -> 2.6 m along the outer edge to the mitre corner (10.83, -2): about 2.43 m
+        # over (10.1, -1.9), though the nearest centre-line station (10, 0) is at 2.6 m
+        tri = ((10.1, -1.9, 0.0), (10.2, -1.9, 0.0), (10.1, -1.8, 0.0))
+        self.assertEqual(trim_under_decks(tri, [mitred_deck([0.0, 2.6, 2.6])]), [])
+        self.assertEqual(trim_under_decks(tri, [mitred_deck([2.6, 2.6, 2.6])]), [tri])
 
     def test_an_at_grade_deck_cuts_out_exactly_its_footprint(self):
         pieces = trim_under_decks(RAMP_TRI, [deck_across_ramp(3.0)])

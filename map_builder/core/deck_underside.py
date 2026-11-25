@@ -13,6 +13,7 @@ Pure geometry, no I/O.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -31,14 +32,17 @@ RAMP_MIN_CLEARANCE_M = 2.5   # passages.MIN_CLEARANCE_M: the lowest free height 
 MIN_PIECE_AREA_M2 = 1e-6     # a clipped piece smaller than this is a rounding sliver, not ramp
 
 
+QUAD_SPLITS = ((0, 1, 2), (0, 2, 3), (0, 1, 3), (1, 2, 3))   # a quad's triangles across either diagonal
+
+
 @dataclass(frozen=True)
 class DeckUnderside:
-    """A deck seen from below: a lower bound ``z[i]`` of its underside at arc length ``s[i]`` of its path ``xy[i]``
-    (linear between), and its plan ``footprint`` as convex quads, sunk ends included."""
-    xy: Sequence[Pt]
-    s: Sequence[float]
-    z: Sequence[float]
+    """A deck seen from below, as its sweep makes it. ``footprint``: one convex plan quad
+    ``[left start, right start, right end, left end]`` per path segment, quad ``i`` between sections ``i`` and
+    ``i + 1``. ``z[i]``: a lower bound of the underside at section ``i``, linear across each quad; ``None`` where
+    the section is sunk into an abutment."""
     footprint: Sequence[Sequence[Pt]]
+    z: Sequence[float | None]
 
     @cached_property
     def _quad_boxes(self) -> list[Box]:
@@ -48,48 +52,26 @@ class DeckUnderside:
         """The footprint quads that share area with the triangle and do not clear the part of it they cover."""
         plan = _plan(tri)
         plan_box = bounding_box(plan)
-        for quad, quad_box in zip(self.footprint, self._quad_boxes):
+        for i, (quad, quad_box) in enumerate(zip(self.footprint, self._quad_boxes)):
             if not boxes_meet(plan_box, quad_box):
                 continue
             covered = convex_intersection(plan, quad)
-            if polygon_area(covered) > MIN_PIECE_AREA_M2 and not self.clears([_lift(tri, p) for p in covered]):
+            if polygon_area(covered) > MIN_PIECE_AREA_M2 and not self.clears(i, tri, covered):
                 yield quad
 
-    def clears(self, piece: Sequence[Vec3], clearance: float = RAMP_MIN_CLEARANCE_M) -> bool:
-        """Whether the deck stands at least ``clearance`` above the whole planar piece. A piece reaching past a
-        deck end (an abutment) is never cleared."""
-        stations = [self._station(v[0], v[1]) for v in piece]
-        known = [st for st in stations if st is not None]
-        if len(known) < len(stations):
-            return False
-        return self._lowest_between(min(known), max(known)) - max(v[2] for v in piece) >= clearance
+    def clears(self, quad: int, tri: Tri, covered: Sequence[Pt], clearance: float = RAMP_MIN_CLEARANCE_M) -> bool:
+        """Whether the underside over footprint quad ``quad`` stands at least ``clearance`` above the ramp triangle
+        ``tri`` over its plan part ``covered``. The gap is checked on the underside triangles of both diagonals,
+        so it holds however the deck mesh splits the quad. A quad at an abutment never clears."""
+        underside = self._underside_triangles(quad)
+        return underside is not None and all(_lowest_gap(u, tri, covered) >= clearance for u in underside)
 
-    def _station(self, x: float, y: float) -> float | None:
-        """Arc length of the path point nearest to (x, y); None if that is an end of the path or past it."""
-        best: tuple[float, float] | None = None   # (squared distance, arc length)
-        for i in range(len(self.xy) - 1):
-            (ax, ay), (bx, by) = self.xy[i], self.xy[i + 1]
-            dx, dy = bx - ax, by - ay
-            n2 = dx * dx + dy * dy
-            t = 0.0 if n2 == 0.0 else min(max(((x - ax) * dx + (y - ay) * dy) / n2, 0.0), 1.0)
-            d2 = (x - ax - t * dx) ** 2 + (y - ay - t * dy) ** 2
-            if best is None or d2 < best[0]:
-                best = (d2, self.s[i] + t * (self.s[i + 1] - self.s[i]))
-        if best is None or not self.s[0] < best[1] < self.s[-1]:
+    def _underside_triangles(self, quad: int) -> list[Tri] | None:
+        z_start, z_end = self.z[quad], self.z[quad + 1]
+        if z_start is None or z_end is None:
             return None
-        return best[1]
-
-    def _lowest_between(self, s0: float, s1: float) -> float:
-        """The lowest underside over an arc-length range: at its ends or a path node inside it (linear between)."""
-        inner = [z for si, z in zip(self.s, self.z) if s0 < si < s1]
-        return min([self._at(s0), self._at(s1)] + inner)
-
-    def _at(self, st: float) -> float:
-        for i in range(len(self.s) - 1):
-            if self.s[i] <= st <= self.s[i + 1]:
-                span = self.s[i + 1] - self.s[i]
-                return self.z[i] if span == 0.0 else self.z[i] + (self.z[i + 1] - self.z[i]) * (st - self.s[i]) / span
-        raise ValueError(f"arc length {st} is off the deck path")
+        corners = [(x, y, z) for (x, y), z in zip(self.footprint[quad], (z_start, z_start, z_end, z_end))]
+        return [(corners[a], corners[b], corners[c]) for a, b, c in QUAD_SPLITS]
 
 
 def trim_under_decks(tri: Tri, decks: Sequence[DeckUnderside]) -> list[Tri]:
@@ -104,6 +86,15 @@ def trim_under_decks(tri: Tri, decks: Sequence[DeckUnderside]) -> list[Tri]:
     counter_clockwise = signed_area2(_plan(tri)) > 0.0
     return [(_lift(tri, a), _lift(tri, b), _lift(tri, c)) for piece in pieces
             for a, b, c in _fan(piece, counter_clockwise) if polygon_area((a, b, c)) > MIN_PIECE_AREA_M2]
+
+
+def _lowest_gap(underside: Tri, ramp: Tri, covered: Sequence[Pt]) -> float:
+    """The least height of the ``underside`` triangle above the ``ramp`` triangle over the part of ``covered`` under
+    it; infinite where none is. Both are planar there, so their gap is linear and lowest at a vertex of that part."""
+    if polygon_area(_plan(underside)) <= MIN_PIECE_AREA_M2:
+        return math.inf
+    part = convex_intersection(covered, _plan(underside))
+    return min((_lift(underside, p)[2] - _lift(ramp, p)[2] for p in part), default=math.inf)
 
 
 def _plan(tri: Sequence[Vec3]) -> list[Pt]:
