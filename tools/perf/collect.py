@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 lingshf
 """Capture the work vector of one revision (D153): counters and primitive calls per stage, from a frozen cache.
 
