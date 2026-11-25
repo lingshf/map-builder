@@ -1,0 +1,48 @@
+{
+  "before": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\before_munich_blender.mbmap",
+  "after": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\after_munich_blender.mbmap",
+  "archive_identical": false,
+  "archive_sha256": [
+    "dcfc61df8ebde5a203d7c4e035ed85c3187dec4ce0a093d109d9cac934413ef0",
+    "a4e6b51d227d237641727c187418060ec73880917c3c6c86d776694e7972be68"
+  ],
+  "members_changed": [
+    "manifest.json"
+  ],
+  "manifest_keys_changed": [
+    "created_utc"
+  ],
+  "manifest_objects": {
+    "changed": [],
+    "removed": [],
+    "added": []
+  },
+  "report_keys_changed": [],
+  "report_water_bodies": {},
+  "report_budget_export": {},
+  "pinned_unchanged": {
+    "manifest.georeference": true,
+    "manifest.passage_probes": true,
+    "manifest.orientation_probes": true,
+    "manifest.axes": true,
+    "manifest.area": true,
+    "report.passage_probes_blocked": true,
+    "report.passage_probes_dropped": true,
+    "report.water_decks_raised": true,
+    "report.counts": true
+  },
+  "collision_objects": {
+    "changed": [],
+    "removed": [],
+    "added": []
+  },
+  "glb_nodes": {
+    "changed": [],
+    "removed": [],
+    "added": []
+  },
+  "heightfield": {
+    "changed_nodes": 0,
+    "total_nodes": 40401
+  }
+}

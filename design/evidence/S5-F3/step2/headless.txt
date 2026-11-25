@@ -1,0 +1,271 @@
+# D166 headless run on 2328c93: Blender 4.2.23 LTS, tests/blender/run_integration.py (PASS/FAIL/OK lines)
+PASS generate from local fixtures (ok)
+PASS generate created a map collection and selected it for export
+PASS generate added exactly one new collection
+PASS pre-existing user content kept
+PASS all 82 generated objects carry mb_id and a valid mb_class
+PASS generated ids stored in the collection
+PASS report Text mentions 'SOURCES, LICENCES AND ATTRIBUTION'
+PASS report Text mentions 'OpenStreetMap'
+PASS report Text mentions 'SYNTHETIC'
+PASS report Text mentions 'UNSUPPORTED FEATURES'
+PASS report Text mentions 'INVALID FEATURES'
+PASS report Text mentions 'WARNINGS'
+PASS report Text mentions 'resampled_spacing_m'
+PASS forced mid-build failure cancels
+PASS failed generation rolled back its meshes/objects/materials/collections (21, 86, 11, 9, 1) -> (21, 86, 11, 9, 1)
+PASS failed generation left the report Text untouched
+PASS credential typed into Licence is cleared before it can be saved
+PASS notice cleared by a clean value
+PASS credential in Licence rejects generation, naming the field only
+PASS credential rejection created nothing and left the report Text untouched
+PASS credential-like source data is rejected before anything is persisted
+PASS rejected source data created nothing and left the report Text untouched
+PASS export of the edited map (ok)
+PASS export left the scene unchanged (objects, meshes, modifiers, matrices, selection, active object)
+PASS validate_package: VALID: 0 error(s), 1 warning(s)
+PASS moved/rotated/scaled building: collision == evaluated world triangles (20 tris, max err 7.63e-06 m)
+PASS deleted building reported in edits.removed and absent from collision
+PASS duplicate has the distinct derived id 'osm:way/1028~bld_way_1028.001', original keeps its id
+PASS duplicate reported in edits
+PASS user cube exported as user:<name> with class 'user'
+PASS Bevel modifier geometry exported (108 tris)
+PASS Array modifier doubles the building's collision triangles (14 -> 28)
+PASS mirrored building is outward-wound in collision (436.80) and visuals (436.80)
+PASS mirrored object listed in the report
+PASS terrain:grid selection ignores terrain-class order
+PASS terrain:grid selection fails when missing
+PASS terrain:grid exists exactly once in collision
+PASS terrain:grid ray at edited vertex (ok)
+PASS terrain vertex edit exported
+PASS non-terrain ray hit is rejected (hit user:wrong-hit)
+PASS heightfield node (165, 75) covered by terrain:grid (ok)
+PASS heightfield matches terrain:grid at a grid node
+PASS Blender version recorded
+PASS heightfield exported and validated
+PASS every collision object has its glTF node
+PASS every mesh object exported
+PASS map collection with one enabled path (scene root) still exports (ok)
+PASS map collection only under a render-disabled parent blocks export ("Error: Export failed (previous package kept): 1 problem(s): map collection 'MapBuilder it'")
+PASS local and linked objects share the name 'it_twin' ('it_twin [it_lib.blend]')
+PASS linked and local objects sharing a name block export, naming both ("Error: Export failed (previous package kept): 1 problem(s): 2 objects share the export name 'it_twin': 'it_twin', 'it_tw")
+PASS export with a linked object and restricted collections (ok)
+PASS it_box_render_off (in 'it render off') excluded and listed in the report
+PASS it_box_excluded (in 'it excluded') excluded and listed in the report
+PASS it_box_hidden (in 'it hidden in layer') excluded and listed in the report
+PASS object with one enabled collection path is exported
+PASS linked library object exported exactly once (identity dedupe)
+PASS omitted material effect 'emission' named in the export warnings
+PASS omitted material effect 'coat' named in the export warnings
+PASS omitted material effect 'transmission' named in the export warnings
+PASS omitted material effect 'normal/bump' named in the export warnings
+PASS export after restoring the scene (ok)
+PASS export with same-named material datablocks (ok)
+PASS distinct material datablocks with the same display name keep their own colours (['it_dup [it_mlib.blend] 8e430c22', 'it_dup [it_mlib.blend] bfda763a'])
+PASS Color Attribute Alpha output into Base Color is not treated as RGB (constant colour + warning)
+PASS credential-like object name is not echoed in the export error ('Error: Export failed (previous package kept): 1 problem(s): (diagnostic withheld: it quotes a creden')
+PASS previous package unchanged after the credential-named failure
+PASS credential-like collection name is never echoed or packaged ({'CANCELLED'}, 'Error: Export failed (previous package kept): 1 problem(s): refusing to write the package: package: ')
+PASS export after removing the material test objects (ok)
+PASS curve object blocks export with a clear error
+PASS previous package unchanged after the curve failure
+PASS zero-scale object blocks export
+PASS previous package unchanged after the zero-scale failure
+PASS non-closed building blocks export (['Error: Export failed (previous package kept): 1 problem(s): package failed validation; previous export kept:'])
+PASS previous package unchanged after the non-closed-building failure
+PASS failed exports left the last good report Text untouched
+PASS failed validation reports without touching the report Text ('Error: Package is invalid: INVALID: 1 error(s), 0 warning(s)')
+PASS previous package still validates
+PASS offline: Overpass generation fails clearly
+PASS failed generation created nothing
+PASS no credential/endpoint in the .blend
+PASS no credential in the package
+PASS bridges: generate fixture (ok)
+PASS bridges: fixture footway bridge generated as class 'bridge' (1)
+PASS bridges: export fixture (ok)
+PASS bridges: fixture package VALID, no probe warning
+PASS bridges: generate valley (ok)
+PASS bridges: valley bridge generated (1)
+PASS bridges: export valley (ok)
+PASS bridges: valley manifest carries one under probe (['osm:way/1010:deck', 'osm:way/1010:under'])
+PASS bridges: valley package VALID, no probe warning ([])
+PASS bridges: export after lowering the deck (ok)
+PASS bridges: a lowered deck is still VALID (errors [])
+PASS bridges: the lowered deck makes exactly the under probe (index 1) a warning (['passage probe 1 is blocked by collision object #0']; all ['passage probe 1 is blocked by collision object #0'])
+PASS hygiene: munich bbox edges within 0.05 m of the double-precision area (worst 0.0000 m)
+PASS hygiene: pittsburgh bbox edges within 0.05 m of the double-precision area (worst 0.0000 m)
+PASS hygiene: 48N far from origin bbox edges within 0.05 m of the double-precision area (worst 0.0000 m)
+PASS hygiene: 0.5 m feature 0.02 m from the area limit is classified correctly for munich (misclassified: [])
+PASS hygiene: 0.5 m feature 0.02 m from the area limit is classified correctly for pittsburgh (misclassified: [])
+PASS hygiene: 0.5 m feature 0.02 m from the area limit is classified correctly for 48N far from origin (misclassified: [])
+PASS hygiene: legacy float bbox migrates into the text fields as stored ('40.433998107910156')
+PASS hygiene: migrated bbox builds the area
+PASS hygiene: a cleared bbox field is not revived
+PASS hygiene: unmodified default material is exported as 'MB Default' (['MB Default'])
+PASS hygiene: a parameter variant keeps the digest suffix (['MB Default 6ef15dce'])
+PASS parity: the Blender seed default equals the CLI default (1)
+PASS parity: the centre keeps double precision (40.437, -80.016)
+PASS parity: legacy float centre (40.437, -80.016) migrates ('40.437', '-80.015999')
+PASS parity: a cleared centre is not revived from the legacy float
+PASS parity: legacy float centre (0.0, 0.0) migrates ('0', '0')
+PASS parity: a cleared centre is not revived from the legacy float
+PASS parity: legacy float centre (47.0, 0.0) migrates ('47', '0')
+PASS parity: a cleared centre is not revived from the legacy float
+PASS parity: legacy float centre (0.0, 8.0) migrates ('0', '8')
+PASS parity: a cleared centre is not revived from the legacy float
+PASS parity[AUTO]: Blender generate (ok)
+PASS parity[AUTO]: Blender export (ok)
+PASS parity[AUTO]: the fixture emits passage probes (CLI 4)
+PASS parity[AUTO]: CLI and Blender probe sets are equal (CLI ['osm:way/1048:under', 'osm:way/1069:deck', 'osm:way/1072:bore', 'osm:way/1098:passage'] vs Blender ['osm:way/1048:under', 'osm:way/1069:deck', 'osm:way/1072:bore', 'osm:way/1098:passage'])
+PASS parity[AUTO]: both packages validate
+PASS parity[ON]: Blender generate (ok)
+PASS parity[ON]: Blender export (ok)
+PASS parity[ON]: the fixture emits passage probes (CLI 4)
+PASS parity[ON]: CLI and Blender probe sets are equal (CLI ['osm:way/1048:under', 'osm:way/1069:deck', 'osm:way/1072:bore', 'osm:way/1098:passage'] vs Blender ['osm:way/1048:under', 'osm:way/1069:deck', 'osm:way/1072:bore', 'osm:way/1098:passage'])
+PASS parity[ON]: both packages validate
+PASS passages: generate (ok)
+PASS passages: the passage building is split into parts #1..#3
+PASS passages: export of the edited map (ok)
+PASS passages: package validates: VALID: 0 error(s), 2 warning(s)
+PASS passages: duplicated upper part has the distinct id 'osm:way/1095#3~bld_way_1095_3.002'
+PASS passages: the building passage probe is exported
+PASS passages: the unedited elevated-part probe is still exported
+PASS passages: the lowered carved upper part blocks probe 1 (:passage), reported as a validator warning
+PASS passages: the unedited :under probe is not reported
+PASS roofs: generate (ok)
+PASS roofs: every fixture roof shape is supported by the generator
+PASS roofs: build_roof has a single call site in generate
+PASS roofs: osm:way/1023 exists as a gabled building (built gabled)
+PASS roofs: gabled vertices equal the Python pipeline within 1 mm (10 verts)
+PASS roofs: gabled apex height 20.8210 vs Python 20.8210
+PASS roofs: gabled roof+walls are closed manifold (0 bad edges)
+PASS roofs: gabled is outward-wound (positive volume)
+PASS roofs: gabled eave 5.300 m / apex 8.300 m above the mesh base = fixture 5.3 / 8.3 m
+PASS roofs: gabled measured rise 3.000 m (apex - wall top) = declared roof height 3.0 m
+PASS roofs: gabled has a two-point ridge (2)
+PASS roofs: gabled ridge 16.000 m spans a footprint side [10.000008734271074, 15.999941499171571]
+PASS roofs: gabled rises exactly roof:height 3.0 m above the eave
+PASS roofs: gabled apex 20.821 rises above the eave 17.821
+PASS roofs: osm:way/1028 exists as a hipped building (built hipped)
+PASS roofs: hipped vertices equal the Python pipeline within 1 mm (10 verts)
+PASS roofs: hipped apex height 21.1374 vs Python 21.1374
+PASS roofs: hipped roof+walls are closed manifold (0 bad edges)
+PASS roofs: hipped is outward-wound (positive volume)
+PASS roofs: hipped eave 3.700 m / apex 7.300 m above the mesh base = fixture 3.7 / 7.3 m
+PASS roofs: hipped measured rise 3.600 m (apex - wall top) = declared roof height 3.6 m
+PASS roofs: hipped ridge 6.000 m = long side - short side (6.000 m)
+PASS roofs: hipped apex 21.137 rises above the eave 17.537
+PASS roofs: osm:way/1033 exists as a pyramidal building (built pyramidal)
+PASS roofs: pyramidal vertices equal the Python pipeline within 1 mm (9 verts)
+PASS roofs: pyramidal apex height 24.8047 vs Python 24.8047
+PASS roofs: pyramidal roof+walls are closed manifold (0 bad edges)
+PASS roofs: pyramidal is outward-wound (positive volume)
+PASS roofs: pyramidal eave 6.300 m / apex 9.300 m above the mesh base = fixture 6.3 / 9.3 m
+PASS roofs: pyramidal measured rise 3.000 m (apex - wall top) = declared roof height 3.0 m
+PASS roofs: pyramidal has a single apex (1)
+PASS roofs: pyramidal apex 24.805 rises above the eave 21.805
+PASS roofs: osm:way/1038 exists as a skillion building (built skillion)
+PASS roofs: skillion vertices equal the Python pipeline within 1 mm (8 verts)
+PASS roofs: skillion apex height 27.3295 vs Python 27.3295
+PASS roofs: skillion roof+walls are closed manifold (0 bad edges)
+PASS roofs: skillion is outward-wound (positive volume)
+PASS roofs: skillion eave 3.800 m / apex 5.300 m above the mesh base = fixture 3.8 / 5.3 m
+PASS roofs: skillion measured rise 1.500 m (apex - wall top) = declared roof height 1.5 m
+PASS roofs: skillion high edge has >= 2 points (2)
+PASS roofs: skillion slopes (not flat)
+PASS roofs: skillion rises exactly roof:height 1.5 m above the eave
+PASS roofs: skillion apex 27.329 rises above the eave 25.829
+PASS roofs: osm:way/1043 exists as a dome building (built dome)
+PASS roofs: dome vertices equal the Python pipeline within 1 mm (29 verts)
+PASS roofs: dome apex height 30.6065 vs Python 30.6065
+PASS roofs: dome roof+walls are closed manifold (0 bad edges)
+PASS roofs: dome is outward-wound (positive volume)
+PASS roofs: dome eave 6.100 m / apex 10.300 m above the mesh base = fixture 6.1 / 10.3 m
+PASS roofs: dome measured rise 4.200 m (apex - wall top) = declared roof height 4.2 m
+PASS roofs: dome has a single apex (1)
+PASS roofs: dome apex 30.606 rises above the eave 26.406
+PASS roofs: gabled and hipped ridges are both two-point
+PASS roofs: the hipped ridge is shorter than the gabled ridge (hips cut ends)
+PASS roofs: export after moving a roof (ok)
+PASS roofs: exported package exists and validates
+PASS roofs: gabled collision == Blender triangles (max err 0.0e+00 m)
+PASS roofs: hipped collision == Blender triangles (max err 0.0e+00 m)
+PASS roofs: pyramidal collision == Blender triangles (max err 0.0e+00 m)
+PASS roofs: skillion collision == Blender triangles (max err 0.0e+00 m)
+PASS roofs: dome (moved +2 m) collision == Blender triangles (max err 0.0e+00 m)
+PASS roofs: moved dome apex is 2 m higher in the exported collision
+PASS roofs: generate with an unsupported roof:shape (ok)
+PASS roofs: Python reason for the unsupported shape (fallback:flat (roof:shape=butterfly not modelled))
+PASS roofs: Blender falls back to flat with the same reason as Python
+PASS roofs: fallback roof is a flat closed box top
+PASS roofs: generate an L-shaped hipped house (ok)
+PASS roofs: the L-shaped hipped house is built hipped from the straight skeleton
+PASS roofs: L-shaped hipped vertices equal Python within 1 mm (17 verts)
+PASS roofs: L-shaped hipped house is closed manifold
+PASS roofs: L-shaped hipped house is outward-wound
+PASS roofs: L-shaped hipped house has the tagged roof height
+PASS roofs: generate an L-shaped gabled house (ok)
+PASS roofs: the L-shaped gabled house is built gabled (measured:osm roof:shape)
+PASS roofs: L-shaped gabled vertices equal Python within 1 mm (17 verts)
+PASS roofs: L-shaped gabled house is closed manifold
+PASS roofs: L-shaped gabled house is outward-wound
+PASS roofs: the L-shaped gabled house has vertical gable-end walls (2 triangles)
+PASS roofs: generate a chamfered gabled house (ok)
+PASS roofs: the chamfered house is built gabled by the vertical cut (measured:osm roof:shape)
+PASS roofs: chamfered gabled vertices equal Python within 1 mm (13 verts)
+PASS roofs: chamfered gabled house is closed manifold
+PASS roofs: chamfered gabled house is outward-wound
+PASS slivers: the face is up-facing under single rounding
+PASS slivers: unfiltered Blender bake keeps the non-degenerate face and fails the road-normal rule (['collision: road object #0 has 1 non-degenerate triangle(s) whose normal does not point up (z <= 0); open surfaces must face +Z'])
+PASS slivers: drop_unstorable_slivers drops it ([(0, 3, 4)])
+PASS slivers: filtered Blender bake passes the road-normal rule ([])
+PASS textures: the Textures property exists and defaults on (D27/D60)
+PASS textures: the panel attribution lists the CC0 asset notice only when textures are on
+PASS textures: generate (textures=True) (ok)
+PASS textures: 18 textured objects
+PASS textures: every textured object has a UV map
+PASS textures: 5 generated image(s) are packed into the .blend
+PASS textures: material nodes are Image Texture x Vertex Colour into the Principled BSDF (['BSDF_PRINCIPLED', 'MIX_RGB', 'MIX_RGB', 'OUTPUT_MATERIAL', 'TEX_IMAGE', 'UVMAP', 'VERTEX_COLOR'])
+PASS textures: export (ok)
+PASS textures: strictly VALID (VALID: 0 error(s), 1 warning(s))
+PASS textures: schema 2.1.0 and the same D65 asset_notices entry as the CLI
+PASS textures: NOTICES.txt has the Assets section
+PASS textures: textures are bound by material name with the core/textures PNG bytes
+PASS textures: TEXCOORD_0 exactly on the textured materials
+PASS textures: the same materials as the CLI package
+PASS textures: UV seam count equals the CLI's (168)
+PASS textures: per-material UVs equal the CLI's within 1e-3 ([])
+PASS textures: export with Textures off (ok)
+PASS textures: off gives no images, no UVs and no asset notice
+PASS textures: off uses the same materials as the untextured CLI package
+PASS textures: collision is independent of Textures
+PASS textures: export with a user mesh without UVs (ok)
+PASS textures: fallback UVs give exactly one warning naming the triangle count and the package is VALID (['user_cube: no UV map; 12 triangle(s) of textured materials got fallback UVs (world XY projection)'])
+PASS textures: the user mesh has UVs on every corner
+PASS textures: generate (textures=False) (ok)
+PASS textures: off->on export (ok)
+PASS textures: off->on package is VALID and carries the D65 notice and NOTICES Assets section
+PASS textures: off->on textures, materials and UVs agree (['MB Concrete', 'MB Facade', 'MB Road', 'MB Roof', 'MB Terrain', 'MB Tunnel'])
+PASS textures: off->on has the same materials and UV seams as the CLI package
+PASS textures: off->on needs no fallback-UV warning for generated objects
+PASS textures: generate (textures=False) (ok)
+PASS textures: L gable off->on export (ok)
+PASS textures: L gable generated off, exported on has the CLI's MB Roof UVs ([('bld_way_9101', 'MB Roof')])
+PASS textures: generate (textures=False) (ok)
+PASS textures: an untagged no-UV cube with a generated material gets one fallback warning (['plain_cube: no UV map; 12 triangle(s) of textured materials got fallback UVs (world XY projection)'])
+PASS textures: a plain/textured mix with a different roughness exports two textured materials, independent of object names ({'MB Facade 4c204fa8': (0.85, True), 'MB Facade c558e66c': (0.21, True)})
+PASS textures: the mixed package carries the notice
+PASS textures: a user material named like a generated one keeps its own params and the texture stays on the generated primitive ({'MB Terrain': (0.95, True), 'MB Facade 4c204fa8': (0.85, True), 'MB Roof': (0.7, True), 'MB Concrete': (0.8, True), 'MB Road': (0.9, True), 'MB Facade 210cfc69': (0.4, False), 'MB Bark': (0.9, False), 'MB Foliage': (0.8, False), 'MB Tunnel': (0.8, True), 'MB Water': (0.15, False)})
+PASS textures: roughness 0.2101 and 0.2104 export as two stable, distinct materials ({'MB Facade ea5b539f': (0.21, True), 'MB Facade d7781cad': (0.21, True)})
+PASS tunnel: generate (ok)
+PASS tunnel: fixture way/1072 is a tunnel-class object in a Tunnels collection
+PASS tunnel: export with a mirrored tunnel (ok)
+PASS tunnel: mirrored tunnel keeps the tube rule after bake (errors: [])
+PASS water: generate fixture (ok)
+PASS water: export fixture (ok)
+PASS water: Blender package VALID
+PASS water: Blender water objects (class water) and triangle counts equal the CLI build: {'water:osm:way/1087': 2} vs {'water:osm:way/1087': 2}
+PASS water: carve invariant on Blender's baked triangles, water:osm:way/1087.002: max terrain-water -0.020000 m
+PASS water bank: fixture has a built body and no fallback (['osm:way/1087'], [])
+PASS water bank: no Blender terrain face carries the water colour under a built body (0 do)
+OK: 0 failure(s); output in <work>\headless

@@ -1,0 +1,158 @@
+{
+ "base_totals": {
+  "clip_steps": 1080019,
+  "overlap_edge_tests": 86787
+ },
+ "head_totals": {
+  "clip_steps": 1096213,
+  "overlap_edge_tests": 102128
+ },
+ "strips_only_in_base": [],
+ "strips_only_in_head": [],
+ "classes": {
+  "unchanged": {
+   "strips": 928,
+   "growth": {
+    "clip_steps": 0,
+    "overlap_edge_tests": 0
+   },
+   "growth_by_test": {
+    "blocked_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 0
+    },
+    "wet_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 0
+    },
+    "trim": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 0
+    }
+   }
+  },
+  "kept_to_kept": {
+   "strips": 37,
+   "growth": {
+    "clip_steps": 162,
+    "overlap_edge_tests": -684
+   },
+   "growth_by_test": {
+    "blocked_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": -846
+    },
+    "wet_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 0
+    },
+    "trim": {
+     "clip_steps": 162,
+     "overlap_edge_tests": 162
+    }
+   }
+  },
+  "dropped_to_kept": {
+   "strips": 37,
+   "growth": {
+    "clip_steps": 7445,
+    "overlap_edge_tests": 7475
+   },
+   "growth_by_test": {
+    "blocked_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 30
+    },
+    "wet_by": {
+     "clip_steps": 5280,
+     "overlap_edge_tests": 5280
+    },
+    "trim": {
+     "clip_steps": 2165,
+     "overlap_edge_tests": 2165
+    }
+   }
+  },
+  "dropped_to_trimmed": {
+   "strips": 27,
+   "growth": {
+    "clip_steps": 6207,
+    "overlap_edge_tests": 6176
+   },
+   "growth_by_test": {
+    "blocked_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": -31
+    },
+    "wet_by": {
+     "clip_steps": 3308,
+     "overlap_edge_tests": 3308
+    },
+    "trim": {
+     "clip_steps": 2899,
+     "overlap_edge_tests": 2899
+    }
+   }
+  },
+  "dropped_to_trimmed_away": {
+   "strips": 8,
+   "growth": {
+    "clip_steps": 2218,
+    "overlap_edge_tests": 2202
+   },
+   "growth_by_test": {
+    "blocked_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": -16
+    },
+    "wet_by": {
+     "clip_steps": 1139,
+     "overlap_edge_tests": 1139
+    },
+    "trim": {
+     "clip_steps": 1079,
+     "overlap_edge_tests": 1079
+    }
+   }
+  },
+  "dropped_to_dropped": {
+   "strips": 3,
+   "growth": {
+    "clip_steps": 162,
+    "overlap_edge_tests": 172
+   },
+   "growth_by_test": {
+    "blocked_by": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 10
+    },
+    "wet_by": {
+     "clip_steps": 162,
+     "overlap_edge_tests": 162
+    },
+    "trim": {
+     "clip_steps": 0,
+     "overlap_edge_tests": 0
+    }
+   }
+  }
+ },
+ "water_stage_calls_growth": 155803,
+ "water_stage_calls_top": {
+  "water.py:_build_index": 58597,
+  "water.py:add": 28949,
+  "generate.py:_cell": 14148,
+  "water.py:wmax_segment": 9937,
+  "water.py:_tris_near": 9698,
+  "structures.py:_frames": 6027,
+  "osm.py:bbox": 5595,
+  "water.py:_cells": 3924,
+  "bridges.py:<genexpr>": 2121,
+  "bridges.py:_directions": 1638,
+  "bridges.py:<lambda>": 1638,
+  "structures.py:_norm": 1594,
+  "generate.py:terrain_height": 1572,
+  "generate.py:_plane_height": 1572,
+  "bridges.py:deck_profile": 1572
+ }
+}

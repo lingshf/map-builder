@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 lingshf
 """S5-F3 evidence harness (not product code): acquire, freeze and build the real-data presets.
 
   py -3.12 build_factoria.py acquire --root <tree> --cache <dir>/cache-bellevue-factoria

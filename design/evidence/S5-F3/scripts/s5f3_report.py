@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S5-F3 step-1 report (session files): classify the regions of ``evidence.json`` and write the PR evidence.
 
   py -3.12 s5f3_report.py --evidence <dir>/evidence.json --blocked <blocked_strips.json> --out <dir>

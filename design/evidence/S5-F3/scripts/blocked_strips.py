@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S5-F3 evidence (session files): rebuild a preset offline and record every shore strip the ramp builder left out,
 with the reason (footprint, line mask, or wet overlap). Product code is only wrapped in-process, never edited.
 

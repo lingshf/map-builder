@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 lingshf
 """S5-F3 step-1 evidence (session files, read-only): per-region measurements for every water and heightfield
 finding of ``tools/floating_audit.py`` on one package.
 
