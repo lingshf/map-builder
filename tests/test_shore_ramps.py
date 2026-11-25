@@ -6,9 +6,9 @@ from __future__ import annotations
 import unittest
 
 from map_builder.core import shore
-from map_builder.core.deck_underside import TRIM_DEPTH
+from map_builder.core.deck_underside import DeckUnderside, trim_under_decks
 from map_builder.core.osm import point_in_ring
-from map_builder.core.overlap import triangle_overlaps_region, triangle_touches
+from map_builder.core.overlap import convex_intersection, polygon_area, triangle_overlaps_region, triangle_touches
 from map_builder.core.query import ray_cast
 from map_builder.core.structures import plan_collision
 
@@ -207,6 +207,8 @@ class LakeBankTest(unittest.TestCase):
 
 LAKE_RING = [(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)]   # its west bank is the low one
 SECONDARY = {"highway": "secondary", "bridge": "yes"}                         # 7 m road: an 8 m deck
+FLOAT32_M = 1e-4             # mesh vertices are stored in float32: tens of metres from the origin, about 4e-6 m
+FLOAT32_SLIVER_M2 = 1e-3
 
 
 def bank_tris_over_lake_with(bridge_way):
@@ -229,7 +231,32 @@ class DeckClearanceTest(unittest.TestCase):
     def test_a_ramp_is_clipped_out_of_an_at_grade_deck_footprint_only(self):
         tris = bank_tris_over_lake_with([(-48.0, 12.0), (-32.0, 12.0)])   # 16 m long: at-grade over the shore
         footprint = [(-48.5, 8.0), (-31.5, 8.0), (-31.5, 16.0), (-48.5, 16.0)]   # 0.5 m sunk ends, 4 m half width
-        self.assertFalse(any(triangle_overlaps_region(t, footprint, []) for t in tris))
-        south_of_deck = [p[1] for t in tris for p in t if -44.0 < p[0] < -40.0 and p[1] < 8.0 + 1e-6]
-        clip_piece_m = 12.0 / 2 ** TRIM_DEPTH    # the coarsest a 12 m ramp triangle is cut
-        self.assertGreater(max(south_of_deck), 8.0 - clip_piece_m)   # cut at the footprint, not a whole strip short of it
+        under_deck_m2 = sum(polygon_area(convex_intersection(t, footprint)) for t in tris)
+        self.assertLess(under_deck_m2, FLOAT32_SLIVER_M2)
+        south_of_deck = [p[1] for t in tris for p in t if -44.0 < p[0] < -40.0 and p[1] < 8.0 + FLOAT32_M]
+        self.assertAlmostEqual(max(south_of_deck), 8.0, delta=FLOAT32_M)   # cut at the footprint, not a strip short
+
+
+RAMP_TRI = ((0.0, 0.0, 0.0), (10.0, 0.0, 1.0), (0.0, 10.0, 2.0))
+
+
+def deck_across_ramp(underside_z):
+    """A 20 m deck along y = 4 with a 2 m half width and a flat underside at ``underside_z``."""
+    return DeckUnderside(xy=[(-5.0, 4.0), (15.0, 4.0)], s=[0.0, 20.0], z=[underside_z, underside_z],
+                         footprint=[[(-5.0, 2.0), (15.0, 2.0), (15.0, 6.0), (-5.0, 6.0)]])
+
+
+class TrimUnderDecksTest(unittest.TestCase):
+    def test_an_elevated_deck_keeps_the_triangle_whole(self):
+        self.assertEqual(trim_under_decks(RAMP_TRI, [deck_across_ramp(10.0)]), [RAMP_TRI])
+
+    def test_an_at_grade_deck_cuts_out_exactly_its_footprint(self):
+        pieces = trim_under_decks(RAMP_TRI, [deck_across_ramp(3.0)])
+        plans = [[(x, y) for x, y, _ in t] for t in pieces]
+        band_area = (8.0 + 4.0) / 2 * 4.0                  # the triangle between y = 2 and y = 6
+        self.assertAlmostEqual(sum(polygon_area(p) for p in plans), 50.0 - band_area)
+        self.assertFalse(any(2.0 < sum(y for _, y in p) / 3 < 6.0 for p in plans))
+        for (ax, ay, az), (bx, by, bz), (cx, cy, cz) in pieces:   # on the ramp plane z = x / 10 + y / 5, wound CCW
+            for x, y, z in ((ax, ay, az), (bx, by, bz), (cx, cy, cz)):
+                self.assertAlmostEqual(z, x / 10 + y / 5)
+            self.assertGreater((bx - ax) * (cy - ay) - (by - ay) * (cx - ax), 0.0)

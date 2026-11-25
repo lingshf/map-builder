@@ -4,27 +4,31 @@
 
 A bank ramp is terrain, so it may run under an elevated deck, but not into an at-grade one or its abutments. The
 bridge stage gives a lower bound of each deck's underside and its plan footprint (``bridges.deck_underside``);
-:func:`trim_under_decks` cuts out of a ramp triangle every piece that lies in a footprint where that deck has less
-than ``RAMP_MIN_CLEARANCE_M`` over it. :class:`RampLines` tells the water stage which lines still mask a ramp whole.
+:func:`trim_under_decks` cuts out of a ramp triangle every footprint quad whose deck has less than
+``RAMP_MIN_CLEARANCE_M`` over the part of the triangle in it. :class:`RampLines` tells the water stage which lines
+still mask a ramp whole.
 
 Pure geometry, no I/O.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 
-from .overlap import triangle_touches
+from .overlap import (bounding_box, boxes_meet, convex_difference, convex_intersection, polygon_area,
+                      signed_area2)
 
 Pt = tuple[float, float]
 Vec3 = tuple[float, float, float]
 Tri = tuple[Vec3, Vec3, Vec3]
+Box = tuple[float, float, float, float]               # (min x, min y, max x, max y)
 Line = tuple[Sequence[Pt], float]                     # (polyline, half width)
 WaterMax = Callable[[Pt, Pt], "float | None"]         # the highest water level along a segment, or None
 
 RAMP_MIN_CLEARANCE_M = 2.5   # passages.MIN_CLEARANCE_M: the lowest free height under a deck that is not at-grade
-TRIM_DEPTH = 5               # a ramp triangle is quartered at most this often: 12 m ramps are cut to under 0.4 m
+MIN_PIECE_AREA_M2 = 1e-6     # a clipped piece smaller than this is a rounding sliver, not ramp
 
 
 @dataclass(frozen=True)
@@ -36,20 +40,29 @@ class DeckUnderside:
     z: Sequence[float]
     footprint: Sequence[Sequence[Pt]]
 
-    def at_grade_over(self, tri: Sequence[Vec3]) -> bool:
-        """Whether the triangle meets the footprint somewhere the deck does not clear it."""
-        plan = [(v[0], v[1]) for v in tri]
-        return any(triangle_touches(plan, quad, 0.0, closed=True) for quad in self.footprint) \
-            and not self.clears(tri)
+    @cached_property
+    def _quad_boxes(self) -> list[Box]:
+        return [bounding_box(quad) for quad in self.footprint]
 
-    def clears(self, tri: Sequence[Vec3], clearance: float = RAMP_MIN_CLEARANCE_M) -> bool:
-        """Whether the deck stands at least ``clearance`` above the whole triangle. A triangle reaching past a deck
-        end (an abutment) is never cleared."""
-        stations = [self._station(v[0], v[1]) for v in tri]
+    def at_grade_quads(self, tri: Tri) -> Iterator[Sequence[Pt]]:
+        """The footprint quads that share area with the triangle and do not clear the part of it they cover."""
+        plan = _plan(tri)
+        plan_box = bounding_box(plan)
+        for quad, quad_box in zip(self.footprint, self._quad_boxes):
+            if not boxes_meet(plan_box, quad_box):
+                continue
+            covered = convex_intersection(plan, quad)
+            if polygon_area(covered) > MIN_PIECE_AREA_M2 and not self.clears([_lift(tri, p) for p in covered]):
+                yield quad
+
+    def clears(self, piece: Sequence[Vec3], clearance: float = RAMP_MIN_CLEARANCE_M) -> bool:
+        """Whether the deck stands at least ``clearance`` above the whole planar piece. A piece reaching past a
+        deck end (an abutment) is never cleared."""
+        stations = [self._station(v[0], v[1]) for v in piece]
         known = [st for st in stations if st is not None]
         if len(known) < len(stations):
             return False
-        return self._lowest_between(min(known), max(known)) - max(v[2] for v in tri) >= clearance
+        return self._lowest_between(min(known), max(known)) - max(v[2] for v in piece) >= clearance
 
     def _station(self, x: float, y: float) -> float | None:
         """Arc length of the path point nearest to (x, y); None if that is an end of the path or past it."""
@@ -79,27 +92,37 @@ class DeckUnderside:
         raise ValueError(f"arc length {st} is off the deck path")
 
 
-def trim_under_decks(tri: Tri, decks: Sequence[DeckUnderside], depth: int = TRIM_DEPTH) -> list[Tri]:
-    """The pieces of a ramp triangle that no deck in ``decks`` stands at-grade over: the triangle itself if none
-    does, else its midpoint quarters, trimmed in turn; a piece still under an at-grade deck after ``depth``
-    quarterings is left out."""
-    near = [d for d in decks if d.at_grade_over(tri)]
-    if not near:
+def trim_under_decks(tri: Tri, decks: Sequence[DeckUnderside]) -> list[Tri]:
+    """The ramp triangle minus every at-grade footprint quad of ``decks``: the triangle itself if there is none,
+    else the rest as fans of triangles in the triangle's plane, wound like it."""
+    cuts = [quad for deck in decks for quad in deck.at_grade_quads(tri)]
+    if not cuts:
         return [tri]
-    if depth == 0:
-        return []
-    return [piece for quarter in _quarters(tri) for piece in trim_under_decks(quarter, near, depth - 1)]
+    pieces = [_plan(tri)]
+    for quad in cuts:
+        pieces = [rest for piece in pieces for rest in convex_difference(piece, quad)]
+    counter_clockwise = signed_area2(_plan(tri)) > 0.0
+    return [(_lift(tri, a), _lift(tri, b), _lift(tri, c)) for piece in pieces
+            for a, b, c in _fan(piece, counter_clockwise) if polygon_area((a, b, c)) > MIN_PIECE_AREA_M2]
 
 
-def _quarters(tri: Tri) -> list[Tri]:
-    """The four midpoint sub-triangles, each wound like ``tri``."""
-    a, b, c = tri
-    ab, bc, ca = _mid(a, b), _mid(b, c), _mid(c, a)
-    return [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+def _plan(tri: Sequence[Vec3]) -> list[Pt]:
+    return [(v[0], v[1]) for v in tri]
 
 
-def _mid(p: Vec3, q: Vec3) -> Vec3:
-    return ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2)
+def _fan(piece: Sequence[Pt], counter_clockwise: bool) -> list[tuple[Pt, Pt, Pt]]:
+    """A convex polygon as a triangle fan from its first vertex, each wound counter-clockwise or clockwise."""
+    ring = list(piece) if (signed_area2(piece) > 0.0) == counter_clockwise else list(reversed(piece))
+    return [(ring[0], ring[i], ring[i + 1]) for i in range(1, len(ring) - 1)]
+
+
+def _lift(tri: Tri, p: Pt) -> Vec3:
+    """The point of the triangle's plane over ``p`` (barycentric; ``tri`` is not degenerate in plan)."""
+    (ax, ay, az), (bx, by, bz), (cx, cy, cz) = tri
+    det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    wa = ((by - cy) * (p[0] - cx) + (cx - bx) * (p[1] - cy)) / det
+    wb = ((cy - ay) * (p[0] - cx) + (ax - cx) * (p[1] - cy)) / det
+    return p[0], p[1], wa * az + wb * bz + (1.0 - wa - wb) * cz
 
 
 @dataclass

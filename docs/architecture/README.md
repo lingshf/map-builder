@@ -76,9 +76,10 @@ cushion.
    exact area predicates in `core/overlap.py`:
    * against footprints, road ribbons, tunnels and bridges without a deck, with whole-strip masks;
    * against highway bridge decks only where the deck is at-grade (D178, `core/deck_underside.py`): a bank ramp may
-     pass under an elevated deck, and is clipped out of the deck's plan footprint (sunk ends included) wherever the
-     deck's underside, bounded from below by its ground-and-water profile (`bridges.deck_underside`), stands less
-     than 2.5 m above it or the ramp reaches past a deck end. Clipping quarters a triangle at most 5 times;
+     pass under an elevated deck. It is cut exactly out of each quad of the deck's plan footprint (one per path
+     segment, sunk ends included) whose deck underside, bounded from below by its ground-and-water profile
+     (`bridges.deck_underside`), stands less than 2.5 m above the part of the ramp in it, or where that part reaches
+     past a deck end; the rest is fanned into triangles;
    * against other water, by positive area, where a cascade may overlap only its lower receiving body.
 
    A blocked strip is skipped; its length, and that of a clipped strip, is added to `info["shore_ramp_blocked_m"]`.

@@ -44,7 +44,7 @@ def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequ
     """
     if perf_counters.ENABLED:
         perf_counters.inc("overlap_pairs")
-    if not _boxes_meet(_box(tri), _box(outer)):
+    if not boxes_meet(bounding_box(tri), bounding_box(outer)):
         return False
     origin = tri[0]
     tri_local = [_sub_xy(p, origin) for p in tri]
@@ -117,12 +117,12 @@ def _side(a: Pt, b: Pt, p: Pt) -> float:
     return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
 
 
-def _box(points: Sequence[Pt]) -> tuple[float, float, float, float]:
+def bounding_box(points: Sequence[Pt]) -> tuple[float, float, float, float]:
     xs, ys = [p[0] for p in points], [p[1] for p in points]
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def _boxes_meet(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+def boxes_meet(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
     return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
 
 
@@ -131,14 +131,43 @@ def _clipped_ring_area(tri: Sequence[Pt], ring: Sequence[Pt]) -> float:
     if len(poly) < 3:
         return 0.0
     t = list(tri)
-    if _signed_area2(t) < 0.0:
+    if signed_area2(t) < 0.0:
         t[1], t[2] = t[2], t[1]
     for i in range(3):
         a, b = t[i], t[(i + 1) % 3]
         poly = _clip_against_edge(poly, a, b)
         if len(poly) < 3:
             return 0.0
-    return _polygon_area(poly)
+    return polygon_area(poly)
+
+
+def convex_intersection(subject: Sequence[Pt], clip: Sequence[Pt]) -> list[Pt]:
+    """The convex polygon ``subject`` cut to the convex polygon ``clip`` (either winding); [] if they share no area."""
+    poly = list(subject)
+    for a, b in _edges(_counter_clockwise(clip), True):
+        poly = _clip_against_edge(poly, a, b)
+        if len(poly) < 3:
+            return []
+    return poly
+
+
+def convex_difference(subject: Sequence[Pt], clip: Sequence[Pt]) -> list[list[Pt]]:
+    """The convex polygon ``subject`` minus the convex polygon ``clip`` (either winding), as convex pieces: the part
+    outside each edge of ``clip`` of what the previous edges left inside."""
+    pieces: list[list[Pt]] = []
+    rest = list(subject)
+    for a, b in _edges(_counter_clockwise(clip), True):
+        outside = _clip_against_edge(rest, b, a)
+        if len(outside) >= 3 and polygon_area(outside) > 0.0:
+            pieces.append(outside)
+        rest = _clip_against_edge(rest, a, b)
+        if len(rest) < 3:
+            break
+    return pieces
+
+
+def _counter_clockwise(ring: Sequence[Pt]) -> list[Pt]:
+    return list(ring) if signed_area2(ring) >= 0.0 else list(reversed(ring))
 
 
 def _clip_against_edge(subject: list[Pt], a: Pt, b: Pt) -> list[Pt]:
@@ -172,12 +201,12 @@ def _line_intersection_by_side(a: Pt, b: Pt, side_a: float, side_b: float) -> Pt
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
 
 
-def _polygon_area(poly: Sequence[Pt]) -> float:
+def polygon_area(poly: Sequence[Pt]) -> float:
     return 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
                          for i in range(len(poly))))
 
 
-def _signed_area2(poly: Sequence[Pt]) -> float:
+def signed_area2(poly: Sequence[Pt]) -> float:
     return sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
                for i in range(len(poly)))
 
