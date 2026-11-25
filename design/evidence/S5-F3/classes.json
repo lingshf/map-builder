@@ -1,0 +1,1006 @@
+{
+ "water_above_bank:col#3": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/34575267"
+ ],
+ "water_above_bank:col#1": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/33731358, osm:way/34575500"
+ ],
+ "water_above_bank:col#4": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/317417201"
+ ],
+ "water_above_bank:col#2": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/23615351"
+ ],
+ "water_above_bank:vis#3": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/34575267"
+ ],
+ "water_above_bank:vis#1": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/33731358, osm:way/34575500"
+ ],
+ "water_above_bank:vis#4": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/317417201"
+ ],
+ "water_above_bank:vis#2": [
+  "D",
+  "sheet edge above the outside terrain by more than the 1.5 m carve step; bank ramp skipped (shore_ramp_blocked_m): strip meets the line mask of osm:way/23615351"
+ ],
+ "water_shore_step:col#68": [
+  "E",
+  "designed shore step on the audit ring, max 0.514 m <= 1.501 m"
+ ],
+ "water_shore_step:col#14": [
+  "E",
+  "designed shore step on the audit ring, max 0.937 m <= 1.501 m"
+ ],
+ "water_shore_step:col#69": [
+  "E",
+  "designed shore step on the audit ring, max 0.376 m <= 1.501 m"
+ ],
+ "water_shore_step:col#1": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:col#6": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:col#5": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:col#70": [
+  "E",
+  "designed shore step on the audit ring, max 0.420 m <= 1.501 m"
+ ],
+ "water_shore_step:col#71": [
+  "E",
+  "designed shore step on the audit ring, max 0.409 m <= 1.501 m"
+ ],
+ "water_shore_step:col#72": [
+  "E",
+  "designed shore step on the audit ring, max 0.398 m <= 1.501 m"
+ ],
+ "water_shore_step:col#73": [
+  "E",
+  "designed shore step on the audit ring, max 0.386 m <= 1.501 m"
+ ],
+ "water_shore_step:col#7": [
+  "E",
+  "designed shore step on the audit ring, max 0.980 m <= 1.501 m"
+ ],
+ "water_shore_step:col#74": [
+  "E",
+  "designed shore step on the audit ring, max 0.420 m <= 1.501 m"
+ ],
+ "water_shore_step:col#75": [
+  "E",
+  "designed shore step on the audit ring, max 0.433 m <= 1.501 m"
+ ],
+ "water_shore_step:col#76": [
+  "E",
+  "designed shore step on the audit ring, max 0.445 m <= 1.501 m"
+ ],
+ "water_shore_step:col#77": [
+  "E",
+  "designed shore step on the audit ring, max 0.458 m <= 1.501 m"
+ ],
+ "water_shore_step:col#78": [
+  "E",
+  "designed shore step on the audit ring, max 0.470 m <= 1.501 m"
+ ],
+ "water_shore_step:col#79": [
+  "E",
+  "designed shore step on the audit ring, max 0.470 m <= 1.501 m"
+ ],
+ "water_shore_step:col#80": [
+  "E",
+  "designed shore step on the audit ring, max 0.455 m <= 1.501 m"
+ ],
+ "water_shore_step:col#81": [
+  "E",
+  "designed shore step on the audit ring, max 0.451 m <= 1.501 m"
+ ],
+ "water_shore_step:col#82": [
+  "E",
+  "designed shore step on the audit ring, max 0.509 m <= 1.501 m"
+ ],
+ "water_shore_step:col#83": [
+  "E",
+  "designed shore step on the audit ring, max 0.533 m <= 1.501 m"
+ ],
+ "water_shore_step:col#25": [
+  "E",
+  "designed shore step on the audit ring, max 0.723 m <= 1.501 m"
+ ],
+ "water_shore_step:col#84": [
+  "E",
+  "designed shore step on the audit ring, max 0.356 m <= 1.501 m"
+ ],
+ "water_shore_step:col#85": [
+  "E",
+  "designed shore step on the audit ring, max 0.381 m <= 1.501 m"
+ ],
+ "water_shore_step:col#86": [
+  "E",
+  "designed shore step on the audit ring, max 0.411 m <= 1.501 m"
+ ],
+ "water_shore_step:col#87": [
+  "E",
+  "designed shore step on the audit ring, max 0.431 m <= 1.501 m"
+ ],
+ "water_shore_step:col#88": [
+  "E",
+  "designed shore step on the audit ring, max 0.443 m <= 1.501 m"
+ ],
+ "water_shore_step:col#89": [
+  "E",
+  "designed shore step on the audit ring, max 0.456 m <= 1.501 m"
+ ],
+ "water_shore_step:col#90": [
+  "E",
+  "designed shore step on the audit ring, max 0.468 m <= 1.501 m"
+ ],
+ "water_shore_step:col#91": [
+  "E",
+  "designed shore step on the audit ring, max 0.481 m <= 1.501 m"
+ ],
+ "water_shore_step:col#92": [
+  "E",
+  "designed shore step on the audit ring, max 0.494 m <= 1.501 m"
+ ],
+ "water_shore_step:col#93": [
+  "E",
+  "designed shore step on the audit ring, max 0.504 m <= 1.501 m"
+ ],
+ "water_shore_step:col#94": [
+  "E",
+  "designed shore step on the audit ring, max 0.514 m <= 1.501 m"
+ ],
+ "water_shore_step:col#95": [
+  "E",
+  "designed shore step on the audit ring, max 0.535 m <= 1.501 m"
+ ],
+ "water_shore_step:col#48": [
+  "E",
+  "designed shore step on the audit ring, max 0.647 m <= 1.501 m"
+ ],
+ "water_shore_step:col#65": [
+  "E",
+  "designed shore step on the audit ring, max 0.544 m <= 1.501 m"
+ ],
+ "water_shore_step:col#51": [
+  "E",
+  "designed shore step on the audit ring, max 0.754 m <= 1.501 m"
+ ],
+ "water_shore_step:col#52": [
+  "E",
+  "designed shore step on the audit ring, max 0.729 m <= 1.501 m"
+ ],
+ "water_shore_step:col#53": [
+  "E",
+  "designed shore step on the audit ring, max 0.792 m <= 1.501 m"
+ ],
+ "water_shore_step:col#35": [
+  "E",
+  "designed shore step on the audit ring, max 0.753 m <= 1.501 m"
+ ],
+ "water_shore_step:col#96": [
+  "E",
+  "designed shore step on the audit ring, max 0.486 m <= 1.501 m"
+ ],
+ "water_shore_step:col#97": [
+  "E",
+  "designed shore step on the audit ring, max 0.435 m <= 1.501 m"
+ ],
+ "water_shore_step:col#44": [
+  "E",
+  "designed shore step on the audit ring, max 0.680 m <= 1.501 m"
+ ],
+ "water_shore_step:col#22": [
+  "E",
+  "designed shore step on the audit ring, max 0.841 m <= 1.501 m"
+ ],
+ "water_shore_step:col#16": [
+  "E",
+  "designed shore step on the audit ring, max 0.986 m <= 1.501 m"
+ ],
+ "water_shore_step:col#45": [
+  "E",
+  "designed shore step on the audit ring, max 0.799 m <= 1.501 m"
+ ],
+ "water_shore_step:col#38": [
+  "E",
+  "designed shore step on the audit ring, max 0.806 m <= 1.501 m"
+ ],
+ "water_shore_step:col#15": [
+  "D",
+  "shore step 1.518 m above the 1.501 m bound; 65 cells on a bank: ramp; ramp missing at the rest (osm:way/33731358, osm:way/34575267, osm:way/34575500, osm:way/4744359, osm:way/4744407, osm:way/4752302)"
+ ],
+ "water_shore_step:col#98": [
+  "E",
+  "designed shore step on the audit ring, max 0.455 m <= 1.501 m"
+ ],
+ "water_shore_step:col#99": [
+  "E",
+  "designed shore step on the audit ring, max 0.433 m <= 1.501 m"
+ ],
+ "water_shore_step:col#100": [
+  "E",
+  "designed shore step on the audit ring, max 0.444 m <= 1.501 m"
+ ],
+ "water_shore_step:col#101": [
+  "E",
+  "designed shore step on the audit ring, max 0.410 m <= 1.501 m"
+ ],
+ "water_shore_step:col#102": [
+  "E",
+  "designed shore step on the audit ring, max 0.413 m <= 1.501 m"
+ ],
+ "water_shore_step:col#103": [
+  "E",
+  "designed shore step on the audit ring, max 0.415 m <= 1.501 m"
+ ],
+ "water_shore_step:col#104": [
+  "E",
+  "designed shore step on the audit ring, max 0.379 m <= 1.501 m"
+ ],
+ "water_shore_step:col#105": [
+  "E",
+  "designed shore step on the audit ring, max 0.395 m <= 1.501 m"
+ ],
+ "water_shore_step:col#106": [
+  "E",
+  "designed shore step on the audit ring, max 0.377 m <= 1.501 m"
+ ],
+ "water_shore_step:col#107": [
+  "E",
+  "designed shore step on the audit ring, max 0.393 m <= 1.501 m"
+ ],
+ "water_shore_step:col#27": [
+  "D",
+  "shore step 1.524 m above the 1.501 m bound; 9 cells on a bank: ramp; ramp missing at the rest (osm:way/34575267, osm:way/4744359, osm:way/4744407)"
+ ],
+ "water_shore_step:col#108": [
+  "E",
+  "designed shore step on the audit ring, max 0.513 m <= 1.501 m"
+ ],
+ "water_shore_step:col#109": [
+  "E",
+  "designed shore step on the audit ring, max 0.465 m <= 1.501 m"
+ ],
+ "water_shore_step:col#13": [
+  "D",
+  "shore step 1.533 m above the 1.501 m bound; 42 cells on a bank: ramp; ramp missing at the rest (osm:way/23615351, osm:way/317417201, osm:way/33731358, osm:way/34575500, osm:way/4752302)"
+ ],
+ "water_shore_step:col#4": [
+  "D",
+  "shore step 1.548 m above the 1.501 m bound; 202 cells on a bank: ramp; ramp missing at the rest (osm:way/214883367, osm:way/23615351, osm:way/317417201, osm:way/34575263, osm:way/34575500, osm:way/4752301, osm:way/4758298, osm:way/83926163)"
+ ],
+ "water_shore_step:col#10": [
+  "D",
+  "shore step 1.544 m above the 1.501 m bound; 116 cells on a bank: ramp; ramp missing at the rest (osm:way/214883367, osm:way/23615351, osm:way/34575263, osm:way/83926163)"
+ ],
+ "water_shore_step:col#12": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:col#110": [
+  "E",
+  "designed shore step on the audit ring, max 0.485 m <= 1.501 m"
+ ],
+ "water_shore_step:col#46": [
+  "E",
+  "designed shore step on the audit ring, max 0.730 m <= 1.501 m"
+ ],
+ "water_shore_step:col#111": [
+  "E",
+  "designed shore step on the audit ring, max 0.474 m <= 1.501 m"
+ ],
+ "water_shore_step:col#33": [
+  "E",
+  "designed shore step on the audit ring, max 0.795 m <= 1.501 m"
+ ],
+ "water_shore_step:col#49": [
+  "E",
+  "designed shore step on the audit ring, max 0.789 m <= 1.501 m"
+ ],
+ "water_shore_step:col#54": [
+  "E",
+  "designed shore step on the audit ring, max 0.767 m <= 1.501 m"
+ ],
+ "water_shore_step:col#17": [
+  "E",
+  "designed shore step on the audit ring, max 0.892 m <= 1.501 m"
+ ],
+ "water_shore_step:col#55": [
+  "E",
+  "designed shore step on the audit ring, max 0.759 m <= 1.501 m"
+ ],
+ "water_shore_step:col#56": [
+  "E",
+  "designed shore step on the audit ring, max 0.751 m <= 1.501 m"
+ ],
+ "water_shore_step:col#57": [
+  "E",
+  "designed shore step on the audit ring, max 0.743 m <= 1.501 m"
+ ],
+ "water_shore_step:col#8": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:col#66": [
+  "E",
+  "designed shore step on the audit ring, max 0.523 m <= 1.501 m"
+ ],
+ "water_shore_step:col#18": [
+  "E",
+  "designed shore step on the audit ring, max 0.914 m <= 1.501 m"
+ ],
+ "water_shore_step:col#47": [
+  "E",
+  "designed shore step on the audit ring, max 0.780 m <= 1.501 m"
+ ],
+ "water_shore_step:col#9": [
+  "E",
+  "designed shore step on the audit ring, max 0.995 m <= 1.501 m"
+ ],
+ "water_shore_step:col#58": [
+  "E",
+  "designed shore step on the audit ring, max 0.769 m <= 1.501 m"
+ ],
+ "water_shore_step:col#39": [
+  "E",
+  "designed shore step on the audit ring, max 0.821 m <= 1.501 m"
+ ],
+ "water_shore_step:col#40": [
+  "E",
+  "designed shore step on the audit ring, max 0.811 m <= 1.501 m"
+ ],
+ "water_shore_step:col#23": [
+  "E",
+  "designed shore step on the audit ring, max 0.889 m <= 1.501 m"
+ ],
+ "water_shore_step:col#41": [
+  "E",
+  "designed shore step on the audit ring, max 0.788 m <= 1.501 m"
+ ],
+ "water_shore_step:col#28": [
+  "E",
+  "designed shore step on the audit ring, max 0.868 m <= 1.501 m"
+ ],
+ "water_shore_step:col#112": [
+  "E",
+  "designed shore step on the audit ring, max 0.487 m <= 1.501 m"
+ ],
+ "water_shore_step:col#26": [
+  "E",
+  "designed shore step on the audit ring, max 0.994 m <= 1.501 m"
+ ],
+ "water_shore_step:col#59": [
+  "E",
+  "designed shore step on the audit ring, max 0.785 m <= 1.501 m"
+ ],
+ "water_shore_step:col#60": [
+  "E",
+  "designed shore step on the audit ring, max 0.784 m <= 1.501 m"
+ ],
+ "water_shore_step:col#61": [
+  "E",
+  "designed shore step on the audit ring, max 0.783 m <= 1.501 m"
+ ],
+ "water_shore_step:col#42": [
+  "E",
+  "designed shore step on the audit ring, max 0.796 m <= 1.501 m"
+ ],
+ "water_shore_step:col#62": [
+  "E",
+  "designed shore step on the audit ring, max 0.781 m <= 1.501 m"
+ ],
+ "water_shore_step:col#2": [
+  "E",
+  "designed shore step on the audit ring, max 1.001 m <= 1.501 m"
+ ],
+ "water_shore_step:col#34": [
+  "E",
+  "designed shore step on the audit ring, max 0.815 m <= 1.501 m"
+ ],
+ "water_shore_step:col#3": [
+  "E",
+  "designed shore step on the audit ring, max 0.999 m <= 1.501 m"
+ ],
+ "water_shore_step:col#24": [
+  "E",
+  "designed shore step on the audit ring, max 0.995 m <= 1.501 m"
+ ],
+ "water_shore_step:col#19": [
+  "E",
+  "designed shore step on the audit ring, max 0.940 m <= 1.501 m"
+ ],
+ "water_shore_step:col#64": [
+  "E",
+  "designed shore step on the audit ring, max 0.711 m <= 1.501 m"
+ ],
+ "water_shore_step:col#113": [
+  "E",
+  "designed shore step on the audit ring, max 0.447 m <= 1.501 m"
+ ],
+ "water_shore_step:col#32": [
+  "E",
+  "designed shore step on the audit ring, max 0.936 m <= 1.501 m"
+ ],
+ "water_shore_step:col#43": [
+  "E",
+  "designed shore step on the audit ring, max 0.810 m <= 1.501 m"
+ ],
+ "water_shore_step:col#114": [
+  "E",
+  "designed shore step on the audit ring, max 0.457 m <= 1.501 m"
+ ],
+ "water_shore_step:col#115": [
+  "E",
+  "designed shore step on the audit ring, max 0.467 m <= 1.501 m"
+ ],
+ "water_shore_step:col#116": [
+  "E",
+  "designed shore step on the audit ring, max 0.477 m <= 1.501 m"
+ ],
+ "water_shore_step:col#50": [
+  "E",
+  "designed shore step on the audit ring, max 0.753 m <= 1.501 m"
+ ],
+ "water_shore_step:col#29": [
+  "E",
+  "designed shore step on the audit ring, max 0.840 m <= 1.501 m"
+ ],
+ "water_shore_step:col#31": [
+  "E",
+  "designed shore step on the audit ring, max 0.842 m <= 1.501 m"
+ ],
+ "water_shore_step:col#11": [
+  "E",
+  "designed shore step on the audit ring, max 0.968 m <= 1.501 m"
+ ],
+ "water_shore_step:col#21": [
+  "E",
+  "designed shore step on the audit ring, max 0.941 m <= 1.501 m"
+ ],
+ "water_shore_step:col#36": [
+  "E",
+  "designed shore step on the audit ring, max 0.840 m <= 1.501 m"
+ ],
+ "water_shore_step:col#67": [
+  "E",
+  "designed shore step on the audit ring, max 0.458 m <= 1.501 m"
+ ],
+ "water_shore_step:col#20": [
+  "E",
+  "designed shore step on the audit ring, max 0.940 m <= 1.501 m"
+ ],
+ "water_shore_step:col#30": [
+  "E",
+  "designed shore step on the audit ring, max 0.971 m <= 1.501 m"
+ ],
+ "water_shore_step:col#37": [
+  "E",
+  "designed shore step on the audit ring, max 0.865 m <= 1.501 m"
+ ],
+ "water_shore_step:col#117": [
+  "E",
+  "designed shore step on the audit ring, max 0.498 m <= 1.501 m"
+ ],
+ "water_shore_step:col#118": [
+  "E",
+  "designed shore step on the audit ring, max 0.462 m <= 1.501 m"
+ ],
+ "water_shore_step:col#119": [
+  "E",
+  "designed shore step on the audit ring, max 0.423 m <= 1.501 m"
+ ],
+ "water_shore_step:col#63": [
+  "E",
+  "designed shore step on the audit ring, max 0.695 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#68": [
+  "E",
+  "designed shore step on the audit ring, max 0.514 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#14": [
+  "E",
+  "designed shore step on the audit ring, max 0.937 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#69": [
+  "E",
+  "designed shore step on the audit ring, max 0.376 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#1": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#6": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#5": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#70": [
+  "E",
+  "designed shore step on the audit ring, max 0.420 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#71": [
+  "E",
+  "designed shore step on the audit ring, max 0.409 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#72": [
+  "E",
+  "designed shore step on the audit ring, max 0.398 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#73": [
+  "E",
+  "designed shore step on the audit ring, max 0.386 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#7": [
+  "E",
+  "designed shore step on the audit ring, max 0.980 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#74": [
+  "E",
+  "designed shore step on the audit ring, max 0.420 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#75": [
+  "E",
+  "designed shore step on the audit ring, max 0.433 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#76": [
+  "E",
+  "designed shore step on the audit ring, max 0.445 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#77": [
+  "E",
+  "designed shore step on the audit ring, max 0.458 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#78": [
+  "E",
+  "designed shore step on the audit ring, max 0.470 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#79": [
+  "E",
+  "designed shore step on the audit ring, max 0.470 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#80": [
+  "E",
+  "designed shore step on the audit ring, max 0.455 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#81": [
+  "E",
+  "designed shore step on the audit ring, max 0.451 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#82": [
+  "E",
+  "designed shore step on the audit ring, max 0.509 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#83": [
+  "E",
+  "designed shore step on the audit ring, max 0.533 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#25": [
+  "E",
+  "designed shore step on the audit ring, max 0.723 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#84": [
+  "E",
+  "designed shore step on the audit ring, max 0.356 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#85": [
+  "E",
+  "designed shore step on the audit ring, max 0.381 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#86": [
+  "E",
+  "designed shore step on the audit ring, max 0.411 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#87": [
+  "E",
+  "designed shore step on the audit ring, max 0.431 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#88": [
+  "E",
+  "designed shore step on the audit ring, max 0.443 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#89": [
+  "E",
+  "designed shore step on the audit ring, max 0.456 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#90": [
+  "E",
+  "designed shore step on the audit ring, max 0.468 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#91": [
+  "E",
+  "designed shore step on the audit ring, max 0.481 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#92": [
+  "E",
+  "designed shore step on the audit ring, max 0.494 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#93": [
+  "E",
+  "designed shore step on the audit ring, max 0.504 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#94": [
+  "E",
+  "designed shore step on the audit ring, max 0.514 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#95": [
+  "E",
+  "designed shore step on the audit ring, max 0.535 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#48": [
+  "E",
+  "designed shore step on the audit ring, max 0.647 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#65": [
+  "E",
+  "designed shore step on the audit ring, max 0.544 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#51": [
+  "E",
+  "designed shore step on the audit ring, max 0.754 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#52": [
+  "E",
+  "designed shore step on the audit ring, max 0.729 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#53": [
+  "E",
+  "designed shore step on the audit ring, max 0.792 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#35": [
+  "E",
+  "designed shore step on the audit ring, max 0.753 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#96": [
+  "E",
+  "designed shore step on the audit ring, max 0.486 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#97": [
+  "E",
+  "designed shore step on the audit ring, max 0.435 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#44": [
+  "E",
+  "designed shore step on the audit ring, max 0.680 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#22": [
+  "E",
+  "designed shore step on the audit ring, max 0.841 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#16": [
+  "E",
+  "designed shore step on the audit ring, max 0.986 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#45": [
+  "E",
+  "designed shore step on the audit ring, max 0.799 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#38": [
+  "E",
+  "designed shore step on the audit ring, max 0.806 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#15": [
+  "D",
+  "shore step 1.518 m above the 1.501 m bound; 65 cells on a bank: ramp; ramp missing at the rest (osm:way/33731358, osm:way/34575267, osm:way/34575500, osm:way/4744359, osm:way/4744407, osm:way/4752302)"
+ ],
+ "water_shore_step:vis#98": [
+  "E",
+  "designed shore step on the audit ring, max 0.455 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#99": [
+  "E",
+  "designed shore step on the audit ring, max 0.433 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#100": [
+  "E",
+  "designed shore step on the audit ring, max 0.444 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#101": [
+  "E",
+  "designed shore step on the audit ring, max 0.410 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#102": [
+  "E",
+  "designed shore step on the audit ring, max 0.413 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#103": [
+  "E",
+  "designed shore step on the audit ring, max 0.415 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#104": [
+  "E",
+  "designed shore step on the audit ring, max 0.379 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#105": [
+  "E",
+  "designed shore step on the audit ring, max 0.395 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#106": [
+  "E",
+  "designed shore step on the audit ring, max 0.377 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#107": [
+  "E",
+  "designed shore step on the audit ring, max 0.393 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#27": [
+  "D",
+  "shore step 1.524 m above the 1.501 m bound; 9 cells on a bank: ramp; ramp missing at the rest (osm:way/34575267, osm:way/4744359, osm:way/4744407)"
+ ],
+ "water_shore_step:vis#108": [
+  "E",
+  "designed shore step on the audit ring, max 0.513 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#109": [
+  "E",
+  "designed shore step on the audit ring, max 0.465 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#13": [
+  "D",
+  "shore step 1.533 m above the 1.501 m bound; 42 cells on a bank: ramp; ramp missing at the rest (osm:way/23615351, osm:way/317417201, osm:way/33731358, osm:way/34575500, osm:way/4752302)"
+ ],
+ "water_shore_step:vis#4": [
+  "D",
+  "shore step 1.548 m above the 1.501 m bound; 202 cells on a bank: ramp; ramp missing at the rest (osm:way/214883367, osm:way/23615351, osm:way/317417201, osm:way/34575263, osm:way/34575500, osm:way/4752301, osm:way/4758298, osm:way/83926163)"
+ ],
+ "water_shore_step:vis#10": [
+  "D",
+  "shore step 1.544 m above the 1.501 m bound; 116 cells on a bank: ramp; ramp missing at the rest (osm:way/214883367, osm:way/23615351, osm:way/34575263, osm:way/83926163)"
+ ],
+ "water_shore_step:vis#12": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#110": [
+  "E",
+  "designed shore step on the audit ring, max 0.485 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#46": [
+  "E",
+  "designed shore step on the audit ring, max 0.730 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#111": [
+  "E",
+  "designed shore step on the audit ring, max 0.474 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#33": [
+  "E",
+  "designed shore step on the audit ring, max 0.795 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#49": [
+  "E",
+  "designed shore step on the audit ring, max 0.789 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#54": [
+  "E",
+  "designed shore step on the audit ring, max 0.767 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#17": [
+  "E",
+  "designed shore step on the audit ring, max 0.892 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#55": [
+  "E",
+  "designed shore step on the audit ring, max 0.759 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#56": [
+  "E",
+  "designed shore step on the audit ring, max 0.751 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#57": [
+  "E",
+  "designed shore step on the audit ring, max 0.743 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#8": [
+  "E",
+  "designed shore step on the audit ring, max 1.500 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#66": [
+  "E",
+  "designed shore step on the audit ring, max 0.523 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#18": [
+  "E",
+  "designed shore step on the audit ring, max 0.914 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#47": [
+  "E",
+  "designed shore step on the audit ring, max 0.780 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#9": [
+  "E",
+  "designed shore step on the audit ring, max 0.995 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#58": [
+  "E",
+  "designed shore step on the audit ring, max 0.769 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#39": [
+  "E",
+  "designed shore step on the audit ring, max 0.821 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#40": [
+  "E",
+  "designed shore step on the audit ring, max 0.811 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#23": [
+  "E",
+  "designed shore step on the audit ring, max 0.889 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#41": [
+  "E",
+  "designed shore step on the audit ring, max 0.788 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#28": [
+  "E",
+  "designed shore step on the audit ring, max 0.868 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#112": [
+  "E",
+  "designed shore step on the audit ring, max 0.487 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#26": [
+  "E",
+  "designed shore step on the audit ring, max 0.994 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#59": [
+  "E",
+  "designed shore step on the audit ring, max 0.785 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#60": [
+  "E",
+  "designed shore step on the audit ring, max 0.784 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#61": [
+  "E",
+  "designed shore step on the audit ring, max 0.783 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#42": [
+  "E",
+  "designed shore step on the audit ring, max 0.796 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#62": [
+  "E",
+  "designed shore step on the audit ring, max 0.781 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#2": [
+  "E",
+  "designed shore step on the audit ring, max 1.001 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#34": [
+  "E",
+  "designed shore step on the audit ring, max 0.815 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#3": [
+  "E",
+  "designed shore step on the audit ring, max 0.999 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#24": [
+  "E",
+  "designed shore step on the audit ring, max 0.995 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#19": [
+  "E",
+  "designed shore step on the audit ring, max 0.940 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#64": [
+  "E",
+  "designed shore step on the audit ring, max 0.711 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#113": [
+  "E",
+  "designed shore step on the audit ring, max 0.447 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#32": [
+  "E",
+  "designed shore step on the audit ring, max 0.936 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#43": [
+  "E",
+  "designed shore step on the audit ring, max 0.810 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#114": [
+  "E",
+  "designed shore step on the audit ring, max 0.457 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#115": [
+  "E",
+  "designed shore step on the audit ring, max 0.467 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#116": [
+  "E",
+  "designed shore step on the audit ring, max 0.477 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#50": [
+  "E",
+  "designed shore step on the audit ring, max 0.753 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#29": [
+  "E",
+  "designed shore step on the audit ring, max 0.840 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#31": [
+  "E",
+  "designed shore step on the audit ring, max 0.842 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#11": [
+  "E",
+  "designed shore step on the audit ring, max 0.968 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#21": [
+  "E",
+  "designed shore step on the audit ring, max 0.941 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#36": [
+  "E",
+  "designed shore step on the audit ring, max 0.840 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#67": [
+  "E",
+  "designed shore step on the audit ring, max 0.458 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#20": [
+  "E",
+  "designed shore step on the audit ring, max 0.940 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#30": [
+  "E",
+  "designed shore step on the audit ring, max 0.971 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#37": [
+  "E",
+  "designed shore step on the audit ring, max 0.865 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#117": [
+  "E",
+  "designed shore step on the audit ring, max 0.498 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#118": [
+  "E",
+  "designed shore step on the audit ring, max 0.462 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#119": [
+  "E",
+  "designed shore step on the audit ring, max 0.423 m <= 1.501 m"
+ ],
+ "water_shore_step:vis#63": [
+  "E",
+  "designed shore step on the audit ring, max 0.695 m <= 1.501 m"
+ ],
+ "hf_below_ground:water#1": [
+  "E",
+  "D117: every node of .mbhf equals the collision bed under the sheet"
+ ],
+ "hf_below_ground:water#2": [
+  "E",
+  "D117: every node of .mbhf equals the collision bed under the sheet"
+ ],
+ "hf_below_ground:water#3": [
+  "E",
+  "D117: every node of .mbhf equals the collision bed under the sheet"
+ ],
+ "hf_below_ground:water#4": [
+  "E",
+  "D117: every node of .mbhf equals the collision bed under the sheet"
+ ],
+ "hf_below_ground:water#5": [
+  "E",
+  "D117: every node of .mbhf equals the collision bed under the sheet"
+ ]
+}
