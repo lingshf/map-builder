@@ -237,6 +237,13 @@ class GateModeTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             work_count.main(["compare", "--base", "b", "--head", "h", "--base-peer", "bp", "--head-peer", "hp"])
 
+    def test_noop_cannot_be_combined_with_the_cpu_waiver(self) -> None:
+        # The waiver always reports an F5 event, so a no-op run with it can never be clean: refuse the combination.
+        with self.assertRaises(SystemExit) as refused:
+            work_count.main(["compare", "--base", "b", "--head", "h", "--base-peer", "bp", "--head-peer", "hp",
+                             "--noop", "--no-cpu-evidence"])
+        self.assertNotEqual(refused.exception.code, 0)
+
 
 class CpuRoundsTest(unittest.TestCase):
     def test_non_finite_times_are_rejected(self) -> None:

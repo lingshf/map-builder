@@ -165,7 +165,7 @@ python -m tools.perf.work_count compare --base <base.json> --head <head.json> --
 Run each preset (`munich`, `pittsburgh`) and series (`cli_generate`, `blender_generate`,
 `blender_generate_export`) twice per revision; the second run is the determinism peer, and the checker validates it
 as strictly as the first. Both peers and either CPU evidence or an explicit `--no-cpu-evidence` waiver (reported as an
-F5 review item) are mandatory. The collector fails when a counter's registry total differs from the sum of its stage
+F5 review item) are mandatory; `--noop` cannot be combined with the waiver, since the waiver itself reports F5. The collector fails when a counter's registry total differs from the sum of its stage
 rows. The CLI backend refuses to run without `PYTHONHASHSEED=0`; Blender's embedded Python
 ignores that variable, so its determinism rests on the peer run. The cache directory holds `cache-<preset>`,
 copied afresh per run; any network access fails the run.

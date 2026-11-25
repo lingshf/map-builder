@@ -193,7 +193,10 @@ def _run_compare(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.cmd == "compare" and args.noop and args.no_cpu_evidence:
+        parser.error("--noop needs --cpu-rounds: the --no-cpu-evidence waiver always reports an F5 event")
     if args.cmd == "prepare-base":
         print(json.dumps(prepare_merge_base_worktree(
             Path(args.repo).resolve(), head_ref=args.head_ref, base_ref=args.base_ref,
