@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 lingshf
 """S5-F3 step 2 evidence: the ``--pre-carve`` base of tools/water_check.py, the same inputs built without
 water. ``build_water`` gets no water areas, so the emitted terrain mesh is the uncarved (pre-carve) grid.
