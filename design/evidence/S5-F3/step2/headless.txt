@@ -1,4 +1,4 @@
-# D166 headless run on 2328c93: Blender 4.2.23 LTS, tests/blender/run_integration.py (PASS/FAIL/OK lines)
+# D166 headless run on 7fddca09d1f3e0293da33782179b0fc6d698f349: Blender 4.2.23 LTS, tests/blender/run_integration.py (PASS/FAIL/OK lines)
 PASS generate from local fixtures (ok)
 PASS generate created a map collection and selected it for export
 PASS generate added exactly one new collection
@@ -268,4 +268,4 @@ PASS water: Blender water objects (class water) and triangle counts equal the CL
 PASS water: carve invariant on Blender's baked triangles, water:osm:way/1087.002: max terrain-water -0.020000 m
 PASS water bank: fixture has a built body and no fallback (['osm:way/1087'], [])
 PASS water bank: no Blender terrain face carries the water colour under a built body (0 do)
-OK: 0 failure(s); output in <work>\headless
+OK: 0 failure(s); output in C:\Users\shaoling\.copilot\session-state\f63263ea-2f46-48e1-88c6-9d1c39d51a53\files\s5f3\headless_r1
