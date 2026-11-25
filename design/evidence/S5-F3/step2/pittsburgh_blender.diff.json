@@ -3,8 +3,8 @@
   "after": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\after_pittsburgh_blender.mbmap",
   "archive_identical": false,
   "archive_sha256": [
-    "0477e57940d67c62c8a94aae66a895e92b4a18c4e57830e5f00d9e50b5edd70f",
-    "605972038f88f30c6889eb12833fedb89e4f9ebc8fa27010ce9f9604d2943dd3"
+    "d031dc11d4ffa7f1cdc80bacfdeae61517c85d31dd6a2b9dfab996e9b9d586d1",
+    "38ab29a6330071fd7c9bafe98cfc93837d66866876d24b853bbff1db995ce461"
   ],
   "members_changed": [
     "collision/map.mbcol",
@@ -15,7 +15,6 @@
   ],
   "manifest_keys_changed": [
     "collision",
-    "created_utc",
     "files"
   ],
   "manifest_objects": {

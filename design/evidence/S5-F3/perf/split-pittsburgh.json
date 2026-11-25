@@ -4,8 +4,8 @@
   "overlap_edge_tests": 86787
  },
  "head_totals": {
-  "clip_steps": 1096213,
-  "overlap_edge_tests": 102128
+  "clip_steps": 1102831,
+  "overlap_edge_tests": 108746
  },
  "strips_only_in_base": [],
  "strips_only_in_head": [],
@@ -55,8 +55,8 @@
   "dropped_to_kept": {
    "strips": 37,
    "growth": {
-    "clip_steps": 7445,
-    "overlap_edge_tests": 7475
+    "clip_steps": 12442,
+    "overlap_edge_tests": 12472
    },
    "growth_by_test": {
     "blocked_by": {
@@ -68,16 +68,16 @@
      "overlap_edge_tests": 5280
     },
     "trim": {
-     "clip_steps": 2165,
-     "overlap_edge_tests": 2165
+     "clip_steps": 7162,
+     "overlap_edge_tests": 7162
     }
    }
   },
   "dropped_to_trimmed": {
    "strips": 27,
    "growth": {
-    "clip_steps": 6207,
-    "overlap_edge_tests": 6176
+    "clip_steps": 7366,
+    "overlap_edge_tests": 7335
    },
    "growth_by_test": {
     "blocked_by": {
@@ -89,16 +89,16 @@
      "overlap_edge_tests": 3308
     },
     "trim": {
-     "clip_steps": 2899,
-     "overlap_edge_tests": 2899
+     "clip_steps": 4058,
+     "overlap_edge_tests": 4058
     }
    }
   },
   "dropped_to_trimmed_away": {
    "strips": 8,
    "growth": {
-    "clip_steps": 2218,
-    "overlap_edge_tests": 2202
+    "clip_steps": 2680,
+    "overlap_edge_tests": 2664
    },
    "growth_by_test": {
     "blocked_by": {
@@ -110,8 +110,8 @@
      "overlap_edge_tests": 1139
     },
     "trim": {
-     "clip_steps": 1079,
-     "overlap_edge_tests": 1079
+     "clip_steps": 1541,
+     "overlap_edge_tests": 1541
     }
    }
   },
@@ -137,7 +137,7 @@
    }
   }
  },
- "water_stage_calls_growth": 155803,
+ "water_stage_calls_growth": 155870,
  "water_stage_calls_top": {
   "water.py:_build_index": 58597,
   "water.py:add": 28949,
@@ -151,8 +151,8 @@
   "bridges.py:_directions": 1638,
   "bridges.py:<lambda>": 1638,
   "structures.py:_norm": 1594,
-  "generate.py:terrain_height": 1572,
+  "bridges.py:deck_profile": 1572,
   "generate.py:_plane_height": 1572,
-  "bridges.py:deck_profile": 1572
+  "generate.py:terrain_height": 1572
  }
 }

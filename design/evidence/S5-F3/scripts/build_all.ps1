@@ -18,6 +18,8 @@ foreach ($side in @(@('after', $HeadRoot), @('before', $BaseRoot))) {
         $out = "$Work\builds\${tag}_${preset}_cli.mbmap"
         py -3.12 $build cli --root $root --cache $Caches --preset $preset --out $out *> "$out.log"
         "$tag $preset cli exit $LASTEXITCODE"
+    }
+    foreach ($preset in 'bellevue-factoria', 'munich', 'pittsburgh', 'sample') {
         $out = "$Work\builds\${tag}_${preset}_blender.mbmap"
         & $Blender -b --factory-startup --online-mode --python-exit-code 1 --python $build -- blender --root $root --cache $Caches --preset $preset --out $out *> "$out.log"
         "$tag $preset blender exit $LASTEXITCODE"

@@ -23,7 +23,7 @@
       "added": []
     },
     "heightfield": {
-      "changed_nodes": 134,
+      "changed_nodes": 136,
       "total_nodes": 561501,
       "bbox_xy": [
         -686.0,
@@ -48,11 +48,11 @@
       "osm:relation/2315576": {
         "shore_ramp_blocked_m": [
           192.5,
-          45.2
+          43.3
         ],
         "shore_ramp_triangles": [
           1779,
-          1971
+          1972
         ]
       }
     }
@@ -81,7 +81,7 @@
       "added": []
     },
     "heightfield": {
-      "changed_nodes": 134,
+      "changed_nodes": 136,
       "total_nodes": 561501,
       "bbox_xy": [
         -686.0,
@@ -106,11 +106,11 @@
       "osm:relation/2315576": {
         "shore_ramp_blocked_m": [
           192.5,
-          45.2
+          43.3
         ],
         "shore_ramp_triangles": [
           1779,
-          1971
+          1972
         ]
       }
     }
@@ -146,10 +146,8 @@
     "report_water_bodies": {}
   },
   "munich_blender": {
-    "archive_identical": false,
-    "members_changed": [
-      "manifest.json"
-    ],
+    "archive_identical": true,
+    "members_changed": [],
     "collision_objects": {
       "changed": [],
       "removed": [],
@@ -316,5 +314,35 @@
         ]
       }
     }
+  },
+  "sample_blender": {
+    "archive_identical": true,
+    "members_changed": [],
+    "collision_objects": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 0,
+      "total_nodes": 30351
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {}
   }
 }

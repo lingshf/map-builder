@@ -3,8 +3,8 @@
   "after": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\after_bellevue-factoria_blender.mbmap",
   "archive_identical": false,
   "archive_sha256": [
-    "b7b2f0c5282274edfe0b30a210345ff77aef05a7911b7224ae5b5a23b4845c0f",
-    "0a4780b281af918170024d0f55b79e00ca1a16d6257cd50cdf6f680044f196ff"
+    "f69b459b55058bac87e976ccc45b8a6ca9752293add6239e9be209552a1460c2",
+    "180c480717a27635982531356b8da698fc6f7cab25bd7847266fbdcff88329d8"
   ],
   "members_changed": [
     "collision/map.mbcol",
@@ -15,7 +15,6 @@
   ],
   "manifest_keys_changed": [
     "collision",
-    "created_utc",
     "files"
   ],
   "manifest_objects": {
@@ -33,11 +32,11 @@
     "osm:relation/2315576": {
       "shore_ramp_blocked_m": [
         192.5,
-        45.2
+        43.3
       ],
       "shore_ramp_triangles": [
         1779,
-        1971
+        1972
       ]
     }
   },
@@ -52,8 +51,8 @@
       {
         "max_triangles": 4000000,
         "max_vertices": 3000000,
-        "triangles": 218424,
-        "vertices": 161513
+        "triangles": 218425,
+        "vertices": 161511
       }
     ],
     "export": [
@@ -66,8 +65,8 @@
         "orientation_probes": 3
       },
       {
-        "collision_triangles": 218424,
-        "collision_vertices": 161498,
+        "collision_triangles": 218425,
+        "collision_vertices": 161496,
         "degenerate_triangles": 305,
         "heightfield_nan_cells": 327,
         "objects": 3655,
@@ -101,7 +100,7 @@
     "added": []
   },
   "heightfield": {
-    "changed_nodes": 134,
+    "changed_nodes": 136,
     "total_nodes": 561501,
     "bbox_xy": [
       -686.0,

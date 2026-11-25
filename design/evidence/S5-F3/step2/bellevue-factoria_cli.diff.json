@@ -4,7 +4,7 @@
   "archive_identical": false,
   "archive_sha256": [
     "a90130731e87d38c722a2b891ee27578fe1b947d110286d8536fd65a3f5abb02",
-    "002e02cbcbecfc897509d074c01ec5d34bc1072bc2e35f485b0949205fccbee3"
+    "f18fa18e6cecf1f07918e6e98a738a43b6ac06bc51a7c6389084f624019f1053"
   ],
   "members_changed": [
     "collision/map.mbcol",
@@ -31,11 +31,11 @@
     "osm:relation/2315576": {
       "shore_ramp_blocked_m": [
         192.5,
-        45.2
+        43.3
       ],
       "shore_ramp_triangles": [
         1779,
-        1971
+        1972
       ]
     }
   },
@@ -50,8 +50,8 @@
       {
         "max_triangles": 4000000,
         "max_vertices": 3000000,
-        "triangles": 218424,
-        "vertices": 161513
+        "triangles": 218425,
+        "vertices": 161511
       }
     ],
     "export": [
@@ -64,8 +64,8 @@
         "orientation_probes": 3
       },
       {
-        "collision_triangles": 218424,
-        "collision_vertices": 161498,
+        "collision_triangles": 218425,
+        "collision_vertices": 161496,
         "degenerate_triangles": 305,
         "heightfield_nan_cells": 327,
         "objects": 3655,
@@ -99,7 +99,7 @@
     "added": []
   },
   "heightfield": {
-    "changed_nodes": 134,
+    "changed_nodes": 136,
     "total_nodes": 561501,
     "bbox_xy": [
       -686.0,

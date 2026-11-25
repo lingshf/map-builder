@@ -62,7 +62,7 @@
       "water_shore_step:vis": 117
     }
   },
-  "sample_cli": {
+  "sample_blender": {
     "exit": 0,
     "water_above_bank+water_buried": {},
     "shore_step_max_m": 1.5,
@@ -73,7 +73,7 @@
       "water_shore_step:vis": 4
     }
   },
-  "sample_blender": {
+  "sample_cli": {
     "exit": 0,
     "water_above_bank+water_buried": {},
     "shore_step_max_m": 1.5,

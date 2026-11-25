@@ -1,17 +1,13 @@
 {
   "before": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\before_munich_blender.mbmap",
   "after": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\after_munich_blender.mbmap",
-  "archive_identical": false,
+  "archive_identical": true,
   "archive_sha256": [
-    "dcfc61df8ebde5a203d7c4e035ed85c3187dec4ce0a093d109d9cac934413ef0",
-    "a4e6b51d227d237641727c187418060ec73880917c3c6c86d776694e7972be68"
+    "60067867782be2833e1af9e46bbe3fd167e4c0a9d156f8bb23b9650f9b0dc985",
+    "60067867782be2833e1af9e46bbe3fd167e4c0a9d156f8bb23b9650f9b0dc985"
   ],
-  "members_changed": [
-    "manifest.json"
-  ],
-  "manifest_keys_changed": [
-    "created_utc"
-  ],
+  "members_changed": [],
+  "manifest_keys_changed": [],
   "manifest_objects": {
     "changed": [],
     "removed": [],

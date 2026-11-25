@@ -2,8 +2,8 @@
 # Copyright 2026 lingshf
 """S5-F3 step 2 evidence: the AC2 audit of every after-build and the sample, and the before -> after member diffs.
 
-``--work`` holds ``builds/{before,after}_<preset>_<path>.mbmap`` (from ``build_all.ps1``); the results go to
-``<work>/step2``. ``--sample-blender`` is the sample fixtures built through Blender (the headless run's ``it.mbmap``).
+``--work`` holds ``builds/{before,after}_<name>.mbmap`` (from ``build_all.ps1``, ``created_utc`` pinned); the results
+go to ``<work>/step2``. The sample goes through Blender only; its CLI package is the committed fixture.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 
 PRESETS = ("bellevue-factoria", "munich", "pittsburgh")
 PATHS = ("cli", "blender")
+BUILDS = tuple(f"{preset}_{path}" for preset in PRESETS for path in PATHS) + ("sample_blender",)
 SHORE_STEP_BOUND_M = 1.501
 GATED_KINDS = ("water_above_bank", "water_buried")
 DIFF_KEYS = ("archive_identical", "members_changed", "collision_objects", "glb_nodes", "heightfield",
@@ -44,20 +45,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, required=True, help="the map-builder head checkout")
     ap.add_argument("--work", type=Path, required=True)
-    ap.add_argument("--sample-blender", type=Path, required=True)
     args = ap.parse_args()
     builds, out_dir = args.work / "builds", args.work / "step2"
     out_dir.mkdir(exist_ok=True)
     audits, diffs = {}, {}
-    for preset in PRESETS:
-        for path in PATHS:
-            name = f"{preset}_{path}"
-            audits[name] = audit(args.root, out_dir, name, builds / f"after_{name}.mbmap")
-            d = member_diff(args.root, builds, out_dir, name)
-            diffs[name] = {k: d[k] for k in DIFF_KEYS}
-    samples = {"sample_cli": args.root / "examples" / "synthetic_sample.mbmap", "sample_blender": args.sample_blender}
-    for name, pkg in samples.items():
-        audits[name] = audit(args.root, out_dir, name, pkg)
+    for name in BUILDS:
+        audits[name] = audit(args.root, out_dir, name, builds / f"after_{name}.mbmap")
+        d = member_diff(args.root, builds, out_dir, name)
+        diffs[name] = {k: d[k] for k in DIFF_KEYS}
+    audits["sample_cli"] = audit(args.root, out_dir, "sample_cli", args.root / "examples" / "synthetic_sample.mbmap")
     (out_dir / "ac2.json").write_text(json.dumps(audits, indent=2) + "\n")
     (out_dir / "diffs.json").write_text(json.dumps(diffs, indent=2) + "\n")
     print(json.dumps(audits, indent=1))

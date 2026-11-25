@@ -7,13 +7,22 @@ strip ``_place_strip`` sees, the ``clip_steps`` and ``overlap_edge_tests`` charg
 (``blocked_by``, ``wet_by``, ``trim``) and the strip's outcome, plus the ``_water_stage`` primitive calls per
 function. ``compare`` joins a base and a head record by strip and splits the growth by cause.
 
+``index`` profiles every ``WaterModel._build_index`` call of one plan on its own and charges its primitive calls
+to the ``build_water`` line that made it, which separates the index build D178 adds before the ramps from the
+final one that also indexes the extra banks. ``residual`` removes the work the waiver covers (every strip D178
+keeps or trims) from each gate series and applies the F2/F3 limits to what remains, the work spent only on
+strips that end up rejected.
+
     PYTHONHASHSEED=0 py -3.12 perf_attribution.py record --root TREE --cache CACHES --preset pittsburgh --out F
     py -3.12 perf_attribution.py compare BASE.json HEAD.json --out SPLIT.json
+    PYTHONHASHSEED=0 py -3.12 perf_attribution.py index --root TREE --cache CACHES --preset pittsburgh --out F
+    py -3.12 perf_attribution.py residual SPLIT.json --base-dir BASE1 --head-dir HEAD1 --preset pittsburgh --out R.json
 """
 
 from __future__ import annotations
 
 import argparse
+import cProfile
 import json
 import os
 import pstats
@@ -30,6 +39,11 @@ STRIP_TESTS = ("blocked_by", "wet_by", "trim")
 KEY_DECIMALS = 3
 TOP_FUNCTIONS = 15
 BUILTIN_PATH = "~"
+SHORE_STAGE = "shore_ramps"
+GATE_SERIES = ("cli_generate", "blender_generate", "blender_generate_export")
+# The strips whose growth the D179 waiver covers: D178 keeps them, so their wet_by and trim work is the fix.
+# A strip that ends up dropped or trimmed away is not covered, even though some of its growth is trim work.
+COVERED_CLASSES = ("kept_to_kept", "dropped_to_kept", "dropped_to_trimmed")
 
 
 def _work(counters: Any) -> dict[str, int]:
@@ -125,11 +139,10 @@ def _calls_by_function(profile: Any) -> dict[str, int]:
     return dict(calls)
 
 
-def record(root: Path, caches: Path, preset: str, out: Path) -> Path:
-    sys.path[:0] = [str(root), str(REPO)]
-    from tools.perf.collect import (CORE_TARGETS, HEIGHTFIELD_SPACING_M, PRESET_AREAS, SEED,
-                                    TERRAIN_SPACING_M, Capture, fresh_cache_copy, require_fixed_hash_seed)
-    from map_builder.core import perf_counters, shore
+def _run_plan(root: Path, caches: Path, preset: str) -> None:
+    """Plan ``preset`` from a fresh copy of the frozen caches with the tree at ``root``, as the gate does."""
+    from tools.perf.collect import (HEIGHTFIELD_SPACING_M, PRESET_AREAS, SEED, TERRAIN_SPACING_M,
+                                    fresh_cache_copy, require_fixed_hash_seed)
     from map_builder.core.generate import PlanOptions
     from map_builder.core.geodesy import Area
     from map_builder.core.pipeline import Settings, generate_plan
@@ -140,14 +153,67 @@ def record(root: Path, caches: Path, preset: str, out: Path) -> Path:
         settings = Settings(cache_dir=str(fresh_cache_copy(caches, preset, Path(scratch))),
                             terrain_spacing=TERRAIN_SPACING_M, dsm_correction=True,
                             heightfield_spacing=HEIGHTFIELD_SPACING_M, plan_options=PlanOptions(seed=SEED))
-        with Capture(CORE_TARGETS) as capture, StripRecorder(shore, perf_counters) as strips:
-            generate_plan(Area(lat, lon, width, height), settings)
-            totals = _work(perf_counters)
-            water_profile = capture._profiler._profiles.get("_water_stage")
-            water_calls = _calls_by_function(water_profile) if water_profile else {}
+        generate_plan(Area(lat, lon, width, height), settings)
+
+
+def _use_tree(root: Path) -> None:
+    sys.path[:0] = [str(root), str(REPO)]
+
+
+def record(root: Path, caches: Path, preset: str, out: Path) -> Path:
+    _use_tree(root)
+    from tools.perf.collect import CORE_TARGETS, Capture
+    from map_builder.core import perf_counters, shore
+
+    with Capture(CORE_TARGETS) as capture, StripRecorder(shore, perf_counters) as strips:
+        _run_plan(root, caches, preset)
+        totals = _work(perf_counters)
+        water_profile = capture._profiler._profiles.get("_water_stage")
+        water_calls = _calls_by_function(water_profile) if water_profile else {}
     path = out / f"attribution-{preset}-{root.name}.json"
     path.write_text(json.dumps({"root": str(root), "preset": preset, "totals": totals, "strips": strips.strips,
                                 "water_stage_calls": water_calls}, indent=1), encoding="utf-8")
+    return path
+
+
+class IndexRecorder:
+    """Profiles each ``WaterModel._build_index`` call on its own and charges its primitive calls to the
+    ``function:line`` that made it."""
+
+    def __init__(self, water: Any) -> None:
+        self._model = water.WaterModel
+        self._original = water.WaterModel._build_index
+        self.calls: Counter[str] = Counter()
+        self.invocations: Counter[str] = Counter()
+
+    def __enter__(self) -> IndexRecorder:
+        recorder = self
+
+        def build_index(model: Any) -> None:
+            caller = sys._getframe(1)
+            recorder._profile(f"{caller.f_code.co_name}:{caller.f_lineno}", model)
+        self._model._build_index = build_index
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._model._build_index = self._original
+
+    def _profile(self, site: str, model: Any) -> None:
+        profile = cProfile.Profile()
+        profile.runcall(self._original, model)
+        self.calls[site] += sum(_calls_by_function(profile).values())
+        self.invocations[site] += 1
+
+
+def record_index_builds(root: Path, caches: Path, preset: str, out: Path) -> Path:
+    _use_tree(root)
+    from map_builder.core import water
+
+    with IndexRecorder(water) as builds:
+        _run_plan(root, caches, preset)
+    path = out / f"index-builds-{preset}-{root.name}.json"
+    path.write_text(json.dumps({"root": str(root), "preset": preset, "calls": dict(builds.calls),
+                                "invocations": dict(builds.invocations)}, indent=1), encoding="utf-8")
     return path
 
 
@@ -192,23 +258,74 @@ def compare(base_path: Path, head_path: Path, out: Path) -> dict[str, Any]:
     return split
 
 
+def _covered_growth(split: dict[str, Any]) -> dict[str, int]:
+    covered: dict[str, int] = dict.fromkeys(WORK_COUNTERS, 0)
+    for name in COVERED_CLASSES:
+        _add(covered, split["classes"].get(name, {"growth": dict.fromkeys(WORK_COUNTERS, 0)})["growth"])
+    return covered
+
+
+def _residual_row(base: Any, head: Any, covered: int) -> dict[str, Any]:
+    """What remains of one counter's growth once ``covered`` is removed, judged with the gate's F2/F3 limits."""
+    from tools.perf.work_count import SERIES_LIMIT, STAGE_LIMIT, STAGE_SHARE_LIMIT
+
+    left = head.total - base.total - covered
+    stage_base = base.stages[SHORE_STAGE]
+    stage_left = head.stages[SHORE_STAGE] - stage_base - covered
+    return {"base_total": base.total, "head_total": head.total, "covered": covered, "residual": left,
+            "residual_share": round(left / base.total, 4), "f2": left > SERIES_LIMIT * base.total,
+            "stage_base": stage_base, "stage_residual": stage_left,
+            "stage_residual_share": round(stage_left / stage_base, 4),
+            "f3": stage_left > STAGE_LIMIT * stage_base and stage_left > STAGE_SHARE_LIMIT * base.total}
+
+
+def residual(split_path: Path, base_dir: Path, head_dir: Path, preset: str, out: Path) -> dict[str, Any]:
+    sys.path.insert(0, str(REPO))
+    from tools.perf.work_vector import parse_vector
+
+    covered = _covered_growth(json.loads(split_path.read_text(encoding="utf-8")))
+    rows: dict[str, Any] = {}
+    for series in GATE_SERIES:
+        base, head = (parse_vector(json.loads((folder / f"{preset}.{series}.json").read_text(encoding="utf-8")))
+                      for folder in (base_dir, head_dir))
+        rows[series] = {name: _residual_row(base.values[name], head.values[name], covered[name])
+                        for name in WORK_COUNTERS}
+    report = {"covered_classes": list(COVERED_CLASSES), "covered": covered, "series": rows}
+    out.write_text(json.dumps(report, indent=1), encoding="utf-8")
+    return report
+
+
+def _add_record_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--root", type=Path, required=True)
+    command.add_argument("--cache", type=Path, required=True)
+    command.add_argument("--preset", required=True)
+    command.add_argument("--out", type=Path, required=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-    record_cmd = commands.add_parser("record")
-    record_cmd.add_argument("--root", type=Path, required=True)
-    record_cmd.add_argument("--cache", type=Path, required=True)
-    record_cmd.add_argument("--preset", required=True)
-    record_cmd.add_argument("--out", type=Path, required=True)
+    _add_record_arguments(commands.add_parser("record"))
+    _add_record_arguments(commands.add_parser("index"))
     compare_cmd = commands.add_parser("compare")
     compare_cmd.add_argument("base", type=Path)
     compare_cmd.add_argument("head", type=Path)
     compare_cmd.add_argument("--out", type=Path, required=True)
+    residual_cmd = commands.add_parser("residual")
+    residual_cmd.add_argument("split", type=Path)
+    residual_cmd.add_argument("--base-dir", type=Path, required=True)
+    residual_cmd.add_argument("--head-dir", type=Path, required=True)
+    residual_cmd.add_argument("--preset", required=True)
+    residual_cmd.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "record":
         print(record(args.root.resolve(), args.cache, args.preset, args.out))
-    else:
+    elif args.command == "index":
+        print(record_index_builds(args.root.resolve(), args.cache, args.preset, args.out))
+    elif args.command == "compare":
         print(json.dumps(compare(args.base, args.head, args.out), indent=1))
+    else:
+        print(json.dumps(residual(args.split, args.base_dir, args.head_dir, args.preset, args.out), indent=1))
 
 
 if __name__ == "__main__":
