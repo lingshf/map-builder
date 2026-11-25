@@ -1,106 +1,40 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 lingshf
-"""Deterministic work-vector checker for S5-PERF-GATE (D153).
+"""Work-count gate of S5-PERF-GATE (D153): compare two work vectors under F1..F6.
 
-This checker has two responsibilities:
-1) validate and compare deterministic work vectors under F1..F6;
-2) prepare merge-base+counter-commit temporary worktrees used as the base revision.
+  collect.py                     captures a revision's work vector (see tools/perf/collect.py)
+  work_count.py compare          F1 completeness, F2 series total, F3 stage; F4/F5/F6 are listed for review
+  work_count.py prepare-base     builds the merge-base + counter-commit worktree used as the base revision
+
+F1-F3 fail the revision (exit 1). F4, F5 and F6 are review gates: they are printed, and the reviewer accepts or
+rejects each listed item explicitly. See docs/dev/tools.md for the workflow.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 import argparse
 import json
 import shutil
+import statistics
 import subprocess
 import tempfile
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
-from typing import Final, Iterable
+from typing import Final
 
+from tools.perf.work_vector import (
+    Rule, RuleEvent, WorkValue, WorkVector, applicable_counters, applicable_stages, check_determinism,
+    check_vector, parse_vector)
 
-COUNTERS: Final[tuple[str, ...]] = (
-    "tri_emitted[building]",
-    "tri_emitted[road]",
-    "tri_emitted[terrain]",
-    "tri_emitted[vegetation]",
-    "tri_emitted[water]",
-    "ring_edge_tests",
-    "clip_steps",
-    "overlap_pairs",
-    "overlap_edge_tests",
-    "candidate_pairs",
-    "grid_cells",
-    "deflate_in_bytes",
-    "bytes_written[manifest.json]",
-    "bytes_written[visual/map.glb]",
-    "bytes_written[collision/map.mbcol]",
-    "bytes_written[collision/terrain.mbhf]",
-    "bytes_written[report.json]",
-    "bytes_written[NOTICES.txt]",
-    "validator_pairs",
-    "bpy_mesh_vertices",
-    "primitive_calls",
-)
-
-STAGES: Final[tuple[str, ...]] = (
-    "acquire",
-    "build_plan",
-    "_water_stage",
-    "shore_ramps",
-    "build_terrain",
-    "buildings_roofs",
-    "roads",
-    "bridges",
-    "tunnels",
-    "build_scene",
-    "package_write",
-    "validate_package",
-    "other",
-)
-
-SERIES: Final[tuple[str, ...]] = ("cli_generate", "blender_generate", "blender_generate_export")
-GATING_PRESETS: Final[tuple[str, ...]] = ("munich", "pittsburgh")
-
-NOT_APPLICABLE: Final[dict[str, set[str]]] = {
-    "cli_generate": {"bpy_mesh_vertices"},
-    "blender_generate": {"bytes_written[manifest.json]", "bytes_written[visual/map.glb]",
-                         "bytes_written[collision/map.mbcol]", "bytes_written[collision/terrain.mbhf]",
-                         "bytes_written[report.json]", "bytes_written[NOTICES.txt]",
-                         "deflate_in_bytes", "validator_pairs"},
-    "blender_generate_export": set(),
-}
-
-
-class Rule(str, Enum):
-    F1 = "F1"
-    F2 = "F2"
-    F3 = "F3"
-    F4 = "F4"
-    F5 = "F5"
-    F6 = "F6"
-
-
-@dataclass(frozen=True)
-class RuleEvent:
-    rule: Rule
-    message: str
-
-
-@dataclass(frozen=True)
-class WorkValue:
-    total: int
-    stages: dict[str, int]
-
-
-@dataclass(frozen=True)
-class WorkVector:
-    preset: str
-    series: str
-    values: dict[str, WorkValue]
-    package_valid: bool = True
-    run_error: str | None = None
+SERIES_LIMIT: Final = Fraction(5, 100)        # F2: a counter's series total may grow by at most +5.0 %
+STAGE_LIMIT: Final = Fraction(10, 100)        # F3: a stage's value may grow by at most +10.0 % ...
+STAGE_SHARE_LIMIT: Final = Fraction(1, 100)   # ... unless the increase is <= 1 % of the counter's base total
+REDISTRIBUTION_LIMIT: Final = Fraction(5, 100)  # F4: growth above +5 % is listed for review
+CPU_LIMIT: Final = 0.05                       # F5: CPU median growth above +5 % needs an account
+CPU_ROUNDS: Final = 5                         # D147: alternating rounds per revision
+FAILING_RULES: Final = (Rule.F1, Rule.F2, Rule.F3)
 
 
 @dataclass(frozen=True)
@@ -110,116 +44,84 @@ class CompareOptions:
     noop_expected: bool = False
 
 
-def _ratio(head: int, base: int) -> float:
-    if base == 0:
-        return 0.0 if head == 0 else float("inf")
-    return (head - base) / base
+def _exceeds(head: int, base: int, limit: Fraction) -> bool:
+    """Whether ``head`` is more than ``limit`` above ``base``; growth from zero always exceeds."""
+    return head - base > limit * base
 
 
-def _ensure_vector_shape(v: WorkVector) -> list[RuleEvent]:
-    errors: list[RuleEvent] = []
-    if v.run_error:
-        errors.append(RuleEvent(Rule.F1, f"run error: {v.run_error}"))
-    if not v.package_valid:
-        errors.append(RuleEvent(Rule.F1, "package is not VALID"))
-    if v.series not in SERIES:
-        errors.append(RuleEvent(Rule.F1, f"unknown series {v.series!r}"))
-        return errors
-    na = NOT_APPLICABLE[v.series]
-    for name in COUNTERS:
-        if name in na:
-            continue
-        if name not in v.values:
-            errors.append(RuleEvent(Rule.F1, f"missing counter {name}"))
-            continue
-        w = v.values[name]
-        stage_sum = sum(w.stages.get(s, 0) for s in STAGES)
-        if stage_sum != w.total:
-            errors.append(RuleEvent(Rule.F1, f"stage sum mismatch for {name}: {stage_sum} != {w.total}"))
-        for stage in w.stages:
-            if stage not in STAGES:
-                errors.append(RuleEvent(Rule.F1, f"unknown stage {stage!r} for {name}"))
-    return errors
+def _growth_text(head: int, base: int) -> str:
+    return f"{base} -> {head}" + (f" ({(head - base) / base:+.1%})" if base else "")
 
 
-def _f1_determinism(v1: WorkVector, v2: WorkVector) -> list[RuleEvent]:
-    if (v1.preset, v1.series) != (v2.preset, v2.series):
-        return [RuleEvent(Rule.F1, "determinism inputs mismatch in preset/series")]
-    if set(v1.values) != set(v2.values):
-        return [RuleEvent(Rule.F1, "determinism inputs mismatch in counter keys")]
-    errors: list[RuleEvent] = []
-    for name in sorted(v1.values):
-        a = v1.values[name]
-        b = v2.values[name]
-        if a.total != b.total:
-            errors.append(RuleEvent(Rule.F1, f"determinism mismatch for {name}: {a.total} != {b.total}"))
-            continue
-        if a.stages != b.stages:
-            errors.append(RuleEvent(Rule.F1, f"determinism stage mismatch for {name}"))
-    return errors
+def _stage_events(name: str, base: WorkValue, head: WorkValue, stage: str) -> list[RuleEvent]:
+    base_stage, head_stage = base.stages[stage], head.stages[stage]
+    text = f"{name} in {stage}: {_growth_text(head_stage, base_stage)}"
+    events: list[RuleEvent] = []
+    if _exceeds(head_stage, base_stage, STAGE_LIMIT) and head_stage - base_stage > STAGE_SHARE_LIMIT * base.total:
+        events.append(RuleEvent(Rule.F3, f"{text} exceeds +10% and 1% of the series total"))
+    if _exceeds(head_stage, base_stage, REDISTRIBUTION_LIMIT):
+        events.append(RuleEvent(Rule.F4, f"{text} grew more than 5%"))
+    return events
+
+
+def _counter_events(name: str, base: WorkValue, head: WorkValue, stages: Iterable[str]) -> list[RuleEvent]:
+    events: list[RuleEvent] = []
+    text = f"{name} total: {_growth_text(head.total, base.total)}"
+    if _exceeds(head.total, base.total, SERIES_LIMIT):
+        events.append(RuleEvent(Rule.F2, f"{text} exceeds +5%"))
+    if _exceeds(head.total, base.total, REDISTRIBUTION_LIMIT):
+        events.append(RuleEvent(Rule.F4, f"{text} grew more than 5%"))
+    for stage in stages:
+        events.extend(_stage_events(name, base, head, stage))
+    return events
+
+
+def _review_events(gate_events: Sequence[RuleEvent], opts: CompareOptions) -> list[RuleEvent]:
+    events: list[RuleEvent] = []
+    gate_passes = not any(e.rule in (Rule.F2, Rule.F3) for e in gate_events)
+    if gate_passes and opts.cpu_ratio is not None and opts.cpu_ratio > CPU_LIMIT:
+        events.append(RuleEvent(Rule.F5, f"CPU median {opts.cpu_ratio:+.1%} exceeds +5% while F2 and F3 pass: "
+                                         "name the uncounted work or show a same-code control pair"))
+    if opts.uncounted_sites:
+        events.append(RuleEvent(Rule.F6, "uncounted work declared: " + ", ".join(opts.uncounted_sites)))
+    return events
 
 
 def compare(base: WorkVector, head: WorkVector, opts: CompareOptions | None = None) -> list[RuleEvent]:
     opts = opts or CompareOptions()
-    events: list[RuleEvent] = []
-    events.extend(_ensure_vector_shape(base))
-    events.extend(_ensure_vector_shape(head))
-    if base.series != head.series or base.preset != head.preset:
-        events.append(RuleEvent(Rule.F1, "base/head vector identity mismatch"))
+    events = [*check_vector(base, "base"), *check_vector(head, "head")]
+    if (base.preset, base.series) != (head.preset, head.series):
+        events.append(RuleEvent(Rule.F1, "base and head are different preset/series"))
+    if events:
         return events
-    if any(e.rule == Rule.F1 for e in events):
-        return events
-
-    na = NOT_APPLICABLE[base.series]
-    for name in COUNTERS:
-        if name in na:
-            continue
-        b = base.values[name]
-        h = head.values[name]
-        dr = _ratio(h.total, b.total)
-        if dr > 0.05:
-            events.append(RuleEvent(Rule.F2, f"{name} total ratio {dr:.3%} exceeds +5%"))
-        for stage in STAGES:
-            bs = b.stages.get(stage, 0)
-            hs = h.stages.get(stage, 0)
-            sr = _ratio(hs, bs)
-            if sr > 0.10 and (hs - bs) > b.total * 0.01:
-                events.append(RuleEvent(Rule.F3, f"{name} stage {stage} ratio {sr:.3%} exceeds F3"))
-            if sr > 0.05:
-                events.append(RuleEvent(Rule.F4, f"{name} stage {stage} grew {sr:.3%}"))
-
-    if opts.cpu_ratio is not None and opts.cpu_ratio > 0.05:
-        events.append(RuleEvent(Rule.F5, f"cpu ratio {opts.cpu_ratio:.3%} exceeds +5%"))
-    if opts.uncounted_sites:
-        events.append(RuleEvent(Rule.F6, "uncounted work declared: " + ", ".join(opts.uncounted_sites)))
-
-    if opts.noop_expected:
-        for e in events:
-            if e.rule in (Rule.F1, Rule.F2, Rule.F3, Rule.F4, Rule.F5, Rule.F6):
-                return [RuleEvent(Rule.F1, f"no-op expected, but got {e.rule.value}: {e.message}")]
+    stages = applicable_stages(base.series)
+    for name in applicable_counters(base.series):
+        events.extend(_counter_events(name, base.values[name], head.values[name], stages))
+    events.extend(_review_events(events, opts))
+    if opts.noop_expected and events:
+        return [RuleEvent(Rule.F1, f"no-op expected, but got {events[0].rule.value}: {events[0].message}")]
     return events
 
 
-def _parse_vector(path: str) -> WorkVector:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    values: dict[str, WorkValue] = {}
-    for name, item in raw["values"].items():
-        values[name] = WorkValue(total=int(item["total"]),
-                                 stages={str(k): int(v) for k, v in item["stages"].items()})
-    return WorkVector(
-        preset=str(raw["preset"]),
-        series=str(raw["series"]),
-        values=values,
-        package_valid=bool(raw.get("package_valid", True)),
-        run_error=raw.get("run_error"),
-    )
+def cpu_ratio_from_rounds(raw: object) -> float:
+    """Median CPU growth from ``{"base": [...], "head": [...]}`` with exactly ``CPU_ROUNDS`` rounds each."""
+    if not isinstance(raw, dict):
+        raise ValueError("CPU evidence must be an object with 'base' and 'head' round lists")
+    medians = []
+    for side in ("base", "head"):
+        rounds = raw.get(side)
+        if (not isinstance(rounds, list) or len(rounds) != CPU_ROUNDS
+                or not all(isinstance(r, (int, float)) and not isinstance(r, bool) and r > 0 for r in rounds)):
+            raise ValueError(f"CPU evidence {side!r} must be {CPU_ROUNDS} positive CPU-second values")
+        medians.append(statistics.median(rounds))
+    return medians[1] / medians[0] - 1
 
 
-def _emit(events: list[RuleEvent]) -> int:
-    out = [{"rule": e.rule.value, "message": e.message} for e in events]
-    print(json.dumps({"events": out}, indent=2, sort_keys=True))
-    return 1 if any(e.rule in (Rule.F1, Rule.F2, Rule.F3) for e in events) else 0
+def _load_vector(path: str, label: str) -> WorkVector:
+    try:
+        return parse_vector(json.loads(Path(path).read_text(encoding="utf-8")))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{label} vector {path}: {exc}") from exc
 
 
 def _run_git(cwd: Path, args: Iterable[str]) -> str:
@@ -227,76 +129,75 @@ def _run_git(cwd: Path, args: Iterable[str]) -> str:
     return cp.stdout.strip()
 
 
-def prepare_merge_base_worktree(repo: Path, *, head_ref: str, base_ref: str, counter_commit: str,
-                                keep: bool = False) -> dict[str, str]:
-    merge_base = _run_git(repo, ["merge-base", head_ref, base_ref]).strip()
-    tmp_root = Path(tempfile.mkdtemp(prefix="mb-perf-base-"))
-    wt = tmp_root / "worktree"
+def prepare_merge_base_worktree(repo: Path, *, head_ref: str, base_ref: str, counter_commit: str) -> dict[str, str]:
+    """Create a detached worktree at the merge-base with the counter commit applied. It is never pushed."""
+    merge_base = _run_git(repo, ["merge-base", head_ref, base_ref])
+    root = Path(tempfile.mkdtemp(prefix="mb-perf-base-"))
+    worktree = root / "worktree"
     try:
-        _run_git(repo, ["worktree", "add", "--detach", str(wt), merge_base])
+        _run_git(repo, ["worktree", "add", "--detach", str(worktree), merge_base])
         try:
-            _run_git(wt, ["cherry-pick", "--no-commit", counter_commit])
+            _run_git(worktree, ["cherry-pick", "--no-commit", counter_commit])
         except subprocess.CalledProcessError as exc:
-            # explicit F1 failure signal for the checker caller
-            _run_git(wt, ["cherry-pick", "--abort"])
-            raise RuntimeError("F1: counter commit does not apply cleanly to merge-base") from exc
-        _run_git(wt, ["reset"])  # keep the applied index/worktree only
-        out = {
-            "merge_base": merge_base,
-            "worktree_path": str(wt),
-            "counter_commit": counter_commit,
-        }
-        if not keep:
-            out["cleanup_hint"] = "run `git worktree remove <path> --force` when done"
-        return out
-    except Exception:
-        if not keep:
-            shutil.rmtree(tmp_root, ignore_errors=True)
+            raise RuntimeError("F1: counter commit does not apply cleanly to the merge-base") from exc
+        _run_git(worktree, ["reset"])
+    except BaseException:
+        subprocess.run(["git", "worktree", "remove", "--force", str(worktree)], cwd=str(repo), check=False)
+        shutil.rmtree(root, ignore_errors=True)
         raise
+    return {"merge_base": merge_base, "worktree_path": str(worktree), "counter_commit": counter_commit,
+            "cleanup": f"git worktree remove --force {worktree}"}
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    sub = ap.add_subparsers(dest="cmd", required=True)
+def _emit(events: Sequence[RuleEvent]) -> int:
+    print(json.dumps({"events": [{"rule": e.rule.value, "message": e.message} for e in events]},
+                     indent=2, sort_keys=True))
+    return 1 if any(e.rule in FAILING_RULES for e in events) else 0
 
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
     cmp_ap = sub.add_parser("compare", help="compare base/head work vectors under F1..F6")
     cmp_ap.add_argument("--base", required=True, help="base vector json")
     cmp_ap.add_argument("--head", required=True, help="head vector json")
-    cmp_ap.add_argument("--cpu-ratio", type=float, default=None, help="optional cpu delta as ratio (0.06 = +6%%)")
-    cmp_ap.add_argument("--uncounted-site", action="append", default=None, help="declare uncounted work site(s)")
-    cmp_ap.add_argument("--noop", action="store_true", help="assert no-op case")
-    cmp_ap.add_argument("--determinism-peer", default=None, help="second run vector of same revision for F1")
-
-    prep_ap = sub.add_parser("prepare-base", help="create merge-base+C temporary worktree")
+    cmp_ap.add_argument("--base-peer", help="second run of the base revision (F1 determinism)")
+    cmp_ap.add_argument("--head-peer", help="second run of the head revision (F1 determinism)")
+    cmp_ap.add_argument("--cpu-rounds", help=f"json {{'base': [..], 'head': [..]}}, {CPU_ROUNDS} CPU-second rounds each")
+    cmp_ap.add_argument("--uncounted-site", action="append", default=[], help="declare an uncounted work site (F6)")
+    cmp_ap.add_argument("--noop", action="store_true", help="assert that nothing at all is reported")
+    prep_ap = sub.add_parser("prepare-base", help="create the merge-base + counter-commit worktree")
     prep_ap.add_argument("--repo", default=".", help="repository root")
-    prep_ap.add_argument("--head-ref", default="HEAD", help="head ref")
-    prep_ap.add_argument("--base-ref", default="origin/main", help="base ref")
-    prep_ap.add_argument("--counter-commit", required=True, help="isolated counter commit C")
-    prep_ap.add_argument("--keep", action="store_true", help="keep the temporary root folder")
+    prep_ap.add_argument("--head-ref", default="HEAD")
+    prep_ap.add_argument("--base-ref", default="origin/main")
+    prep_ap.add_argument("--counter-commit", required=True, help="the isolated counter commit C")
+    return parser
 
-    a = ap.parse_args(argv)
-    if a.cmd == "prepare-base":
-        out = prepare_merge_base_worktree(
-            Path(a.repo).resolve(),
-            head_ref=str(a.head_ref),
-            base_ref=str(a.base_ref),
-            counter_commit=str(a.counter_commit),
-            keep=bool(a.keep),
-        )
-        print(json.dumps(out, indent=2, sort_keys=True))
-        return 0
 
-    base = _parse_vector(a.base)
-    head = _parse_vector(a.head)
+def _run_compare(args: argparse.Namespace) -> int:
+    base, head = _load_vector(args.base, "base"), _load_vector(args.head, "head")
     events: list[RuleEvent] = []
-    if a.determinism_peer:
-        events.extend(_f1_determinism(head, _parse_vector(a.determinism_peer)))
-    events.extend(compare(base, head, CompareOptions(
-        cpu_ratio=a.cpu_ratio,
-        uncounted_sites=tuple(a.uncounted_site or ()),
-        noop_expected=a.noop,
-    )))
+    for label, vector, peer in (("base", base, args.base_peer), ("head", head, args.head_peer)):
+        if peer:
+            events.extend(check_determinism(vector, _load_vector(peer, f"{label} peer"), label))
+    cpu_ratio = None
+    if args.cpu_rounds:
+        cpu_ratio = cpu_ratio_from_rounds(json.loads(Path(args.cpu_rounds).read_text(encoding="utf-8")))
+    events.extend(compare(base, head, CompareOptions(cpu_ratio, tuple(args.uncounted_site), args.noop)))
     return _emit(events)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    if args.cmd == "prepare-base":
+        print(json.dumps(prepare_merge_base_worktree(
+            Path(args.repo).resolve(), head_ref=args.head_ref, base_ref=args.base_ref,
+            counter_commit=args.counter_commit), indent=2, sort_keys=True))
+        return 0
+    try:
+        return _run_compare(args)
+    except (OSError, ValueError) as exc:
+        return _emit([RuleEvent(Rule.F1, str(exc))])
 
 
 if __name__ == "__main__":
