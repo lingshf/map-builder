@@ -6,11 +6,14 @@ from __future__ import annotations
 import unittest
 
 from map_builder.core import shore
+from map_builder.core.deck_underside import TRIM_DEPTH
+from map_builder.core.osm import point_in_ring
 from map_builder.core.overlap import triangle_overlaps_region, triangle_touches
 from map_builder.core.query import ray_cast
 from map_builder.core.structures import plan_collision
 
-from .test_water import lake_scene
+from .test_bridges import make_scene
+from .test_water import H, W, lake_ground, lake_scene
 
 SHEET = 10.0
 SHORE_EDGE = ((0.0, 0.0), (0.0, 10.0))        # water on the left, so the bank lies at x > 0
@@ -200,3 +203,33 @@ class LakeBankTest(unittest.TestCase):
                    (40 + reach, 20.0), (-40 - reach, -20.0)]
         for x, y in outside:
             self.assertGreaterEqual(self.first_hit(x, y), lowest_allowed, (x, y))
+
+
+LAKE_RING = [(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)]   # its west bank is the low one
+SECONDARY = {"highway": "secondary", "bridge": "yes"}                         # 7 m road: an 8 m deck
+
+
+def bank_tris_over_lake_with(bridge_way):
+    plan, _, _ = make_scene([(LAKE_RING, {"natural": "water"}, True), (bridge_way, SECONDARY)], lake_ground,
+                            width=W, height=H)
+    (bank,) = [o for o in plan.objects if o.mb_id.startswith("bank:")]
+    vs = bank.mesh.vertices
+    return [[(vs[i][0], vs[i][1]) for i in face] for face in bank.mesh.faces]
+
+
+class DeckClearanceTest(unittest.TestCase):
+    """D178: a bank ramp runs under an elevated deck and is clipped out of an at-grade deck's footprint."""
+
+    def test_a_ramp_runs_under_an_elevated_deck(self):
+        # 160 m long, crossing the west shore 90 m from its west end: the deck stands over 4 m above the ramp there
+        tris = bank_tris_over_lake_with([(-130.0, 0.0), (30.0, 0.0)])
+        for x in (-40.5, -42.0):
+            self.assertTrue(any(point_in_ring(x, 0.0, t) for t in tris), x)
+
+    def test_a_ramp_is_clipped_out_of_an_at_grade_deck_footprint_only(self):
+        tris = bank_tris_over_lake_with([(-48.0, 12.0), (-32.0, 12.0)])   # 16 m long: at-grade over the shore
+        footprint = [(-48.5, 8.0), (-31.5, 8.0), (-31.5, 16.0), (-48.5, 16.0)]   # 0.5 m sunk ends, 4 m half width
+        self.assertFalse(any(triangle_overlaps_region(t, footprint, []) for t in tris))
+        south_of_deck = [p[1] for t in tris for p in t if -44.0 < p[0] < -40.0 and p[1] < 8.0 + 1e-6]
+        clip_piece_m = 12.0 / 2 ** TRIM_DEPTH    # the coarsest a 12 m ramp triangle is cut
+        self.assertGreater(max(south_of_deck), 8.0 - clip_piece_m)   # cut at the footprint, not a whole strip short of it

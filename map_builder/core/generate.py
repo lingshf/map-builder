@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Generic, NoReturn, TypeAlias, TypedDict, TypeVar
 
 from . import bridges, dsm, passages, perf_counters, roofs, tunnels, water
+from .deck_underside import RampLines
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .structures import (Color, InvalidEntry, Probe, ProbeBlock, Prov, Segment, StageContext, UnsupportedEntry, Vec2,
@@ -1814,7 +1815,24 @@ def _water_stage(terrain: ElevationGrid, z_offset: float, areas: Sequence[Featur
         terrain, z_offset, areas, classified.riverbanks, classified.waterways, foot, structs,
         lines(classified.roads), terrain_extent(terrain),
         lambda p: ring_topology_problem(p, opts.max_triangulation_work),
-        charge=lambda fid, v, t: budget.charge(fid, v, t), refund=refund)
+        charge=lambda fid, v, t: budget.charge(fid, v, t), refund=refund,
+        ramp_lines=_ramp_lines(terrain, classified, opts))
+
+
+def _ramp_lines(terrain: ElevationGrid, classified: Classified, opts: PlanOptions) -> RampLines:
+    """D178: a shore ramp may run under the deck of a highway bridge (its DSM mask copy included) and is trimmed out
+    of the deck's footprint only where the deck is at-grade; tunnels and the other bridges block it wherever it meets
+    them."""
+    decks = list(classified.structure_bridges) if opts.roads else []
+    deck_ids = {f.id for f in decks}
+    out = RampLines(undersides=lambda water_max: bridges.ramp_deck_undersides(decks, terrain, water_max))
+    for f in list(classified.structure_bridges) + list(classified.bridges) + list(classified.tunnels):
+        half_width = road_width(f.tags)[0] / 2.0
+        if f.id in deck_ids:
+            out.decks.append((f.id, f.geometry, half_width))
+        else:
+            out.always.append((f.geometry, half_width))
+    return out
 
 
 def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classified,

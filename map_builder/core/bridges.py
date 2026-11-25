@@ -12,14 +12,17 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from .deck_underside import DeckUnderside, WaterMax
 from .errors import LimitError
 from .structures import (Color, Frame, Probe, Region, RoadTri, Segment, Tri, Vec2, Vec3, polyline_z_profile,
-                         sweep)
+                         sweep, sweep_footprint)
 
 if TYPE_CHECKING:
+    from .dem import ElevationGrid
     from .generate import ScenePlan
     from .mesh import MeshData
     from .osm import Feature
@@ -117,6 +120,101 @@ def _ground_max(terrain_z: Callable[[float, float], float], x: float, y: float, 
         k = int(math.ceil(2 * half / step))
         ts.update(-half + 2 * half * m / k for m in range(k + 1))
     return max(terrain_z(x + nx * t, y + ny * t) for t in ts)
+
+
+@dataclass(frozen=True)
+class _DeckPath:
+    """The deck's samples along its way: plan points, arc lengths, directions and the at-grade end heights."""
+    xy: list[Vec2]
+    s: list[float]
+    dirs: list[Vec2]
+    z_a: float
+    z_b: float
+
+    @classmethod
+    def sample(cls, pts: Sequence[Vec2], tz: Callable[[float, float], float], road_lift: float) -> _DeckPath:
+        samples = polyline_z_profile(pts, tz, SAMPLE_STEP_M)
+        xy = [(x, y) for _, x, y, _ in samples]
+        return cls(xy, [t[0] for t in samples], _directions(xy), samples[0][3] + road_lift,
+                   samples[-1][3] + road_lift)
+
+    def ground(self, tz: Callable[[float, float], float], half: float) -> list[float]:
+        """The highest terrain across the deck at each sample."""
+        return [_ground_max(tz, x, y, d, half) for (x, y), d in zip(self.xy, self.dirs)]
+
+    def wet_ground(self, ground: Sequence[float], half: float, water_max: WaterMax | None) -> list[float]:
+        """``ground`` raised to the water across the deck: decks never drop into water, the highest surface a drone
+        can hit (D116)."""
+        out = list(ground)
+        if water_max is None:
+            return out
+        for k, ((x, y), d) in enumerate(zip(self.xy, self.dirs)):
+            wm = water_max((x + d[1] * half, y - d[0] * half), (x - d[1] * half, y + d[0] * half))
+            if wm is not None:
+                out[k] = max(out[k], wm)
+        return out
+
+
+def _sunk_ends(xy: Sequence[Vec2], inside: Callable[[float, float], bool]) -> tuple[list[Vec2], int]:
+    """The swept path of a deck: ``xy`` with each end extended ``END_SINK_M`` into the abutting ground or road
+    where that stays ``inside`` the terrain, and the number of points added at the front (0 or 1)."""
+    path_xy = list(xy)
+    front = 0
+    for first, (end, nbr) in enumerate(((xy[0], xy[1]), (xy[-1], xy[-2]))):
+        dx, dy = _unit(end[0] - nbr[0], end[1] - nbr[1])
+        ext = (end[0] + dx * END_SINK_M, end[1] + dy * END_SINK_M)
+        if inside(*ext):
+            if first == 0:
+                path_xy.insert(0, ext)
+                front = 1
+            else:
+                path_xy.append(ext)
+    return path_xy, front
+
+
+def deck_underside(pts: Sequence[Vec2], tags: Mapping[str, str], width: float, tz: Callable[[float, float], float],
+                   water_max: WaterMax, road_lift: float, inside: Callable[[float, float], bool]) -> DeckUnderside:
+    """A lower bound of the underside of the deck ``_build_deck`` makes for the deduplicated way ``pts``: its profile
+    over the ground and water alone (crossing roads only raise it, ``deck_profile`` is monotone in the wanted
+    heights), and the deck's footprint. ``inside``: whether a plan point is inside the terrain."""
+    half = (width + 2 * DECK_SIDE_MARGIN_M) / 2.0   # as ``_build_deck`` computes it, bit for bit
+    clearance = _layer(tags) * CLEARANCE_PER_LAYER_M
+    path = _DeckPath.sample(pts, tz, road_lift)
+    ground = path.wet_ground(path.ground(tz, half), half, water_max)
+    lower = [gr + road_lift + clearance + DECK_THICKNESS_M for gr in ground]
+    top = deck_profile(path.s, lower, path.z_a, path.z_b)
+    footprint = sweep_footprint(_sunk_ends(path.xy, inside)[0], half)
+    return DeckUnderside(path.xy, path.s, [t - DECK_THICKNESS_M for t in top], footprint)
+
+
+def ramp_deck_undersides(features: Iterable[Feature], terrain: ElevationGrid,
+                         water_max: WaterMax) -> dict[str, DeckUnderside]:
+    """``deck_underside`` of every bridge that ``build`` would accept (same path and checks), by feature id."""
+    from . import generate as g
+    tz: Callable[[float, float], float] = lambda x, y: g.terrain_height(terrain, x, y)   # noqa: E731
+    out: dict[str, DeckUnderside] = {}
+    for f in features:
+        try:
+            pts = _deck_way(f, terrain, g)
+            out[f.id] = deck_underside(pts, f.tags, g.road_width(f.tags)[0], tz, water_max, g.ROAD_LIFT_M,
+                                       lambda x, y: g.inside_terrain(terrain, x, y, 0.0))
+        except g.InvalidFeature:
+            continue
+    return out
+
+
+def _deck_way(f: Feature, terrain: ElevationGrid, g: ModuleType) -> list[Vec2]:
+    """The deduplicated path of a bridge way; ``InvalidFeature`` if no deck can be built on it."""
+    pts: list[Vec2] = g._dedupe_polyline(list(f.geometry))
+    if len(pts) < 2 or _length(pts) < MIN_LENGTH_M:
+        raise g.InvalidFeature(f"shorter than {MIN_LENGTH_M:g} m; not generated")
+    if not all(g.inside_terrain(terrain, x, y) for x, y in pts):
+        raise g.InvalidFeature("lies outside the terrain extent; not generated")
+    return pts
+
+
+def _length(pts: Sequence[Vec2]) -> float:
+    return sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:]))
 
 
 def _clip(subject: list[Vec2], clip: Sequence[Vec2]) -> list[Vec2]:
@@ -401,11 +499,7 @@ def build(plan: ScenePlan, ctx: StageContext) -> None:
     results: list[tuple[float, list[Probe]]] = []   # (length, probes)
     for f in features:
         try:
-            pts = g._dedupe_polyline(list(f.geometry))
-            if len(pts) < 2 or sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:])) < MIN_LENGTH_M:
-                raise g.InvalidFeature(f"shorter than {MIN_LENGTH_M:g} m; not generated")
-            if not all(g.inside_terrain(ctx.terrain, x, y) for x, y in pts):
-                raise g.InvalidFeature("lies outside the terrain extent; not generated")
+            pts = _deck_way(f, ctx.terrain, g)
             results.append(_build_deck(plan, ctx, f, pts, tz, roads, g, road_boxes))
         except g.InvalidFeature as e:
             ctx.budget.release()
@@ -457,36 +551,18 @@ def _build_deck(plan: ScenePlan, ctx: StageContext, f: Feature, pts: list[Vec2],
     deck_w = width + 2 * DECK_SIDE_MARGIN_M
     half = deck_w / 2.0
     clearance = _layer(f.tags) * CLEARANCE_PER_LAYER_M
-    samples = polyline_z_profile(pts, tz, SAMPLE_STEP_M)
-    xy = [(x, y) for _, x, y, _ in samples]
-    s = [t[0] for t in samples]
+    path = _DeckPath.sample(pts, tz, g.ROAD_LIFT_M)
+    xy, s, dirs, z_a, z_b = path.xy, path.s, path.dirs, path.z_a, path.z_b
     total = s[-1]
-    dirs = _directions(xy)
-    z_a, z_b = samples[0][3] + g.ROAD_LIFT_M, samples[-1][3] + g.ROAD_LIFT_M
     line = [z_a + (z_b - z_a) * si / total for si in s]
-    ground = [_ground_max(tz, x, y, d, half) for (x, y), d in zip(xy, dirs)]
-    dry_ground = list(ground)
-    if ctx.water is not None:   # decks never drop into water: the highest surface a drone can hit (D116)
-        for k, ((x, y), d) in enumerate(zip(xy, dirs)):
-            wm = ctx.water.wmax_segment((x + d[1] * half, y - d[0] * half), (x - d[1] * half, y + d[0] * half))
-            if wm is not None:
-                ground[k] = max(ground[k], wm)
+    dry_ground = path.ground(tz, half)
+    ground = path.wet_ground(dry_ground, half, ctx.water.wmax_segment if ctx.water is not None else None)
     ground = [gr + g.ROAD_LIFT_M for gr in ground]
     lower = [gr + clearance + DECK_THICKNESS_M for gr in ground]
     dry_lower = [gr + g.ROAD_LIFT_M + clearance + DECK_THICKNESS_M for gr in dry_ground]
 
     # the ends sink into the abutting ground/road (not past the terrain edge)
-    path_xy = list(xy)
-    front = 0
-    for first, (end, nbr) in enumerate(((xy[0], xy[1]), (xy[-1], xy[-2]))):
-        dx, dy = _unit(end[0] - nbr[0], end[1] - nbr[1])
-        ext = (end[0] + dx * END_SINK_M, end[1] + dy * END_SINK_M)
-        if g.inside_terrain(terrain, ext[0], ext[1], 0.0):
-            if first == 0:
-                path_xy.insert(0, ext)
-                front = 1
-            else:
-                path_xy.append(ext)
+    path_xy, front = _sunk_ends(xy, lambda x, y: g.inside_terrain(terrain, x, y, 0.0))
     n_path = len(path_xy)
     parapets = half - PARAPET_WIDTH_M >= PROBE_RADIUS_M + 0.05   # the deck probe runs between the parapets
     prof, surface = _deck_profile_2d(half, parapets)
