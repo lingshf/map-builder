@@ -24,6 +24,7 @@ import struct
 from collections.abc import Iterable, Mapping, Sequence
 from typing import NoReturn, TypeAlias, TypedDict, TypeGuard, cast
 
+from . import perf_counters
 from . import COLLISION_FORMAT_VERSION, HEIGHTFIELD_FORMAT_VERSION
 from .errors import JsonValue, LimitError, PackageError
 
@@ -179,6 +180,8 @@ def write_collision(objects: Sequence[ColObject]) -> bytes:
             idx.extend((remap[t[0]], remap[t[1]], remap[t[2]]))
             tri_obj.append(oi)
             tri_cls.append(CLASSES[o.cls])
+        if perf_counters.ENABLED:
+            perf_counters.inc_keyed("tri_emitted", o.cls, len(tri_obj) - start)
         entry: dict[str, object] = {"index": oi, "name": o.name, "mb_id": o.mb_id, "class": o.cls, "tri_start": start,
                  "tri_count": len(tri_obj) - start, "aabb": lo + hi}
         for ek, v in o.extra.items():
@@ -417,7 +420,10 @@ def rasterize_heightfield(triangles: Iterable[tuple[Pt3, Pt3, Pt3]], x0: float, 
         j1 = min(ny - 1, int(math.floor((max(a[1], b[1], c[1]) - y0) / spacing + 1e-9)))
         if i1 < i0 or j1 < j0:
             continue
-        visited += (i1 - i0 + 1) * (j1 - j0 + 1)
+        cells = (i1 - i0 + 1) * (j1 - j0 + 1)
+        visited += cells
+        if perf_counters.ENABLED:
+            perf_counters.inc("grid_cells", cells)
         if visited > budget:
             raise LimitError(f"heightfield rasterisation exceeds its work budget of {budget} grid-point visits "
                              f"({HF_VISITS_PER_POINT} per point of the {nx}x{ny} grid + {HF_VISIT_SLACK}); "

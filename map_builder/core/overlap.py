@@ -8,6 +8,7 @@ import math
 from collections.abc import Iterator, Sequence
 
 from .osm import point_in_ring
+from . import perf_counters
 
 Pt = tuple[float, float]
 BOUNDARY_CROSS_EPS = 1e-12   # plan-area/collinearity epsilon: points this close to an edge are treated as boundary
@@ -24,6 +25,8 @@ def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
 def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, closed: bool) -> bool:
     """Whether the triangle lies within ``margin`` of ``path``: a closed ring (touching it or containing it
     counts) or an open polyline. Nothing is sampled, so a small ring wholly inside the triangle is found."""
+    if perf_counters.ENABLED:
+        perf_counters.inc("overlap_pairs")
     box = _padded_box(tri, margin)
     if any(point_in_ring(x, y, tri) for x, y in path if _in_box(x, y, box)):
         return True
@@ -39,6 +42,8 @@ def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequ
     The overlap is exact in plan area: each ring is clipped against the triangle, then overlap area is
     ``area(clip(outer)) - Σ area(clip(hole))``. Boundary-only touch gives zero area by construction.
     """
+    if perf_counters.ENABLED:
+        perf_counters.inc("overlap_pairs")
     if not _boxes_meet(_box(tri), _box(outer)):
         return False
     origin = tri[0]
@@ -96,6 +101,8 @@ def _edges(points: Sequence[Pt], closed: bool) -> Iterator[tuple[Pt, Pt]]:
 
 
 def _segment_distance(a: Pt, b: Pt, c: Pt, d: Pt) -> float:
+    if perf_counters.ENABLED:
+        perf_counters.inc("overlap_edge_tests")
     if _segments_cross(a, b, c, d):
         return 0.0
     return min(point_segment_distance(*a, c, d), point_segment_distance(*b, c, d),
@@ -137,6 +144,9 @@ def _clipped_ring_area(tri: Sequence[Pt], ring: Sequence[Pt]) -> float:
 def _clip_against_edge(subject: list[Pt], a: Pt, b: Pt) -> list[Pt]:
     if not subject:
         return []
+    if perf_counters.ENABLED:
+        perf_counters.inc("clip_steps", len(subject))
+        perf_counters.inc("overlap_edge_tests", len(subject))
     out: list[Pt] = []
     prev = subject[-1]
     prev_side = _side(a, b, prev)

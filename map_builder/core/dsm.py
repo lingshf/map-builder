@@ -37,6 +37,7 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import NotRequired, TypeAlias, TypedDict, cast
 
+from . import perf_counters
 from .dem import ElevationGrid
 from .errors import LimitError, NoDataError
 
@@ -715,6 +716,8 @@ def correct_grid(grid: ElevationGrid, mask: MaskRaster | Sequence[int], passes: 
                 lower_sum += d
                 if d > lower_max:
                     lower_max = d
+        if perf_counters.ENABLED:
+            perf_counters.inc("grid_cells", nx)
     stats["lowered_points"] = lowered
     stats["max_lowering_m"] = round(lower_max, 3)
     stats["mean_lowering_m"] = round(lower_sum / masked, 3)

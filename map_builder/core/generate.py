@@ -34,7 +34,7 @@ import struct
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Generic, NoReturn, TypeAlias, TypedDict, TypeVar
 
-from . import bridges, dsm, passages, roofs, tunnels, water
+from . import bridges, dsm, passages, perf_counters, roofs, tunnels, water
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .structures import (Color, InvalidEntry, Probe, ProbeBlock, Prov, Segment, StageContext, UnsupportedEntry, Vec2,
@@ -788,6 +788,8 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
     nx = grid.nx
     for j in range(grid.ny - 1):
         for i in range(nx - 1):
+            if perf_counters.ENABLED:
+                perf_counters.inc("grid_cells")
             v00, v10 = j * nx + i, j * nx + i + 1
             v01, v11 = v00 + nx, v10 + nx
             cx = grid.x0 + (i + 0.5) * grid.spacing
@@ -881,6 +883,8 @@ def _road_pieces(pts: Sequence[Vec2], half: float) -> list[Poly]:
 
 def _clip_halfplane(poly: Sequence[Vec2], a: Vec2, b: Vec2) -> list[Vec2]:
     """Keep the part of convex ``poly`` left of (or on) the directed line a->b."""
+    if perf_counters.ENABLED:
+        perf_counters.inc("clip_steps", len(poly))
     out: list[Vec2] = []
     n = len(poly)
     for k in range(n):

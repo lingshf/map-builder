@@ -149,6 +149,47 @@ for `palette-regions`; `x`, `y`, `w` and `h` are fractions of the image size fro
 {"regions": [{"camera": "ponds", "label": "water", "x": 0.40, "y": 0.55, "w": 0.10, "h": 0.08, "target_hex": "#3c6e8c"}]}
 ```
 
+## Perf gate (`tools/perf/`, D153)
+
+A deterministic work-count gate: the collector records operation counters and Python primitive calls per stage;
+the checker compares head with the merge-base.
+
+```
+$env:PYTHONHASHSEED = 0
+python -m tools.perf.work_count prepare-base --counter-commit <C>      # merge-base + counter commit worktree
+python -m tools.perf.collect cli --root <tree> --cache <frozen caches> --preset munich --out-dir <dir>
+blender --background --factory-startup --online-mode --python tools/perf/collect.py -- blender --root <tree> --cache <frozen caches> --preset munich --out-dir <dir>
+python -m tools.perf.work_count compare --base <base.json> --head <head.json> --base-peer <base2.json> --head-peer <head2.json> (--cpu-rounds <json> | --no-cpu-evidence) [--uncounted-site <text>] [--noop]
+```
+
+Run each preset (`munich`, `pittsburgh`) and series (`cli_generate`, `blender_generate`,
+`blender_generate_export`) twice per revision; the second run is the determinism peer, and the checker validates it
+as strictly as the first. Both peers and either CPU evidence or an explicit `--no-cpu-evidence` waiver (reported as an
+F5 review item) are mandatory; `--noop` cannot be combined with the waiver, since the waiver itself reports F5. The collector fails when a counter's registry total differs from the sum of its stage
+rows. The CLI backend refuses to run without `PYTHONHASHSEED=0`; Blender's embedded Python
+ignores that variable, so its determinism rests on the peer run. The cache directory holds `cache-<preset>`,
+copied afresh per run; any network access fails the run.
+
+Stages are the innermost pinned function active when work happens (`tools/perf/stages.py`); work outside every
+stage is charged to `other`. Buildings and roads are inline blocks of `build_plan`, so they are attributed through
+`build_building` and `build_road`. `primitive_calls` is the sum of one `cProfile` profile per stage.
+
+The checker treats a vector as invalid (F1) when a counter or stage that applies to the series is missing, when
+`package_valid` or `run_error` is absent, wrongly typed, or reports a failure, or when stage values do not sum to
+the total. Nothing is defaulted or truncated. Rules: F2 series total above +5 %, F3 stage above +10 % and 1 % of the
+total (both fail); F4 growth above +5 % is always listed, even when F2 fails; F5 (CPU median above +5 %) is raised only
+when F2 and F3 pass; F6 lists declared uncounted work.
+
+**CPU evidence (D147).** F5 uses five alternating base/head rounds of CPU seconds, passed as
+`{"base": [5 values], "head": [5 values]}` of positive finite numbers; the median ratio is compared with +5 %.
+
+**Reviewer dispositions.** F4, F5 and F6 never fail the gate by themselves. The reviewer records an explicit accept
+or reject for each one in the PR; an F5 needs either the named uncounted work (declared with `--uncounted-site`,
+which raises F6) or a same-code control pair.
+
+**Coverage limit.** Counters cover the pinned sites only. Work in an uncounted loop is visible only through CPU
+(F5) and the F6 declaration, never through F2/F3.
+
 ## Benchmarks (`design/bench/`)
 
 The harnesses used for D91 and D106 timing, and the D147 CPU method. Every harness installs `offline_guard.py`,

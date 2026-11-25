@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Literal, NotRequired, Required, TypedDict
 
 from . import (COLLISION_FORMAT_VERSION, GENERATOR_NAME, GENERATOR_VERSION, HEIGHTFIELD_FORMAT_VERSION,
                PACKAGE_SCHEMA, PACKAGE_SCHEMA_VERSION)
+from . import perf_counters
 from .collision import (CLASS_KINDS, CLASSES, DEGENERATE_EPS, KIND_SOLID, KIND_TUBE, MAX_ABS_COORD_M,
                         degenerate_triangle_count, is_degenerate, rasterize_heightfield, read_collision,
                         read_heightfield, strict_json)
@@ -726,6 +727,8 @@ def match_winding(collision_triangles: Iterable[Tri], visual_triangles: Iterable
         for cell in _centroid_cells(tri, tol):
             for v in grid.get(cell, ()):
                 st["work"] += 1
+                if perf_counters.ENABLED:
+                    perf_counters.inc("validator_pairs")
                 if st["work"] > budget:
                     st["work_exhausted"] = True
                     break
@@ -796,6 +799,8 @@ def match_one_to_one(collision_triangles: Iterable[Tri], visual_triangles: Itera
         for cell in _centroid_cells(tri, tol):
             for k in grid.get(cell, ()):
                 work += 1
+                if perf_counters.ENABLED:
+                    perf_counters.inc("validator_pairs")
                 if work > budget:
                     st["work_exhausted"] = True
                     return st
@@ -1162,9 +1167,15 @@ def _write_member(z: zipfile.ZipFile, name: str, data: bytes) -> None:
     written entry passes the ratio check. The raw level-6 stream is computed once and written as is, which
     is the same stream and header ``ZipFile.writestr`` would produce."""
     zi = _zinfo(name)
+    if perf_counters.ENABLED:
+        perf_counters.inc_keyed("bytes_written", name, len(data))
     if not data:
+        if perf_counters.ENABLED:
+            perf_counters.inc("deflate_in_bytes", len(data))
         z.writestr(zi, data)
         return
+    if perf_counters.ENABLED:
+        perf_counters.inc("deflate_in_bytes", len(data))
     co = zlib.compressobj(6, zlib.DEFLATED, -15)   # the raw deflate stream zipfile writes at level 6
     raw = co.compress(data) + co.flush()
     fp = z.fp
@@ -1172,6 +1183,8 @@ def _write_member(z: zipfile.ZipFile, name: str, data: bytes) -> None:
         z.writestr(zi, data, compress_type=zipfile.ZIP_STORED)
         return
     if fp is None or len(data) >= _ZIP64_MEMBER:   # zip64 sizes: let zipfile write it (deflates again)
+        if perf_counters.ENABLED:
+            perf_counters.inc("deflate_in_bytes", len(data))
         z.writestr(zi, data)
         return
     zi.file_size, zi.compress_size, zi.CRC = len(data), len(raw), zlib.crc32(data)
