@@ -16,6 +16,7 @@ from map_builder.core.generate import (MAX_RING_VERTICES, ROAD_LIFT_M, InvalidFe
 from map_builder.core.geodesy import Area
 from map_builder.core import generate as gen
 from map_builder.core.osm import Classified, Feature, Polygon, classify, parse_osm_xml, ring_area
+from map_builder.core.style import style_uses_textures
 from map_builder.core.triangulate import TriangulationError, triangulate, verify_triangulation
 
 from .synthetic import OsmBuilder, synthetic_inputs
@@ -117,6 +118,16 @@ class PlanTest(unittest.TestCase):
 
     def obj(self, key, kind="way"):
         return self.by_id[f"osm:{kind}/{self.ids[key]}"]
+
+    def test_style_default_is_stylized(self):
+        plan = build_plan(self.area, self.grid, self.cl)
+        self.assertEqual(plan.report.get("options", {}).get("style"), "stylized")
+        self.assertFalse(style_uses_textures(plan.report["options"]["style"]))
+
+    def test_classic_mode_is_selectable(self):
+        plan = build_plan(self.area, self.grid, self.cl, PlanOptions(style="classic"))
+        self.assertNotIn("options", plan.report)
+        self.assertTrue(style_uses_textures("classic"))
 
     def test_buildings_closed_and_outward(self):
         n = 0

@@ -236,6 +236,23 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
     _, cli_nodes = read_glb(cli.glb)
     _, bl_nodes = read_glb(bl.glb)
 
+    def _norm_num(value: Any) -> Any:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return round(float(value), 6)
+        return value
+
+    def _norm_color_hash(gl: dict[str, Any], bin_chunk: bytes, accessor_index: int) -> str:
+        raw = _buffer_slice(gl, bin_chunk, accessor_index)
+        accessor = gl.get("accessors", [])[accessor_index]
+        if (isinstance(accessor, dict) and accessor.get("componentType") == 5126
+                and accessor.get("type") in {"VEC3", "VEC4"} and len(raw) % 4 == 0):
+            values = struct.unpack("<" + "f" * (len(raw) // 4), raw)
+            width = 3 if accessor.get("type") == "VEC3" else 4
+            rows = [tuple(_norm_num(values[i + k]) for k in range(width)) for i in range(0, len(values), width)]
+            rows.sort()
+            return hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
+        return hashlib.sha256(raw).hexdigest()
+
     def signature(gl: dict[str, Any], bin_chunk: bytes, nodes: list[Any]) -> list[dict[str, Any]]:
         sig: list[dict[str, Any]] = []
         mats = gl.get("materials", [])
@@ -252,14 +269,15 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
         for i, m in enumerate(mats):
             pbr = m.get("pbrMetallicRoughness", {}) if isinstance(m, dict) else {}
             mat_name = _identity_name(m.get("name") if isinstance(m, dict) else None, i, "material")
+            base_color = pbr.get("baseColorFactor")
             material_payload_by_index.append(
                 {
-                "name": mat_name,
-                "mb_id": _mb_id_of(m),
-                "baseColorFactor": pbr.get("baseColorFactor"),
-                "metallicFactor": pbr.get("metallicFactor"),
-                "roughnessFactor": pbr.get("roughnessFactor"),
-                "hasBaseColorTexture": isinstance(pbr, dict) and "baseColorTexture" in pbr,
+                    "name": mat_name,
+                    "mb_id": _mb_id_of(m),
+                    "baseColorFactor": [_norm_num(v) for v in base_color] if isinstance(base_color, list) else base_color,
+                    "metallicFactor": _norm_num(pbr.get("metallicFactor")),
+                    "roughnessFactor": _norm_num(pbr.get("roughnessFactor")),
+                    "hasBaseColorTexture": isinstance(pbr, dict) and "baseColorTexture" in pbr,
                 }
             )
         for n in nodes:
@@ -283,7 +301,7 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
                     material_mb_id = material_payload["mb_id"]
                 color_hash = None
                 if "COLOR_0" in attrs:
-                    color_hash = hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
+                    color_hash = _norm_color_hash(gl, bin_chunk, attrs["COLOR_0"])
                 sig.append(
                     {
                         "node_name": node_name,
