@@ -52,7 +52,7 @@ PR CI (`.github/workflows/ci.yml`) has two jobs:
 
 Headless Blender and network acquisition are not PR CI jobs. Release automation is tag-triggered. Run mypy
 locally with `py -3.12 -m pip install mypy==2.4.1` and then `py -3.12 -m mypy`. The package-checking tools
-(audit, replays, style and benchmarks) are documented in [Developer tools](tools.md).
+(audit, replays, style, the D153 perf gate and benchmarks) are documented in [Developer tools](tools.md).
 
 ## Workflow and Definition of Done
 
