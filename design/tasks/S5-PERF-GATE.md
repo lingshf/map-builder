@@ -73,11 +73,13 @@ tunnels } > `build_scene` (Blender) > package write > `validate_package`
 * **Counters land first, isolated.** S5-PERF-GATE adds the counters in **one output-neutral commit** `C`: the
   registry plus the increments, packages byte-identical with counters off. The tool `tools/perf/work_count.py`
   goes in a separate commit.
-* **Base for every comparison.** The base is the PR's merge-base with `C` cherry-applied. The checker builds it in a
-  temporary worktree it creates itself, and that worktree is never pushed. The head already contains `C` once
-  S5-PERF-GATE has merged; before that, the head is measured with `C` applied too.
-* **If `C` does not apply cleanly** to the base or the head, that is F1. There is no hand-merging; the PR author
-  rebases.
+* **Base for every comparison (amended, D182).** If the PR's merge-base already contains the counters (main from
+  `796d72b` on), the base is that merge-base **as is**, in a plain temporary worktree. Only a **pre-counter**
+  merge-base (before `796d72b`) gets `C` cherry-applied, in a worktree the checker creates itself
+  (`work_count prepare-base`); it is never pushed. The head already contains `C` once S5-PERF-GATE has merged.
+  Usage: [docs/dev/tools.md §Perf gate](../../docs/dev/tools.md#perf-gate-toolsperf-d153).
+* **If `C` does not apply cleanly** to a pre-counter base, that is F1. There is no hand-merging; the PR author
+  rebases. `C` is never applied to a base that already contains it.
 * **The first PR (S5-PERF-GATE itself)** is verified in three steps. Each must pass on the sample, Munich and
   Pittsburgh across all three series:
   * `C` with counters off is byte-identical to the merge-base;
@@ -100,7 +102,7 @@ are evidence-only (visuals and G0, D157) and are not part of this gate.
 **The revision fails if:**
 
 * **F1, completeness.** A run errors, a package is not `VALID`, a required counter or stage is missing, the stage
-  sums do not match, `C` does not apply, or two runs of one revision differ in any counter or call count.
+  sums do not match, `C` does not apply to a pre-counter base, or two runs of one revision differ in any counter or call count.
 * **F2, series total.** Any counter's series total or the total primitive calls are **> +5.0 %** over the base.
   Exactly +5.0 % passes. The exception is new geometry listed under D35 with a coordinator exception.
 * **F3, stage.** For any stage and any counter (or calls), the stage value is **> +10.0 %** over the same stage and
