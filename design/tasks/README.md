@@ -166,7 +166,7 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 | DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | merged (197335d); done (D168) | #92 (197335d) |
 | DOC-TOOLS-F1 | later | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then `docs/dev/tools.md` exit-code note | ready: floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
 | DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
-| DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/README.md` (performance section) | in progress (unblocked by #91; facts: Developer check; QA rehearsal) | |
+| DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/tools.md` §Perf gate (the canonical usage page; `docs/dev/README.md` links to it) | review (facts: Developer check; QA rehearsal) | |
 
 Details for each row:
 
