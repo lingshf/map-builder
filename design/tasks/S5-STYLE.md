@@ -116,7 +116,7 @@ How each element is styled:
 
 ## Low-end budgets (D139)
 
-S5-STYLE-BASE records the **classic** baseline on main at the S5 start (rebaselined to 8ce3d28 after the S5-F3 collision change, D181; the fba2509 record is kept), for the sample, Munich, Pittsburgh and
+S5-STYLE-BASE records the **classic** baseline on main at the S5 start (rebaseline target 8ce3d28 after the S5-F3 collision change, D181, measurements to be recorded; the fba2509 record is kept), for the sample, Munich, Pittsburgh and
 Bellevue-Factoria (D90, D157). The stylized mode does not exist yet; S5-STYLE-PALETTE records the first **stylized**
 baseline. Pittsburgh is the sizing case; Bellevue-Factoria is the main visual example.
 
