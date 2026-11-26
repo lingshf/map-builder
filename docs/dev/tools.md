@@ -173,6 +173,7 @@ git worktree add --detach "$out\base" $mb
 $base = "$out\base"
 
 # Base tree, merge-base before 796d72b only: pinned historical example (#91's head against its base a1e0839)
+git fetch origin refs/pull/91/head   # #91 was squash-merged, so d889d97 and 9fb0756 are not in main's history
 python -m tools.perf.work_count prepare-base --head-ref d889d977d5f75223c83bc2bf2e013d255b896572 --base-ref a1e0839 --counter-commit 9fb07560e53f10bb63abb777cf8e3b1f8ae81a36
 # use the printed worktree_path as $base, and run the printed cleanup command afterwards
 
