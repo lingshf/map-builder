@@ -1,0 +1,87 @@
+{
+  "bellevue-factoria_cli": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 1.5,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_below_ground:water": 5,
+      "water_shore_step:col": 121,
+      "water_shore_step:vis": 121
+    }
+  },
+  "bellevue-factoria_blender": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 1.5,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_below_ground:water": 5,
+      "water_shore_step:col": 121,
+      "water_shore_step:vis": 121
+    }
+  },
+  "munich_cli": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 0.0,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_coverage": 1
+    }
+  },
+  "munich_blender": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 0.0,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_coverage": 1
+    }
+  },
+  "pittsburgh_cli": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 1.5,
+    "shore_step_ok": true,
+    "kinds": {
+      "edge_ambiguous_collision_visual": 1,
+      "hf_below_ground:water": 2,
+      "water_shore_step:col": 117,
+      "water_shore_step:vis": 117
+    }
+  },
+  "pittsburgh_blender": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 1.5,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_below_ground:water": 2,
+      "water_shore_step:col": 117,
+      "water_shore_step:vis": 117
+    }
+  },
+  "sample_blender": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 1.5,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_below_ground:water": 1,
+      "water_shore_step:col": 4,
+      "water_shore_step:vis": 4
+    }
+  },
+  "sample_cli": {
+    "exit": 0,
+    "water_above_bank+water_buried": {},
+    "shore_step_max_m": 1.5,
+    "shore_step_ok": true,
+    "kinds": {
+      "hf_below_ground:water": 1,
+      "water_shore_step:col": 4,
+      "water_shore_step:vis": 4
+    }
+  }
+}

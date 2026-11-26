@@ -1,0 +1,2134 @@
+{
+ "package": "after_munich_cli.mbmap",
+ "node": [
+  18.0,
+  -122.0
+ ],
+ "hf_z": 4.552392959594727,
+ "near_triangles": [
+  {
+   "triangle": 604,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     20.0,
+     -130.0,
+     4.864402770996094
+    ],
+    [
+     30.0,
+     -130.0,
+     7.085750102996826
+    ],
+    [
+     30.0,
+     -120.0,
+     6.027751922607422
+    ]
+   ],
+   "edge_distance_m": [
+    8.0,
+    12.0,
+    -7.071067811865475
+   ]
+  },
+  {
+   "triangle": 605,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     20.0,
+     -130.0,
+     4.864402770996094
+    ],
+    [
+     30.0,
+     -120.0,
+     6.027751922607422
+    ],
+    [
+     20.0,
+     -120.0,
+     4.321763515472412
+    ]
+   ],
+   "edge_distance_m": [
+    7.071067811865475,
+    2.0,
+    -2.0
+   ]
+  },
+  {
+   "triangle": 682,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     10.0,
+     -120.0,
+     4.625842094421387
+    ],
+    [
+     20.0,
+     -120.0,
+     4.321763515472412
+    ],
+    [
+     20.0,
+     -110.0,
+     3.8264729976654053
+    ]
+   ],
+   "edge_distance_m": [
+    -2.0,
+    2.0,
+    7.071067811865475
+   ]
+  },
+  {
+   "triangle": 683,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     10.0,
+     -120.0,
+     4.625842094421387
+    ],
+    [
+     20.0,
+     -110.0,
+     3.8264729976654053
+    ],
+    [
+     10.0,
+     -110.0,
+     3.8323428630828857
+    ]
+   ],
+   "edge_distance_m": [
+    -7.071067811865475,
+    12.0,
+    8.0
+   ]
+  },
+  {
+   "triangle": 684,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     20.0,
+     -120.0,
+     4.321763515472412
+    ],
+    [
+     30.0,
+     -120.0,
+     6.027751922607422
+    ],
+    [
+     30.0,
+     -110.0,
+     4.993980884552002
+    ]
+   ],
+   "edge_distance_m": [
+    -2.0,
+    12.0,
+    0.0
+   ]
+  },
+  {
+   "triangle": 685,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     20.0,
+     -120.0,
+     4.321763515472412
+    ],
+    [
+     30.0,
+     -110.0,
+     4.993980884552002
+    ],
+    [
+     20.0,
+     -110.0,
+     3.8264729976654053
+    ]
+   ],
+   "edge_distance_m": [
+    0.0,
+    12.0,
+    -2.0
+   ]
+  },
+  {
+   "triangle": 3830,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     20.0,
+     -128.11546325683594,
+     4.762140274047852
+    ],
+    [
+     20.0,
+     -120.0,
+     4.321763515472412
+    ],
+    [
+     13.717982292175293,
+     -126.28202056884766,
+     5.046172142028809
+    ]
+   ],
+   "edge_distance_m": [
+    2.0,
+    -6.440759520063079e-07,
+    5.310211872007959
+   ]
+  },
+  {
+   "triangle": 3848,
+   "mb_id": "terrain:grid",
+   "class": "terrain",
+   "xyz": [
+    [
+     14.447157859802246,
+     -125.55284118652344,
+     4.962087631225586
+    ],
+    [
+     20.0,
+     -120.0,
+     4.321763515472412
+    ],
+    [
+     14.781259536743164,
+     -120.0,
+     4.480453968048096
+    ]
+   ],
+   "edge_distance_m": [
+    -2.428844966438981e-07,
+    2.0,
+    3.3330482408681026
+   ]
+  },
+  {
+   "triangle": 6523,
+   "mb_id": "osm:way/504896249",
+   "class": "building",
+   "xyz": [
+    [
+     29.00364875793457,
+     -125.62580871582031,
+     4.1931562423706055
+    ],
+    [
+     5.388405799865723,
+     -119.1544418334961,
+     4.1931562423706055
+    ],
+    [
+     5.388405799865723,
+     -119.1544418334961,
+     10.493156433105469
+    ]
+   ],
+   "edge_distance_m": [
+    -0.5887354650262123,
+    Infinity,
+    0.5887354650262123
+   ]
+  },
+  {
+   "triangle": 6524,
+   "mb_id": "osm:way/504896249",
+   "class": "building",
+   "xyz": [
+    [
+     29.00364875793457,
+     -125.62580871582031,
+     4.1931562423706055
+    ],
+    [
+     5.388405799865723,
+     -119.1544418334961,
+     10.493156433105469
+    ],
+    [
+     29.00364875793457,
+     -125.62580871582031,
+     10.493156433105469
+    ]
+   ],
+   "edge_distance_m": [
+    -0.5887354650262123,
+    0.5887354650262123,
+    Infinity
+   ]
+  },
+  {
+   "triangle": 6525,
+   "mb_id": "osm:way/504896249",
+   "class": "building",
+   "xyz": [
+    [
+     29.00364875793457,
+     -125.62580871582031,
+     4.1931562423706055
+    ],
+    [
+     3.185415744781494,
+     -127.13809967041016,
+     4.1931562423706055
+    ],
+    [
+     5.388405799865723,
+     -119.1544418334961,
+     4.1931562423706055
+    ]
+   ],
+   "edge_distance_m": [
+    -4.263035384746179,
+    -12.91415734439403,
+    0.5887354650262123
+   ]
+  },
+  {
+   "triangle": 6532,
+   "mb_id": "osm:way/504896249",
+   "class": "building",
+   "xyz": [
+    [
+     29.00364875793457,
+     -125.62580871582031,
+     10.493156433105469
+    ],
+    [
+     5.388405799865723,
+     -119.1544418334961,
+     10.493156433105469
+    ],
+    [
+     3.185415744781494,
+     -127.13809967041016,
+     10.493156433105469
+    ]
+   ],
+   "edge_distance_m": [
+    -0.5887354650262123,
+    12.91415734439403,
+    4.263035384746179
+   ]
+  }
+ ],
+ "rays": [
+  {
+   "xy": [
+    17.5,
+    -122.5
+   ],
+   "python": [
+    10.493156433105469,
+    "osm:way/504896249"
+   ],
+   "csharp": [
+    10.493156432999967,
+    "osm:way/504896249"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -122.5
+   ],
+   "python": [
+    4.60394498919959,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.603944988999956,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -122.5
+   ],
+   "python": [
+    4.59783991830102,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.597839917999977,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -122.5
+   ],
+   "python": [
+    4.59173484740279,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.591734846999998,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -122.5
+   ],
+   "python": [
+    4.58562977650422,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.585629777000008,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -122.5
+   ],
+   "python": [
+    4.579524705605991,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.579524706000029,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -122.5
+   ],
+   "python": [
+    4.57341963470742,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.57341963500005,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -122.5
+   ],
+   "python": [
+    4.567314563809191,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5673145639999575,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -122.5
+   ],
+   "python": [
+    4.561209492910734,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5612094929999785,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -122.5
+   ],
+   "python": [
+    4.555104422012391,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.555104421999999,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -122.5
+   ],
+   "python": [
+    4.548999351113821,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.54899935100002,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -122.4
+   ],
+   "python": [
+    4.601559520491833,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.601559520000023,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -122.4
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -122.4
+   ],
+   "python": [
+    4.592413527414578,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.592413526999962,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -122.4
+   ],
+   "python": [
+    4.586308456516235,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.586308456999973,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -122.4
+   ],
+   "python": [
+    4.580203385617779,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.580203385999994,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -122.4
+   ],
+   "python": [
+    4.574098314719436,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.574098315000015,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -122.4
+   ],
+   "python": [
+    4.567993243820752,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.567993244000036,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -122.4
+   ],
+   "python": [
+    4.561888172922636,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.561888173000057,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -122.4
+   ],
+   "python": [
+    4.555783102024179,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.555783101999964,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -122.4
+   ],
+   "python": [
+    4.549678031125609,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.549678030999985,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -122.4
+   ],
+   "python": [
+    4.543572960227266,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.543572960000006,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -122.3
+   ],
+   "python": [
+    4.593068833507687,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.593068833999951,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -122.3
+   ],
+   "python": [
+    4.590028052811704,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.590028052999969,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -122.3
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -122.3
+   ],
+   "python": [
+    4.580882065629453,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.580882065999958,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -122.3
+   ],
+   "python": [
+    4.57477699473111,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.574776994999979,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -122.3
+   ],
+   "python": [
+    4.568671923832767,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.568671924,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -122.3
+   ],
+   "python": [
+    4.5625668529341965,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.562566853000021,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -122.3
+   ],
+   "python": [
+    4.556461782035967,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.556461782000042,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -122.3
+   ],
+   "python": [
+    4.550356711137624,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.550356710999949,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -122.3
+   ],
+   "python": [
+    4.5442516402391675,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.54425163999997,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -122.3
+   ],
+   "python": [
+    4.538146569340597,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.538146568999991,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -122.2
+   ],
+   "python": [
+    4.584578146523427,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.584578147000002,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -122.2
+   ],
+   "python": [
+    4.581537365827444,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5815373660000205,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -122.2
+   ],
+   "python": [
+    4.578496585131575,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.578496585000039,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -122.2
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -122.2
+   ],
+   "python": [
+    4.569350603844555,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.569350603999965,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -122.2
+   ],
+   "python": [
+    4.563245532946098,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.563245532999986,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -122.2
+   ],
+   "python": [
+    4.557140462047528,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.557140462000007,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -122.2
+   ],
+   "python": [
+    4.5510353911492984,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.551035391000028,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -122.2
+   ],
+   "python": [
+    4.544930320250728,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.544930320000049,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -122.2
+   ],
+   "python": [
+    4.538825249352499,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.538825248999956,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -122.2
+   ],
+   "python": [
+    4.532720178454042,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.532720177999977,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -122.1
+   ],
+   "python": [
+    4.576087459539167,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.576087460000053,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -122.1
+   ],
+   "python": [
+    4.573046678843411,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.573046678999958,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -122.1
+   ],
+   "python": [
+    4.5700058981474285,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.570005897999977,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -122.1
+   ],
+   "python": [
+    4.566965117451332,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.566965116999995,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -122.1
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -122.1
+   ],
+   "python": [
+    4.557819142059429,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.557819141999971,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -122.1
+   ],
+   "python": [
+    4.551714071161086,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.551714070999992,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -122.1
+   ],
+   "python": [
+    4.54560900026263,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.545609000000013,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -122.1
+   ],
+   "python": [
+    4.539503929364287,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.539503929000034,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -122.1
+   ],
+   "python": [
+    4.53339885846583,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.533398858000055,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -122.1
+   ],
+   "python": [
+    4.527293787567487,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.527293787999952,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -122.0
+   ],
+   "python": [
+    4.567596772554907,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.567596772999991,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -122.0
+   ],
+   "python": [
+    4.564555991858924,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.56455599200001,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -122.0
+   ],
+   "python": [
+    4.561515211163055,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.561515211000028,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -122.0
+   ],
+   "python": [
+    4.558474430467186,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.558474430000047,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -122.0
+   ],
+   "python": [
+    4.555433649771203,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5554336500000545,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -122.0
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -122.0
+   ],
+   "python": [
+    4.546287680274304,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.546287679999978,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -122.0
+   ],
+   "python": [
+    4.540182609375961,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.540182608999999,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -122.0
+   ],
+   "python": [
+    4.534077538477618,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.53407753800002,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -122.0
+   ],
+   "python": [
+    4.527972467579275,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.52797246800003,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -122.0
+   ],
+   "python": [
+    4.521867396680818,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.521867397000051,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -121.9
+   ],
+   "python": [
+    4.559106085570647,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5591060860000425,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -121.9
+   ],
+   "python": [
+    4.556065304874664,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.556065304999947,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -121.9
+   ],
+   "python": [
+    4.5530245241786815,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.553024523999966,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -121.9
+   ],
+   "python": [
+    4.54998374348304,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.549983742999984,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -121.9
+   ],
+   "python": [
+    4.546942962787057,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.546942962999992,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -121.9
+   ],
+   "python": [
+    4.543902182091074,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.543902182000011,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -121.9
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -121.9
+   ],
+   "python": [
+    4.53475621848952,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.534756217999984,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -121.9
+   ],
+   "python": [
+    4.528651147591063,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5286511479999945,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -121.9
+   ],
+   "python": [
+    4.5225460766924925,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.522546077000015,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -121.9
+   ],
+   "python": [
+    4.5164410057941495,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.516441006000036,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -121.8
+   ],
+   "python": [
+    4.550615398586501,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.55061539899998,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -121.8
+   ],
+   "python": [
+    4.547574617890518,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.547574617999999,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -121.8
+   ],
+   "python": [
+    4.544533837194535,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.544533837000017,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -121.8
+   ],
+   "python": [
+    4.541493056498666,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.541493056000036,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -121.8
+   ],
+   "python": [
+    4.538452275802797,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.538452276000044,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -121.8
+   ],
+   "python": [
+    4.535411495106928,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5354114949999484,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -121.8
+   ],
+   "python": [
+    4.532370714410945,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.532370713999967,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -121.8
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -121.8
+   ],
+   "python": [
+    4.523224756704508,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.52322475699998,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -121.8
+   ],
+   "python": [
+    4.517119685806051,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.517119686000001,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -121.8
+   ],
+   "python": [
+    4.511014614907481,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.511014615000022,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -121.7
+   ],
+   "python": [
+    4.542124711602128,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.542124712000032,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -121.7
+   ],
+   "python": [
+    4.539083930906372,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.53908393100005,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -121.7
+   ],
+   "python": [
+    4.536043150210389,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.536043149999955,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -121.7
+   ],
+   "python": [
+    4.533002369514634,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.533002369999963,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -121.7
+   ],
+   "python": [
+    4.529961588818537,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.529961588999981,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -121.7
+   ],
+   "python": [
+    4.526920808122554,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.526920808,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -121.7
+   ],
+   "python": [
+    4.523880027426912,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.523880027000018,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -121.7
+   ],
+   "python": [
+    4.5208392467309295,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.520839247000026,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -121.7
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -121.7
+   ],
+   "python": [
+    4.511693294919382,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.511693294999986,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -121.7
+   ],
+   "python": [
+    4.505588224020926,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.505588224000007,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -121.6
+   ],
+   "python": [
+    4.533634024617982,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.533634024999969,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -121.6
+   ],
+   "python": [
+    4.530593243922112,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.530593243999988,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -121.6
+   ],
+   "python": [
+    4.527552463226243,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.527552463000006,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -121.6
+   ],
+   "python": [
+    4.524511682530147,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.524511683000014,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -121.6
+   ],
+   "python": [
+    4.521470901834391,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.521470902000033,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -121.6
+   ],
+   "python": [
+    4.518430121138408,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.518430121000051,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -121.6
+   ],
+   "python": [
+    4.515389340442539,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.515389339999956,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -121.6
+   ],
+   "python": [
+    4.512348559746783,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.512348559999964,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -121.6
+   ],
+   "python": [
+    4.509307779050687,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5093077789999825,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -121.6
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -121.6
+   ],
+   "python": [
+    4.500161833134257,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.500161832999993,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.5,
+    -121.5
+   ],
+   "python": [
+    4.525143337633722,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.525143338000021,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.6,
+    -121.5
+   ],
+   "python": [
+    4.522102556937739,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.522102557000039,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.7,
+    -121.5
+   ],
+   "python": [
+    4.51906177624187,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.519061775999944,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.8,
+    -121.5
+   ],
+   "python": [
+    4.5160209955460004,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.516020995999952,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    17.9,
+    -121.5
+   ],
+   "python": [
+    4.5129802148500175,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5129802149999705,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.0,
+    -121.5
+   ],
+   "python": [
+    4.509939434154148,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.509939433999989,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.1,
+    -121.5
+   ],
+   "python": [
+    4.506898653458279,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.5068986530000075,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.2,
+    -121.5
+   ],
+   "python": [
+    4.503857872762296,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.503857873000015,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.3,
+    -121.5
+   ],
+   "python": [
+    4.500817092066427,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.500817092000034,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.4,
+    -121.5
+   ],
+   "python": [
+    4.497776311370444,
+    "terrain:grid"
+   ],
+   "csharp": [
+    4.497776311000052,
+    "terrain:grid"
+   ],
+   "agree": true
+  },
+  {
+   "xy": [
+    18.5,
+    -121.5
+   ],
+   "python": null,
+   "csharp": null,
+   "agree": true
+  }
+ ],
+ "misses": [
+  [
+   17.6,
+   -122.4
+  ],
+  [
+   17.7,
+   -122.3
+  ],
+  [
+   17.8,
+   -122.2
+  ],
+  [
+   17.9,
+   -122.1
+  ],
+  [
+   18.0,
+   -122.0
+  ],
+  [
+   18.1,
+   -121.9
+  ],
+  [
+   18.2,
+   -121.8
+  ],
+  [
+   18.3,
+   -121.7
+  ],
+  [
+   18.4,
+   -121.6
+  ],
+  [
+   18.5,
+   -121.5
+  ]
+ ],
+ "readers_agree": true
+}

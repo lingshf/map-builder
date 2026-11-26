@@ -239,6 +239,16 @@ def sweep(profile_2d: Sequence[Vec2], path_3d: Iterable[Iterable[float]], closed
     return mesh
 
 
+def sweep_footprint(path_xy: Sequence[Vec2], half_width: float) -> list[list[Vec2]]:
+    """The plan of a sweep ``half_width`` to each side of ``path_xy`` (mitred as :func:`sweep` mitres it): one quad per
+    path segment, between its two cross-sections."""
+    path: list[Vec3] = [(x, y, 0.0) for x, y in path_xy]
+    sections = [((p[0] - side[0] * half_width * miter, p[1] - side[1] * half_width * miter),
+                 (p[0] + side[0] * half_width * miter, p[1] + side[1] * half_width * miter))
+                for p, (_, side, miter) in zip(path, _frames(path, half_width))]
+    return [[left0, right0, right1, left1] for (left0, right0), (left1, right1) in zip(sections, sections[1:])]
+
+
 def polyline_z_profile(points_xy: Iterable[Sequence[float]], z_func: Callable[[float, float], float],
                        max_step: float | None = None) -> list[tuple[float, float, float, float]]:
     """Samples of a polyline: ``[(s, x, y, z)]`` with ``s`` the arc length from the first point, the original

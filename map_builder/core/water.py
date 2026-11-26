@@ -21,12 +21,13 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from .dem import ElevationGrid
+from .deck_underside import RampLines, trim_under_decks
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
 from .overlap import point_segment_distance, triangle_overlaps_region, triangle_touches
 from . import perf_counters
-from .shore import shore_ramps
+from .shore import Trim, keep_whole, shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
 
 Pt = tuple[float, float]
@@ -50,6 +51,7 @@ WATER_COLOR = (0.05, 0.14, 0.24)
 MATERIAL = "MB Water"
 BANK_MATERIAL = "MB Terrain"
 SAMPLE_MASK_BUFFER_M = 15.0   # dsm.BUILDING_BUFFER_M / BRIDGE_BUFFER_M: the DSM mask the samples avoid
+BLEND_LINE_MARGIN_M = 1.0     # the bank blend and the shore ramps keep this clear of a road, bridge or tunnel edge
 
 
 def percentile(values: Sequence[float], q: float) -> float:
@@ -693,14 +695,15 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
                 ring_problem: Callable[[Polygon], str | None],
                 charge: Callable[[str, int, int], None] | None = None,
                 refund: Callable[[int, int], None] | None = None,
-                carve_depth: float = CARVE_DEPTH_M) -> WaterModel:
+                carve_depth: float = CARVE_DEPTH_M, ramp_lines: RampLines | None = None) -> WaterModel:
     """Build the water bodies and the carved terrain grid.
 
     ``areas``: validated water landcover features. ``riverbanks``/``waterways``: ``ClassifiedOSM`` lists.
     ``footprints``: building polygons and ``lines``: (polyline, half width) of bridges and tunnels, both used to
     discard shore samples. ``road_lines``: roads (and the lines above) the bank blend must not undercut.
     ``extent``: terrain extent (x0, y0, x1, y1). ``charge``/``refund``: triangle-budget callbacks (LimitError means
-    refusal). ``carve_depth`` exists for tests."""
+    refusal). ``ramp_lines``: how ``lines`` block the shore ramps (D178); without it they block them as they do the
+    bank blend. ``carve_depth`` exists for tests."""
     s = grid.spacing
     bodies: list[Body] = []
     for f in areas:
@@ -721,7 +724,8 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
 
     masks = _Masks(list(footprints), [(list(pl), hw + SAMPLE_MASK_BUFFER_M) for pl, hw in lines])
     masks.build()
-    blend_masks = _Masks(list(footprints), [(list(pl), hw + 1.0) for pl, hw in list(road_lines) + list(lines)])
+    blend_masks = _Masks(list(footprints), [(list(pl), hw + BLEND_LINE_MARGIN_M)
+                                            for pl, hw in list(road_lines) + list(lines)])
     blend_masks.build()
 
     # 1. clip to the terrain rectangle
@@ -774,12 +778,36 @@ def build_water(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature], 
     cut = _CarveContext(model, blend_masks, carve_depth)
     cut.prepare()
     cut.settle(refund)
-    _attach_ramps(model, blend_masks, charge)
+    model._build_index()
+    ramp_block, ramp_trim = _ramp_masks(model, footprints, road_lines, ramp_lines) if ramp_lines is not None \
+        else (blend_masks.hit_triangle, keep_whole)
+    _attach_ramps(model, ramp_block, ramp_trim, charge)
     model._build_index()
     return model
 
 
-def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, int], None] | None) -> None:
+def _ramp_masks(model: WaterModel, footprints: Sequence[Polygon], road_lines: Sequence[tuple[Sequence[Pt], float]],
+                ramp_lines: RampLines) -> tuple[Callable[[Sequence[Pt]], bool], Trim]:
+    """The shore ramps' ``blocked_by`` and ``trim`` (D178): footprints, roads, ``always`` lines and deck lines
+    without a deck block a ramp strip as they block the bank blend; a deck trims it out of its at-grade footprint."""
+    found = ramp_lines.undersides(model.wmax_segment)
+    deckless = [(pl, hw) for bridge_id, pl, hw in ramp_lines.decks if bridge_id not in found]
+    always = _Masks(list(footprints), [(list(pl), hw + BLEND_LINE_MARGIN_M)
+                                       for pl, hw in list(road_lines) + ramp_lines.always + deckless])
+    always.build()
+    decks = [found[bridge_id] for bridge_id in sorted(found)]
+    deck_idx = _Index()
+    for i, deck in enumerate(decks):
+        deck_idx.add(i, _ring_box([p for quad in deck.footprint for p in quad]))
+
+    def trim(tri: Tri) -> list[Tri]:
+        near = [decks[i] for i in sorted(deck_idx.in_box(_ring_box([(v[0], v[1]) for v in tri])))]
+        return trim_under_decks(tri, near) if near else [tri]
+    return always.hit_triangle, trim
+
+
+def _attach_ramps(model: WaterModel, blocked_by: Callable[[Sequence[Pt]], bool], trim: Trim,
+                  charge: Callable[[str, int, int], None] | None) -> None:
     """Give every built body its shore ramps on the final terrain; ramps over the budget are left out (noted)."""
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
@@ -809,8 +837,8 @@ def _attach_ramps(model: WaterModel, masks: _Masks, charge: Callable[[str, int, 
                 return True
             return False
 
-        ramps = shore_ramps(b.shore, level.at, ground, masks.hit_triangle, water_receiver, wet_by,
-                            edge_sources=b.shore_source_piece)
+        ramps = shore_ramps(b.shore, level.at, ground, blocked_by, water_receiver, wet_by,
+                            edge_sources=b.shore_source_piece, trim=trim)
         b.info["shore_ramp_blocked_m"] = round(ramps.blocked_m, 1)
         triangles = ramps.bank + ramps.cascade
         try:

@@ -1,0 +1,113 @@
+{
+  "before": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\before_bellevue-factoria_blender.mbmap",
+  "after": "C:\\Users\\shaoling\\.copilot\\session-state\\f63263ea-2f46-48e1-88c6-9d1c39d51a53\\files\\s5f3\\builds\\after_bellevue-factoria_blender.mbmap",
+  "archive_identical": false,
+  "archive_sha256": [
+    "f69b459b55058bac87e976ccc45b8a6ca9752293add6239e9be209552a1460c2",
+    "180c480717a27635982531356b8da698fc6f7cab25bd7847266fbdcff88329d8"
+  ],
+  "members_changed": [
+    "collision/map.mbcol",
+    "collision/terrain.mbhf",
+    "manifest.json",
+    "report.json",
+    "visual/map.glb"
+  ],
+  "manifest_keys_changed": [
+    "collision",
+    "files"
+  ],
+  "manifest_objects": {
+    "changed": [],
+    "removed": [],
+    "added": []
+  },
+  "report_keys_changed": [
+    "blender_export",
+    "budget",
+    "export",
+    "water_bodies"
+  ],
+  "report_water_bodies": {
+    "osm:relation/2315576": {
+      "shore_ramp_blocked_m": [
+        192.5,
+        43.3
+      ],
+      "shore_ramp_triangles": [
+        1779,
+        1972
+      ]
+    }
+  },
+  "report_budget_export": {
+    "budget": [
+      {
+        "max_triangles": 4000000,
+        "max_vertices": 3000000,
+        "triangles": 218232,
+        "vertices": 161328
+      },
+      {
+        "max_triangles": 4000000,
+        "max_vertices": 3000000,
+        "triangles": 218425,
+        "vertices": 161511
+      }
+    ],
+    "export": [
+      {
+        "collision_triangles": 218232,
+        "collision_vertices": 161323,
+        "degenerate_triangles": 305,
+        "heightfield_nan_cells": 327,
+        "objects": 3655,
+        "orientation_probes": 3
+      },
+      {
+        "collision_triangles": 218425,
+        "collision_vertices": 161496,
+        "degenerate_triangles": 305,
+        "heightfield_nan_cells": 327,
+        "objects": 3655,
+        "orientation_probes": 3
+      }
+    ]
+  },
+  "pinned_unchanged": {
+    "manifest.georeference": true,
+    "manifest.passage_probes": true,
+    "manifest.orientation_probes": true,
+    "manifest.axes": true,
+    "manifest.area": true,
+    "report.passage_probes_blocked": true,
+    "report.passage_probes_dropped": true,
+    "report.water_decks_raised": true,
+    "report.counts": true
+  },
+  "collision_objects": {
+    "changed": [
+      "bank:osm:relation/2315576"
+    ],
+    "removed": [],
+    "added": []
+  },
+  "glb_nodes": {
+    "changed": [
+      "bank:osm:relation/2315576"
+    ],
+    "removed": [],
+    "added": []
+  },
+  "heightfield": {
+    "changed_nodes": 136,
+    "total_nodes": 561501,
+    "bbox_xy": [
+      -686.0,
+      -32.0,
+      -596.0,
+      172.0
+    ],
+    "max_abs_dz_m": 1.525832176208496
+  }
+}

@@ -1,0 +1,348 @@
+{
+  "bellevue-factoria_cli": {
+    "archive_identical": false,
+    "members_changed": [
+      "collision/map.mbcol",
+      "collision/terrain.mbhf",
+      "manifest.json",
+      "report.json",
+      "visual/map.glb"
+    ],
+    "collision_objects": {
+      "changed": [
+        "bank:osm:relation/2315576"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [
+        "bank:osm:relation/2315576"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 136,
+      "total_nodes": 561501,
+      "bbox_xy": [
+        -686.0,
+        -32.0,
+        -596.0,
+        172.0
+      ],
+      "max_abs_dz_m": 1.525832176208496
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {
+      "osm:relation/2315576": {
+        "shore_ramp_blocked_m": [
+          192.5,
+          43.3
+        ],
+        "shore_ramp_triangles": [
+          1779,
+          1972
+        ]
+      }
+    }
+  },
+  "bellevue-factoria_blender": {
+    "archive_identical": false,
+    "members_changed": [
+      "collision/map.mbcol",
+      "collision/terrain.mbhf",
+      "manifest.json",
+      "report.json",
+      "visual/map.glb"
+    ],
+    "collision_objects": {
+      "changed": [
+        "bank:osm:relation/2315576"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [
+        "bank:osm:relation/2315576"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 136,
+      "total_nodes": 561501,
+      "bbox_xy": [
+        -686.0,
+        -32.0,
+        -596.0,
+        172.0
+      ],
+      "max_abs_dz_m": 1.525832176208496
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {
+      "osm:relation/2315576": {
+        "shore_ramp_blocked_m": [
+          192.5,
+          43.3
+        ],
+        "shore_ramp_triangles": [
+          1779,
+          1972
+        ]
+      }
+    }
+  },
+  "munich_cli": {
+    "archive_identical": true,
+    "members_changed": [],
+    "collision_objects": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 0,
+      "total_nodes": 40401
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {}
+  },
+  "munich_blender": {
+    "archive_identical": true,
+    "members_changed": [],
+    "collision_objects": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 0,
+      "total_nodes": 40401
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {}
+  },
+  "pittsburgh_cli": {
+    "archive_identical": false,
+    "members_changed": [
+      "collision/map.mbcol",
+      "collision/terrain.mbhf",
+      "manifest.json",
+      "report.json",
+      "visual/map.glb"
+    ],
+    "collision_objects": {
+      "changed": [
+        "bank:osm:relation/7937544",
+        "bank:osm:way/379511900"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [
+        "bank:osm:relation/7937544",
+        "bank:osm:way/379511900"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 67,
+      "total_nodes": 301101,
+      "bbox_xy": [
+        284.0,
+        134.0,
+        596.0,
+        482.0
+      ],
+      "max_abs_dz_m": 1.4427720606327057
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {
+      "osm:relation/7937544": {
+        "shore_ramp_blocked_m": [
+          223.0,
+          156.4
+        ],
+        "shore_ramp_triangles": [
+          918,
+          1014
+        ]
+      },
+      "osm:way/379511900": {
+        "shore_ramp_blocked_m": [
+          48.9,
+          47.0
+        ],
+        "shore_ramp_triangles": [
+          2,
+          64
+        ]
+      }
+    }
+  },
+  "pittsburgh_blender": {
+    "archive_identical": false,
+    "members_changed": [
+      "collision/map.mbcol",
+      "collision/terrain.mbhf",
+      "manifest.json",
+      "report.json",
+      "visual/map.glb"
+    ],
+    "collision_objects": {
+      "changed": [
+        "bank:osm:relation/7937544",
+        "bank:osm:way/379511900"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [
+        "bank:osm:relation/7937544",
+        "bank:osm:way/379511900"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 67,
+      "total_nodes": 301101,
+      "bbox_xy": [
+        284.0,
+        134.0,
+        596.0,
+        482.0
+      ],
+      "max_abs_dz_m": 1.4427720606327057
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {
+      "osm:relation/7937544": {
+        "shore_ramp_blocked_m": [
+          223.0,
+          156.4
+        ],
+        "shore_ramp_triangles": [
+          918,
+          1014
+        ]
+      },
+      "osm:way/379511900": {
+        "shore_ramp_blocked_m": [
+          48.9,
+          47.0
+        ],
+        "shore_ramp_triangles": [
+          2,
+          64
+        ]
+      }
+    }
+  },
+  "sample_blender": {
+    "archive_identical": true,
+    "members_changed": [],
+    "collision_objects": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "glb_nodes": {
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "heightfield": {
+      "changed_nodes": 0,
+      "total_nodes": 30351
+    },
+    "pinned_unchanged": {
+      "manifest.georeference": true,
+      "manifest.passage_probes": true,
+      "manifest.orientation_probes": true,
+      "manifest.axes": true,
+      "manifest.area": true,
+      "report.passage_probes_blocked": true,
+      "report.passage_probes_dropped": true,
+      "report.water_decks_raised": true,
+      "report.counts": true
+    },
+    "report_water_bodies": {}
+  }
+}

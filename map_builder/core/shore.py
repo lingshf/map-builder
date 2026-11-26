@@ -24,6 +24,7 @@ Vec3 = tuple[float, float, float]
 Tri = tuple[Vec3, Vec3, Vec3]
 Surface = Callable[[float, float], float]
 Receiver = tuple[str, float]
+Trim = Callable[[Tri], list[Tri]]
 
 RAMP_SLOPE = 0.5          # rise / run: the capped slope of an embankment or cascade
 FREEBOARD_M = 0.02        # a bank ramp starts this far under the sheet: terrain never pokes through it, yet no gap shows at grazing angles
@@ -42,7 +43,12 @@ LEVEL_TOL_M = 1e-6
 class ShoreRamps:
     bank: list[Tri] = field(default_factory=list)
     cascade: list[Tri] = field(default_factory=list)
-    blocked_m: float = 0.0      # shore length left open because a footprint, road or bridge is in the way
+    blocked_m: float = 0.0      # shore length left open, wholly or in part, because a footprint, road or bridge is in the way
+
+
+def keep_whole(tri: Tri) -> list[Tri]:
+    """The ``trim`` that keeps every ramp triangle."""
+    return [tri]
 
 
 @dataclass
@@ -62,11 +68,12 @@ class _Node:
 def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Surface,
                 blocked_by: Callable[[Sequence[Pt]], bool], other_level_at: Callable[[float, float], Receiver | None],
                 wet_by: Callable[[Sequence[Pt], str | None, int], bool],
-                edge_sources: Sequence[int] | None = None) -> ShoreRamps:
+                edge_sources: Sequence[int] | None = None, trim: Trim = keep_whole) -> ShoreRamps:
     """Ramps along ``edges`` (water on the left of each p->q). ``level_at``: the body's sheet; ``ground_at``: the
     final terrain; ``blocked_by``: whether a plan triangle overlaps a footprint, road or bridge that must not be
     covered; ``other_level_at``: the receiving water body id and its sheet at a point, or None; ``wet_by``:
-    whether a plan triangle overlaps disallowed wet area (a cascade may overlap only its receiving body)."""
+    whether a plan triangle overlaps disallowed wet area (a cascade may overlap only its receiving body);
+    ``trim``: the parts of a ramp triangle to keep (D178: none under an at-grade deck)."""
     out = ShoreRamps()
     normals = [_right_normal(p, q) for p, q in edges]
     sources = list(edge_sources) if edge_sources is not None and len(edge_sources) == len(edges) else [0] * len(edges)
@@ -78,13 +85,13 @@ def shore_ramps(edges: Sequence[tuple[Pt, Pt]], level_at: Surface, ground_at: Su
         nodes = [section(pt, normal, source_piece) for pt in _cut(p, q)]
         for a, b in zip(nodes, nodes[1:]):
             for part in _split_mixed(a, b, lambda pt: section(pt, normal, source_piece)):
-                _place_strip(out, *part, blocked_by, wet_by)
+                _place_strip(out, *part, blocked_by, wet_by, trim)
     for i, (_, corner) in enumerate(edges):
         following = (i + 1) % len(edges)
         if _same_point(corner, edges[following][0]) and _turns_towards_water(normals[i], normals[following]):
             fan = [section(corner, n, sources[i]) for n in _fan_normals(normals[i], normals[following])]
             for a, b in zip(fan, fan[1:]):
-                _place_strip(out, a, b, blocked_by, wet_by)
+                _place_strip(out, a, b, blocked_by, wet_by, trim)
     return out
 
 
@@ -99,19 +106,24 @@ def _split_mixed(a: _Node, b: _Node, section: Callable[[Pt], _Node], depth: int 
 
 
 def _place_strip(out: ShoreRamps, a: _Node, b: _Node, blocked_by: Callable[[Sequence[Pt]], bool],
-                 wet_by: Callable[[Sequence[Pt], str | None, int], bool]) -> None:
+                 wet_by: Callable[[Sequence[Pt], str | None, int], bool], trim: Trim) -> None:
     """Add the strip between two cross-sections as a cascade (both ends cascade) or a bank ramp. A strip that
-    overlaps a footprint, road or bridge, or a bank strip that would cover water, is left out."""
+    overlaps a footprint, road or bridge, or a bank strip that would cover water, is left out; a strip that loses
+    a part to ``trim`` is kept without it. Either way its length counts as blocked."""
     tris = _ramp_tris(a, b)
     if not tris:
         return
     cascade = a.cascade and b.cascade and a.receiver is not None and a.receiver == b.receiver
     plan = [[(v[0], v[1]) for v in t] for t in tris]
     source_piece = a.source_piece if a.source_piece == b.source_piece else a.source_piece
+    length = math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
     if any(blocked_by(t) or wet_by(t, a.receiver if cascade else None, source_piece) for t in plan):
-        out.blocked_m += math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1])
-    else:
-        (out.cascade if cascade else out.bank).extend(tris)
+        out.blocked_m += length
+        return
+    kept = [part for t in tris for part in trim(t)]
+    if kept != tris:
+        out.blocked_m += length
+    (out.cascade if cascade else out.bank).extend(kept)
 
 
 

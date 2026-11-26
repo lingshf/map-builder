@@ -1,0 +1,15 @@
+{
+ "base_totals": {
+  "clip_steps": 311796,
+  "overlap_edge_tests": 0
+ },
+ "head_totals": {
+  "clip_steps": 311796,
+  "overlap_edge_tests": 0
+ },
+ "strips_only_in_base": [],
+ "strips_only_in_head": [],
+ "classes": {},
+ "water_stage_calls_growth": 0,
+ "water_stage_calls_top": {}
+}

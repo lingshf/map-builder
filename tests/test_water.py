@@ -7,7 +7,7 @@ import math
 import unittest
 from unittest import mock
 
-from map_builder.core import bridges, generate, water
+from map_builder.core import bridges, generate, shore, water
 from map_builder.core.dem import ElevationGrid
 from map_builder.core.generate import ROAD_LIFT_M
 from map_builder.core.overlap import triangle_overlaps_region
@@ -419,12 +419,7 @@ class ShoreRampWetWiringTest(unittest.TestCase):
         grid = ElevationGrid(-6.0, -6.0, 1.0, 12, 12, heights, {})
         model = water.WaterModel(grid, grid, [body])
 
-        class Masks:
-            @staticmethod
-            def hit_triangle(_tri):
-                return False
-
-        water._attach_ramps(model, Masks(), charge=None)
+        water._attach_ramps(model, lambda tri: False, shore.keep_whole, charge=None)
         self.assertGreater(body.info["shore_ramp_blocked_m"], 0.0)
         self.assertFalse(any(triangle_overlaps_region([(v[0], v[1]) for v in t], wet_patch, []) for t in body.bank))
 
@@ -438,12 +433,7 @@ class ShoreRampWetWiringTest(unittest.TestCase):
         grid = ElevationGrid(-6.0, -6.0, 1.0, 16, 16, heights, {})
         model = water.WaterModel(grid, grid, [body])
 
-        class Masks:
-            @staticmethod
-            def hit_triangle(_tri):
-                return False
-
-        water._attach_ramps(model, Masks(), charge=None)
+        water._attach_ramps(model, lambda tri: False, shore.keep_whole, charge=None)
         self.assertGreater(body.info["shore_ramp_blocked_m"], 0.0)
 
 

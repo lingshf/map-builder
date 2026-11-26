@@ -1,0 +1,1 @@
+OK seed 20260101 | centroid rays 305 + grid rays 2000 + water rays 6 | capsules 100 | base passages 43 | head passages 43 | change set {} | Python and C# agree on every query (ray distance to 1 mm, class and object)

@@ -1,0 +1,209 @@
+{
+ "munich.cli_generate": {
+  "exit": 0,
+  "cpu": {
+   "base": [
+    4.484375,
+    4.46875,
+    4.4375,
+    4.46875,
+    4.46875
+   ],
+   "head": [
+    4.4375,
+    4.421875,
+    4.46875,
+    4.4375,
+    4.453125
+   ]
+  },
+  "events": []
+ },
+ "munich.blender_generate": {
+  "exit": 0,
+  "cpu": {
+   "base": [
+    3.65625,
+    3.671875,
+    3.609375,
+    3.625,
+    3.65625
+   ],
+   "head": [
+    3.828125,
+    3.65625,
+    3.65625,
+    3.6875,
+    3.65625
+   ]
+  },
+  "events": []
+ },
+ "munich.blender_generate_export": {
+  "exit": 0,
+  "cpu": {
+   "base": [
+    7.234375,
+    7.328125,
+    7.328125,
+    7.296875,
+    7.265625
+   ],
+   "head": [
+    7.640625,
+    7.390625,
+    7.296875,
+    7.359375,
+    7.234375
+   ]
+  },
+  "events": []
+ },
+ "pittsburgh.cli_generate": {
+  "exit": 1,
+  "cpu": {
+   "base": [
+    19.0625,
+    19.109375,
+    19.09375,
+    19.125,
+    19.109375
+   ],
+   "head": [
+    19.1875,
+    19.09375,
+    19.203125,
+    19.1875,
+    19.21875
+   ]
+  },
+  "events": [
+   {
+    "message": "clip_steps in shore_ramps: 84580 -> 107392 (+27.0%) exceeds +10% and 1% of the series total",
+    "rule": "F3"
+   },
+   {
+    "message": "clip_steps in shore_ramps: 84580 -> 107392 (+27.0%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "overlap_edge_tests total: 86787 -> 108746 (+25.3%) exceeds +5%",
+    "rule": "F2"
+   },
+   {
+    "message": "overlap_edge_tests total: 86787 -> 108746 (+25.3%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "overlap_edge_tests in shore_ramps: 86787 -> 108746 (+25.3%) exceeds +10% and 1% of the series total",
+    "rule": "F3"
+   },
+   {
+    "message": "overlap_edge_tests in shore_ramps: 86787 -> 108746 (+25.3%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "primitive_calls in _water_stage: 2555294 -> 2706515 (+5.9%) grew more than 5%",
+    "rule": "F4"
+   }
+  ]
+ },
+ "pittsburgh.blender_generate": {
+  "exit": 1,
+  "cpu": {
+   "base": [
+    12.25,
+    12.390625,
+    12.515625,
+    12.609375,
+    12.5625
+   ],
+   "head": [
+    12.28125,
+    12.546875,
+    12.390625,
+    12.375,
+    12.078125
+   ]
+  },
+  "events": [
+   {
+    "message": "clip_steps in shore_ramps: 84580 -> 107392 (+27.0%) exceeds +10% and 1% of the series total",
+    "rule": "F3"
+   },
+   {
+    "message": "clip_steps in shore_ramps: 84580 -> 107392 (+27.0%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "overlap_edge_tests total: 86787 -> 108746 (+25.3%) exceeds +5%",
+    "rule": "F2"
+   },
+   {
+    "message": "overlap_edge_tests total: 86787 -> 108746 (+25.3%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "overlap_edge_tests in shore_ramps: 86787 -> 108746 (+25.3%) exceeds +10% and 1% of the series total",
+    "rule": "F3"
+   },
+   {
+    "message": "overlap_edge_tests in shore_ramps: 86787 -> 108746 (+25.3%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "primitive_calls in _water_stage: 2585606 -> 2740226 (+6.0%) grew more than 5%",
+    "rule": "F4"
+   }
+  ]
+ },
+ "pittsburgh.blender_generate_export": {
+  "exit": 1,
+  "cpu": {
+   "base": [
+    33.578125,
+    33.6875,
+    33.53125,
+    33.765625,
+    34.0
+   ],
+   "head": [
+    33.765625,
+    33.796875,
+    33.734375,
+    34.0625,
+    33.4375
+   ]
+  },
+  "events": [
+   {
+    "message": "clip_steps in shore_ramps: 84580 -> 107392 (+27.0%) exceeds +10% and 1% of the series total",
+    "rule": "F3"
+   },
+   {
+    "message": "clip_steps in shore_ramps: 84580 -> 107392 (+27.0%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "overlap_edge_tests total: 86787 -> 108746 (+25.3%) exceeds +5%",
+    "rule": "F2"
+   },
+   {
+    "message": "overlap_edge_tests total: 86787 -> 108746 (+25.3%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "overlap_edge_tests in shore_ramps: 86787 -> 108746 (+25.3%) exceeds +10% and 1% of the series total",
+    "rule": "F3"
+   },
+   {
+    "message": "overlap_edge_tests in shore_ramps: 86787 -> 108746 (+25.3%) grew more than 5%",
+    "rule": "F4"
+   },
+   {
+    "message": "primitive_calls in _water_stage: 2585606 -> 2740226 (+6.0%) grew more than 5%",
+    "rule": "F4"
+   }
+  ]
+ }
+}

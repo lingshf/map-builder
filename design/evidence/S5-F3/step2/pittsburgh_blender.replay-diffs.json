@@ -1,0 +1,21 @@
+[
+ {
+  "query": "ray",
+  "index": 317,
+  "xy": [
+   585.019,
+   275.172
+  ],
+  "base": [
+   165.70072987675667,
+   "terrain",
+   "terrain"
+  ],
+  "head": [
+   164.27025996883043,
+   "bank:osm:relation/7937544",
+   "terrain"
+  ],
+  "label": "bank ramp"
+ }
+]

@@ -6,11 +6,14 @@ from __future__ import annotations
 import unittest
 
 from map_builder.core import shore
-from map_builder.core.overlap import triangle_overlaps_region, triangle_touches
+from map_builder.core.deck_underside import DeckUnderside, trim_under_decks
+from map_builder.core.osm import point_in_ring
+from map_builder.core.overlap import convex_intersection, polygon_area, triangle_overlaps_region, triangle_touches
 from map_builder.core.query import ray_cast
-from map_builder.core.structures import plan_collision
+from map_builder.core.structures import plan_collision, sweep_footprint
 
-from .test_water import lake_scene
+from .test_bridges import make_scene
+from .test_water import H, W, lake_ground, lake_scene
 
 SHEET = 10.0
 SHORE_EDGE = ((0.0, 0.0), (0.0, 10.0))        # water on the left, so the bank lies at x > 0
@@ -200,3 +203,76 @@ class LakeBankTest(unittest.TestCase):
                    (40 + reach, 20.0), (-40 - reach, -20.0)]
         for x, y in outside:
             self.assertGreaterEqual(self.first_hit(x, y), lowest_allowed, (x, y))
+
+
+LAKE_RING = [(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)]   # its west bank is the low one
+SECONDARY = {"highway": "secondary", "bridge": "yes"}                         # 7 m road: an 8 m deck
+FLOAT32_M = 1e-4             # mesh vertices are stored in float32: tens of metres from the origin, about 4e-6 m
+FLOAT32_SLIVER_M2 = 1e-3
+
+
+def bank_tris_over_lake_with(bridge_way):
+    plan, _, _ = make_scene([(LAKE_RING, {"natural": "water"}, True), (bridge_way, SECONDARY)], lake_ground,
+                            width=W, height=H)
+    (bank,) = [o for o in plan.objects if o.mb_id.startswith("bank:")]
+    vs = bank.mesh.vertices
+    return [[(vs[i][0], vs[i][1]) for i in face] for face in bank.mesh.faces]
+
+
+class DeckClearanceTest(unittest.TestCase):
+    """D178: a bank ramp runs under an elevated deck and is clipped out of an at-grade deck's footprint."""
+
+    def test_a_ramp_runs_under_an_elevated_deck(self):
+        # 160 m long, crossing the west shore 90 m from its west end: the deck stands over 4 m above the ramp there
+        tris = bank_tris_over_lake_with([(-130.0, 0.0), (30.0, 0.0)])
+        for x in (-40.5, -42.0):
+            self.assertTrue(any(point_in_ring(x, 0.0, t) for t in tris), x)
+
+    def test_a_ramp_is_clipped_out_of_an_at_grade_deck_footprint_only(self):
+        tris = bank_tris_over_lake_with([(-48.0, 12.0), (-32.0, 12.0)])   # 16 m long: at-grade over the shore
+        footprint = [(-48.5, 8.0), (-31.5, 8.0), (-31.5, 16.0), (-48.5, 16.0)]   # 0.5 m sunk ends, 4 m half width
+        under_deck_m2 = sum(polygon_area(convex_intersection(t, footprint)) for t in tris)
+        self.assertLess(under_deck_m2, FLOAT32_SLIVER_M2)
+        south_of_deck = [p[1] for t in tris for p in t if -44.0 < p[0] < -40.0 and p[1] < 8.0 + FLOAT32_M]
+        self.assertAlmostEqual(max(south_of_deck), 8.0, delta=FLOAT32_M)   # cut at the footprint, not a strip short
+
+
+RAMP_TRI = ((0.0, 0.0, 0.0), (10.0, 0.0, 1.0), (0.0, 10.0, 2.0))
+
+
+def deck_across_ramp(underside_z, abutment=False):
+    """A 20 m deck along y = 4 with a 2 m half width and a flat underside at ``underside_z``; with ``abutment``,
+    its west end is a section sunk into an abutment."""
+    z = [None if abutment else underside_z, underside_z]
+    return DeckUnderside(footprint=[[(-5.0, 6.0), (-5.0, 2.0), (15.0, 2.0), (15.0, 6.0)]], z=z)
+
+
+def mitred_deck(underside_z):
+    """A deck turning 45 degrees at (10, 0), its sections ``underside_z`` swept by the production mitre."""
+    return DeckUnderside(footprint=sweep_footprint([(0.0, 0.0), (10.0, 0.0), (20.0, 10.0)], 2.0), z=underside_z)
+
+
+class TrimUnderDecksTest(unittest.TestCase):
+    def test_an_elevated_deck_keeps_the_triangle_whole(self):
+        self.assertEqual(trim_under_decks(RAMP_TRI, [deck_across_ramp(10.0)]), [RAMP_TRI])
+
+    def test_an_abutment_masks_even_a_high_deck(self):
+        self.assertNotEqual(trim_under_decks(RAMP_TRI, [deck_across_ramp(10.0, abutment=True)]), [RAMP_TRI])
+
+    def test_a_low_corner_of_a_mitred_deck_is_at_grade(self):
+        # the swept underside rises 0 -> 2.6 m along the outer edge to the mitre corner (10.83, -2): about 2.43 m
+        # over (10.1, -1.9), though the nearest centre-line station (10, 0) is at 2.6 m
+        tri = ((10.1, -1.9, 0.0), (10.2, -1.9, 0.0), (10.1, -1.8, 0.0))
+        self.assertEqual(trim_under_decks(tri, [mitred_deck([0.0, 2.6, 2.6])]), [])
+        self.assertEqual(trim_under_decks(tri, [mitred_deck([2.6, 2.6, 2.6])]), [tri])
+
+    def test_an_at_grade_deck_cuts_out_exactly_its_footprint(self):
+        pieces = trim_under_decks(RAMP_TRI, [deck_across_ramp(3.0)])
+        plans = [[(x, y) for x, y, _ in t] for t in pieces]
+        band_area = (8.0 + 4.0) / 2 * 4.0                  # the triangle between y = 2 and y = 6
+        self.assertAlmostEqual(sum(polygon_area(p) for p in plans), 50.0 - band_area)
+        self.assertFalse(any(2.0 < sum(y for _, y in p) / 3 < 6.0 for p in plans))
+        for (ax, ay, az), (bx, by, bz), (cx, cy, cz) in pieces:   # on the ramp plane z = x / 10 + y / 5, wound CCW
+            for x, y, z in ((ax, ay, az), (bx, by, bz), (cx, cy, cz)):
+                self.assertAlmostEqual(z, x / 10 + y / 5)
+            self.assertGreater((bx - ax) * (cy - ay) - (by - ay) * (cx - ax), 0.0)

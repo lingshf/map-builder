@@ -1,0 +1,7 @@
+invariant water:osm:relation/2315576: max terrain-water -0.020000 m OK
+invariant water:osm:relation/2793848: max terrain-water -0.020000 m OK
+invariant water:osm:way/1537086924: max terrain-water -0.020000 m OK
+invariant water:osm:way/1537086925: max terrain-water -0.020000 m OK
+invariant water:osm:way/1537086926: max terrain-water -0.020000 m OK
+invariant water:osm:way/818834645: max terrain-water -0.020000 m OK
+6 water bodies, 0 wet under-probes, PASS

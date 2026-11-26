@@ -1,0 +1,2 @@
+  diff bank ramp: ray 321 at [585.019, 275.172] base (165.70072987675667, 'terrain', 'terrain') head (164.27026279933827, 'bank:osm:relation/7937544', 'terrain')
+OK seed 20260101 | centroid rays 73 + grid rays 2000 + water rays 3 | capsules 100 | base passages 11 | head passages 11 | change set {'bank ramp': 1} | Python and C# agree on every query (ray distance to 1 mm, class and object)
