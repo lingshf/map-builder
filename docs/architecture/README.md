@@ -113,9 +113,10 @@ cushion.
 | Package | `water_above_bank` | `water_shore_step` |
 |---|---|---|
 | v0.5.0 release packages (Pittsburgh) | 0 | 104 regions, max 1.500 m |
-| Bellevue-Factoria classic build (#85) | **4** | **119 regions, max 1.548 m** |
+| Bellevue-Factoria classic build (#85, before the fix) | 4 | 119 regions, max 1.548 m |
+| All four presets on main 8ce3d28, CLI and Blender (S5-F3 QA, D184; Factoria from the D157 cache, D183) | 0 | max 1.500 m |
 
-The Factoria findings are open under [S5-F3](../../design/tasks/S5-F3.md), which owns their disposition.
+The fix is [S5-F3](../../design/tasks/S5-F3.md) (#97; D178: bank ramps may pass under elevated decks, with a 2.5 m deck clearance).
 
 **Trade-offs** (full rationale in the decision record):
 
