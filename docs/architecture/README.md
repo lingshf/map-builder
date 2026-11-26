@@ -115,7 +115,7 @@ cushion.
 | v0.5.0 release packages (Pittsburgh) | 0 | 104 regions, max 1.500 m |
 | Bellevue-Factoria classic build (#85) | **4** | **119 regions, max 1.548 m** |
 
-The Factoria findings are open under [S5-F3](../../design/tasks/S5-F3.md), which owns their disposition.
+The Factoria row is the #85 measurement. The S5-F3 fix (#97, 8ce3d28; D178: bank ramps may pass under elevated decks, with a 2.5 m deck clearance) reported 0 `water_above_bank` and a shore step ≤ 1.500 m on its head packages; the measurement on merged main is pending QA ([S5-F3](../../design/tasks/S5-F3.md) AC2). Until then this table is not updated.
 
 **Trade-offs** (full rationale in the decision record):
 
