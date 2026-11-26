@@ -154,13 +154,44 @@ for `palette-regions`; `x`, `y`, `w` and `h` are fractions of the image size fro
 A deterministic work-count gate: the collector records operation counters and Python primitive calls per stage;
 the checker compares head with the merge-base.
 
+**Choosing the base tree.** Main contains the counters from `796d72b` (#91) on, so for a PR whose merge-base is at
+or after `796d72b`, use a plain worktree of the merge-base as the base tree. `prepare-base` is only for a merge-base
+**before** the counters: it checks out the merge-base and cherry-picks the counter commit `C` (`9fb0756`, D153). On a
+merge-base that already has the counters it exits 1 with `F1: counter commit does not apply cleanly to the
+merge-base`.
+
 ```powershell
-$env:PYTHONHASHSEED = 0
-python -m tools.perf.work_count prepare-base --counter-commit <C>      # merge-base + counter commit worktree
-python -m tools.perf.collect cli --root <tree> --cache <frozen caches> --preset munich --out-dir <dir>
-blender --background --factory-startup --online-mode --python tools/perf/collect.py -- blender --root <tree> --cache <frozen caches> --preset munich --out-dir <dir>
-python -m tools.perf.work_count compare --base <base.json> --head <head.json> --base-peer <base2.json> --head-peer <head2.json> (--cpu-rounds <json> | --no-cpu-evidence) [--uncounted-site <text>] [--noop]
+# Setup (repository root; $caches holds fresh copies of cache-munich and cache-pittsburgh, see Frozen inputs)
+$env:PYTHONHASHSEED = '0'
+$blender = 'C:\tools\blender-4.2.23-windows-x64\blender.exe'
+$caches = "$env:TEMP\mb-perf\caches"
+$out = "$env:TEMP\mb-perf"
+
+# Base tree, merge-base at or after 796d72b: a plain worktree
+$mb = git merge-base HEAD origin/main
+git worktree add --detach "$out\base" $mb
+$base = "$out\base"
+
+# Base tree, merge-base before 796d72b only: pinned historical example (#91's head against its base a1e0839)
+python -m tools.perf.work_count prepare-base --head-ref d889d977d5f75223c83bc2bf2e013d255b896572 --base-ref a1e0839 --counter-commit 9fb07560e53f10bb63abb777cf8e3b1f8ae81a36
+# use the printed worktree_path as $base, and run the printed cleanup command afterwards
+
+# Collect: run each line twice per revision into separate folders (the second run is the determinism peer)
+python -m tools.perf.collect cli --root $base --cache $caches --preset munich --out-dir "$out\base1"
+& $blender --background --factory-startup --online-mode --python-exit-code 1 --python tools\perf\collect.py -- blender --root $base --cache $caches --preset munich --out-dir "$out\base1"
+python -m tools.perf.collect cli --root (Get-Location).Path --cache $caches --preset munich --out-dir "$out\head1"
+
+# Compare one series, with the CPU waiver (reported as F5)
+python -m tools.perf.work_count compare --base "$out\base1\munich.cli_generate.json" --head "$out\head1\munich.cli_generate.json" --base-peer "$out\base2\munich.cli_generate.json" --head-peer "$out\head2\munich.cli_generate.json" --no-cpu-evidence
+
+# Or with five alternating CPU rounds: rounds.json = {"base": [5 values], "head": [5 values]}
+python -m tools.perf.work_count compare --base "$out\base1\munich.cli_generate.json" --head "$out\head1\munich.cli_generate.json" --base-peer "$out\base2\munich.cli_generate.json" --head-peer "$out\head2\munich.cli_generate.json" --cpu-rounds "$out\rounds.json"
+
+git worktree remove --force "$out\base"
 ```
+
+Without `--python-exit-code 1`, Blender returns 0 even when the collector fails (for example a missing
+`cache-munich`): it prints the error and writes no vector.
 
 Run each preset (`munich`, `pittsburgh`) and series (`cli_generate`, `blender_generate`,
 `blender_generate_export`) twice per revision; the second run is the determinism peer, and the checker validates it
@@ -194,7 +225,10 @@ which raises F6) or a same-code control pair.
   non-zero, with a message, when `PYTHONHASHSEED` is not `0` on the CLI backend, on any network access, or when a
   registry total differs from its stage rows.
 * `compare` exits 0 when no failing rule (F1–F3) fires, 1 when one does, and 2 on a usage error (argparse),
-  including `--noop` together with `--no-cpu-evidence`. F4–F6 are reported but never change the exit code.
+  including `--noop` together with `--no-cpu-evidence`. Without `--noop`, F4–F6 are reported but never change the
+  exit code.
+* `--noop` asserts that **nothing** is reported: any F4, F5 or F6 event (for example from `--uncounted-site`) becomes
+  an F1 failure and exits 1. Use it only for a true no-op change (AC4).
 
 **Coverage limit.** Counters cover the pinned sites only. Work in an uncounted loop is visible only through CPU
 (F5) and the F6 declaration, never through F2/F3.
