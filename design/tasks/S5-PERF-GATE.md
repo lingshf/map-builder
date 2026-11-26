@@ -123,8 +123,11 @@ are evidence-only (visuals and G0, D157) and are not part of this gate.
 2. **Output neutrality:** with counters off, commit `C` keeps the sample, Munich and Pittsburgh whole-archive
    byte-identical (CLI and Blender), and the total primitive calls equal the merge-base's.
 3. **Negative cases.** Each is a scratch branch that is never merged:
-   * **Counted, F3:** run every `build_terrain` cell twice through the counted cell loop. `grid_cells` in
-     `build_terrain` doubles, and F3 must fail on that stage and counter.
+   * **Counted, doubled stage (amended by D182):** run every `build_terrain` cell twice through the counted cell
+     loop. The gate must **fail through F2 or F3 on some counter** (measured: F2/F3 on `ring_edge_tests`), and
+     **F4 must name `grid_cells` in `build_terrain`** as doubled. F3 on `grid_cells` itself is not required: the
+     doubled stage is 0.678 % of the series baseline (12,000 → 24,000 of 1,770,000), below F3's 1 % materiality
+     bar, which stays unchanged. The small-stage F3 property is proven by the `_water_stage` case below.
    * **Counted, F2:** deflate every member twice, passing through the counted compressor sites, with identical
      output bytes. `deflate_in_bytes` doubles, and F2 must fail. A second variant forces the fallback or retry
      compression path, and must also fail, which proves that path is counted.
