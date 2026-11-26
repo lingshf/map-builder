@@ -34,7 +34,7 @@ import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
-from ..core.style import materials_for_style, style_uses_textures
+from ..core.style import materials_for_style, normalize_style, style_uses_textures
 from ..core import textures as tex
 from ..core import uv as core_uv
 from ..core.pipeline import filter_passage_probes, merge_dropped
@@ -144,13 +144,16 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True, style: 
                           and src is not None and src.type == "MIX_RGB")
     generated_plain = (_is_plain_generated(mat) and src is not None and src.type == "VERTEX_COLOR"
                        and src.layer_name == COLOR_ATTR)
-    generated_style_plain = (canonical_generated and gen in materials_for_style(style)
+    generated_style_plain = (normalize_style(style) != "classic" and canonical_generated and gen in materials_for_style(style)
                              and src is not None and src.type == "VERTEX_COLOR"
                              and src.layer_name == COLOR_ATTR and not mat.get("mb_textured") and not generated_plain)
     if generated_textured:
-        canon = _canonical(gen, style)
         name = gen if textures else name
-        rgb = tuple(canon[0]) if textures else WHITE
+        if normalize_style(style) == "classic":
+            rgb = tuple(float(c) for c in base.default_value[:3])
+        else:
+            canon = _canonical(gen, style)
+            rgb = tuple(canon[0]) if textures else WHITE
         attr = COLOR_ATTR
     elif generated_plain:   # generated plain material: keep the CLI's canonical factors for this style
         name = gen
@@ -190,7 +193,7 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True, style: 
         rgb = tuple(_canonical(gen, style)[0])
     if not all(math.isfinite(v) for v in (*rgb, *values)):
         raise ExportError([f"material {mat.name!r}: non-finite colour/roughness/metallic"])
-    if generated_textured and canonical_generated:
+    if generated_textured and canonical_generated and normalize_style(style) != "classic":
         values = [canon[1], canon[2]]
     if generated_style_plain:
         values = [_canonical(gen, style)[1], _canonical(gen, style)[2]]

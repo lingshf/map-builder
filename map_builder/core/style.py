@@ -99,7 +99,8 @@ def _scaled(c: Rgb, factor: float) -> Rgb:
 
 def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) -> Rgb:
     mode = normalize_style(style)
-    base = (_CLASSIC_LANDCOVER if mode == "classic" else _STYLIZED_LANDCOVER).get(landcover, _STYLIZED_LANDCOVER[None])
+    palette = _CLASSIC_LANDCOVER if mode == "classic" else _STYLIZED_LANDCOVER
+    base = palette.get(landcover, palette[None])
     if mode == "classic":
         return base
     # Stylized slope ramp: flatter terrain is slightly brighter, steeper terrain slightly darker.

@@ -119,15 +119,20 @@ class PlanTest(unittest.TestCase):
     def obj(self, key, kind="way"):
         return self.by_id[f"osm:{kind}/{self.ids[key]}"]
 
-    def test_style_default_is_stylized(self):
+    def test_style_default_is_classic(self):
         plan = build_plan(self.area, self.grid, self.cl)
-        self.assertEqual(plan.report.get("options", {}).get("style"), "stylized")
-        self.assertFalse(style_uses_textures(plan.report["options"]["style"]))
+        self.assertNotIn("options", plan.report)
+        self.assertTrue(style_uses_textures("classic"))
 
     def test_classic_mode_is_selectable(self):
         plan = build_plan(self.area, self.grid, self.cl, PlanOptions(style="classic"))
         self.assertNotIn("options", plan.report)
         self.assertTrue(style_uses_textures("classic"))
+
+    def test_stylized_mode_is_selectable(self):
+        plan = build_plan(self.area, self.grid, self.cl, PlanOptions(style="stylized"))
+        self.assertEqual(plan.report.get("options", {}).get("style"), "stylized")
+        self.assertFalse(style_uses_textures(plan.report["options"]["style"]))
 
     def test_buildings_closed_and_outward(self):
         n = 0

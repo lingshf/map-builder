@@ -1645,7 +1645,7 @@ class PlanOptions:
                  max_vertices: int = MAX_SCENE_VERTICES, max_triangles: int = MAX_SCENE_TRIANGLES,
                  max_ring_vertices: int = MAX_RING_VERTICES, max_triangulation_work: int = DEFAULT_MAX_WORK,
                  max_mask_validation_work: int | None = None, bridge_piers: bool = True,
-                 style: str = "stylized") -> None:
+                 style: str = "classic") -> None:
         self.bridge_piers = bridge_piers
         self.buildings = buildings
         self.roads = roads
@@ -2108,6 +2108,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
             add(road_specs[k])
     bridges.build(plan, ctx)
     tunnels.build(plan, ctx)
+    if opts.style != "classic":
+        _remap_style_materials(plan, {"MB Tunnel": "MB Concrete"})
     passages.build(plan, ctx)
     ctx.flush_unsupported(plan)
     if opts.trees:
@@ -2211,3 +2213,26 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
         seen[base] = n + 1
         o.name = base if n == 0 else f"{base}.{n:03d}"
     return plan
+
+
+def _remap_style_materials(plan: ScenePlan, aliases: Mapping[str, str]) -> None:
+    def remap(mesh: MeshData) -> None:
+        if not mesh.materials:
+            return
+        remapped = [aliases.get(name, name) for name in mesh.materials]
+        if remapped == mesh.materials:
+            return
+        unique: list[str] = []
+        idx_by_name: dict[str, int] = {}
+        for name in remapped:
+            if name not in idx_by_name:
+                idx_by_name[name] = len(unique)
+                unique.append(name)
+        mesh.face_materials = [idx_by_name[remapped[i]] for i in mesh.face_materials]
+        mesh.materials = unique
+
+    for obj in plan.objects:
+        if obj.mesh is not None:
+            remap(obj.mesh)
+    for mesh in plan.shared_meshes.values():
+        remap(mesh)
