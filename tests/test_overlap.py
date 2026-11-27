@@ -10,7 +10,7 @@ from typing import Any
 
 from map_builder.core.osm import point_in_ring
 from map_builder.core.overlap import (
-    EdgeIndex, PathMask, RegionMask, RingIndex, triangle_overlaps_region)
+    EdgeIndex, PathMask, RegionMask, RingIndex, triangle_overlaps_region, triangle_touches)
 from tests.overlap_oracle import brute_force_touches
 
 PAIRS_PER_KIND = 2500
@@ -96,6 +96,20 @@ class SyntheticCorpusTest(unittest.TestCase):
         for tri in _triangles(random.Random(SEED + 4), ring):
             self.assertEqual(mask.touches(tri), brute_force_touches(tri, ring, SPECIAL_MARGIN_M, True))
             self.assertEqual(RingIndex(ring).contains(*tri[0]), point_in_ring(*tri[0], ring))
+
+
+class SingletonPathTest(unittest.TestCase):
+    """``triangle_touches`` keeps its pre-change answers for open paths too short to have an edge."""
+
+    TRI = [(0.0, 0.0), (10.0, 0.0), (0.0, 10.0)]
+
+    def test_a_lone_point_touches_only_from_inside_the_triangle(self) -> None:
+        for path in ([], [(2.0, 2.0)], [(10.2, 10.2)], [(10.1, 0.0)], [(-0.1, 0.0)]):
+            with self.subTest(path=path):
+                self.assertEqual(triangle_touches(self.TRI, path, SPECIAL_MARGIN_M, False),
+                                 brute_force_touches(self.TRI, path, SPECIAL_MARGIN_M, False))
+        self.assertTrue(triangle_touches(self.TRI, [(2.0, 2.0)], SPECIAL_MARGIN_M, False))
+        self.assertFalse(triangle_touches(self.TRI, [(10.1, 0.0)], SPECIAL_MARGIN_M, False))
 
 
 class EdgeIndexTest(unittest.TestCase):

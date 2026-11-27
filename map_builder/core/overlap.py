@@ -28,7 +28,17 @@ def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, close
     """Whether the triangle lies within ``margin`` of ``path``: a closed ring (touching it or containing it
     counts) or an open polyline. Nothing is sampled, so a small ring wholly inside the triangle is found.
     Indexes ``path`` on every call: to test many triangles against one path, build a ``PathMask`` once."""
+    if not closed and len(path) < 2:
+        return _lone_point_inside(tri, path, margin)
     return PathMask(path, margin, closed).touches(tri)
+
+
+def _lone_point_inside(tri: Sequence[Pt], points: Sequence[Pt], margin: float) -> bool:
+    """An open path with no edge (zero or one point) touches only by having a point inside the triangle."""
+    if perf_counters.ENABLED:
+        perf_counters.inc("overlap_pairs")
+    box = _padded_box(tri, margin)
+    return any(point_in_ring(x, y, tri) for x, y in points if _in_box(x, y, box))
 
 
 STRIP_HEIGHT_M = 8.0   # RingIndex / EdgeIndex bucket edges by y strips this tall
