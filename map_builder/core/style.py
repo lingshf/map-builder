@@ -108,8 +108,22 @@ def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) 
     return _scaled(base, 1.08 - 0.18 * t)
 
 
+_CLASSIC_WATER: Rgb = (0.05, 0.14, 0.24)
+_STYLIZED_WATER: Rgb = (0.30, 0.78, 0.92)
+_STYLIZED_SHORE_BAND: Rgb = (0.68, 0.81, 0.78)
+
+
+def water_color(style: str | None) -> Rgb:
+    return _CLASSIC_WATER if normalize_style(style) == "classic" else _STYLIZED_WATER
+
+
+def shore_band_color(style: str | None) -> Rgb | None:
+    """Colour of the terrain faces next to built water; ``None`` when the style has no band."""
+    return None if normalize_style(style) == "classic" else _STYLIZED_SHORE_BAND
+
+
 def bank_color(style: str | None) -> Rgb:
-    return _CLASSIC_LANDCOVER[None] if normalize_style(style) == "classic" else (0.88, 0.80, 0.67)
+    return _CLASSIC_LANDCOVER[None] if normalize_style(style) == "classic" else _STYLIZED_LANDCOVER["sand"]
 
 
 def road_color(style: str | None, tags: Mapping[str, str]) -> Rgb:

@@ -766,6 +766,27 @@ def ring_topology_problem(poly: Polygon, max_work: int = DEFAULT_MAX_WORK, max_r
     return None
 
 
+def _wet_cells(grid: ElevationGrid, built_water: Sequence[water.Body]) -> set[tuple[int, int]]:
+    """Grid cells whose centre lies inside a built water piece."""
+    wet: set[tuple[int, int]] = set()
+    for body in built_water:
+        if not body.pieces:
+            continue
+        bx0, by0, bx1, by1 = water._body_box(body)
+        i0, i1, j0, j1 = water._cells(grid, bx0, bx1, by0, by1)
+        for j in range(j0, j1 + 1):
+            for i in range(i0, i1 + 1):
+                if water._inside_pieces(body, grid.x0 + (i + 0.5) * grid.spacing,
+                                        grid.y0 + (j + 0.5) * grid.spacing):
+                    wet.add((i, j))
+    return wet
+
+
+def _shore_cells(wet: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    """The dry cells that touch a wet cell, corners included."""
+    return {(i + di, j + dj) for i, j in wet for di in (-1, 0, 1) for dj in (-1, 0, 1)} - wet
+
+
 def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature],
                   coverage: dict[str, int] | None = None,
                   built_water: Sequence[water.Body] = (), style: str = "classic") -> MeshData:
@@ -774,12 +795,15 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
     If ``coverage`` is a dict it receives, per area id, the number of cells whose
     centre lies inside that area. ``built_water`` are the water bodies with an emitted surface mesh
     (``WaterModel.active()``, riverbanks included): a cell whose centre lies inside one never gets the water
-    colour, whichever area covers it; it takes the highest-priority other landcover, else the default."""
+    colour, whichever area covers it; it takes the highest-priority other landcover, else the default.
+    Where the style defines a shore band, the dry cells touching a built body take its colour (colour only)."""
     mesh = MeshData("terrain")
     buckets = _Buckets([(a, a.geometry.bbox()) for a in areas],
                        bounds=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * grid.spacing,
                                grid.y0 + (grid.ny - 1) * grid.spacing))
     boxes = [(water._body_box(b), b) for b in built_water if b.pieces]
+    band_color = style_palette.shore_band_color(style)
+    shore = _shore_cells(_wet_cells(grid, built_water)) if band_color is not None else set()
     for j in range(grid.ny):
         for i in range(grid.nx):
             mesh.add_vertex(grid.x0 + i * grid.spacing, grid.y0 + j * grid.spacing, grid.heights[j][i] - z_offset)
@@ -807,7 +831,8 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
             if cls == "water" and any(x0 <= cx <= x1 and y0 <= cy <= y1 and water._inside_pieces(b, cx, cy)
                                       for (x0, y0, x1, y1), b in boxes):
                 cls = dry
-            col = style_palette.terrain_color(style, cls, style_palette.terrain_slope(grid, i, j))
+            col = band_color if band_color is not None and (i, j) in shore else style_palette.terrain_color(
+                style, cls, style_palette.terrain_slope(grid, i, j))
             mesh.add_face((v00, v10, v11), "MB Terrain", col)
             mesh.add_face((v00, v11, v01), "MB Terrain", col)
     return mesh
@@ -1848,7 +1873,7 @@ def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classif
         row.update(b.info)
         rows.append(row)
         if b.built:
-            mesh = model.mesh(b)
+            mesh = model.mesh(b, style_palette.water_color(style))
             add(ObjectSpec(mesh.name, mesh.name, "water", "Water", mesh=mesh,
                            provenance={"water_level": ("profile" if b.level is not None and b.level.flat is None
                                                        else "flat"),

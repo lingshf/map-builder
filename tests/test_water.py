@@ -7,7 +7,7 @@ import math
 import unittest
 from unittest import mock
 
-from map_builder.core import bridges, generate, shore, water
+from map_builder.core import bridges, generate, shore, style, water
 from map_builder.core.dem import ElevationGrid
 from map_builder.core.generate import ROAD_LIFT_M
 from map_builder.core.overlap import triangle_overlaps_region
@@ -435,6 +435,45 @@ class ShoreRampWetWiringTest(unittest.TestCase):
 
         water._attach_ramps(model, lambda tri: False, shore.keep_whole, charge=None)
         self.assertGreater(body.info["shore_ramp_blocked_m"], 0.0)
+
+
+class StylizedWaterColourTest(unittest.TestCase):
+    """S5-STYLE-WATER: cyan water, terrain-side shore band and sandy banks; colour only."""
+
+    @staticmethod
+    def build(style):
+        opts = generate.PlanOptions(trees=False, scatter=False, style=style)
+        return make_scene([([(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)],
+                            {"natural": "water"}, True)], lake_ground, width=W, height=H, opts=opts)[0]
+
+    @staticmethod
+    def colours(plan, prefix):
+        return {tuple(c) for o in plan.objects if o.name.startswith(prefix) for c in o.mesh.face_colors}
+
+    @staticmethod
+    def shore_cell_centres(plan):
+        mesh = objects(plan, "terrain")[0].mesh
+        nx, _, x0, y0, sp = mesh.grid_layout
+        return [(x0 + (k % (nx - 1) + 0.5) * sp, y0 + (k // (nx - 1) + 0.5) * sp, tuple(col))
+                for k, col in enumerate(mesh.face_colors[::2])]
+
+    def test_stylized_colours_water_bank_and_shore_band(self):
+        plan = self.build("stylized")
+        self.assertEqual(self.colours(plan, "water:"), {style.water_color("stylized")})
+        self.assertEqual(self.colours(plan, "bank:"), {style.bank_color("stylized")})
+        band = style.shore_band_color("stylized")
+        banded = [(x, y) for x, y, c in self.shore_cell_centres(plan) if c == band]
+        self.assertTrue(banded)
+        for x, y in banded:  # within one cell of the lake rectangle, never inside it
+            self.assertFalse(abs(x) < 40 and abs(y) < 30)
+            self.assertLessEqual(max(abs(x) - 40, abs(y) - 30), 1.5 * SPACING)
+
+    def test_colour_only_and_classic_has_no_band(self):
+        classic, stylized = self.build("classic"), self.build("stylized")
+        self.assertNotIn(style.shore_band_color("stylized"), {c for _, _, c in self.shore_cell_centres(classic)})
+        self.assertEqual(self.colours(classic, "water:"), {style.water_color("classic")})
+        self.assertEqual([(o.name, len(o.mesh.faces)) for o in classic.objects if o.mesh],
+                         [(o.name, len(o.mesh.faces)) for o in stylized.objects if o.mesh])
 
 
 if __name__ == "__main__":
