@@ -27,24 +27,8 @@ def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
 def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, closed: bool) -> bool:
     """Whether the triangle lies within ``margin`` of ``path``: a closed ring (touching it or containing it
     counts) or an open polyline. Nothing is sampled, so a small ring wholly inside the triangle is found.
-    This is the unindexed reference; ``PathMask.touches`` gives the same answer from an index."""
-    return _touches(tri, margin, lambda box: _edges(path, closed),
-                    (lambda x, y: point_in_ring(x, y, path)) if closed else None)
-
-
-def _touches(tri: Sequence[Pt], margin: float, edges_in_box: Callable[[Box], Iterable[Edge]],
-             ring_contains: Callable[[float, float], bool] | None) -> bool:
-    """The test of ``triangle_touches``. ``edges_in_box(box)`` yields the path edges, at least those whose own box
-    meets ``box``; ``ring_contains`` (closed paths only) tells whether a point lies inside the ring."""
-    if perf_counters.ENABLED:
-        perf_counters.inc("overlap_pairs")
-    box = _padded_box(tri, margin)
-    near = [(a, b) for a, b in edges_in_box(box) if _edge_in_box(a, b, box)]
-    if any(point_in_ring(x, y, tri) for a, b in near for x, y in (a, b) if _in_box(x, y, box)):
-        return True
-    if ring_contains is not None and any(ring_contains(x, y) for x, y in tri):
-        return True
-    return any(_segment_distance(a, b, c, d) <= margin for a, b in near for c, d in _edges(tri, True))
+    Indexes ``path`` on every call: to test many triangles against one path, build a ``PathMask`` once."""
+    return PathMask(path, margin, closed).touches(tri)
 
 
 STRIP_HEIGHT_M = 8.0   # RingIndex / EdgeIndex bucket edges by y strips this tall
@@ -55,20 +39,26 @@ def _strip(y: float) -> int:
 
 
 class EdgeIndex:
-    """Edges bucketed by the y strips their own box covers, so a box query reads only the strips it spans."""
+    """Edges bucketed by the y strips their own box covers, so a box query reads only the strips it spans.
+
+    Input contract: any edges. Orientation, zero-length edges, repeated edges and self-intersections are fine;
+    every query answers from the edges as given. Coordinates must be finite."""
 
     def __init__(self, edges: Iterable[Edge]) -> None:
-        self._strips: dict[int, list[Edge]] = {}
+        self._strips: dict[int, list[tuple[int, Edge]]] = {}   # strip -> (the edge's first strip, edge)
         for edge in edges:
             (_, ya), (_, yb) = edge
-            for strip in range(_strip(min(ya, yb)), _strip(max(ya, yb)) + 1):
-                self._strips.setdefault(strip, []).append(edge)
+            first = _strip(min(ya, yb))
+            for strip in range(first, _strip(max(ya, yb)) + 1):
+                self._strips.setdefault(strip, []).append((first, edge))
 
     def edges_in_box(self, box: Box) -> Iterator[Edge]:
-        """Every edge whose own box meets ``box``, and possibly more (those sharing a strip with it)."""
-        for strip in range(_strip(box[1]), _strip(box[3]) + 1):
-            for edge in self._strips.get(strip, ()):
-                if _edge_in_box(*edge, box):
+        """Every edge whose own box meets ``box``, once each (an edge spans several strips, so it is yielded
+        from the first strip of the query that holds it)."""
+        first_strip = _strip(box[1])
+        for strip in range(first_strip, _strip(box[3]) + 1):
+            for edge_first, edge in self._strips.get(strip, ()):
+                if (strip == first_strip or edge_first == strip) and _edge_in_box(*edge, box):
                     yield edge
 
     def has_edge_in_box(self, box: Box) -> bool:
@@ -91,15 +81,18 @@ class RingIndex(EdgeIndex):
         if perf_counters.ENABLED:
             perf_counters.inc("ring_edge_tests", len(straddling))
         inside = False
-        for (xj, yj), (xi, yi) in straddling:
+        for _, ((xj, yj), (xi, yi)) in straddling:
             if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
                 inside = not inside
         return inside
 
 
 class PathMask:
-    """A footprint ring or a road polyline, indexed once, that plan triangles are tested against with
-    ``margin``: ``touches`` answers as ``triangle_touches`` does."""
+    """A footprint ring or a road polyline, indexed once, that plan triangles are tested against with ``margin``.
+
+    Input contract: ``path`` is a ring (``closed``; either winding, the closing edge implied) or a polyline of
+    two or more points; repeated or zero-length edges are fine. ``touches`` is true when the triangle is within
+    ``margin`` of the path, or (closed) contains or lies inside the ring."""
 
     def __init__(self, path: Sequence[Pt], margin: float, closed: bool) -> None:
         self.margin = margin
@@ -117,11 +110,22 @@ class PathMask:
         return boxes_meet(bounding_box(tri), self.box)
 
     def touches(self, tri: Sequence[Pt]) -> bool:
-        return _touches(tri, self.margin, self._index.edges_in_box, self._contains)
+        if perf_counters.ENABLED:
+            perf_counters.inc("overlap_pairs")
+        box = _padded_box(tri, self.margin)
+        near = list(self._index.edges_in_box(box))
+        if any(point_in_ring(x, y, tri) for a, b in near for x, y in (a, b) if _in_box(x, y, box)):
+            return True
+        if self._contains is not None and any(self._contains(x, y) for x, y in tri):
+            return True
+        return any(_segment_distance(a, b, c, d) <= self.margin for a, b in near for c, d in _edges(tri, True))
 
 
 class RegionMask:
-    """A region (``outer`` minus ``holes``), indexed once: ``overlaps`` answers as ``triangle_overlaps_region``."""
+    """A region (``outer`` minus ``holes``), indexed once: ``overlaps`` answers as ``triangle_overlaps_region``.
+
+    Input contract: rings in either winding, holes inside ``outer``; degenerate (under 3 point) rings never
+    overlap, exactly as in ``triangle_overlaps_region``."""
 
     def __init__(self, outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> None:
         self.outer, self.holes = outer, holes

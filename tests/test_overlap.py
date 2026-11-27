@@ -2,13 +2,15 @@
 # Copyright 2026 lingshf
 """The indexed masks answer exactly as the unindexed reference tests, over a seeded synthetic corpus."""
 
+import json
 import random
-
-import pytest
+import unittest
+from pathlib import Path
 
 from map_builder.core.osm import point_in_ring
 from map_builder.core.overlap import (
-    PathMask, RegionMask, RingIndex, triangle_overlaps_region, triangle_touches)
+    EdgeIndex, PathMask, RegionMask, RingIndex, triangle_overlaps_region)
+from tests.overlap_oracle import brute_force_touches
 
 PAIRS_PER_KIND = 2500
 SEED = 20261127
@@ -46,40 +48,93 @@ def _triangles(rng: random.Random, ring: list[tuple[float, float]]) -> list[list
     return out
 
 
-@pytest.mark.parametrize("ring", [BIG_RING, CONCAVE])
-@pytest.mark.parametrize("closed", [True, False])
-def test_path_mask_matches_reference(ring: list[tuple[float, float]], closed: bool) -> None:
-    rng = random.Random(SEED)
-    mask = PathMask(ring, SPECIAL_MARGIN_M, closed)
-    for tri in _triangles(rng, ring):
-        assert mask.touches(tri) == triangle_touches(tri, ring, SPECIAL_MARGIN_M, closed)
-        if not mask.may_touch(tri):
-            assert not triangle_touches(tri, ring, SPECIAL_MARGIN_M, closed)
+REAL_CASES = Path(__file__).parent / "fixtures" / "water_mask_cases.json"
 
 
-def test_path_mask_matches_reference_on_random_rings() -> None:
-    rng = random.Random(SEED + 1)
-    for _ in range(100):
-        ring = _random_ring(rng)
-        mask = PathMask(ring, SPECIAL_MARGIN_M, True)
-        for tri in [_random_triangle(rng, rng.choice((1.0, 10.0, 60.0))) for _ in range(20)]:
-            assert mask.touches(tri) == triangle_touches(tri, ring, SPECIAL_MARGIN_M, True)
+def _as_points(points: list[list[float]]) -> list[tuple[float, float]]:
+    return [(x, y) for x, y in points]
 
 
-@pytest.mark.parametrize("outer,holes", [(BIG_RING, [HOLE]), (BIG_RING, []), (CONCAVE, [])])
-def test_region_mask_matches_reference(outer: list[tuple[float, float]], holes: list[list[tuple[float, float]]]) -> None:
-    rng = random.Random(SEED + 2)
-    mask = RegionMask(outer, holes)
-    for tri in _triangles(rng, outer) + [list(HOLE[:3]), [(45.0, 45.0), (55.0, 45.0), (50.0, 55.0)]]:
-        assert mask.overlaps(tri) == triangle_overlaps_region(tri, outer, holes)
+class SyntheticCorpusTest(unittest.TestCase):
+    def test_path_mask_matches_brute_force(self) -> None:
+        for ring in (BIG_RING, CONCAVE):
+            for closed in (True, False):
+                with self.subTest(concave=ring is CONCAVE, closed=closed):
+                    mask = PathMask(ring, SPECIAL_MARGIN_M, closed)
+                    for tri in _triangles(random.Random(SEED), ring):
+                        expected = brute_force_touches(tri, ring, SPECIAL_MARGIN_M, closed)
+                        self.assertEqual(mask.touches(tri), expected)
+                        if not mask.may_touch(tri):
+                            self.assertFalse(expected)
 
-
-def test_ring_index_contains_matches_point_in_ring() -> None:
-    rng = random.Random(SEED + 3)
-    for ring in (BIG_RING, CONCAVE, *(_random_ring(rng) for _ in range(50))):
-        index = RingIndex(ring)
+    def test_path_mask_matches_brute_force_on_random_rings(self) -> None:
+        rng = random.Random(SEED + 1)
         for _ in range(100):
-            x, y = _point(rng)
-            assert index.contains(x, y) == point_in_ring(x, y, ring)
-        for x, y in ring:
-            assert index.contains(x, y) == point_in_ring(x, y, ring)
+            ring = _random_ring(rng)
+            mask = PathMask(ring, SPECIAL_MARGIN_M, True)
+            for tri in [_random_triangle(rng, rng.choice((1.0, 10.0, 60.0))) for _ in range(20)]:
+                self.assertEqual(mask.touches(tri), brute_force_touches(tri, ring, SPECIAL_MARGIN_M, True))
+
+    def test_region_mask_matches_reference(self) -> None:
+        for outer, holes in ((BIG_RING, [HOLE]), (BIG_RING, []), (CONCAVE, [])):
+            mask = RegionMask(outer, holes)
+            extra = [list(HOLE[:3]), [(45.0, 45.0), (55.0, 45.0), (50.0, 55.0)]]
+            for tri in _triangles(random.Random(SEED + 2), outer) + extra:
+                self.assertEqual(mask.overlaps(tri), triangle_overlaps_region(tri, outer, holes))
+
+    def test_ring_index_contains_matches_point_in_ring(self) -> None:
+        rng = random.Random(SEED + 3)
+        for ring in (BIG_RING, CONCAVE, *(_random_ring(rng) for _ in range(50))):
+            index = RingIndex(ring)
+            for x, y in [_point(rng) for _ in range(100)] + list(ring):
+                self.assertEqual(index.contains(x, y), point_in_ring(x, y, ring))
+
+    def test_repeated_and_zero_length_edges_match_brute_force(self) -> None:
+        ring = BIG_RING + BIG_RING[:2] + [BIG_RING[1]]
+        mask = PathMask(ring, SPECIAL_MARGIN_M, True)
+        for tri in _triangles(random.Random(SEED + 4), ring):
+            self.assertEqual(mask.touches(tri), brute_force_touches(tri, ring, SPECIAL_MARGIN_M, True))
+            self.assertEqual(RingIndex(ring).contains(*tri[0]), point_in_ring(*tri[0], ring))
+
+
+class EdgeIndexTest(unittest.TestCase):
+    def test_an_edge_spanning_many_strips_is_yielded_once(self) -> None:
+        tall = ((0.0, 0.0), (1.0, 100.0))
+        short = ((5.0, 10.0), (6.0, 11.0))
+        index = EdgeIndex([tall, short])
+        found = list(index.edges_in_box((-1.0, -50.0, 10.0, 150.0)))
+        self.assertEqual(sorted(found), sorted([tall, short]))
+        self.assertEqual(list(index.edges_in_box((-1.0, 40.0, 10.0, 60.0))), [tall])
+
+
+class RealWaterCasesTest(unittest.TestCase):
+    """Masks and triangles recorded from the Pittsburgh and Bellevue-Factoria water stage."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cases = json.loads(REAL_CASES.read_text())["cases"]
+
+    def test_the_fixture_covers_every_mask_kind(self) -> None:
+        self.assertEqual({c["kind"] for c in self.cases}, {"region", "closed", "open"})
+        self.assertEqual({c["preset"] for c in self.cases}, {"pittsburgh", "bellevue-factoria"})
+
+    def test_masks_match_the_unindexed_answers(self) -> None:
+        for case in self.cases:
+            tris = [_as_points(t) for t in case["tris"]]
+            mask = case["mask"]
+            with self.subTest(preset=case["preset"], kind=case["kind"]):
+                if case["kind"] == "region":
+                    outer, holes = _as_points(mask["outer"]), [_as_points(h) for h in mask["holes"]]
+                    region = RegionMask(outer, holes)
+                    answers = [(region.overlaps(t), triangle_overlaps_region(t, outer, holes)) for t in tris]
+                else:
+                    path = _as_points(mask["path"])
+                    path_mask = PathMask(path, mask["margin"], mask["closed"])
+                    answers = [(path_mask.touches(t), brute_force_touches(t, path, mask["margin"], mask["closed"]))
+                               for t in tris]
+                self.assertTrue(answers)
+                self.assertTrue(all(got == want for got, want in answers))
+
+
+if __name__ == "__main__":
+    unittest.main()
