@@ -34,7 +34,7 @@ import bpy
 
 from ..core.errors import MapBuilderError
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
-from ..core.style import materials_for_style, normalize_style, style_uses_textures
+from ..core.style import is_stylized, materials_for_style, normalize_style, style_uses_textures
 from ..core import textures as tex
 from ..core import uv as core_uv
 from ..core.pipeline import filter_passage_probes, merge_dropped
@@ -579,7 +579,7 @@ def export_map(context: bpy.types.Context, path: str, name: str, heightfield_spa
     manifest, result, edits = export_baked(out, name, area, meta["sources"], baked, meta["generated_ids"],
                                            materials, report, blender_version=bpy.app.version_string,
                                            heightfield_spacing=heightfield_spacing or None,
-                                           passage_probes=probes)
+                                           passage_probes=probes, with_normals=not is_stylized(style))
     report["edits"] = edits
     deleted = filter_passage_probes(probes, (o["mb_id"] for o in manifest["objects"]), meta["generated_ids"])[1]
     report["passage_probes_dropped"] = merge_dropped(report, deleted)

@@ -448,6 +448,14 @@ def _inside_pieces(b: Body, x: float, y: float) -> bool:
     return False
 
 
+def in_shore_band(b: Body, x: float, y: float, band: float) -> bool:
+    """Whether (x, y) is on the body or within ``band`` metres of one of its true shore edges."""
+    x0, y0, x1, y1 = _body_box(b)
+    if not (x0 - band <= x <= x1 + band and y0 - band <= y <= y1 + band):
+        return False
+    return _inside_pieces(b, x, y) or any(point_segment_distance(x, y, p, q) <= band for p, q in b.shore)
+
+
 @dataclass
 class WaterModel:
     """Result of :func:`build_water`: the carved grid, per-body outcomes and the emitted triangles."""

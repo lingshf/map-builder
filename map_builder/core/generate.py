@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Generic, NoReturn, TypeAlias, TypedDict, TypeVar
 
 from . import bridges, dsm, passages, perf_counters, roofs, style as style_palette, tunnels, water
+from .style import srgb_to_linear
 from .deck_underside import RampLines
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
@@ -134,10 +135,6 @@ def parse_number(value: str | None) -> float | None:
         return f if math.isfinite(f) else None
     except (AttributeError, ValueError):
         return None
-
-
-def srgb_to_linear(c: float) -> float:
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def parse_colour(value: str | None) -> tuple[float, ...] | None:
@@ -487,6 +484,26 @@ def _building_height(tags: Mapping[str, str]) -> tuple[float, float, float | Non
     return h, min_h, roof_h, prov, eave_based
 
 
+def _building_colours(feature: Feature, tags: Mapping[str, str], seed: int, flat_roof: bool, style: str,
+                      prov: Prov) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """(wall colour, roof colour). Tagged colours are used as measured in classic mode and keep their hue,
+    pulled into the palette, in stylized mode."""
+    facade = parse_colour(tags.get("building:colour"))
+    roof = parse_colour(tags.get("roof:colour"))
+    if facade:
+        prov["facade_colour"] = "measured:osm building:colour"
+    if roof:
+        prov["roof_colour"] = "measured:osm roof:colour"
+    facade_key, roof_key = feature.id + str(seed), feature.id + "r" + str(seed)
+    if style_palette.is_stylized(style):
+        return style_palette.facade_color(facade, facade_key), style_palette.roof_color(roof, roof_key, flat_roof)
+    if not facade:
+        facade = FACADE_PALETTE[stable_hash(facade_key) % len(FACADE_PALETTE)]
+    if not roof:
+        roof = (0.3, 0.3, 0.31) if flat_roof else ROOF_PALETTE[stable_hash(roof_key) % len(ROOF_PALETTE)]
+    return facade, roof
+
+
 def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, seed: int = 0,
                    max_ring_vertices: int = MAX_RING_VERTICES, max_work: int = DEFAULT_MAX_WORK,
                    reserve: Callable[..., None] | None = None,
@@ -635,23 +652,7 @@ def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, se
         roof_v, roof_t = roofs.roof_budget(plan, n_ring, len(tris))
         reserve(2 * n_ring + roof_v, 2 * n_ring + len(tris) + roof_t)
 
-    mode = style_palette.normalize_style(style)
-    if mode == "classic":
-        facade = parse_colour(tags.get("building:colour"))
-        if facade:
-            prov["facade_colour"] = "measured:osm building:colour"
-        else:
-            facade = FACADE_PALETTE[stable_hash(feature.id + str(seed)) % len(FACADE_PALETTE)]
-        roof_col = parse_colour(tags.get("roof:colour"))
-        if roof_col:
-            prov["roof_colour"] = "measured:osm roof:colour"
-        else:
-            roof_col = ROOF_PALETTE[stable_hash(feature.id + "r" + str(seed)) % len(ROOF_PALETTE)]
-            if roof_shape == "flat":
-                roof_col = (0.3, 0.3, 0.31)
-    else:
-        facade = style_palette.facade_color(mode, tags, feature.id + str(seed))
-        roof_col = style_palette.roof_color(mode, tags, feature.id + "r" + str(seed), roof_shape == "flat")
+    facade, roof_col = _building_colours(feature, tags, seed, roof_shape == "flat", style, prov)
 
     mesh = MeshData(f"bld_{short_name(feature.id)}")
     split: list[bool] = []
@@ -780,6 +781,7 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
                        bounds=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * grid.spacing,
                                grid.y0 + (grid.ny - 1) * grid.spacing))
     boxes = [(water._body_box(b), b) for b in built_water if b.pieces]
+    stylized = style_palette.is_stylized(style)
     for j in range(grid.ny):
         for i in range(grid.nx):
             mesh.add_vertex(grid.x0 + i * grid.spacing, grid.y0 + j * grid.spacing, grid.heights[j][i] - z_offset)
@@ -807,10 +809,19 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
             if cls == "water" and any(x0 <= cx <= x1 and y0 <= cy <= y1 and water._inside_pieces(b, cx, cy)
                                       for (x0, y0, x1, y1), b in boxes):
                 cls = dry
-            col = style_palette.terrain_color(style, cls, style_palette.terrain_slope(grid, i, j))
-            mesh.add_face((v00, v10, v11), "MB Terrain", col)
-            mesh.add_face((v00, v11, v01), "MB Terrain", col)
+            near_water = stylized and any(water.in_shore_band(b, cx, cy, style_palette.BANK_BAND_M)
+                                          for b in built_water)
+            for tri in ((v00, v10, v11), (v00, v11, v01)):
+                mesh.add_face(tri, "MB Terrain", _terrain_face_color(mesh, tri, style, cls, near_water))
     return mesh
+
+
+def _terrain_face_color(mesh: MeshData, tri: tuple[int, int, int], style: str, landcover: str | None,
+                        near_water: bool) -> tuple[float, ...]:
+    if not style_palette.is_stylized(style):
+        return LANDCOVER_COLORS[landcover]
+    normal = style_palette.face_normal(*(mesh.vertices[v] for v in tri))
+    return style_palette.terrain_face_color(landcover, normal, near_water)
 
 # --- Roads ------------------------------------------------------------------
 
@@ -1572,11 +1583,24 @@ def _check_building_overlaps(plan: ScenePlan, candidates: Iterable[Mapping[str, 
 
 # --- Vegetation -------------------------------------------------------------
 
-def tree_mesh(style: str = "classic", seed: int = 0) -> MeshData:
+TREE_MESH_KEY = "tree_generic"
+
+
+def tree_mesh_key(variant: int) -> str:
+    """Shared-mesh key of a tint variant; variant 0 keeps the classic key."""
+    return TREE_MESH_KEY if variant == 0 else f"{TREE_MESH_KEY}.{variant}"
+
+
+def tree_mesh(style: str = "classic", variant: int = 0) -> MeshData:
     m = MeshData("tree_generic")
     sides = 6
     trunk_r, trunk_h, crown_r, crown_b, crown_t = 0.25, 2.6, 2.2, 2.0, 8.0
-    bark, leaf = style_palette.tree_colours(style, seed)
+    bark = style_palette.bark_color(style, variant)
+
+    def add_crown_face(a: int, b: int, c: int) -> None:
+        normal = style_palette.face_normal(m.vertices[a], m.vertices[b], m.vertices[c])
+        m.add_face((a, b, c), "MB Foliage", style_palette.foliage_color(style, variant, normal))
+
     b = [m.add_vertex(trunk_r * math.cos(2 * math.pi * k / sides), trunk_r * math.sin(2 * math.pi * k / sides), -0.2)
          for k in range(sides)]
     t = [m.add_vertex(trunk_r * math.cos(2 * math.pi * k / sides), trunk_r * math.sin(2 * math.pi * k / sides), trunk_h)
@@ -1592,8 +1616,8 @@ def tree_mesh(style: str = "classic", seed: int = 0) -> MeshData:
     bottom = m.add_vertex(0.0, 0.0, crown_b)
     for k in range(sides):
         j = (k + 1) % sides
-        m.add_face((ring[k], ring[j], top), "MB Foliage", leaf)
-        m.add_face((ring[j], ring[k], bottom), "MB Foliage", leaf)
+        add_crown_face(ring[k], ring[j], top)
+        add_crown_face(ring[j], ring[k], bottom)
     return m
 
 
@@ -2113,7 +2137,10 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
     passages.build(plan, ctx)
     ctx.flush_unsupported(plan)
     if opts.trees:
-        tmpl = plan.shared_meshes["tree_generic"] = tree_mesh(style=opts.style, seed=opts.seed)
+        variants = len(style_palette.TREE_TINT_SCALES) if style_palette.is_stylized(opts.style) else 1
+        for variant in range(variants):
+            plan.shared_meshes[tree_mesh_key(variant)] = tree_mesh(style=opts.style, variant=variant)
+        tmpl = plan.shared_meshes[TREE_MESH_KEY]
         tree_cost = (len(tmpl.vertices), mesh_triangle_count(tmpl))
         scene = (-area.width / 2, -area.height / 2, area.width / 2, area.height / 2)
         fp_buckets = _Buckets(footprints, bounds=scene)
@@ -2166,7 +2193,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                 prov["height"] = "inferred:default 8 m"
             rng = random.Random(stable_hash(f.id) ^ opts.seed)
             budget.charge(f.id, *tree_cost)
-            add(ObjectSpec(f"tree_{short_name(f.id)}", f.id, "vegetation", "Vegetation", mesh_key="tree_generic",
+            add(ObjectSpec(f"tree_{short_name(f.id)}", f.id, "vegetation", "Vegetation",
+                           mesh_key=tree_mesh_key(style_palette.tree_tint_variant(opts.style, f.id)),
                            location=(x, y, terrain_height(terrain, x, y) - z_offset),
                            rotation_z=rng.random() * 2 * math.pi, scale=h / TREE_UNIT_HEIGHT, provenance=prov))
             n_trees += 1
@@ -2190,7 +2218,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                     sid = f"scatter:{f.id}#{k}"
                     budget.charge(sid, *tree_cost)
                     add(ObjectSpec(f"tree_s{stable_hash(f.id) % 1000000:06d}_{k}", sid, "vegetation", "Vegetation",
-                                   mesh_key="tree_generic",
+                                   mesh_key=tree_mesh_key(style_palette.tree_tint_variant(opts.style, sid)),
                                    location=(x, y, terrain_height(terrain, x, y) - z_offset),
                                    rotation_z=rng.random() * 2 * math.pi, scale=s,
                                    provenance={"position": f"inferred:procedural scatter in {f.id} ({cls})",

@@ -28,7 +28,7 @@ from .dem import COPERNICUS_BASE_URL, ElevationGrid, ProgressFn, fetch_copernicu
 from .errors import CoverageError, FormatError, LimitError, NetworkError, PackageError
 from .generate import PlanOptions, ScenePlan, build_plan
 from .glb import GlbNodeSpec, MaterialSpec, node_scale, write_glb
-from .style import materials_for_style, style_uses_textures
+from .style import is_stylized, materials_for_style, style_uses_textures
 from .http import HttpClient, redact
 from .osm import (DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_FETCH_MARGIN_M, OSM_LICENSE, Classified, OsmData, classify,
                   fetch_overpass, load_osm_file)
@@ -561,7 +561,7 @@ def plan_to_package(plan: ScenePlan, path: str | PathLike[str], name: str, sourc
             textured[m] = (rgb, rough, metal, tex.load(m))
         materials = textured
         notices = [tex.asset_notice(used)] if used else ()
-    glb_bytes = write_glb(nodes, materials, generator="map-builder headless")
+    glb_bytes = write_glb(nodes, materials, generator="map-builder headless", with_normals=not is_stylized(style))
     report: Mapping[str, object] = plan.report
     if empty_dropped:
         report = {**report, "objects_dropped_empty": empty_dropped}

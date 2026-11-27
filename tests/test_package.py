@@ -844,7 +844,7 @@ class PlanPackageTest(TempDirCase):
         orig = pipeline.write_glb
         target = next(o.name for o in self.plan.objects if o.mb_class == "building")
 
-        def flipped(nodes, materials, generator=None, extras=None):
+        def flipped(nodes, materials, generator=None, extras=None, with_normals=True):
             out = []
             for n in nodes:
                 if n["name"] == target:

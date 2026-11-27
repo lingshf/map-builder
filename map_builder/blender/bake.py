@@ -280,7 +280,7 @@ def _provenance(obj: BakedObject, mb_id: str, edits_dup: Mapping[str, str]) -> d
 
 
 def package_parts(baked: Sequence[BakedObject], generated_ids: Collection[str],
-                  materials: Mapping[str, MaterialSpec] | None,
+                  materials: Mapping[str, MaterialSpec] | None, with_normals: bool = True,
                   ) -> tuple[bytes, list[ColObject], dict[str, ObjectInfo], Edits]:
     """(glb bytes, [ColObject], object_info, edits) from baked objects. Identities follow
     docs/PACKAGE_FORMAT.md via :func:`resolve_identities`; each glTF node and its collision object are
@@ -307,7 +307,8 @@ def package_parts(baked: Sequence[BakedObject], generated_ids: Collection[str],
         nodes.append({"name": name, "mesh": md, "extras": {"mb_id": mb_id, "mb_class": cls}})
         cols.append(ColObject(name, mb_id, cls, b.vertices, b.triangles))
         info[name] = {"provenance": _provenance(b, mb_id, dup)}
-    glb = write_glb(nodes, mats, generator=f"map-builder {GENERATOR_VERSION} (Blender add-on)")
+    glb = write_glb(nodes, mats, generator=f"map-builder {GENERATOR_VERSION} (Blender add-on)",
+                    with_normals=with_normals)
     return glb, cols, info, edits
 
 
@@ -315,14 +316,14 @@ def export_baked(path: str, name: str, area: Area, sources: Sequence[JsonMapping
                  generated_ids: Collection[str], materials: Mapping[str, MaterialSpec] | None,
                  report: JsonObject, blender_version: str | None = None,
                  heightfield_spacing: float | None = None, created_utc: str | None = None,
-                 passage_probes: Sequence[JsonMapping] = ()) -> tuple[Manifest, ValidationResult, Edits]:
+                 passage_probes: Sequence[JsonMapping] = (), with_normals: bool = True) -> tuple[Manifest, ValidationResult, Edits]:
     """Write the package atomically (core ``write_package``: a failed write keeps the previous file).
     ``passage_probes`` come from the plan; a probe whose feature mb_id is among ``generated_ids`` (the
     original plan) but no longer among the exported objects is dropped and its id listed in report.json
     ``passage_probes_dropped``; a malformed probe (including None, an explicit JSON null in the scene
     metadata) or one naming an unknown feature raises PackageError.
     Returns (manifest, ValidationResult, edits)."""
-    glb, cols, info, edits = package_parts(baked, generated_ids, materials)
+    glb, cols, info, edits = package_parts(baked, generated_ids, materials, with_normals)
     names_used = {m for b in baked for m in set(b.tri_materials)}
     pngs = {bytes(spec[3]) for m, spec in (materials or {}).items() if len(spec) > 3 and m in names_used}
     used = sorted(t for t in TEXTURES if pngs and load_texture(t) in pngs)   # the textures, not the export names

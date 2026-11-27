@@ -8,14 +8,54 @@ palette sampled from the reference background art and keeps geometry untouched.
 
 from __future__ import annotations
 
+import colorsys
 import hashlib
 import math
-from collections.abc import Mapping
-from typing import Any, Literal, cast
+from collections.abc import Mapping, Sequence
+from typing import Literal, cast
 
 StyleMode = Literal["classic", "stylized"]
 Rgb = tuple[float, float, float]
+Vec3 = tuple[float, float, float]
 MaterialSpec = tuple[Rgb, float, float]
+
+CLIFF_MIN_SLOPE_DEG = 35.0
+BANK_BAND_M = 6.0
+SUN_DIRECTION: Vec3 = (-0.5, -0.6, 0.62)    # towards the sun, map frame (+X east, +Y north, +Z up)
+FOLIAGE_LIT_MIN = 0.35                      # Lambert term above which a foliage face is lit
+FOLIAGE_SHADOW_MAX = 0.0                    # ... and at or below which it is in shadow
+SLOPE_RAMP_FULL_TAN = 0.45                  # slope (rise/run) at which the grass ramp reaches its darkest
+SLOPE_RAMP_BRIGHTEST, SLOPE_RAMP_DARKEST = 1.08, 0.90
+FACADE_MAX_SATURATION, FACADE_VALUE_RANGE = 0.30, (0.78, 0.97)
+ROOF_SATURATION_RANGE, ROOF_VALUE_RANGE = (0.35, 0.65), (0.55, 0.80)
+HUE_MIN_SATURATION = 0.05                   # below this a colour counts as grey
+TREE_TINT_SCALES = (0.92, 1.0, 1.08)
+
+
+def srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def linear_to_srgb(c: float) -> float:
+    return c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+
+def _hex_linear(code: str) -> Rgb:
+    """A ``#rrggbb`` sRGB swatch of the target look as linear glTF colour."""
+    r, g, b = (srgb_to_linear(int(code[k:k + 2], 16) / 255.0) for k in (1, 3, 5))
+    return (r, g, b)
+
+
+def _normalized(v: Vec3) -> Vec3:
+    n = math.sqrt(sum(c * c for c in v))
+    return (v[0] / n, v[1] / n, v[2] / n)
+
+
+_SUN = _normalized(SUN_DIRECTION)
+_CLIFF_MAX_NORMAL_Z = math.cos(math.radians(CLIFF_MIN_SLOPE_DEG))
+_CLIFF_LIT, _CLIFF_SHADOW = _hex_linear("#d4b590"), _hex_linear("#70828b")
+_SAND_BANK = _hex_linear("#f2dcae")
+_FOLIAGE_LIT, _FOLIAGE_MID, _FOLIAGE_SHADOW = _hex_linear("#6f934e"), _hex_linear("#39864c"), _hex_linear("#3d6e69")
 
 _CLASSIC_MATERIALS: dict[str, MaterialSpec] = {
     "MB Terrain": ((0.8, 0.8, 0.8), 0.95, 0.0),
@@ -53,15 +93,13 @@ _STYLIZED_LANDCOVER: dict[str | None, Rgb] = {
     "sand": (0.91, 0.85, 0.65),
 }
 
-_CLASSIC_FACADE = [
-    (0.62, 0.58, 0.52),
-    (0.70, 0.66, 0.60),
-    (0.55, 0.42, 0.34),
-    (0.75, 0.73, 0.70),
-    (0.48, 0.47, 0.46),
-    (0.66, 0.55, 0.42),
-]
-_CLASSIC_ROOF = [(0.30, 0.12, 0.08), (0.22, 0.22, 0.24), (0.40, 0.20, 0.12), (0.35, 0.35, 0.36)]
+_CLASSIC_BARK, _CLASSIC_LEAF = (0.18, 0.11, 0.06), (0.06, 0.20, 0.05)
+_STYLIZED_BARK = (0.53, 0.43, 0.33)
+_FLAT_ROOF = (0.68, 0.62, 0.56)
+_MAJOR_ROADS = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link", "trunk_link",
+                "primary_link", "secondary_link"}
+_MINOR_ROADS = {"residential", "unclassified", "living_street", "service"}
+_CLASSIC_FOOT_WAYS = {"footway", "path", "cycleway", "steps", "bridleway", "pedestrian", "track"}
 
 _STYLIZED_FACADE = [
     (0.93, 0.84, 0.72),
@@ -80,6 +118,10 @@ def normalize_style(style: str | None) -> StyleMode:
     return "stylized"
 
 
+def is_stylized(style: str | None) -> bool:
+    return normalize_style(style) == "stylized"
+
+
 def style_uses_textures(style: str | None) -> bool:
     return normalize_style(style) == "classic"
 
@@ -88,81 +130,120 @@ def materials_for_style(style: str | None) -> dict[str, MaterialSpec]:
     return dict(_CLASSIC_MATERIALS if normalize_style(style) == "classic" else _STYLIZED_MATERIALS)
 
 
-def _choose(values: list[Rgb], key: str) -> Rgb:
-    n = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:12], 16)
-    return values[n % len(values)]
+def _stable_hash(key: str) -> int:
+    return int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:12], 16)
+
+
+def _choose(values: Sequence[Rgb], key: str) -> Rgb:
+    return values[_stable_hash(key) % len(values)]
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def _scaled(c: Rgb, factor: float) -> Rgb:
-    return cast("Rgb", tuple(max(0.0, min(1.0, x * factor)) for x in c))
+    return cast("Rgb", tuple(_clamp(x * factor, 0.0, 1.0) for x in c))
+
+
+def _pull_into_palette(rgb: Sequence[float], saturation: tuple[float, float], value: tuple[float, float]) -> Rgb:
+    """Keep the hue of a tagged colour; clamp its saturation and brightness (sRGB HSV) to the palette."""
+    h, s, v = colorsys.rgb_to_hsv(*(linear_to_srgb(c) for c in rgb))
+    if s >= HUE_MIN_SATURATION:     # a grey has no hue to keep, so it stays grey
+        s = _clamp(s, *saturation)
+    r, g, b = colorsys.hsv_to_rgb(h, s, _clamp(v, *value))
+    return (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b))
+
+
+def face_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3:
+    """Unit normal of the counter-clockwise triangle ``a, b, c``."""
+    u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    w = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+    return _normalized((u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]))
+
+
+def _lambert(normal: Vec3) -> float:
+    return normal[0] * _SUN[0] + normal[1] * _SUN[1] + normal[2] * _SUN[2]
+
+
+def _faces_sun(normal: Vec3) -> bool:
+    """Whether the horizontal part of the normal points towards the sun."""
+    return normal[0] * _SUN[0] + normal[1] * _SUN[1] > 0.0
 
 
 def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) -> Rgb:
+    """Landcover colour; stylized terrain gets a brightness ramp by ``slope`` (rise over run)."""
     mode = normalize_style(style)
     palette = _CLASSIC_LANDCOVER if mode == "classic" else _STYLIZED_LANDCOVER
     base = palette.get(landcover, palette[None])
     if mode == "classic":
         return base
-    # Stylized slope ramp: flatter terrain is slightly brighter, steeper terrain slightly darker.
-    t = max(0.0, min(1.0, slope / 0.45))
-    return _scaled(base, 1.08 - 0.18 * t)
+    t = _clamp(slope / SLOPE_RAMP_FULL_TAN, 0.0, 1.0)
+    return _scaled(base, SLOPE_RAMP_BRIGHTEST + (SLOPE_RAMP_DARKEST - SLOPE_RAMP_BRIGHTEST) * t)
+
+
+def terrain_face_color(landcover: str | None, normal: Vec3, near_water: bool) -> Rgb:
+    """Stylized colour of one terrain triangle: cliff colours from 35 degrees, else sand in the bank band,
+    else the landcover ramp."""
+    nx, ny, nz = normal
+    if nz <= _CLIFF_MAX_NORMAL_Z:
+        return _CLIFF_LIT if _faces_sun(normal) else _CLIFF_SHADOW
+    if near_water and landcover != "water":
+        return _SAND_BANK
+    return terrain_color("stylized", landcover, math.hypot(nx, ny) / nz)
 
 
 def bank_color(style: str | None) -> Rgb:
-    return _CLASSIC_LANDCOVER[None] if normalize_style(style) == "classic" else (0.88, 0.80, 0.67)
+    return _CLASSIC_LANDCOVER[None] if normalize_style(style) == "classic" else _SAND_BANK
 
 
 def road_color(style: str | None, tags: Mapping[str, str]) -> Rgb:
-    if normalize_style(style) == "classic":
-        return (0.12, 0.12, 0.12) if tags.get("highway") not in {
-            "footway", "path", "cycleway", "steps", "bridleway", "pedestrian", "track"
-        } else (0.35, 0.32, 0.28)
     highway = tags.get("highway")
-    if highway in {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link", "trunk_link",
-                   "primary_link", "secondary_link"}:
+    if normalize_style(style) == "classic":
+        return (0.35, 0.32, 0.28) if highway in _CLASSIC_FOOT_WAYS else (0.12, 0.12, 0.12)
+    if highway in _MAJOR_ROADS:
         return (0.87, 0.72, 0.54)
-    if highway in {"residential", "unclassified", "living_street", "service"}:
+    if highway in _MINOR_ROADS:
         return (0.85, 0.76, 0.62)
     return (0.80, 0.73, 0.61)
 
 
-def facade_color(style: str | None, tags: Mapping[str, str], fallback_key: str) -> Rgb:
-    palette = _CLASSIC_FACADE if normalize_style(style) == "classic" else _STYLIZED_FACADE
-    measured = tags.get("building:colour")
-    if measured:
-        return _choose(palette, measured + fallback_key)
-    return _choose(palette, fallback_key)
+def facade_color(measured: Sequence[float] | None, fallback_key: str) -> Rgb:
+    """Stylized wall colour: a tagged colour keeps its hue as a pastel, else a palette pick."""
+    if measured is not None:
+        return _pull_into_palette(measured, (0.0, FACADE_MAX_SATURATION), FACADE_VALUE_RANGE)
+    return _choose(_STYLIZED_FACADE, fallback_key)
 
 
-def roof_color(style: str | None, tags: Mapping[str, str], fallback_key: str, is_flat: bool) -> Rgb:
+def roof_color(measured: Sequence[float] | None, fallback_key: str, is_flat: bool) -> Rgb:
+    """Stylized roof colour: a tagged colour keeps its hue, saturated into the palette range."""
+    if measured is not None:
+        return _pull_into_palette(measured, ROOF_SATURATION_RANGE, ROOF_VALUE_RANGE)
+    return _FLAT_ROOF if is_flat else _choose(_STYLIZED_ROOF, fallback_key)
+
+
+def tree_tint_variant(style: str | None, key: str) -> int:
+    """Deterministic tint variant of a tree, from its OSM id or scatter id; classic trees have one look."""
+    return 0 if normalize_style(style) == "classic" else _stable_hash(key) % len(TREE_TINT_SCALES)
+
+
+def bark_color(style: str | None, variant: int) -> Rgb:
     if normalize_style(style) == "classic":
-        if is_flat:
-            return (0.3, 0.3, 0.31)
-        measured = tags.get("roof:colour")
-        if measured:
-            return _choose(_CLASSIC_ROOF, measured + fallback_key)
-        return _choose(_CLASSIC_ROOF, fallback_key)
-    if is_flat:
-        return (0.68, 0.62, 0.56)
-    measured = tags.get("roof:colour")
-    if measured:
-        return _scaled(_choose(_STYLIZED_ROOF, measured + fallback_key), 1.03)
-    return _choose(_STYLIZED_ROOF, fallback_key)
+        return _CLASSIC_BARK
+    return _scaled(_STYLIZED_BARK, TREE_TINT_SCALES[variant])
 
 
-def tree_colours(style: str | None, seed: int) -> tuple[Rgb, Rgb]:
+def foliage_color(style: str | None, variant: int, normal: Vec3) -> Rgb:
+    """Foliage colour of one crown face: lit, mid or shadow side by its facing, tinted by the variant."""
     if normalize_style(style) == "classic":
-        return (0.18, 0.11, 0.06), (0.06, 0.20, 0.05)
-    tint = (seed % 7) / 20.0
-    bark = _scaled((0.53, 0.43, 0.33), 1.0 + tint * 0.1)
-    foliage = _scaled((0.37, 0.57, 0.31), 0.95 + tint * 0.08)
-    return bark, foliage
+        return _CLASSIC_LEAF
+    lambert = _lambert(normal)
+    if lambert > FOLIAGE_LIT_MIN:
+        base = _FOLIAGE_LIT
+    elif lambert > FOLIAGE_SHADOW_MAX:
+        base = _FOLIAGE_MID
+    else:
+        base = _FOLIAGE_SHADOW
+    return _scaled(base, TREE_TINT_SCALES[variant])
 
 
-def terrain_slope(grid: Any, i: int, j: int) -> float:
-    # local finite-difference slope magnitude; caller passes ElevationGrid-like object.
-    h = grid.heights
-    s = float(grid.spacing)
-    dzdx = (h[j][i + 1] - h[j][i] + h[j + 1][i + 1] - h[j + 1][i]) / (2 * s)
-    dzdy = (h[j + 1][i] - h[j][i] + h[j + 1][i + 1] - h[j][i + 1]) / (2 * s)
-    return math.hypot(dzdx, dzdy)
