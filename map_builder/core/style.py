@@ -52,7 +52,7 @@ def _normalized(v: Vec3) -> Vec3:
 
 
 _SUN = _normalized(SUN_DIRECTION)
-_CLIFF_MAX_NORMAL_Z = math.cos(math.radians(CLIFF_MIN_SLOPE_DEG))
+_CLIFF_MIN_TAN = math.tan(math.radians(CLIFF_MIN_SLOPE_DEG))
 _CLIFF_LIT, _CLIFF_SHADOW = _hex_linear("#d4b590"), _hex_linear("#70828b")
 _SAND_BANK = _hex_linear("#f2dcae")
 _FOLIAGE_LIT, _FOLIAGE_MID, _FOLIAGE_SHADOW = _hex_linear("#6f934e"), _hex_linear("#39864c"), _hex_linear("#3d6e69")
@@ -155,20 +155,20 @@ def _pull_into_palette(rgb: Sequence[float], saturation: tuple[float, float], va
     return (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b))
 
 
-def face_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3:
-    """Unit normal of the counter-clockwise triangle ``a, b, c``."""
+def face_cross(a: Vec3, b: Vec3, c: Vec3) -> Vec3:
+    """Normal of the counter-clockwise triangle ``a, b, c``, scaled by twice its area."""
     u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
     w = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
-    return _normalized((u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]))
+    return (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
+
+
+def face_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3:
+    """Unit normal of the counter-clockwise triangle ``a, b, c``."""
+    return _normalized(face_cross(a, b, c))
 
 
 def _lambert(normal: Vec3) -> float:
     return normal[0] * _SUN[0] + normal[1] * _SUN[1] + normal[2] * _SUN[2]
-
-
-def _faces_sun(normal: Vec3) -> bool:
-    """Whether the horizontal part of the normal points towards the sun."""
-    return normal[0] * _SUN[0] + normal[1] * _SUN[1] > 0.0
 
 
 def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) -> Rgb:
@@ -178,19 +178,24 @@ def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) 
     base = palette.get(landcover, palette[None])
     if mode == "classic":
         return base
-    t = _clamp(slope / SLOPE_RAMP_FULL_TAN, 0.0, 1.0)
-    return _scaled(base, SLOPE_RAMP_BRIGHTEST + (SLOPE_RAMP_DARKEST - SLOPE_RAMP_BRIGHTEST) * t)
+    t = slope / SLOPE_RAMP_FULL_TAN
+    factor = SLOPE_RAMP_BRIGHTEST + (SLOPE_RAMP_DARKEST - SLOPE_RAMP_BRIGHTEST) * (t if t < 1.0 else 1.0)
+    r, g, b = base      # inline arithmetic: this runs once per terrain triangle
+    return (r * factor if r * factor < 1.0 else 1.0,
+            g * factor if g * factor < 1.0 else 1.0,
+            b * factor if b * factor < 1.0 else 1.0)
 
 
 def terrain_face_color(landcover: str | None, normal: Vec3, near_water: bool) -> Rgb:
     """Stylized colour of one terrain triangle: cliff colours from 35 degrees, else sand in the bank band,
-    else the landcover ramp."""
+    else the landcover ramp. ``normal`` points up and need not be unit length."""
     nx, ny, nz = normal
-    if nz <= _CLIFF_MAX_NORMAL_Z:
-        return _CLIFF_LIT if _faces_sun(normal) else _CLIFF_SHADOW
+    horizontal_sq = nx * nx + ny * ny
+    if nz <= 0.0 or horizontal_sq >= (nz * _CLIFF_MIN_TAN) ** 2:
+        return _CLIFF_LIT if nx * _SUN[0] + ny * _SUN[1] > 0.0 else _CLIFF_SHADOW
     if near_water and landcover != "water":
         return _SAND_BANK
-    return terrain_color("stylized", landcover, math.hypot(nx, ny) / nz)
+    return terrain_color("stylized", landcover, math.sqrt(horizontal_sq) / nz)
 
 
 def bank_color(style: str | None) -> Rgb:

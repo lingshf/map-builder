@@ -3,8 +3,10 @@
 import colorsys
 import math
 import unittest
+from types import SimpleNamespace
 
-from map_builder.core import style
+from map_builder.core import style, water
+from map_builder.core.dem import ElevationGrid
 from map_builder.core.glb import read_glb, write_glb
 from map_builder.core.mesh import MeshData
 
@@ -68,6 +70,18 @@ class TaggedColourTest(unittest.TestCase):
     def test_untagged_colours_come_from_the_palette_by_key(self):
         self.assertEqual(style.facade_color(None, "a"), style.facade_color(None, "a"))
         self.assertEqual(style.roof_color(None, "a", is_flat=True), style.roof_color(None, "b", is_flat=True))
+
+
+class ShoreBandCellsTest(unittest.TestCase):
+    def test_only_cells_within_the_band_of_a_shore_edge(self) -> None:
+        grid = ElevationGrid(0.0, 0.0, 1.0, 20, 20, [[0.0] * 20 for _ in range(20)], {})
+        body = SimpleNamespace(shore=[((0.0, 10.0), (20.0, 10.0))])
+
+        cells = water.shore_band_cells(grid, [body], band=2.0)
+
+        self.assertIn((10, 9), cells)
+        self.assertIn((10, 11), cells)
+        self.assertNotIn((10, 14), cells)
 
 
 class GlbNormalsTest(unittest.TestCase):

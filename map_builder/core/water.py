@@ -448,13 +448,19 @@ def _inside_pieces(b: Body, x: float, y: float) -> bool:
     return False
 
 
-def in_shore_band(b: Body, x: float, y: float, band: float) -> bool:
-    """Whether (x, y) is on the body or within ``band`` metres of one of its true shore edges."""
-    x0, y0, x1, y1 = _body_box(b)
-    if not (x0 - band <= x <= x1 + band and y0 - band <= y <= y1 + band):
-        return False
-    return _inside_pieces(b, x, y) or any(point_segment_distance(x, y, p, q) <= band for p, q in b.shore)
-
+def shore_band_cells(g: ElevationGrid, bodies: Iterable[Body], band: float) -> set[tuple[int, int]]:
+    """(i, j) of the grid cells whose centre is within ``band`` metres of a true shore edge of a body."""
+    s = g.spacing
+    cells: set[tuple[int, int]] = set()
+    for b in bodies:
+        for p, q in b.shore:
+            i0, i1, j0, j1 = _cells(g, min(p[0], q[0]) - band, max(p[0], q[0]) + band,
+                                    min(p[1], q[1]) - band, max(p[1], q[1]) + band)
+            for j in range(j0, j1 + 1):
+                for i in range(i0, i1 + 1):
+                    if point_segment_distance(g.x0 + (i + 0.5) * s, g.y0 + (j + 0.5) * s, p, q) <= band:
+                        cells.add((i, j))
+    return cells
 
 @dataclass
 class WaterModel:
