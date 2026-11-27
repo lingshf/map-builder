@@ -242,6 +242,16 @@ class RiverBoundaryTest(unittest.TestCase):
         self.assertLess(hausdorff(mesh, [outer, *holes]), 1e-3)
         self.assertEqual(len(boundary_edges(mesh)), len(outer) + 4)
 
+    def test_mesh_takes_its_face_colour_from_the_caller_and_defaults_to_classic(self):
+        poly = water.Polygon(RIVER_RING, [])
+        body = water.Body("osm:way/1", poly, "area", pieces=water.clip_polygon(poly, (-W / 2, -H / 2, W / 2, H / 2)))
+        body.level = water.Level(flat=10.0)
+        water._triangulate_body(body)
+        model = water.WaterModel(None, None, [body])
+        stylized = generate.style_palette.water_color("stylized")
+        self.assertEqual(set(model.mesh(body).face_colors), {water.WATER_COLOR})
+        self.assertEqual(set(model.mesh(body, stylized).face_colors), {stylized})
+
     def test_level_is_the_p20_of_the_shore_band_for_a_lake(self):
         plan, ids, _ = lake_scene()
         row = bodies(plan)[ids[0]]

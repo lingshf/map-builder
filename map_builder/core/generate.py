@@ -1873,7 +1873,7 @@ def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classif
         row.update(b.info)
         rows.append(row)
         if b.built:
-            mesh = model.mesh(b)
+            mesh = model.mesh(b, style_palette.water_color(style))
             add(ObjectSpec(mesh.name, mesh.name, "water", "Water", mesh=mesh,
                            provenance={"water_level": ("profile" if b.level is not None and b.level.flat is None
                                                        else "flat"),

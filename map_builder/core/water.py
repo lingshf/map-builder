@@ -590,9 +590,9 @@ class WaterModel:
                     best = min(best, min(pl.at(x, y) for x, y in clip))
         return best
 
-    def mesh(self, body: Body) -> MeshData:
+    def mesh(self, body: Body, color: tuple[float, float, float] = WATER_COLOR) -> MeshData:
         """The body's ``MB Water`` mesh (local z = absolute - z_offset; welded vertices; normals +Z)."""
-        return self._welded(f"water:{body.id}", (*body.tris, *body.cascade), MATERIAL, WATER_COLOR)
+        return self._welded(f"water:{body.id}", (*body.tris, *body.cascade), MATERIAL, color)
 
     def bank_mesh(self, body: Body, color: tuple[float, float, float]) -> MeshData:
         """The terrain ramps from the body's shore down to the bank (``MB Terrain``)."""
