@@ -9,7 +9,7 @@ import unittest
 
 from map_builder.core import perf_counters
 from tools.perf import work_count
-from tools.perf.collect import build_vector
+from tools.perf.collect import build_vector, default_plan_options
 from tools.perf.stages import StageCallProfiler
 from tools.perf.work_count import CompareOptions, compare, cpu_ratio_from_rounds
 from tools.perf.work_vector import (
@@ -226,6 +226,20 @@ class CollectorTotalsTest(unittest.TestCase):
         counters = {"grid_cells": {"total": 7, "stages": {OTHER_STAGE: 5, "acquire": 2}}}
         vector = build_vector("munich", "cli_generate", counters, {}, package_valid=True, run_error=None)
         self.assertEqual(vector["values"]["grid_cells"]["total"], 7)
+
+
+class CollectorDefaultOptionsTest(unittest.TestCase):
+    def test_cli_series_is_collected_on_the_public_default_style(self) -> None:
+        from map_builder.core.generate import PlanOptions
+
+        self.assertEqual(default_plan_options(PlanOptions).style, "stylized")
+
+    def test_a_tree_without_the_style_option_keeps_its_only_look(self) -> None:
+        class StylelessOptions:
+            def __init__(self, seed: int = 0) -> None:
+                self.seed = seed
+
+        self.assertEqual(default_plan_options(StylelessOptions).seed, 1)
 
 
 class GateModeTest(unittest.TestCase):

@@ -18,7 +18,7 @@ holds ``cache-munich`` and ``cache-pittsburgh``, which are copied afresh for eve
 from __future__ import annotations
 
 import argparse
-import dataclasses
+import inspect
 import json
 import shutil
 import socket
@@ -145,7 +145,7 @@ def write_vector(out_dir: Path, vector: dict[str, Any]) -> Path:
 
 def default_plan_options(plan_options_type: type) -> Any:
     """Options of the public CLI default path: stylized once a tree has the style option, else its only look."""
-    has_style = any(f.name == "style" for f in dataclasses.fields(plan_options_type))
+    has_style = "style" in inspect.signature(plan_options_type).parameters
     return plan_options_type(seed=SEED, style="stylized") if has_style else plan_options_type(seed=SEED)
 
 
