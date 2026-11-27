@@ -32,7 +32,45 @@ class RunResult:
     run_id: str
     glb_sha256: str
     median_ms: float
+    median_render_ms: float
+    passes: int
     renderer: str
+
+    def record(self) -> dict[str, object]:
+        return {
+            "run_id": self.run_id,
+            "glb_sha256": self.glb_sha256,
+            "median_ms": self.median_ms,
+            "median_render_ms": self.median_render_ms,
+            "passes": self.passes,
+            "renderer": self.renderer,
+        }
+
+
+AA_TOLERANCE = 0.03       # C1: head == base, so the ratio must stay within this of 1
+C2_MIN_RATIO = 1.10       # C2: a known +100 % render-work increase must read at least this high
+D139_MAX_RATIO = 1.10     # D139: the allowed render-time growth of head over merge-base
+
+
+def render_ratio(base_runs: list[float], head_runs: list[float]) -> float:
+    """median(head median_render_ms) / median(base median_render_ms) over the alternating pairs."""
+    return _median(head_runs) / _median(base_runs)
+
+
+def control_verdict(ratio: float, head_passes: int, same_package: bool) -> dict[str, object]:
+    """Which rule the ratio answers, and whether it passes: C1 (same package, one pass), C2 (same package, more
+    passes), or D139 (different packages, one pass)."""
+    if same_package:
+        rule, passed = ("C1", abs(ratio - 1.0) <= AA_TOLERANCE) if head_passes == 1 else ("C2", ratio >= C2_MIN_RATIO)
+    else:
+        if head_passes != 1:
+            raise SystemExit("--head-passes above 1 is only valid with the same package on both sides")
+        rule, passed = "D139", ratio <= D139_MAX_RATIO
+    return {"rule": rule, "ratio": ratio, "passed": passed}
+
+
+def _median(values: list[float]) -> float:
+    return sorted(values)[len(values) // 2]
 
 
 def _http_serve(directory: str, host: str, port: int) -> socketserver.TCPServer:
@@ -60,14 +98,14 @@ def _http_serve(directory: str, host: str, port: int) -> socketserver.TCPServer:
     return httpd
 
 
-def _wait_result(url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int) -> dict[str, object]:
+def _wait_result(url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int, passes: int) -> dict[str, object]:
     end = time.time() + timeout_s
     while time.time() < end:
         try:
             with urllib.request.urlopen(url, timeout=2) as r:
                 if r.status == 200:
                     data = cast("dict[str, object]", json.loads(r.read().decode("utf-8")))
-                    if not _matches_expected_result(data, run_id, glb_sha256, warmup, frames):
+                    if not _matches_expected_result(data, run_id, glb_sha256, warmup, frames, passes):
                         time.sleep(0.2)
                         continue
                     return data
@@ -77,21 +115,20 @@ def _wait_result(url: str, timeout_s: float, run_id: str, glb_sha256: str, warmu
     raise TimeoutError("frame-time proxy did not publish results before timeout")
 
 
-def _matches_expected_result(data: dict[str, object], run_id: str, glb_sha256: str, warmup: int, frames: int) -> bool:
+def _matches_expected_result(data: dict[str, object], run_id: str, glb_sha256: str, warmup: int, frames: int, passes: int) -> bool:
     if str(data.get("run_id", "")) != run_id:
         return False
     if str(data.get("glb_sha256", "")) != glb_sha256:
         return False
-    warmup_raw = data.get("warmup_frames", -1)
-    if not isinstance(warmup_raw, (int, float)) or int(warmup_raw) != warmup:
-        return False
-    frames_raw = data.get("measured_frames", -1)
-    if not isinstance(frames_raw, (int, float)) or int(frames_raw) != frames:
-        return False
-    return isinstance(data.get("median_ms"), (int, float))
+    for key, expected in (("warmup_frames", warmup), ("measured_frames", frames), ("passes", passes)):
+        raw = data.get(key, -1)
+        if not isinstance(raw, (int, float)) or int(raw) != expected:
+            return False
+    return all(isinstance(data.get(key), (int, float)) for key in ("median_ms", "median_render_ms"))
 
 
-def _run_once(chrome_cmd: list[str], url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int) -> RunResult:
+def _run_once(chrome_cmd: list[str], url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int,
+              passes: int) -> RunResult:
     parsed = urllib.parse.urlparse(url)
     result_url = urllib.parse.urlunparse(parsed._replace(path="/frame_time_proxy_result.json", query=""))
     p = subprocess.Popen(
@@ -109,12 +146,10 @@ def _run_once(chrome_cmd: list[str], url: str, timeout_s: float, run_id: str, gl
         stderr=subprocess.DEVNULL,
     )
     try:
-        out = _wait_result(result_url, timeout_s, run_id, glb_sha256, warmup, frames)
-        renderer = str(out.get("renderer", "unknown"))
-        median_raw = out.get("median_ms")
-        if not isinstance(median_raw, (int, float)):
-            raise SystemExit("frame_time_proxy_result.json missing numeric median_ms")
-        return RunResult(run_id=run_id, glb_sha256=glb_sha256, median_ms=float(median_raw), renderer=renderer)
+        out = _wait_result(result_url, timeout_s, run_id, glb_sha256, warmup, frames, passes)
+        return RunResult(run_id=run_id, glb_sha256=glb_sha256, median_ms=float(cast("float", out["median_ms"])),
+                         median_render_ms=float(cast("float", out["median_render_ms"])), passes=passes,
+                         renderer=str(out.get("renderer", "unknown")))
     finally:
         p.terminate()
         try:
@@ -137,7 +172,7 @@ def _enu_to_gltf(v: list[float]) -> list[float]:
     return [float(v[0]), float(v[2]), float(-v[1])]
 
 
-def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, warmup: int, frames: int) -> str:
+def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, warmup: int, frames: int, passes: int = 1) -> str:
     eye = camera["eye"]
     target = camera["target"]
     eye_gltf = _enu_to_gltf(eye)
@@ -147,6 +182,7 @@ def _make_url(host: str, port: int, camera: PresetCamera, run_id: str, warmup: i
             "run_id": run_id,
             "warmup": warmup,
             "frames": frames,
+            "passes": passes,
             "eye_x": eye_gltf[0],
             "eye_y": eye_gltf[1],
             "eye_z": eye_gltf[2],
@@ -175,6 +211,17 @@ def _ensure_swiftshader_renderer(renderer: str, run_id: str) -> None:
         raise SystemExit(f"renderer is not SwiftShader for run {run_id}: {renderer}")
 
 
+def _timed_run(args: argparse.Namespace, camera: PresetCamera, port: int, glb_sha256: str, passes: int,
+               result_file: str) -> RunResult:
+    run_id = str(uuid.uuid4())
+    url = _make_url(args.host, port, camera, run_id, int(args.warmup), int(args.frames), passes)
+    if os.path.exists(result_file):
+        os.remove(result_file)
+    out = _run_once(args.chrome_cmd, url, args.timeout, run_id, glb_sha256, int(args.warmup), int(args.frames), passes)
+    _ensure_swiftshader_renderer(out.renderer, out.run_id)
+    return out
+
+
 def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, object]:
     viewer = os.path.abspath(args.viewer_dir)
     if not os.path.isfile(os.path.join(viewer, "map.glb")):
@@ -183,43 +230,24 @@ def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, ob
         raise SystemExit("viewer-dir must contain frame_time_proxy.html")
     httpd = _http_serve(viewer, args.host, args.port)
     try:
-        warmup = int(args.warmup)
-        frames = int(args.frames)
         result_file = os.path.join(viewer, "frame_time_proxy_result.json")
         glb_sha256 = _sha256_file(os.path.join(viewer, "map.glb"))
-        vals: list[float] = []
-        run_results: list[dict[str, object]] = []
-        renderer = "unknown"
-        for _ in range(args.runs):
-            run_id = str(uuid.uuid4())
-            url = _make_url(args.host, args.port, camera, run_id, warmup, frames)
-            if os.path.exists(result_file):
-                os.remove(result_file)
-            out = _run_once(args.chrome_cmd, url, args.timeout, run_id, glb_sha256, warmup, frames)
-            vals.append(out.median_ms)
-            _ensure_swiftshader_renderer(out.renderer, out.run_id)
-            renderer = out.renderer
-            run_results.append(
-                {
-                    "run_id": out.run_id,
-                    "glb_sha256": out.glb_sha256,
-                    "median_ms": out.median_ms,
-                    "renderer": out.renderer,
-                }
-            )
-        median = sorted(vals)[len(vals) // 2]
+        runs = [_timed_run(args, camera, args.port, glb_sha256, 1, result_file) for _ in range(args.runs)]
+        vals = [r.median_ms for r in runs]
+        median = _median(vals)
         spread_pct = 0.0 if median == 0 else (max(vals) - min(vals)) / median * 100.0
         return {
             "mode": "single",
             "runs_ms": vals,
-            "run_results": run_results,
+            "run_results": [r.record() for r in runs],
             "median_ms": median,
+            "median_render_ms": _median([r.median_render_ms for r in runs]),
             "spread_pct": spread_pct,
-            "renderer": renderer,
+            "renderer": runs[-1].renderer if runs else "unknown",
             "execution_label": "swiftshader",
             "interpretation": "relative-only",
-            "warmup_frames": warmup,
-            "measured_frames": frames,
+            "warmup_frames": int(args.warmup),
+            "measured_frames": int(args.frames),
             "glb_sha256": glb_sha256,
         }
     finally:
@@ -238,93 +266,51 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
     base_httpd = _http_serve(base, args.host, base_port)
     head_httpd = _http_serve(head, args.host, head_port)
     try:
-        warmup = int(args.warmup)
-        frames = int(args.frames)
         base_glb_sha = _sha256_file(os.path.join(base, "map.glb"))
         head_glb_sha = _sha256_file(os.path.join(head, "map.glb"))
-        base_runs: list[float] = []
-        head_runs: list[float] = []
-        base_run_results: list[dict[str, object]] = []
-        head_run_results: list[dict[str, object]] = []
-        renderer = "unknown"
         base_result_file = os.path.join(base, "frame_time_proxy_result.json")
         head_result_file = os.path.join(head, "frame_time_proxy_result.json")
+        base_results: list[RunResult] = []
+        head_results: list[RunResult] = []
         for _ in range(args.alternating_pairs):
-            base_run_id = str(uuid.uuid4())
-            base_url = _make_url(args.host, base_port, camera, base_run_id, warmup, frames)
-            if os.path.exists(base_result_file):
-                os.remove(base_result_file)
-            out_b = _run_once(args.chrome_cmd, base_url, args.timeout, base_run_id, base_glb_sha, warmup, frames)
-            _ensure_swiftshader_renderer(out_b.renderer, out_b.run_id)
-            head_run_id = str(uuid.uuid4())
-            head_url = _make_url(args.host, head_port, camera, head_run_id, warmup, frames)
-            if os.path.exists(head_result_file):
-                os.remove(head_result_file)
-            out_h = _run_once(args.chrome_cmd, head_url, args.timeout, head_run_id, head_glb_sha, warmup, frames)
-            _ensure_swiftshader_renderer(out_h.renderer, out_h.run_id)
-            base_runs.append(out_b.median_ms)
-            head_runs.append(out_h.median_ms)
-            base_run_results.append(
-                {
-                    "run_id": out_b.run_id,
-                    "glb_sha256": out_b.glb_sha256,
-                    "median_ms": out_b.median_ms,
-                    "renderer": out_b.renderer,
-                }
-            )
-            head_run_results.append(
-                {
-                    "run_id": out_h.run_id,
-                    "glb_sha256": out_h.glb_sha256,
-                    "median_ms": out_h.median_ms,
-                    "renderer": out_h.renderer,
-                }
-            )
-            renderer = out_h.renderer
-        repeat_runs: list[float] = []
-        repeat_run_results: list[dict[str, object]] = []
-        for _ in range(args.repeats):
-            repeat_run_id = str(uuid.uuid4())
-            if args.repeat_target == "head":
-                repeat_url = _make_url(args.host, head_port, camera, repeat_run_id, warmup, frames)
-                if os.path.exists(head_result_file):
-                    os.remove(head_result_file)
-                out = _run_once(args.chrome_cmd, repeat_url, args.timeout, repeat_run_id, head_glb_sha, warmup, frames)
-            else:
-                repeat_url = _make_url(args.host, base_port, camera, repeat_run_id, warmup, frames)
-                if os.path.exists(base_result_file):
-                    os.remove(base_result_file)
-                out = _run_once(args.chrome_cmd, repeat_url, args.timeout, repeat_run_id, base_glb_sha, warmup, frames)
-            _ensure_swiftshader_renderer(out.renderer, out.run_id)
-            repeat_runs.append(out.median_ms)
-            repeat_run_results.append(
-                {
-                    "run_id": out.run_id,
-                    "glb_sha256": out.glb_sha256,
-                    "median_ms": out.median_ms,
-                    "renderer": out.renderer,
-                }
-            )
-            renderer = out.renderer
-        repeat_median = sorted(repeat_runs)[len(repeat_runs) // 2]
+            base_results.append(_timed_run(args, camera, base_port, base_glb_sha, 1, base_result_file))
+            head_results.append(_timed_run(args, camera, head_port, head_glb_sha, args.head_passes, head_result_file))
+        repeat_results = [
+            _timed_run(args, camera, head_port, head_glb_sha, args.head_passes, head_result_file)
+            if args.repeat_target == "head"
+            else _timed_run(args, camera, base_port, base_glb_sha, 1, base_result_file)
+            for _ in range(args.repeats)
+        ]
+        repeat_runs = [r.median_ms for r in repeat_results]
+        repeat_median = _median(repeat_runs) if repeat_runs else 0.0
         repeat_spread_pct = 0.0 if repeat_median == 0 else (max(repeat_runs) - min(repeat_runs)) / repeat_median * 100.0
+        base_render = [r.median_render_ms for r in base_results]
+        head_render = [r.median_render_ms for r in head_results]
+        ratio = render_ratio(base_render, head_render)
         return {
             "mode": "alternating",
-            "base_runs_ms": base_runs,
-            "head_runs_ms": head_runs,
-            "base_run_results": base_run_results,
-            "head_run_results": head_run_results,
-            "base_median_ms": sorted(base_runs)[len(base_runs) // 2],
-            "head_median_ms": sorted(head_runs)[len(head_runs) // 2],
+            "base_runs_ms": [r.median_ms for r in base_results],
+            "head_runs_ms": [r.median_ms for r in head_results],
+            "base_render_runs_ms": base_render,
+            "head_render_runs_ms": head_render,
+            "base_run_results": [r.record() for r in base_results],
+            "head_run_results": [r.record() for r in head_results],
+            "base_median_ms": _median([r.median_ms for r in base_results]),
+            "head_median_ms": _median([r.median_ms for r in head_results]),
+            "base_median_render_ms": _median(base_render),
+            "head_median_render_ms": _median(head_render),
+            "head_passes": args.head_passes,
+            "ratio": ratio,
+            "verdict": control_verdict(ratio, args.head_passes, base_glb_sha == head_glb_sha),
             "repeat_target": args.repeat_target,
             "repeat_runs_ms": repeat_runs,
-            "repeat_run_results": repeat_run_results,
+            "repeat_run_results": [r.record() for r in repeat_results],
             "repeat_spread_pct": repeat_spread_pct,
-            "renderer": renderer,
+            "renderer": head_results[-1].renderer if head_results else "unknown",
             "execution_label": "swiftshader",
             "interpretation": "relative-only",
-            "warmup_frames": warmup,
-            "measured_frames": frames,
+            "warmup_frames": int(args.warmup),
+            "measured_frames": int(args.frames),
             "base_glb_sha256": base_glb_sha,
             "head_glb_sha256": head_glb_sha,
         }
@@ -348,6 +334,7 @@ def main() -> int:
     ap.add_argument("--alternating-pairs", type=int, default=3)
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--repeat-target", choices=("base", "head"), default="head")
+    ap.add_argument("--head-passes", type=int, default=1, help="render passes per frame on the head side only (known-slowdown control)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8781)
     ap.add_argument("--timeout", type=float, default=60.0)
@@ -355,6 +342,8 @@ def main() -> int:
     ap.add_argument("--frames", type=int, default=300)
     args = ap.parse_args()
     args.chrome_cmd = [args.chrome, *(["--no-sandbox"] if args.no_sandbox else [])]
+    if args.head_passes < 1:
+        raise SystemExit("--head-passes must be at least 1")
 
     if args.viewer_dir and (args.base_viewer_dir or args.head_viewer_dir):
         raise SystemExit("use either --viewer-dir or --base-viewer-dir/--head-viewer-dir")
