@@ -3,6 +3,6 @@
   "description": "S5 style camera: sample forest-edge readability view",
   "area": {"lat": 47.0, "lon": 8.0, "width_m": 400, "height_m": 300},
   "cameras": [
-    {"name": "forest-edge", "eye": [-110, -145, 44], "target": [-28, -36, 8], "lens_mm": 26}
+    {"name": "forest-edge", "eye": [20, -55, 32], "target": [145, -120, 4], "lens_mm": 30}
   ]
 }
