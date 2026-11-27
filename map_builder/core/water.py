@@ -448,6 +448,26 @@ def _inside_pieces(b: Body, x: float, y: float) -> bool:
     return False
 
 
+FACE_CENTROID_FRACTIONS = ((2 / 3, 1 / 3), (1 / 3, 2 / 3))     # centroids of a cell's (v00, v10, v11) and (v00, v11, v01)
+
+
+def shore_band_faces(g: ElevationGrid, bodies: Iterable[Body], band: float) -> set[tuple[int, int, int]]:
+    """(i, j, k) of the terrain triangles (k = 0, 1 of cell (i, j)) whose centroid is within ``band`` metres
+    of a true shore edge of a body. A face deeper inside a body, or inland of the band, is not included."""
+    s = g.spacing
+    faces: set[tuple[int, int, int]] = set()
+    for b in bodies:
+        for p, q in b.shore:
+            i0, i1, j0, j1 = _cells(g, min(p[0], q[0]) - band, max(p[0], q[0]) + band,
+                                    min(p[1], q[1]) - band, max(p[1], q[1]) + band)
+            for j in range(j0, j1 + 1):
+                for i in range(i0, i1 + 1):
+                    for k, (fx, fy) in enumerate(FACE_CENTROID_FRACTIONS):
+                        if point_segment_distance(g.x0 + (i + fx) * s, g.y0 + (j + fy) * s, p, q) <= band:
+                            faces.add((i, j, k))
+    return faces
+
+
 @dataclass
 class WaterModel:
     """Result of :func:`build_water`: the carved grid, per-body outcomes and the emitted triangles."""

@@ -1,0 +1,28 @@
+{
+  "regions": [
+    {
+      "camera": "overview",
+      "label": "grass-mid",
+      "target_hex": "#96b671",
+      "mean_rgb": [
+        217.4,
+        218.9,
+        220.0
+      ],
+      "deltaE2000": 25.55,
+      "flag_over_15": true
+    },
+    {
+      "camera": "overview",
+      "label": "water-open",
+      "target_hex": "#6dc0e7",
+      "mean_rgb": [
+        208.1,
+        211.3,
+        213.2
+      ],
+      "deltaE2000": 19.33,
+      "flag_over_15": true
+    }
+  ]
+}

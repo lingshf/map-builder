@@ -91,12 +91,12 @@ def _matches_expected_result(data: dict[str, object], run_id: str, glb_sha256: s
     return isinstance(data.get("median_ms"), (int, float))
 
 
-def _run_once(chrome: str, url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int) -> RunResult:
+def _run_once(chrome_cmd: list[str], url: str, timeout_s: float, run_id: str, glb_sha256: str, warmup: int, frames: int) -> RunResult:
     parsed = urllib.parse.urlparse(url)
     result_url = urllib.parse.urlunparse(parsed._replace(path="/frame_time_proxy_result.json", query=""))
     p = subprocess.Popen(
         [
-            chrome,
+            *chrome_cmd,
             "--headless=new",
             "--disable-gpu",
             "--use-gl=swiftshader",
@@ -195,7 +195,7 @@ def _single_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, ob
             url = _make_url(args.host, args.port, camera, run_id, warmup, frames)
             if os.path.exists(result_file):
                 os.remove(result_file)
-            out = _run_once(args.chrome, url, args.timeout, run_id, glb_sha256, warmup, frames)
+            out = _run_once(args.chrome_cmd, url, args.timeout, run_id, glb_sha256, warmup, frames)
             vals.append(out.median_ms)
             _ensure_swiftshader_renderer(out.renderer, out.run_id)
             renderer = out.renderer
@@ -254,13 +254,13 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
             base_url = _make_url(args.host, base_port, camera, base_run_id, warmup, frames)
             if os.path.exists(base_result_file):
                 os.remove(base_result_file)
-            out_b = _run_once(args.chrome, base_url, args.timeout, base_run_id, base_glb_sha, warmup, frames)
+            out_b = _run_once(args.chrome_cmd, base_url, args.timeout, base_run_id, base_glb_sha, warmup, frames)
             _ensure_swiftshader_renderer(out_b.renderer, out_b.run_id)
             head_run_id = str(uuid.uuid4())
             head_url = _make_url(args.host, head_port, camera, head_run_id, warmup, frames)
             if os.path.exists(head_result_file):
                 os.remove(head_result_file)
-            out_h = _run_once(args.chrome, head_url, args.timeout, head_run_id, head_glb_sha, warmup, frames)
+            out_h = _run_once(args.chrome_cmd, head_url, args.timeout, head_run_id, head_glb_sha, warmup, frames)
             _ensure_swiftshader_renderer(out_h.renderer, out_h.run_id)
             base_runs.append(out_b.median_ms)
             head_runs.append(out_h.median_ms)
@@ -289,12 +289,12 @@ def _alt_mode(args: argparse.Namespace, camera: PresetCamera) -> dict[str, objec
                 repeat_url = _make_url(args.host, head_port, camera, repeat_run_id, warmup, frames)
                 if os.path.exists(head_result_file):
                     os.remove(head_result_file)
-                out = _run_once(args.chrome, repeat_url, args.timeout, repeat_run_id, head_glb_sha, warmup, frames)
+                out = _run_once(args.chrome_cmd, repeat_url, args.timeout, repeat_run_id, head_glb_sha, warmup, frames)
             else:
                 repeat_url = _make_url(args.host, base_port, camera, repeat_run_id, warmup, frames)
                 if os.path.exists(base_result_file):
                     os.remove(base_result_file)
-                out = _run_once(args.chrome, repeat_url, args.timeout, repeat_run_id, base_glb_sha, warmup, frames)
+                out = _run_once(args.chrome_cmd, repeat_url, args.timeout, repeat_run_id, base_glb_sha, warmup, frames)
             _ensure_swiftshader_renderer(out.renderer, out.run_id)
             repeat_runs.append(out.median_ms)
             repeat_run_results.append(
@@ -341,6 +341,7 @@ def main() -> int:
     ap.add_argument("--base-viewer-dir", help="base viewer dir for alternating runs")
     ap.add_argument("--head-viewer-dir", help="head viewer dir for alternating runs")
     ap.add_argument("--chrome", required=True, help="Chromium/Chrome executable")
+    ap.add_argument("--no-sandbox", action="store_true", help="launch Chrome with --no-sandbox (needed where its sandbox cannot access the executable)")
     ap.add_argument("--preset", required=True, help="preset name or preset json path")
     ap.add_argument("--camera", default=None, help="fixed camera name from preset (default first camera)")
     ap.add_argument("--runs", type=int, default=3)
@@ -353,6 +354,7 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=60)
     ap.add_argument("--frames", type=int, default=300)
     args = ap.parse_args()
+    args.chrome_cmd = [args.chrome, *(["--no-sandbox"] if args.no_sandbox else [])]
 
     if args.viewer_dir and (args.base_viewer_dir or args.head_viewer_dir):
         raise SystemExit("use either --viewer-dir or --base-viewer-dir/--head-viewer-dir")

@@ -61,7 +61,7 @@ def ui_values(s: MB_Settings) -> UiValues:
 def make_settings(s: MB_Settings) -> Settings:
     kw = settings_kwargs(ui_values(s), os.environ)
     kw["plan_options"] = PlanOptions(buildings=s.buildings, roads=s.roads, trees=s.trees, scatter=s.scatter,
-                                     max_trees=s.max_trees, seed=s.seed)
+                                     max_trees=s.max_trees, seed=s.seed, style=s.style)
     return Settings(**kw)
 
 
@@ -104,7 +104,7 @@ class MB_OT_generate(bpy.types.Operator):
             area = make_area(s)
             settings = make_settings(s)
             plan, sources = generate_plan(area, settings, progress=lambda f: wm.progress_update(int(f * 90)))
-            root = build_scene(context, plan, sources, name, s.textures)
+            root = build_scene(context, plan, sources, name, s.textures and s.style == "classic", style=s.style)
         except (MapBuilderError, SettingsInputError, ValueError, OSError) as e:
             return fail(self, "Generation failed; nothing was created", [str(e)])
         finally:
@@ -135,7 +135,8 @@ class MB_OT_export(bpy.types.Operator):
             reject_credentials({"package_name": s.package_name, "export_path": s.export_path},
                                "Nothing was exported")
             manifest, result, report, edits = mb_export.export_map(
-                context, s.export_path, name, s.heightfield_spacing, root=s.export_collection, textures=s.textures)
+                context, s.export_path, name, s.heightfield_spacing, root=s.export_collection,
+                textures=s.textures and s.style == "classic")
         except (MapBuilderError, ValueError, OSError) as e:
             errors = getattr(e, "errors", None) or [str(e)]
             return fail(self, f"Export failed (previous package kept): {len(errors)} problem(s)", errors)

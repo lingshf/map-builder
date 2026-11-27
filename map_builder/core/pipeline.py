@@ -26,8 +26,9 @@ from .collision import (CLASSES, Collision, ColObject, heightfield_layout, is_de
                         read_collision, write_collision, write_heightfield)
 from .dem import COPERNICUS_BASE_URL, ElevationGrid, ProgressFn, fetch_copernicus, grid_layout, load_local_elevation
 from .errors import CoverageError, FormatError, LimitError, NetworkError, PackageError
-from .generate import MATERIALS, PlanOptions, ScenePlan, build_plan
+from .generate import PlanOptions, ScenePlan, build_plan
 from .glb import GlbNodeSpec, MaterialSpec, node_scale, write_glb
+from .style import is_stylized, materials_for_style, style_uses_textures
 from .http import HttpClient, redact
 from .osm import (DEFAULT_OVERPASS_URL, OSM_ATTRIBUTION, OSM_FETCH_MARGIN_M, OSM_LICENSE, Classified, OsmData, classify,
                   fetch_overpass, load_osm_file)
@@ -521,6 +522,13 @@ def plan_to_package(plan: ScenePlan, path: str | PathLike[str], name: str, sourc
         generated_ids = [o.mb_id for o in plan.objects]
     resolved, edits = resolve_identities(entries, generated_ids)
     ident = {n: (i, c) for n, i, c in resolved}
+    style = "classic"
+    report_options = plan.report.get("options")
+    if isinstance(report_options, Mapping):
+        raw_style = report_options.get("style")
+        if isinstance(raw_style, str):
+            style = raw_style
+    textures = bool(textures and style_uses_textures(style))
     nodes: list[GlbNodeSpec] = []
     col_objects: list[ColObject] = []
     info: dict[str, ObjectInfo] = {}
@@ -542,17 +550,18 @@ def plan_to_package(plan: ScenePlan, path: str | PathLike[str], name: str, sourc
         info[o.name] = {"provenance": o.provenance}
     if plan.report.get("z_offset_m", plan.area.frame.z_offset) != plan.area.frame.z_offset:
         raise PackageError("plan z_offset_m differs from the area frame; regenerate the plan")
-    materials: Mapping[str, MaterialSpec] = MATERIALS
+    materials: Mapping[str, MaterialSpec] = materials_for_style(style)
     notices: Sequence[Mapping[str, object]] = ()
     if textures:
         used = uv.textured_materials(n["mesh"] for n in nodes)
-        textured: dict[str, MaterialSpec] = dict(MATERIALS)
+        textured: dict[str, MaterialSpec] = dict(materials)
         for m in used:
-            rgb, rough, metal = MATERIALS.get(m, ((0.8, 0.8, 0.8), tex.roughness(m), 0.0))
+            spec = materials.get(m, ((0.8, 0.8, 0.8), tex.roughness(m), 0.0))
+            rgb, rough, metal = spec[:3]
             textured[m] = (rgb, rough, metal, tex.load(m))
         materials = textured
         notices = [tex.asset_notice(used)] if used else ()
-    glb_bytes = write_glb(nodes, materials, generator="map-builder headless")
+    glb_bytes = write_glb(nodes, materials, generator="map-builder headless", with_normals=not is_stylized(style))
     report: Mapping[str, object] = plan.report
     if empty_dropped:
         report = {**report, "objects_dropped_empty": empty_dropped}

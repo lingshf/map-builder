@@ -179,8 +179,12 @@ def node_scale(scale: float | Sequence[float]) -> tuple[float, ...]:
 
 
 def write_glb(nodes: Sequence[GlbNodeSpec], materials: Mapping[str, MaterialSpec],
-              generator: str = "map-builder", extras: Mapping[str, object] | None = None) -> bytes:
+              generator: str = "map-builder", extras: Mapping[str, object] | None = None,
+              with_normals: bool = True) -> bytes:
     """nodes: list of dicts {name, mesh: MeshData, location, rotation_z, scale, extras}.
+
+    ``with_normals=False`` omits ``NORMAL``: every triangle has its own three vertices, so a viewer that
+    follows glTF 2.0 renders flat normals, and the file is a third of a vertex-buffer smaller.
 
     ``location``/``rotation_z`` (about +Z)/``scale`` (number or per-axis map-frame tuple) are the
     map-frame object transform; they become the node TRS in glTF axes (gltf = (x, z, -y)).
@@ -295,11 +299,14 @@ def write_glb(nodes: Sequence[GlbNodeSpec], materials: Mapping[str, MaterialSpec
             xs, ys, zs = pos[0::3], pos[1::3], pos[2::3]
             pa = add_accessor(add_view(_f32(pos), 34962), 5126, cnt, "VEC3",
                               ([min(xs), min(ys), min(zs)], [max(xs), max(ys), max(zs)]))
-            na = add_accessor(add_view(_f32(nrm), 34962), 5126, cnt, "VEC3")
+            na = add_accessor(add_view(_f32(nrm), 34962), 5126, cnt, "VEC3") if with_normals else None
             ca = add_accessor(add_view(_f32(col), 34962), 5126, cnt, "VEC3")
             idx = struct.pack(f"<{cnt}I", *range(cnt))
             ia = add_accessor(add_view(idx, 34963), 5125, cnt, "SCALAR")
-            attrs = {"POSITION": pa, "NORMAL": na, "COLOR_0": ca}
+            attrs = {"POSITION": pa}
+            if na is not None:
+                attrs["NORMAL"] = na
+            attrs["COLOR_0"] = ca
             if textured:
                 attrs["TEXCOORD_0"] = add_accessor(add_view(_f32(uv), 34962), 5126, cnt, "VEC2")
             prims.append({"attributes": attrs, "indices": ia,

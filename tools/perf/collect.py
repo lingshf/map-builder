@@ -18,6 +18,7 @@ holds ``cache-munich`` and ``cache-pittsburgh``, which are copied afresh for eve
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import shutil
 import socket
@@ -142,6 +143,12 @@ def write_vector(out_dir: Path, vector: dict[str, Any]) -> Path:
     return path
 
 
+def default_plan_options(plan_options_type: type) -> Any:
+    """Options of the public CLI default path: stylized once a tree has the style option, else its only look."""
+    has_style = "style" in inspect.signature(plan_options_type).parameters
+    return plan_options_type(seed=SEED, style="stylized") if has_style else plan_options_type(seed=SEED)
+
+
 def collect_cli(root: Path, caches: Path, preset: str, out_dir: Path) -> Path:
     point_at_tree(root)
     from map_builder.core.generate import PlanOptions
@@ -153,7 +160,7 @@ def collect_cli(root: Path, caches: Path, preset: str, out_dir: Path) -> Path:
         scratch = Path(scratch_name)
         settings = Settings(cache_dir=str(fresh_cache_copy(caches, preset, scratch)),
                             terrain_spacing=TERRAIN_SPACING_M, dsm_correction=True,
-                            heightfield_spacing=HEIGHTFIELD_SPACING_M, plan_options=PlanOptions(seed=SEED))
+                            heightfield_spacing=HEIGHTFIELD_SPACING_M, plan_options=default_plan_options(PlanOptions))
         with Capture(CORE_TARGETS) as capture:
             plan, sources = generate_plan(Area(lat, lon, width, height), settings)
             _, result = plan_to_package(plan, str(scratch / "out.mbmap"), package_name, sources, textures=True,

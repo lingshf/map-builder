@@ -1,0 +1,28 @@
+{
+  "regions": [
+    {
+      "camera": "factoria-interchange",
+      "label": "road-light",
+      "target_hex": "#d4b590",
+      "mean_rgb": [
+        219.4,
+        219.2,
+        218.0
+      ],
+      "deltaE2000": 17.43,
+      "flag_over_15": true
+    },
+    {
+      "camera": "factoria-interchange",
+      "label": "foliage-mid",
+      "target_hex": "#39864c",
+      "mean_rgb": [
+        217.3,
+        217.6,
+        217.5
+      ],
+      "deltaE2000": 37.52,
+      "flag_over_15": true
+    }
+  ]
+}

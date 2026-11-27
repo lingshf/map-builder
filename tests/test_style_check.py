@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import tempfile
 import unittest
 import zipfile
@@ -22,7 +23,9 @@ def _mesh(name: str) -> MeshData:
     a = m.add_vertex(0, 0, 0)
     b = m.add_vertex(10, 0, 0)
     c = m.add_vertex(0, 10, 0)
+    d = m.add_vertex(10, 10, 0)
     m.add_face((a, b, c), "MB Terrain", (0.4, 0.6, 0.4))
+    m.add_face((b, d, c), "MB Terrain", (0.8, 0.4, 0.3))
     return m
 
 
@@ -312,6 +315,68 @@ class StyleCheckTests(unittest.TestCase):
     def test_parity_duplicate_identity_fails_loudly(self) -> None:
         with self.assertRaises(ValueError):
             style_check._assert_unique_identity([("terrain", "osm:1"), ("terrain", "osm:1")], "node identity")
+
+    def test_parity_detects_color_swap_at_same_positions(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cli = os.path.join(td, "cli.mbmap")
+            bl = os.path.join(td, "bl.mbmap")
+            _build_valid_mbmap(cli)
+            _mutate(cli, bl, self._swap_first_two_colors)
+            ok, details = style_check.cli_blender_parity(cli, bl)
+            self.assertFalse(ok)
+            self.assertGreater(len(details.get("cli_only", [])), 0)
+            self.assertGreater(len(details.get("blender_only", [])), 0)
+
+    def test_parity_detects_color_swap_at_shared_edge_corners(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cli = os.path.join(td, "cli.mbmap")
+            bl = os.path.join(td, "bl.mbmap")
+            _build_valid_mbmap(cli)
+            # corners 1, 2 of the first triangle and 3, 5 of the second sit on the shared edge
+            _mutate(cli, bl, lambda m: self._swap_corner_colors(m, [(1, 3), (2, 5)]))
+            ok, details = style_check.cli_blender_parity(cli, bl)
+            self.assertFalse(ok)
+            self.assertGreater(len(details.get("cli_only", [])), 0)
+
+    @staticmethod
+    def _swap_first_two_colors(members: dict[str, bytes]) -> None:
+        StyleCheckTests._swap_corner_colors(members, [(0, 1)])
+
+    @staticmethod
+    def _swap_corner_colors(members: dict[str, bytes], corner_pairs: list[tuple[int, int]]) -> None:
+        glb = members["visual/map.glb"]
+        gl, bin_chunk = style_check._glb_json_and_bin(glb)
+        meshes = gl.get("meshes", [])
+        if not meshes:
+            raise AssertionError("missing mesh")
+        attrs = meshes[0]["primitives"][0]["attributes"]
+        color_accessor = int(attrs["COLOR_0"])
+        color_slice = style_check._buffer_slice(gl, bin_chunk, color_accessor)
+        if len(color_slice) < 32:
+            raise AssertionError("not enough COLOR_0 data for swap")
+        vals = list(struct.unpack("<" + "f" * (len(color_slice) // 4), color_slice))
+        for a, b in corner_pairs:
+            vals[4 * a:4 * a + 4], vals[4 * b:4 * b + 4] = vals[4 * b:4 * b + 4], vals[4 * a:4 * a + 4]
+        swapped = struct.pack("<" + "f" * len(vals), *vals)
+
+        accessor = gl["accessors"][color_accessor]
+        view = gl["bufferViews"][accessor["bufferView"]]
+        offset = int(view.get("byteOffset", 0)) + int(accessor.get("byteOffset", 0))
+        out_bin = bytearray(bin_chunk)
+        out_bin[offset:offset + len(swapped)] = swapped
+        json_bytes = json.dumps(gl, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        while len(json_bytes) % 4:
+            json_bytes += b" "
+        while len(out_bin) % 4:
+            out_bin += b"\x00"
+        header = struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(json_bytes) + 8 + len(out_bin))
+        members["visual/map.glb"] = (
+            header
+            + struct.pack("<I4s", len(json_bytes), b"JSON")
+            + json_bytes
+            + struct.pack("<I4s", len(out_bin), b"BIN\x00")
+            + bytes(out_bin)
+        )
 
 
 if __name__ == "__main__":

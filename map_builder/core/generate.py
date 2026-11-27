@@ -34,7 +34,8 @@ import struct
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Generic, NoReturn, TypeAlias, TypedDict, TypeVar
 
-from . import bridges, dsm, passages, perf_counters, roofs, tunnels, water
+from . import bridges, dsm, passages, perf_counters, roofs, style as style_palette, tunnels, water
+from .style import srgb_to_linear
 from .deck_underside import RampLines
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
@@ -69,23 +70,14 @@ MAX_RING_VERTICES = 2000
 MAX_SCENE_VERTICES = 3_000_000
 MAX_SCENE_TRIANGLES = 4_000_000
 
-MATERIALS = {
-    # name: (base colour linear rgb, roughness, metallic)
-    "MB Terrain": ((0.8, 0.8, 0.8), 0.95, 0.0),
-    "MB Water": ((0.8, 0.8, 0.8), 0.15, 0.0),
-    "MB Facade": ((0.8, 0.8, 0.8), 0.85, 0.0),
-    "MB Roof": ((0.8, 0.8, 0.8), 0.7, 0.0),
-    "MB Road": ((0.8, 0.8, 0.8), 0.9, 0.0),
-    "MB Bark": ((0.8, 0.8, 0.8), 0.9, 0.0),
-    "MB Foliage": ((0.8, 0.8, 0.8), 0.8, 0.0),
-}
+MATERIALS = style_palette.materials_for_style("classic")
 
 LANDCOVER_COLORS = {
-    None: (0.28, 0.26, 0.20),
-    "grass": (0.16, 0.32, 0.08),
-    "forest": (0.07, 0.20, 0.05),
-    "water": (0.05, 0.14, 0.24),
-    "sand": (0.62, 0.55, 0.38),
+    None: style_palette.terrain_color("classic", None),
+    "grass": style_palette.terrain_color("classic", "grass"),
+    "forest": style_palette.terrain_color("classic", "forest"),
+    "water": style_palette.terrain_color("classic", "water"),
+    "sand": style_palette.terrain_color("classic", "sand"),
 }
 FACADE_PALETTE = [(0.62, 0.58, 0.52), (0.70, 0.66, 0.60), (0.55, 0.42, 0.34), (0.75, 0.73, 0.70),
                   (0.48, 0.47, 0.46), (0.66, 0.55, 0.42)]
@@ -143,10 +135,6 @@ def parse_number(value: str | None) -> float | None:
         return f if math.isfinite(f) else None
     except (AttributeError, ValueError):
         return None
-
-
-def srgb_to_linear(c: float) -> float:
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
 def parse_colour(value: str | None) -> tuple[float, ...] | None:
@@ -227,6 +215,7 @@ class ScenePlanReport(TypedDict, total=False):
     water_decks_raised: list[dict[str, object]]
     water_bodies: list[dict[str, object]]
     water_buildings: list[dict[str, str]]
+    options: dict[str, str]
     z_offset_m: float
     budget: dict[str, int]
 
@@ -495,10 +484,30 @@ def _building_height(tags: Mapping[str, str]) -> tuple[float, float, float | Non
     return h, min_h, roof_h, prov, eave_based
 
 
+def _building_colours(feature: Feature, tags: Mapping[str, str], seed: int, flat_roof: bool, style: str,
+                      prov: Prov) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """(wall colour, roof colour). Tagged colours are used as measured in classic mode and keep their hue,
+    pulled into the palette, in stylized mode."""
+    facade = parse_colour(tags.get("building:colour"))
+    roof = parse_colour(tags.get("roof:colour"))
+    if facade:
+        prov["facade_colour"] = "measured:osm building:colour"
+    if roof:
+        prov["roof_colour"] = "measured:osm roof:colour"
+    facade_key, roof_key = feature.id + str(seed), feature.id + "r" + str(seed)
+    if style_palette.is_stylized(style):
+        return style_palette.facade_color(facade, facade_key), style_palette.roof_color(roof, roof_key, flat_roof)
+    if not facade:
+        facade = FACADE_PALETTE[stable_hash(facade_key) % len(FACADE_PALETTE)]
+    if not roof:
+        roof = (0.3, 0.3, 0.31) if flat_roof else ROOF_PALETTE[stable_hash(roof_key) % len(ROOF_PALETTE)]
+    return facade, roof
+
+
 def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, seed: int = 0,
                    max_ring_vertices: int = MAX_RING_VERTICES, max_work: int = DEFAULT_MAX_WORK,
                    reserve: Callable[..., None] | None = None,
-                   carved: ElevationGrid | None = None) -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
+                   carved: ElevationGrid | None = None, style: str = "classic") -> tuple[MeshData, Vec3, Prov]:  # reserve(vertices, triangles); callers bind extra defaults
     """Returns (MeshData in object-local coords, location, provenance).
 
     Raises TriangulationError (invalid rings, work budget) or InvalidFeature (limits)
@@ -643,18 +652,7 @@ def build_building(feature: Feature, terrain: ElevationGrid, z_offset: float, se
         roof_v, roof_t = roofs.roof_budget(plan, n_ring, len(tris))
         reserve(2 * n_ring + roof_v, 2 * n_ring + len(tris) + roof_t)
 
-    facade = parse_colour(tags.get("building:colour"))
-    if facade:
-        prov["facade_colour"] = "measured:osm building:colour"
-    else:
-        facade = FACADE_PALETTE[stable_hash(feature.id + str(seed)) % len(FACADE_PALETTE)]
-    roof_col = parse_colour(tags.get("roof:colour"))
-    if roof_col:
-        prov["roof_colour"] = "measured:osm roof:colour"
-    else:
-        roof_col = ROOF_PALETTE[stable_hash(feature.id + "r" + str(seed)) % len(ROOF_PALETTE)]
-        if roof_shape == "flat":
-            roof_col = (0.3, 0.3, 0.31)
+    facade, roof_col = _building_colours(feature, tags, seed, roof_shape == "flat", style, prov)
 
     mesh = MeshData(f"bld_{short_name(feature.id)}")
     split: list[bool] = []
@@ -771,7 +769,7 @@ def ring_topology_problem(poly: Polygon, max_work: int = DEFAULT_MAX_WORK, max_r
 
 def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature],
                   coverage: dict[str, int] | None = None,
-                  built_water: Sequence[water.Body] = ()) -> MeshData:
+                  built_water: Sequence[water.Body] = (), style: str = "classic") -> MeshData:
     """Terrain mesh; each cell is split along its (i, j)-(i+1, j+1) diagonal (see terrain_height).
 
     If ``coverage`` is a dict it receives, per area id, the number of cells whose
@@ -783,6 +781,8 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
                        bounds=(grid.x0, grid.y0, grid.x0 + (grid.nx - 1) * grid.spacing,
                                grid.y0 + (grid.ny - 1) * grid.spacing))
     boxes = [(water._body_box(b), b) for b in built_water if b.pieces]
+    stylized = style_palette.is_stylized(style)
+    bank_faces = water.shore_band_faces(grid, built_water, style_palette.BANK_BAND_M) if stylized else set()
     for j in range(grid.ny):
         for i in range(grid.nx):
             mesh.add_vertex(grid.x0 + i * grid.spacing, grid.y0 + j * grid.spacing, grid.heights[j][i] - z_offset)
@@ -807,12 +807,21 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
                     cls = c
                 if c != "water" and (dry is None or LANDCOVER_PRIORITY[c] > LANDCOVER_PRIORITY[dry]):
                     dry = c
-            if cls == "water" and any(x0 <= cx <= x1 and y0 <= cy <= y1 and water._inside_pieces(b, cx, cy)
-                                      for (x0, y0, x1, y1), b in boxes):
+            under_built_water = cls == "water" and any(x0 <= cx <= x1 and y0 <= cy <= y1
+                                                       and water._inside_pieces(b, cx, cy)
+                                                       for (x0, y0, x1, y1), b in boxes)
+            if under_built_water:
                 cls = dry
-            col = LANDCOVER_COLORS[cls]
-            mesh.add_face((v00, v10, v11), "MB Terrain", col)
-            mesh.add_face((v00, v11, v01), "MB Terrain", col)
+            tris = ((v00, v10, v11), (v00, v11, v01))
+            if stylized:
+                for k, tri in enumerate(tris):
+                    p, q, r = tri
+                    normal = style_palette.face_cross(mesh.vertices[p], mesh.vertices[q], mesh.vertices[r])
+                    mesh.add_face(tri, "MB Terrain",
+                                  style_palette.terrain_face_color(cls, normal, (i, j, k) in bank_faces))
+            else:
+                for tri in tris:
+                    mesh.add_face(tri, "MB Terrain", LANDCOVER_COLORS[cls])
     return mesh
 
 # --- Roads ------------------------------------------------------------------
@@ -1415,7 +1424,7 @@ def drop_unstorable_slivers(local: Sequence[Vec3], tris: Iterable[tuple[int, ...
 
 def build_road(feature: Feature, terrain: ElevationGrid, z_offset: float, reserve: Callable[..., None] | None = None,
                max_work: int = DEFAULT_MAX_WORK, ownership: RoadOwnership | None = None,
-               limit: tuple[int, int] | None = None) -> tuple[MeshData | None, Vec3 | None, Prov]:
+               limit: tuple[int, int] | None = None, style: str = "classic") -> tuple[MeshData | None, Vec3 | None, Prov]:
     """Returns (mesh, location, provenance), or (None, None, {"reason": ...}) if no valid ribbon exists.
 
     The footprint is the union of one rectangle per segment and a bevel triangle at
@@ -1494,7 +1503,7 @@ def build_road(feature: Feature, terrain: ElevationGrid, z_offset: float, reserv
     if reserve is not None:
         reserve(len(local), len(tris))
     mesh = MeshData(f"road_{short_name(feature.id)}")
-    color = (0.12, 0.12, 0.12) if feature.tags.get("highway") not in FOOT else (0.35, 0.32, 0.28)
+    color = style_palette.road_color(style, feature.tags)
     for v in local:
         mesh.add_vertex(*v)
     for t in tris:
@@ -1575,11 +1584,24 @@ def _check_building_overlaps(plan: ScenePlan, candidates: Iterable[Mapping[str, 
 
 # --- Vegetation -------------------------------------------------------------
 
-def tree_mesh() -> MeshData:
+TREE_MESH_KEY = "tree_generic"
+
+
+def tree_mesh_key(variant: int) -> str:
+    """Shared-mesh key of a tint variant; variant 0 keeps the classic key."""
+    return TREE_MESH_KEY if variant == 0 else f"{TREE_MESH_KEY}.{variant}"
+
+
+def tree_mesh(style: str = "classic", variant: int = 0) -> MeshData:
     m = MeshData("tree_generic")
     sides = 6
     trunk_r, trunk_h, crown_r, crown_b, crown_t = 0.25, 2.6, 2.2, 2.0, 8.0
-    bark, leaf = (0.18, 0.11, 0.06), (0.06, 0.20, 0.05)
+    bark = style_palette.bark_color(style, variant)
+
+    def add_crown_face(a: int, b: int, c: int) -> None:
+        normal = style_palette.face_normal(m.vertices[a], m.vertices[b], m.vertices[c])
+        m.add_face((a, b, c), "MB Foliage", style_palette.foliage_color(style, variant, normal))
+
     b = [m.add_vertex(trunk_r * math.cos(2 * math.pi * k / sides), trunk_r * math.sin(2 * math.pi * k / sides), -0.2)
          for k in range(sides)]
     t = [m.add_vertex(trunk_r * math.cos(2 * math.pi * k / sides), trunk_r * math.sin(2 * math.pi * k / sides), trunk_h)
@@ -1595,8 +1617,8 @@ def tree_mesh() -> MeshData:
     bottom = m.add_vertex(0.0, 0.0, crown_b)
     for k in range(sides):
         j = (k + 1) % sides
-        m.add_face((ring[k], ring[j], top), "MB Foliage", leaf)
-        m.add_face((ring[j], ring[k], bottom), "MB Foliage", leaf)
+        add_crown_face(ring[k], ring[j], top)
+        add_crown_face(ring[j], ring[k], bottom)
     return m
 
 
@@ -1647,7 +1669,8 @@ class PlanOptions:
                  max_trees: int = 2000, seed: int = 0, max_objects: int = 20_000,
                  max_vertices: int = MAX_SCENE_VERTICES, max_triangles: int = MAX_SCENE_TRIANGLES,
                  max_ring_vertices: int = MAX_RING_VERTICES, max_triangulation_work: int = DEFAULT_MAX_WORK,
-                 max_mask_validation_work: int | None = None, bridge_piers: bool = True) -> None:
+                 max_mask_validation_work: int | None = None, bridge_piers: bool = True,
+                 style: str = "classic") -> None:
         self.bridge_piers = bridge_piers
         self.buildings = buildings
         self.roads = roads
@@ -1660,6 +1683,7 @@ class PlanOptions:
         self.max_triangles = max_triangles
         self.max_ring_vertices = max_ring_vertices
         self.max_triangulation_work = max_triangulation_work
+        self.style = style_palette.normalize_style(style)
         # cumulative ring-topology tests for the DSM mask (None: dsm.MASK_VALIDATION_WORK_BUDGET)
         self.max_mask_validation_work = max_mask_validation_work
 
@@ -1836,7 +1860,7 @@ def _ramp_lines(terrain: ElevationGrid, classified: Classified, opts: PlanOption
 
 
 def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classified,
-                   add: Callable[[ObjectSpec], None]) -> None:
+                   add: Callable[[ObjectSpec], None], style: str = "classic") -> None:
     """One ``water:<id>`` object per built body, and the per-body outcome list of the report."""
     rows: list[dict[str, object]] = []
     over = water.at_grade_roads(model, [(r.id, r.geometry) for r in classified.roads], ROAD_LIFT_M)
@@ -1856,7 +1880,7 @@ def _water_objects(plan: ScenePlan, model: water.WaterModel, classified: Classif
                                        "level_source": "inferred:p20 of the shore band of the corrected DEM",
                                        "outcome": b.outcome}))
             if b.bank:
-                bank = model.bank_mesh(b, LANDCOVER_COLORS[None])
+                bank = model.bank_mesh(b, style_palette.bank_color(style))
                 add(ObjectSpec(bank.name, bank.name, "terrain", "Terrain", mesh=bank,
                                provenance={"shore_ramp": "terrain ramp from the water edge down to the bank"}))
     plan.report["water_bodies"] = rows
@@ -1930,8 +1954,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
     wmodel = None
     if any(a.tags.get("_class") == "water" for a in areas) or classified.riverbanks:
         wmodel = _water_stage(terrain, z_offset, areas, classified, opts, budget)
-    tmesh = build_terrain(wmodel.carved if wmodel is not None else terrain,     z_offset, areas, coverage,
-                              wmodel.active() if wmodel is not None else ())
+    tmesh = build_terrain(wmodel.carved if wmodel is not None else terrain, z_offset, areas, coverage,
+                          wmodel.active() if wmodel is not None else (), style=opts.style)
     tmesh.grid_layout = (terrain.nx, terrain.ny, terrain.x0, terrain.y0, terrain.spacing)  # lets probes find triangles by cell
     if wmodel is None:
         budget.commit(tmesh)
@@ -1943,7 +1967,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                                "spacing_m": terrain.spacing,
                                "surface": DSM_CORRECTED_SURFACE if correction["applied"] else TERRAIN_SURFACE}))
     if wmodel is not None:
-        _water_objects(plan, wmodel, classified, add)
+        _water_objects(plan, wmodel, classified, add, style=opts.style)
     for a in areas:
         if not coverage.get(a.id) and not (wmodel is not None and any(b.id == a.id and b.built
                                                                       for b in wmodel.bodies)):
@@ -1975,7 +1999,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                         f, terrain, z_offset, opts.seed, max_ring_vertices=opts.max_ring_vertices,
                         max_work=opts.max_triangulation_work,
                         reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
-                        carved=wmodel.carved if wmodel is not None else None)
+                        carved=wmodel.carved if wmodel is not None else None, style=opts.style)
             except TriangulationError as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": f"{reason_prefix}triangulation failed: {e}"})
@@ -2074,7 +2098,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                 mesh, origin, prov = build_road(f, wmodel.carved if wmodel is not None else terrain, z_offset,
                                                 reserve=lambda v, t, fid=f.id: budget.reserve(fid, v, t),
                                                 max_work=opts.max_triangulation_work, ownership=ownership,
-                                                limit=budget.remaining())
+                                                limit=budget.remaining(), style=opts.style)
             except InvalidFeature as e:
                 budget.release()
                 invalid.append({"id": f.id, "reason": str(e)})
@@ -2109,10 +2133,15 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
             add(road_specs[k])
     bridges.build(plan, ctx)
     tunnels.build(plan, ctx)
+    if opts.style != "classic":
+        _remap_style_materials(plan, {"MB Tunnel": "MB Concrete"})
     passages.build(plan, ctx)
     ctx.flush_unsupported(plan)
     if opts.trees:
-        tmpl = plan.shared_meshes["tree_generic"] = tree_mesh()
+        variants = len(style_palette.TREE_TINT_SCALES) if style_palette.is_stylized(opts.style) else 1
+        for variant in range(variants):
+            plan.shared_meshes[tree_mesh_key(variant)] = tree_mesh(style=opts.style, variant=variant)
+        tmpl = plan.shared_meshes[TREE_MESH_KEY]
         tree_cost = (len(tmpl.vertices), mesh_triangle_count(tmpl))
         scene = (-area.width / 2, -area.height / 2, area.width / 2, area.height / 2)
         fp_buckets = _Buckets(footprints, bounds=scene)
@@ -2165,7 +2194,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                 prov["height"] = "inferred:default 8 m"
             rng = random.Random(stable_hash(f.id) ^ opts.seed)
             budget.charge(f.id, *tree_cost)
-            add(ObjectSpec(f"tree_{short_name(f.id)}", f.id, "vegetation", "Vegetation", mesh_key="tree_generic",
+            add(ObjectSpec(f"tree_{short_name(f.id)}", f.id, "vegetation", "Vegetation",
+                           mesh_key=tree_mesh_key(style_palette.tree_tint_variant(opts.style, f.id)),
                            location=(x, y, terrain_height(terrain, x, y) - z_offset),
                            rotation_z=rng.random() * 2 * math.pi, scale=h / TREE_UNIT_HEIGHT, provenance=prov))
             n_trees += 1
@@ -2189,7 +2219,7 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
                     sid = f"scatter:{f.id}#{k}"
                     budget.charge(sid, *tree_cost)
                     add(ObjectSpec(f"tree_s{stable_hash(f.id) % 1000000:06d}_{k}", sid, "vegetation", "Vegetation",
-                                   mesh_key="tree_generic",
+                                   mesh_key=tree_mesh_key(style_palette.tree_tint_variant(opts.style, sid)),
                                    location=(x, y, terrain_height(terrain, x, y) - z_offset),
                                    rotation_z=rng.random() * 2 * math.pi, scale=s,
                                    provenance={"position": f"inferred:procedural scatter in {f.id} ({cls})",
@@ -2202,6 +2232,8 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
     plan.report["counts"]["objects"] = len(plan.objects)
     plan.report["z_offset_m"] = z_offset
     plan.report["budget"] = budget.to_dict()
+    if opts.style != "classic":
+        plan.report["options"] = {"style": opts.style}
     # Ensure unique object names (Blender truncates at 63 bytes; keep ours shorter).
     seen: dict[str, int] = {}
     for o in plan.objects:
@@ -2210,3 +2242,26 @@ def build_plan(area: Area, terrain: ElevationGrid, classified: Classified, optio
         seen[base] = n + 1
         o.name = base if n == 0 else f"{base}.{n:03d}"
     return plan
+
+
+def _remap_style_materials(plan: ScenePlan, aliases: Mapping[str, str]) -> None:
+    def remap(mesh: MeshData) -> None:
+        if not mesh.materials:
+            return
+        remapped = [aliases.get(name, name) for name in mesh.materials]
+        if remapped == mesh.materials:
+            return
+        unique: list[str] = []
+        idx_by_name: dict[str, int] = {}
+        for name in remapped:
+            if name not in idx_by_name:
+                idx_by_name[name] = len(unique)
+                unique.append(name)
+        mesh.face_materials = [idx_by_name[remapped[i]] for i in mesh.face_materials]
+        mesh.materials = unique
+
+    for obj in plan.objects:
+        if obj.mesh is not None:
+            remap(obj.mesh)
+    for mesh in plan.shared_meshes.values():
+        remap(mesh)

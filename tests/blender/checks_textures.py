@@ -75,7 +75,7 @@ def _cli_package(out_dir, textures, osm=OSM, tag=''):
     s = Settings(elevation_source="file", elevation_file=DEM, elevation_crs="EPSG:4326",
                  elevation_vertical_datum="SYNTHETIC", elevation_license=DEM_LICENSE, osm_source="file",
                  osm_file=osm, osm_license=OSM_LICENSE, terrain_spacing=10.0, heightfield_spacing=2.0,
-                 plan_options=PlanOptions(seed=1))
+                 plan_options=PlanOptions(seed=1, style="classic"))
     pkg = os.path.join(out_dir, f"tex_cli{tag}_{int(textures)}.mbmap")
     build_package(Area(LAT, LON, WIDTH, HEIGHT), s, pkg, "tex", textures=textures)
     return pkg
@@ -91,7 +91,7 @@ def _generate(pkg, textures, osm=OSM):
     s.elevation_crs, s.elevation_vertical_datum, s.elevation_license = "EPSG:4326", "SYNTHETIC", DEM_LICENSE
     s.osm_source, s.osm_file = "file", osm
     s.terrain_spacing, s.heightfield_spacing, s.seed = 10.0, 2.0, 1
-    s.package_name, s.export_path, s.textures = "tex", pkg, textures
+    s.package_name, s.export_path, s.textures, s.style = "tex", pkg, textures, "classic"
     res, err = run_op(bpy.ops.map_builder.generate)
     check(res == {"FINISHED"}, f"textures: generate (textures={textures}) ({err or 'ok'})")
     return s
@@ -103,6 +103,7 @@ def run(out_dir):
     from map_builder.core.package import validate_package
     from tests.test_uv import seams
 
+    bpy.ops.wm.read_factory_settings(use_empty=True)
     s = bpy.context.scene.map_builder
     prop = s.bl_rna.properties.get("textures")
     check(prop is not None and prop.default is True, "textures: the Textures property exists and defaults on (D27/D60)")

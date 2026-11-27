@@ -118,6 +118,10 @@ class MB_Settings(bpy.types.PropertyGroup):
                           description="Procedural (inferred) trees inside forests and parks")
     max_trees: IntProperty(name="Max trees", default=2000, min=0, max=20000)
     seed: IntProperty(name="Seed", default=1, min=0)
+    style: EnumProperty(name="Style", items=[
+        ("stylized", "Stylized", "Stylized palette and faceted look (default)"),
+        ("classic", "Classic", "Pre-S5 classic look (byte-identical baseline mode)"),
+    ], default="stylized")
     textures: BoolProperty(name="Textures", default=True,
                            description="Procedural CC0 textures: UV-mapped materials on Generate and embedded "
                                        "textures with TEXCOORD_0 on Export (off: the untextured package layout)")

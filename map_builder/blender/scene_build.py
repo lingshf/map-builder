@@ -24,7 +24,7 @@ from ..core import textures as tex
 from ..core import uv as core_uv
 from ..core import perf_counters
 from ..core.errors import MapBuilderError
-from ..core.generate import MATERIALS
+from ..core.style import materials_for_style, style_uses_textures
 from ..core.glb import node_scale
 from ..core.mesh import UV, MeshData
 from .sources import JsonMapping, check_persistable
@@ -44,7 +44,7 @@ META_VERSION = 1
 CLASS_COLLECTIONS: dict[str, str] = {"bridge": "Bridges", "tunnel": "Tunnels", "structure": "Structures"}
 STRUCTURE_MATERIALS: dict[str, tuple[tuple[float, float, float], float, float]] = {
     "MB Concrete": ((0.8, 0.8, 0.8), 0.9, 0.0),   # deck sides, piers, headwalls
-    "MB Tunnel": ((0.8, 0.8, 0.8), 0.95, 0.0),    # tube walls
+    "MB Tunnel": ((0.8, 0.8, 0.8), 0.9, 0.0),     # tube walls
 }
 
 
@@ -119,11 +119,13 @@ def _textured_nodes(nt: bpy.types.NodeTree, bsdf: bpy.types.Node, name: str,
 def ensure_material(name: str, created: list[bpy.types.Material] | None = None, textures: bool = False,
                     created_images: list[bpy.types.Image] | None = None,
                     cache: dict[tuple[str, bool], bpy.types.Material] | None = None,
-                    image_cache: dict[str, bpy.types.Image] | None = None) -> bpy.types.Material:
+                    image_cache: dict[str, bpy.types.Image] | None = None,
+                    style: str = "classic") -> bpy.types.Material:
     """The generated material ``name``; reuses an existing generated one (tagged ``mb_material``), never
     modifies or adopts a user material that happens to have the same name. ``textures`` builds the textured
     node tree for the materials of ``core.textures`` (the others are unaffected)."""
-    textured = bool(textures) and name in tex.TEXTURES
+    style_mats = materials_for_style(style)
+    textured = bool(textures) and style_uses_textures(style) and name in tex.TEXTURES
     key = (name, textured)
     if cache is not None:
         cached = cache.get(key)
@@ -140,9 +142,9 @@ def ensure_material(name: str, created: list[bpy.types.Material] | None = None, 
             cache[key] = mat
         return mat
     if textured:   # the CLI writer's factors, so both paths emit the same material
-        base, rough, metal = MATERIALS.get(name, ((0.8, 0.8, 0.8), tex.roughness(name), 0.0))
+        base, rough, metal = style_mats.get(name, ((0.8, 0.8, 0.8), tex.roughness(name), 0.0))
     else:
-        base, rough, metal = STRUCTURE_MATERIALS.get(name) or MATERIALS.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
+        base, rough, metal = STRUCTURE_MATERIALS.get(name) or style_mats.get(name, ((0.8, 0.8, 0.8), 0.9, 0.0))
     mat = bpy.data.materials.new(name)
     if created is not None:
         created.append(mat)
@@ -180,7 +182,8 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
                    origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
                    created_images: list[bpy.types.Image] | None = None,
                    material_cache: dict[tuple[str, bool], bpy.types.Material] | None = None,
-                   image_cache: dict[str, bpy.types.Image] | None = None) -> bpy.types.Mesh:
+                   image_cache: dict[str, bpy.types.Image] | None = None,
+                   style: str = "classic") -> bpy.types.Mesh:
     """Blender mesh with exactly the plan's faces (the generator's closed, CCW-outward shells).
 
     The new mesh is appended to ``created_meshes`` right after it is allocated (before anything that can
@@ -197,7 +200,8 @@ def mesh_from_data(md: MeshData, name: str | None, created_materials: list[bpy.t
         raise MapBuilderError(f"generated mesh {md.name!r} was altered by Blender's mesh validation; "
                               "refusing to create a scene that differs from the plan")
     for m in md.materials:
-        me.materials.append(ensure_material(m, created_materials, textures, created_images, material_cache, image_cache))
+        me.materials.append(ensure_material(m, created_materials, textures, created_images, material_cache, image_cache,
+                                            style=style))
     me.polygons.foreach_set("material_index", md.face_materials)
     uvsrc = uv_source(md, origin) if any(m in tex.TEXTURES for m in md.materials) else None
     if uvsrc is not None:
@@ -231,7 +235,7 @@ def unique_collection_name(base: str) -> str:
 
 
 def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[JsonMapping],
-                map_name: str, textures: bool = False) -> bpy.types.Collection:
+                map_name: str, textures: bool = False, style: str = "classic") -> bpy.types.Collection:
     """Instantiate ``plan`` in a NEW collection linked to the scene. Everything that will be saved in the
     .blend (collection metadata, object names and provenance) is first checked with the core credential
     policy; then all datablocks are created and linked last. If anything fails, the datablocks created here
@@ -276,7 +280,7 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
                 subs[coll_name] = coll
             if spec.mesh is not None:
                 me = mesh_from_data(spec.mesh, spec.name, created_mats, created_meshes, textures, spec.location,
-                                    created_images, material_cache, image_cache)
+                                    created_images, material_cache, image_cache, style=style)
             else:  # instanced template (trees): one Blender mesh shared by its objects (linked duplicates)
                 key = spec.mesh_key
                 if key is None:
@@ -284,7 +288,8 @@ def build_scene(context: bpy.types.Context, plan: ScenePlan, sources: Sequence[J
                 me = shared.get(key)
                 if me is None:
                     me = shared[key] = mesh_from_data(plan.shared_meshes[key], key, created_mats, created_meshes,
-                                                      material_cache=material_cache, image_cache=image_cache)
+                                                      material_cache=material_cache, image_cache=image_cache,
+                                                      style=style)
             # Blender may suffix the name (".001") when another map is already in the file; identities
             # live in mb_id, so the object name only has to be unique, which Blender guarantees.
             ob = bpy.data.objects.new(spec.name, me)

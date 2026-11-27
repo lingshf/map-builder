@@ -13,7 +13,7 @@ package format 2.1.0 and is **textured** (world-scaled UVs, five CC0 textures em
 py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc `
     --datum SYNTHETIC --dem-license "SYNTHETIC test data (no licence required)" `
     --osm-license "SYNTHETIC test fixture (hand-written OSM-format XML, not OpenStreetMap data; no licence required)" --lat 47.0 --lon 8.0 `
-    --width 400 --height 300 --heightfield 2 --created-utc 2026-01-01T00:00:00Z `
+    --width 400 --height 300 --heightfield 2 --style classic --created-utc 2026-01-01T00:00:00Z `
     --name synthetic_sample --out examples\synthetic_sample.mbmap
 py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 ```
