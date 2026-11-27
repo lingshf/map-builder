@@ -72,16 +72,27 @@ class TaggedColourTest(unittest.TestCase):
         self.assertEqual(style.roof_color(None, "a", is_flat=True), style.roof_color(None, "b", is_flat=True))
 
 
-class ShoreBandCellsTest(unittest.TestCase):
-    def test_only_cells_within_the_band_of_a_shore_edge(self) -> None:
-        grid = ElevationGrid(0.0, 0.0, 1.0, 20, 20, [[0.0] * 20 for _ in range(20)], {})
-        body = SimpleNamespace(shore=[((0.0, 10.0), (20.0, 10.0))])
+class ShoreBandFacesTest(unittest.TestCase):
+    GRID = ElevationGrid(0.0, 0.0, 1.0, 20, 20, [[0.0] * 20 for _ in range(20)], {})
+    SQUARE_SHORE = [((2.0, 2.0), (18.0, 2.0)), ((18.0, 2.0), (18.0, 18.0)),
+                    ((18.0, 18.0), (2.0, 18.0)), ((2.0, 18.0), (2.0, 2.0))]
 
-        cells = water.shore_band_cells(grid, [body], band=2.0)
+    def faces_within(self, band: float) -> set:
+        return water.shore_band_faces(self.GRID, [SimpleNamespace(shore=self.SQUARE_SHORE)], band)
 
-        self.assertIn((10, 9), cells)
-        self.assertIn((10, 11), cells)
-        self.assertNotIn((10, 14), cells)
+    def test_faces_next_to_the_shore_on_both_sides_are_in_the_band(self) -> None:
+        faces = self.faces_within(2.0)
+        self.assertIn((10, 1, 0), faces)        # outside the square
+        self.assertIn((10, 3, 1), faces)        # inside the square
+
+    def test_face_deep_inside_the_body_or_far_inland_is_not_in_the_band(self) -> None:
+        faces = self.faces_within(2.0)
+        self.assertNotIn((10, 10, 0), faces)
+        self.assertNotIn((10, 10, 1), faces)
+
+    def test_the_two_faces_of_a_cell_are_decided_by_their_own_centroid(self) -> None:
+        faces = self.faces_within(0.5)
+        self.assertEqual({k for (i, j, k) in faces if (i, j) == (10, 2)}, {0})
 
 
 class GlbNormalsTest(unittest.TestCase):

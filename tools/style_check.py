@@ -251,14 +251,30 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
             return [tuple(_norm_num(values[i + k]) for k in range(width)) for i in range(0, len(values), width)]
         return None
 
-    def _norm_color_hash(gl: dict[str, Any], bin_chunk: bytes, position_accessor: int, color_accessor: int) -> str:
-        pos_rows = _norm_accessor_rows(gl, bin_chunk, position_accessor)
-        color_rows = _norm_accessor_rows(gl, bin_chunk, color_accessor)
+    def _primitive_indices(gl: dict[str, Any], bin_chunk: bytes, primitive: dict[str, Any], vertex_count: int) -> list[int]:
+        if "indices" not in primitive:
+            return list(range(vertex_count))
+        raw = _buffer_slice(gl, bin_chunk, primitive["indices"])
+        code = {5121: "B", 5123: "H", 5125: "I"}[gl["accessors"][primitive["indices"]]["componentType"]]
+        return list(struct.unpack("<" + code * (len(raw) // struct.calcsize(code)), raw))
+
+    def _canonical_triangle(corners: list[Any]) -> tuple[Any, ...]:
+        """Corner tuples rotated to start at the smallest one; the cyclic (winding) order is kept."""
+        start = corners.index(min(corners))
+        return tuple(corners[start:] + corners[:start])
+
+    def _norm_color_hash(gl: dict[str, Any], bin_chunk: bytes, primitive: dict[str, Any]) -> str:
+        """Hash of the triangles as (position, colour) corner triples, so a colour swap between
+        coincident corners of different triangles is a difference."""
+        attrs = primitive["attributes"]
+        pos_rows = _norm_accessor_rows(gl, bin_chunk, attrs["POSITION"])
+        color_rows = _norm_accessor_rows(gl, bin_chunk, attrs["COLOR_0"])
         if pos_rows is not None and color_rows is not None and len(pos_rows) == len(color_rows):
-            paired = list(zip(pos_rows, color_rows))
-            paired.sort()
-            return hashlib.sha256(json.dumps(paired, separators=(",", ":")).encode("utf-8")).hexdigest()
-        return hashlib.sha256(_buffer_slice(gl, bin_chunk, color_accessor)).hexdigest()
+            indices = _primitive_indices(gl, bin_chunk, primitive, len(pos_rows))
+            corners = [(pos_rows[i], color_rows[i]) for i in indices]
+            triangles = sorted(_canonical_triangle(corners[k:k + 3]) for k in range(0, len(corners) - 2, 3))
+            return hashlib.sha256(json.dumps(triangles, separators=(",", ":")).encode("utf-8")).hexdigest()
+        return hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
 
     def signature(gl: dict[str, Any], bin_chunk: bytes, nodes: list[Any]) -> list[dict[str, Any]]:
         sig: list[dict[str, Any]] = []
@@ -308,7 +324,7 @@ def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str
                     material_mb_id = material_payload["mb_id"]
                 color_hash = None
                 if "COLOR_0" in attrs and "POSITION" in attrs:
-                    color_hash = _norm_color_hash(gl, bin_chunk, attrs["POSITION"], attrs["COLOR_0"])
+                    color_hash = _norm_color_hash(gl, bin_chunk, p)
                 sig.append(
                     {
                         "node_name": node_name,

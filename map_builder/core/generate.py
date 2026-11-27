@@ -782,7 +782,7 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
                                grid.y0 + (grid.ny - 1) * grid.spacing))
     boxes = [(water._body_box(b), b) for b in built_water if b.pieces]
     stylized = style_palette.is_stylized(style)
-    bank_cells = water.shore_band_cells(grid, built_water, style_palette.BANK_BAND_M) if stylized else set()
+    bank_faces = water.shore_band_faces(grid, built_water, style_palette.BANK_BAND_M) if stylized else set()
     for j in range(grid.ny):
         for i in range(grid.nx):
             mesh.add_vertex(grid.x0 + i * grid.spacing, grid.y0 + j * grid.spacing, grid.heights[j][i] - z_offset)
@@ -814,11 +814,11 @@ def build_terrain(grid: ElevationGrid, z_offset: float, areas: Sequence[Feature]
                 cls = dry
             tris = ((v00, v10, v11), (v00, v11, v01))
             if stylized:
-                near_water = under_built_water or (i, j) in bank_cells
-                for tri in tris:
+                for k, tri in enumerate(tris):
                     p, q, r = tri
                     normal = style_palette.face_cross(mesh.vertices[p], mesh.vertices[q], mesh.vertices[r])
-                    mesh.add_face(tri, "MB Terrain", style_palette.terrain_face_color(cls, normal, near_water))
+                    mesh.add_face(tri, "MB Terrain",
+                                  style_palette.terrain_face_color(cls, normal, (i, j, k) in bank_faces))
             else:
                 for tri in tris:
                     mesh.add_face(tri, "MB Terrain", LANDCOVER_COLORS[cls])

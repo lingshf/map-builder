@@ -327,8 +327,23 @@ class StyleCheckTests(unittest.TestCase):
             self.assertGreater(len(details.get("cli_only", [])), 0)
             self.assertGreater(len(details.get("blender_only", [])), 0)
 
+    def test_parity_detects_color_swap_at_shared_edge_corners(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cli = os.path.join(td, "cli.mbmap")
+            bl = os.path.join(td, "bl.mbmap")
+            _build_valid_mbmap(cli)
+            # corners 1, 2 of the first triangle and 3, 5 of the second sit on the shared edge
+            _mutate(cli, bl, lambda m: self._swap_corner_colors(m, [(1, 3), (2, 5)]))
+            ok, details = style_check.cli_blender_parity(cli, bl)
+            self.assertFalse(ok)
+            self.assertGreater(len(details.get("cli_only", [])), 0)
+
     @staticmethod
     def _swap_first_two_colors(members: dict[str, bytes]) -> None:
+        StyleCheckTests._swap_corner_colors(members, [(0, 1)])
+
+    @staticmethod
+    def _swap_corner_colors(members: dict[str, bytes], corner_pairs: list[tuple[int, int]]) -> None:
         glb = members["visual/map.glb"]
         gl, bin_chunk = style_check._glb_json_and_bin(glb)
         meshes = gl.get("meshes", [])
@@ -340,7 +355,8 @@ class StyleCheckTests(unittest.TestCase):
         if len(color_slice) < 32:
             raise AssertionError("not enough COLOR_0 data for swap")
         vals = list(struct.unpack("<" + "f" * (len(color_slice) // 4), color_slice))
-        vals[0:4], vals[4:8] = vals[4:8], vals[0:4]
+        for a, b in corner_pairs:
+            vals[4 * a:4 * a + 4], vals[4 * b:4 * b + 4] = vals[4 * b:4 * b + 4], vals[4 * a:4 * a + 4]
         swapped = struct.pack("<" + "f" * len(vals), *vals)
 
         accessor = gl["accessors"][color_accessor]
