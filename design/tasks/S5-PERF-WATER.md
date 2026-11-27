@@ -72,6 +72,29 @@ polygon whose padded bbox it meets.
    * holes.
 
    The test runs in ≤ 5 s on the synthetic corpus. The real-fixture comparison is PR evidence.
+5. **Frame-time proxy: sensitivity control and D139 result (D186a, moved from #100).** #100 measured exactly
+   150.0 ms on both sides. The page times `requestAnimationFrame` intervals, which headless Chromium paces, so a
+   render regression below the pacing floor is invisible. This AC makes the proxy measure render work and proves it.
+   * **Measure render work, not intervals.** In `tools/demo/viewer/frame_time_proxy.html`, each measured frame
+     records `t0 = performance.now()`, then `renderer.render(scene, camera)` repeated `passes` times, then a forced
+     GPU sync (a 1 × 1 `gl.readPixels` after `gl.finish()`), then `t1`. The result gains `median_render_ms`
+     (the median of `t1 − t0`) and `passes`. `median_ms` (the interval) stays, as information only.
+   * **`passes` parameter.** A URL parameter `passes` (integer ≥ 1, default 1). The runner
+     `tools/demo/style_frame_time_proxy.py` adds `--head-passes N` (default 1), which applies only to the head
+     side in alternating mode. The runner reports `ratio = median(head median_render_ms) / median(base
+     median_render_ms)` over the pairs.
+   * **Fixed setup:** the Pittsburgh **stylized** package built at the PR head with the G0 settings, preset
+     `pittsburgh`, camera `overview`, 1280 × 720, 60 warm-up + 300 measured frames, 3 alternating pairs, the
+     existing SwiftShader flags; one host and one session for all runs below.
+   * **C1, A/A control:** the same package as base and head, `--head-passes 1`. Pass: `|ratio − 1| ≤ 0.03`.
+   * **C2, known increase:** the same package as base and head, `--head-passes 2` (about +100 % render work).
+     Pass: `ratio ≥ 1.10`, so the proxy flags a regression larger than the D139 +10 % floor.
+   * **D139 result:** base = the Pittsburgh stylized package built at this PR's merge-base, head = the PR head,
+     `--head-passes 1`. Pass: `ratio ≤ 1.10`. (AC1 makes the GLBs byte-identical, so this is expected near 1.00;
+     the PR posts it anyway, as the first established D139 proxy number for S5.)
+   * If C1 or C2 fails, the proxy is **not established**: the PR does not merge on AC5. It reports the numbers to
+     Design, which then approves a replacement proxy or a different control. It does not report a D139 pass.
+   * The PR posts the raw JSON of every run (C1, C2, the D139 pair), the GLB SHA-256s and the renderer string.
 
 ## Tests
 
@@ -79,14 +102,17 @@ polygon whose padded bbox it meets.
   cases named.
 * If any cache is kept, a test where a cached cell straddles the body edge must give the exact answer.
 * The existing shore, water and replay tests pass unchanged. Do not duplicate S4-COL-FLOAT-2 cases.
+* AC5: in `tests/test_style_frame_time_proxy.py`, the runner builds a URL carrying `passes`, applies `--head-passes` to the head side only, and computes `ratio` and the C1, C2 and D139 verdicts from canned result JSON. No browser runs in CI; the test takes ≤ 5 s. The browser runs are PR evidence.
 
 ## Conflict domain
 
 `core/overlap.py`, `core/shore.py` (mask callbacks only), `core/water.py` (`_inside_pieces`, the mask helpers), the
-water-stage mask construction in `core/generate.py`, `tests/test_overlap.py`, `tests/test_shore_ramps.py`.
+water-stage mask construction in `core/generate.py`, `tests/test_overlap.py`, `tests/test_shore_ramps.py`; for AC5 only,
+`tools/demo/viewer/frame_time_proxy.html`, `tools/demo/style_frame_time_proxy.py` and
+`tests/test_style_frame_time_proxy.py` (no product code).
 
 No sample change (byte identity). It does not run at the same time as S4-F8 (B), S5-PERF-GATE (counter lines in the
 same files) or S5-STYLE-WATER.
 
-Scope note: the S5-STYLE runtime and frame-time budgets (D139) are a separate browser measurement. They are not
-generation work counts and are not part of this task.
+Scope note: the D139 frame-time proxy is a browser measurement, not a generation work count; it was added to this
+task as AC5 by D186a (amended in #104 after the dev started). AC1–AC4 are unchanged.
