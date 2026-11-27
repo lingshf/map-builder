@@ -6,6 +6,7 @@ import json
 import random
 import unittest
 from pathlib import Path
+from typing import Any
 
 from map_builder.core.osm import point_in_ring
 from map_builder.core.overlap import (
@@ -109,6 +110,8 @@ class EdgeIndexTest(unittest.TestCase):
 
 class RealWaterCasesTest(unittest.TestCase):
     """Masks and triangles recorded from the Pittsburgh and Bellevue-Factoria water stage."""
+
+    cases: list[dict[str, Any]]
 
     @classmethod
     def setUpClass(cls) -> None:
