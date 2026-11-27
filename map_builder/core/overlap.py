@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 
 from .osm import point_in_ring
 from . import perf_counters
 
 Pt = tuple[float, float]
+Edge = tuple[Pt, Pt]
+Box = tuple[float, float, float, float]
 BOUNDARY_CROSS_EPS = 1e-12   # plan-area/collinearity epsilon: points this close to an edge are treated as boundary
 OVERLAP_AREA_EPS_M2 = 1e-9   # area this small is treated as boundary-only touch (no positive wet overlap)
 
@@ -24,17 +26,121 @@ def point_segment_distance(x: float, y: float, a: Pt, b: Pt) -> float:
 
 def triangle_touches(tri: Sequence[Pt], path: Sequence[Pt], margin: float, closed: bool) -> bool:
     """Whether the triangle lies within ``margin`` of ``path``: a closed ring (touching it or containing it
-    counts) or an open polyline. Nothing is sampled, so a small ring wholly inside the triangle is found."""
+    counts) or an open polyline. Nothing is sampled, so a small ring wholly inside the triangle is found.
+    This is the unindexed reference; ``PathMask.touches`` gives the same answer from an index."""
+    return _touches(tri, margin, lambda box: _edges(path, closed),
+                    (lambda x, y: point_in_ring(x, y, path)) if closed else None)
+
+
+def _touches(tri: Sequence[Pt], margin: float, edges_in_box: Callable[[Box], Iterable[Edge]],
+             ring_contains: Callable[[float, float], bool] | None) -> bool:
+    """The test of ``triangle_touches``. ``edges_in_box(box)`` yields the path edges, at least those whose own box
+    meets ``box``; ``ring_contains`` (closed paths only) tells whether a point lies inside the ring."""
     if perf_counters.ENABLED:
         perf_counters.inc("overlap_pairs")
     box = _padded_box(tri, margin)
-    if any(point_in_ring(x, y, tri) for x, y in path if _in_box(x, y, box)):
+    near = [(a, b) for a, b in edges_in_box(box) if _edge_in_box(a, b, box)]
+    if any(point_in_ring(x, y, tri) for a, b in near for x, y in (a, b) if _in_box(x, y, box)):
         return True
-    if closed and any(point_in_ring(x, y, path) for x, y in tri):
+    if ring_contains is not None and any(ring_contains(x, y) for x, y in tri):
         return True
-    return any(_segment_distance(a, b, c, d) <= margin
-               for a, b in _edges(path, closed) if _edge_in_box(a, b, box) for c, d in _edges(tri, True))
+    return any(_segment_distance(a, b, c, d) <= margin for a, b in near for c, d in _edges(tri, True))
 
+
+STRIP_HEIGHT_M = 8.0   # RingIndex / EdgeIndex bucket edges by y strips this tall
+
+
+def _strip(y: float) -> int:
+    return math.floor(y / STRIP_HEIGHT_M)
+
+
+class EdgeIndex:
+    """Edges bucketed by the y strips their own box covers, so a box query reads only the strips it spans."""
+
+    def __init__(self, edges: Iterable[Edge]) -> None:
+        self._strips: dict[int, list[Edge]] = {}
+        for edge in edges:
+            (_, ya), (_, yb) = edge
+            for strip in range(_strip(min(ya, yb)), _strip(max(ya, yb)) + 1):
+                self._strips.setdefault(strip, []).append(edge)
+
+    def edges_in_box(self, box: Box) -> Iterator[Edge]:
+        """Every edge whose own box meets ``box``, and possibly more (those sharing a strip with it)."""
+        for strip in range(_strip(box[1]), _strip(box[3]) + 1):
+            for edge in self._strips.get(strip, ()):
+                if _edge_in_box(*edge, box):
+                    yield edge
+
+    def has_edge_in_box(self, box: Box) -> bool:
+        return next(self.edges_in_box(box), None) is not None
+
+
+class RingIndex(EdgeIndex):
+    """A closed ring as an ``EdgeIndex`` that also answers point containment with ``point_in_ring``'s crossing
+    parity, over only the edges that straddle the query's y. A point outside the ring's box is outside the ring."""
+
+    def __init__(self, ring: Sequence[Pt]) -> None:
+        points = list(ring)
+        super().__init__(zip(points[-1:] + points[:-1], points))
+        self.box = bounding_box(points)
+
+    def contains(self, x: float, y: float) -> bool:
+        if not _in_box(x, y, self.box):
+            return False
+        straddling = self._strips.get(_strip(y), ())
+        if perf_counters.ENABLED:
+            perf_counters.inc("ring_edge_tests", len(straddling))
+        inside = False
+        for (xj, yj), (xi, yi) in straddling:
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                inside = not inside
+        return inside
+
+
+class PathMask:
+    """A footprint ring or a road polyline, indexed once, that plan triangles are tested against with
+    ``margin``: ``touches`` answers as ``triangle_touches`` does."""
+
+    def __init__(self, path: Sequence[Pt], margin: float, closed: bool) -> None:
+        self.margin = margin
+        self.box = _padded_box(path, margin)
+        self._contains: Callable[[float, float], bool] | None = None
+        if closed:
+            ring = RingIndex(path)
+            self._index: EdgeIndex = ring
+            self._contains = ring.contains
+        else:
+            self._index = EdgeIndex(_edges(path, False))
+
+    def may_touch(self, tri: Sequence[Pt]) -> bool:
+        """False only when the triangle's box misses this mask's padded box, so ``touches`` is False."""
+        return boxes_meet(bounding_box(tri), self.box)
+
+    def touches(self, tri: Sequence[Pt]) -> bool:
+        return _touches(tri, self.margin, self._index.edges_in_box, self._contains)
+
+
+class RegionMask:
+    """A region (``outer`` minus ``holes``), indexed once: ``overlaps`` answers as ``triangle_overlaps_region``."""
+
+    def __init__(self, outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> None:
+        self.outer, self.holes = outer, holes
+        self._outer_index = RingIndex(outer)
+        self._hole_indexes = [RingIndex(h) for h in holes]
+
+    def contains(self, x: float, y: float) -> bool:
+        return self._outer_index.contains(x, y) and not any(h.contains(x, y) for h in self._hole_indexes)
+
+    def overlaps(self, tri: Sequence[Pt]) -> bool:
+        return not self._clear_of_outer(tri) and triangle_overlaps_region(tri, self.outer, self.holes)
+
+    def _clear_of_outer(self, tri: Sequence[Pt]) -> bool:
+        """Whether the triangle is wholly outside ``outer`` and so shares no area with the region: its box misses the
+        ring's box, or meets no ring edge (so it is wholly inside or wholly outside) and a vertex is outside."""
+        box = bounding_box(tri)
+        if not boxes_meet(box, self._outer_index.box):
+            return True
+        return not self._outer_index.has_edge_in_box(box) and not self._outer_index.contains(*tri[0])
 
 def triangle_overlaps_region(tri: Sequence[Pt], outer: Sequence[Pt], holes: Sequence[Sequence[Pt]]) -> bool:
     """Whether the triangle and the region (``outer`` minus ``holes``) share positive area.
@@ -139,7 +245,6 @@ def _clipped_ring_area(tri: Sequence[Pt], ring: Sequence[Pt]) -> float:
         if len(poly) < 3:
             return 0.0
     return polygon_area(poly)
-
 
 def convex_intersection(subject: Sequence[Pt], clip: Sequence[Pt]) -> list[Pt]:
     """The convex polygon ``subject`` cut to the convex polygon ``clip`` (either winding); [] if they share no area."""

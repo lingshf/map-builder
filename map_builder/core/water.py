@@ -19,13 +19,14 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 
 from .dem import ElevationGrid
 from .deck_underside import RampLines, trim_under_decks
 from .errors import LimitError, MapBuilderError
 from .mesh import MeshData
 from .osm import Feature, Polygon, point_in_ring
-from .overlap import point_segment_distance, triangle_overlaps_region, triangle_touches
+from .overlap import PathMask, RegionMask, point_segment_distance
 from . import perf_counters
 from .shore import Trim, keep_whole, shore_ramps
 from .triangulate import TriangulationError, clean_ring, dedupe_ring, triangulate
@@ -434,6 +435,11 @@ class Body:
     def built(self) -> bool:
         return self.outcome.startswith("built")
 
+    @cached_property
+    def regions(self) -> list[RegionMask]:
+        """The pieces as indexed regions; built on first use, after ``pieces`` is set."""
+        return [RegionMask(o, hs) for o, hs in self.pieces]
+
 
 def _body_box(b: Body) -> tuple[float, float, float, float]:
     xs = [p[0] for o, _ in b.pieces for p in o]
@@ -442,10 +448,7 @@ def _body_box(b: Body) -> tuple[float, float, float, float]:
 
 
 def _inside_pieces(b: Body, x: float, y: float) -> bool:
-    for o, hs in b.pieces:
-        if point_in_ring(x, y, o) and not any(point_in_ring(x, y, h) for h in hs):
-            return True
-    return False
+    return any(region.contains(x, y) for region in b.regions)
 
 
 FACE_CENTROID_FRACTIONS = ((2 / 3, 1 / 3), (1 / 3, 2 / 3))     # centroids of a cell's (v00, v10, v11) and (v00, v11, v01)
@@ -653,6 +656,18 @@ def _edge_samples(ring: Sequence[Pt], r: Rect, step: float) -> list[tuple[Pt, Pt
     return out
 
 
+class _MaskCache(dict[int, PathMask]):
+    """``PathMask``s built on first use: most footprints and roads are never near a ramp triangle."""
+
+    def __init__(self, make: Callable[[int], PathMask]) -> None:
+        super().__init__()
+        self._make = make
+
+    def __missing__(self, key: int) -> PathMask:
+        mask = self[key] = self._make(key)
+        return mask
+
+
 @dataclass
 class _Masks:
     """Things the shore samples avoid and the bank blend must not undercut."""
@@ -660,6 +675,10 @@ class _Masks:
     lines: list[tuple[list[Pt], float]]          # (polyline, half width + margin)
     foot_idx: _Index = field(default_factory=_Index)
     line_idx: _Index = field(default_factory=_Index)
+
+    def __post_init__(self) -> None:
+        self._foot_masks = _MaskCache(lambda i: PathMask(self.footprints[i].outer, 0.0, closed=True))
+        self._line_masks = _MaskCache(lambda i: PathMask(self.lines[i][0], self.lines[i][1], closed=False))
 
     def build(self) -> None:
         for i, p in enumerate(self.footprints):
@@ -686,13 +705,12 @@ class _Masks:
         foot_candidates = self.foot_idx.in_box(box)
         if perf_counters.ENABLED:
             perf_counters.inc("candidate_pairs", len(foot_candidates))
-        if any(triangle_touches(tri, self.footprints[i].outer, 0.0, closed=True) for i in foot_candidates):
+        if _any_touches(tri, (self._foot_masks[i] for i in foot_candidates)):
             return True
         line_candidates = self.line_idx.in_box(box)
         if perf_counters.ENABLED:
             perf_counters.inc("candidate_pairs", len(line_candidates))
-        return any(triangle_touches(tri, self.lines[i][0], self.lines[i][1], closed=False)
-                   for i in line_candidates)
+        return _any_touches(tri, (self._line_masks[i] for i in line_candidates))
 
     def hit_line(self, x: float, y: float, extra: float) -> bool:
         for i in self.line_idx.at(x, y):
@@ -701,6 +719,10 @@ class _Masks:
                 if point_segment_distance(x, y, pl[k], pl[k + 1]) <= hw + extra:
                     return True
         return False
+
+
+def _any_touches(tri: Sequence[Pt], masks: Iterable[PathMask]) -> bool:
+    return any(m.may_touch(tri) and m.touches(tri) for m in masks)
 
 
 def _dist_ring(x: float, y: float, ring: Sequence[Pt]) -> float:
@@ -832,8 +854,8 @@ def _attach_ramps(model: WaterModel, blocked_by: Callable[[Sequence[Pt]], bool],
     def ground(x: float, y: float) -> float:
         return _ground(model.carved, x, y)
 
-    wet_pieces = [(body.id, piece_idx, _ring_box(o), o, hs)
-                  for body in model.active() for piece_idx, (o, hs) in enumerate(body.pieces)]
+    wet_pieces = [(body.id, _ring_box(region.outer), region)
+                  for body in model.active() for region in body.regions]
 
     for b in model.active():
         if b.level is None:
@@ -846,10 +868,10 @@ def _attach_ramps(model: WaterModel, blocked_by: Callable[[Sequence[Pt]], bool],
 
         def wet_by(tri: Sequence[Pt], receiver_id: str | None, source_piece_idx: int) -> bool:
             box = _ring_box(tri)
-            for body_id, piece_idx, pb, o, hs in wet_pieces:
+            for body_id, pb, region in wet_pieces:
                 if not _boxes_meet(box, pb):
                     continue
-                if not triangle_overlaps_region(tri, o, hs):
+                if not region.overlaps(tri):
                     continue
                 cascade_receiver = receiver_id is not None and body_id == receiver_id
                 if cascade_receiver:
