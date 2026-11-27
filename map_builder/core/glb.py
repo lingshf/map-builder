@@ -16,11 +16,12 @@ import json
 import math
 import struct
 from collections.abc import Callable, Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypeAlias, TypedDict, TypeGuard, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypeAlias, TypedDict, TypeGuard, cast
 
 from .collision import strict_json
 from .errors import PackageError
 from .geodesy import map_to_gltf
+from .mesh import DECOR_MATERIAL
 
 if TYPE_CHECKING:
     from .mesh import MeshData
@@ -114,6 +115,7 @@ class _GltfPrimitive(TypedDict):
     indices: int
     material: int
     mode: int
+    extras: NotRequired[dict[str, bool]]
 
 
 class _GltfMesh(TypedDict):
@@ -302,8 +304,11 @@ def write_glb(nodes: Sequence[GlbNodeSpec], materials: Mapping[str, MaterialSpec
             attrs = {"POSITION": pa, "NORMAL": na, "COLOR_0": ca}
             if textured:
                 attrs["TEXCOORD_0"] = add_accessor(add_view(_f32(uv), 34962), 5126, cnt, "VEC2")
-            prims.append({"attributes": attrs, "indices": ia,
-                          "material": material(md.materials[mi]), "mode": 4})
+            prim: _GltfPrimitive = {"attributes": attrs, "indices": ia,
+                                    "material": material(md.materials[mi]), "mode": 4}
+            if md.materials[mi] == DECOR_MATERIAL:
+                prim["extras"] = {"mb_decor": True}
+            prims.append(prim)
         gl["meshes"].append({"name": md.name, "primitives": prims})
         mesh_ids[key] = len(gl["meshes"]) - 1
         return mesh_ids[key]
@@ -379,13 +384,16 @@ def det3(m: Sequence[Sequence[float]]) -> float:
 
 class GlbNode:
     def __init__(self, index: int, name: str, extras: dict[str, object],
-                 matrix: Matrix, triangles: list[tuple[Vec3, Vec3, Vec3]]) -> None:
+                 matrix: Matrix, triangles: list[tuple[Vec3, Vec3, Vec3]],
+                 decor_triangles: list[tuple[Vec3, Vec3, Vec3]] | None = None) -> None:
         self.index: int = index
         self.name: str = name
         self.extras: dict[str, object] = extras
         self.matrix: Matrix = matrix
         # world-space glTF coords [(a, b, c)], front faces CCW (negative-determinant rule applied)
         self.triangles: list[tuple[Vec3, Vec3, Vec3]] = triangles
+        # same space and winding rule, from ``MB Decor`` primitives only; never bound to collision
+        self.decor_triangles: list[tuple[Vec3, Vec3, Vec3]] = decor_triangles or []
 
 
 _CT: dict[int, tuple[str, int]] = {5120: ("b", 1), 5121: ("B", 1), 5122: ("h", 2), 5123: ("H", 2), 5125: ("I", 4), 5126: ("f", 4)}
@@ -547,7 +555,8 @@ def _read_glb(data: bytes, max_triangles: int) -> tuple[Gltf, list[GlbNode]]:
     ident: Matrix = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
     stack: list[tuple[object, Matrix, int]] = [(n, ident, 0) for n in reversed(roots)]
     visited: set[int] = set()
-    mesh_cache: dict[int, list[tuple[Vec3, Vec3, Vec3]]] = {}
+    mesh_cache: dict[int, MeshTriangles] = {}
+    decor = _decor_material_indices(gl)
     while stack:
         ni, parent, depth = stack.pop()
         if depth > MAX_DEPTH or not _is_index(ni, len(nodes_js)) or ni in visited:
@@ -556,17 +565,18 @@ def _read_glb(data: bytes, max_triangles: int) -> tuple[Gltf, list[GlbNode]]:
         node = nodes_js[ni]
         m = _mat_mul(parent, _trs(node))
         tris: list[tuple[Vec3, Vec3, Vec3]] = []
+        decor_tris: list[tuple[Vec3, Vec3, Vec3]] = []
         if "mesh" in node:
             mi = node["mesh"]
             if not _is_index(mi, len(meshes)):
                 raise PackageError("glb: bad mesh index")
             if mi in mesh_cache:  # instanced mesh: its triangles count again
-                budget["tris"] += len(mesh_cache[mi])
+                budget["tris"] += mesh_cache[mi].count
                 if budget["tris"] > max_triangles:
                     raise PackageError(f"glb: more than {max_triangles} visual triangles")
             else:
                 mesh_cache[mi] = _mesh_triangles(meshes[mi], read_vectors, read_indices, budget, max_triangles,
-                                                 textured, len(gl.get("materials", ())))
+                                                 textured, len(gl.get("materials", ())), decor)
             flip = det3(m) < 0  # glTF: negative determinant means clockwise front faces
 
             def place(p: Vec3, m: Matrix = m) -> Vec3:
@@ -574,14 +584,15 @@ def _read_glb(data: bytes, max_triangles: int) -> tuple[Gltf, list[GlbNode]]:
                         m[1][0] * p[0] + m[1][1] * p[1] + m[1][2] * p[2] + m[1][3],
                         m[2][0] * p[0] + m[2][1] * p[1] + m[2][2] * p[2] + m[2][3])
 
-            for a, b, c in mesh_cache[mi]:
-                wa, wb, wc = place(a), place(b), place(c)
-                tris.append((wa, wc, wb) if flip else (wa, wb, wc))
+            for local, placed in ((mesh_cache[mi].solid, tris), (mesh_cache[mi].decor, decor_tris)):
+                for a, b, c in local:
+                    wa, wb, wc = place(a), place(b), place(c)
+                    placed.append((wa, wc, wb) if flip else (wa, wb, wc))
         name = node.get("name", f"node{ni}")
         if not isinstance(name, str):
             raise PackageError("glb: node name must be a string")
         extras = node.get("extras", {})
-        result.append(GlbNode(ni, name, extras if isinstance(extras, dict) else {}, m, tris))
+        result.append(GlbNode(ni, name, extras if isinstance(extras, dict) else {}, m, tris, decor_tris))
         children = node.get("children", [])
         if not isinstance(children, list):
             raise PackageError("glb: node children must be an array")
@@ -664,14 +675,29 @@ def glb_image_sha256s(data: bytes) -> list[str]:
     return out
 
 
+class MeshTriangles(NamedTuple):
+    """Local-space triangles of one mesh, split into the ``MB Decor`` primitives and all others."""
+    solid: list[tuple[Vec3, Vec3, Vec3]]
+    decor: list[tuple[Vec3, Vec3, Vec3]]
+
+    @property
+    def count(self) -> int:
+        return len(self.solid) + len(self.decor)
+
+
+def _decor_material_indices(gl: Gltf) -> set[int]:
+    return {i for i, m in enumerate(gl.get("materials", ())) if isinstance(m, dict) and m.get("name") == DECOR_MATERIAL}
+
+
 def _mesh_triangles(mesh: object, read_vectors: Callable[[object, Literal["position", "uv"]], list[tuple[float, ...]]],
                     read_indices: Callable[[object], list[int]], budget: dict[str, int], max_triangles: int,
                     textured: Collection[int] = frozenset(),
-                    n_materials: int = 0) -> list[tuple[Vec3, Vec3, Vec3]]:
+                    n_materials: int = 0,
+                    decor: Collection[int] = frozenset()) -> MeshTriangles:
     """Local-space triangles of a mesh (mode 4 only; points/lines carry no triangles)."""
     if not isinstance(mesh, dict) or not isinstance(mesh.get("primitives"), list):
         raise PackageError("glb: mesh without primitives")
-    out: list[tuple[Vec3, Vec3, Vec3]] = []
+    out = MeshTriangles([], [])
     for p in mesh["primitives"]:
         mode = p.get("mode", 4)
         if mode in (5, 6):
@@ -704,6 +730,7 @@ def _mesh_triangles(mesh: object, read_vectors: Callable[[object, Literal["posit
         budget["tris"] += len(idx) // 3
         if budget["tris"] > max_triangles:
             raise PackageError(f"glb: more than {max_triangles} visual triangles")
-        out.extend((cast(Vec3, pos[idx[k]]), cast(Vec3, pos[idx[k + 1]]), cast(Vec3, pos[idx[k + 2]]))   # POSITION is VEC3
-                   for k in range(0, len(idx), 3))
+        (out.decor if pm in decor else out.solid).extend(
+            (cast(Vec3, pos[idx[k]]), cast(Vec3, pos[idx[k + 1]]), cast(Vec3, pos[idx[k + 2]]))   # POSITION is VEC3
+            for k in range(0, len(idx), 3))
     return out

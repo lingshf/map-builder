@@ -24,7 +24,9 @@ from unittest import mock
 from map_builder.core.package import PACKAGE_SCHEMA_VERSION, file_entry, manifest_bytes, validate_package
 
 from . import csharp_build
+from .make_decor_fixture import build_package as build_decor_package
 from .make_textured_fixture import _load, build_textured_package, edit_glb
+from map_builder.core.mesh import DECOR_MATERIAL
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FUTURE_MINOR = "2.2.0"
@@ -122,6 +124,13 @@ class Fixtures(unittest.TestCase):
         run = subprocess.run([*command, path], capture_output=True, text=True)
         return run.returncode, run.stdout + run.stderr
 
+    def decor_package(self):
+        """A genuine export carrying an ``MB Decor`` primitive (S5-DECOR step 1a)."""
+        path = os.path.join(self.tmp.name, "decor.mbmap")
+        if not os.path.exists(path):
+            build_decor_package(path, DECOR_MATERIAL)
+        return path
+
 
 class PythonPolicyTest(Fixtures):
     def test_current_schema_is_2_1_0_and_fixture_is_a_later_minor(self):
@@ -169,6 +178,11 @@ class CsharpPolicyTest(Fixtures):
         code, out = self.run_cs(csharp_build.reader_command(), self.future_minor())
         self.assertEqual(code, 0, out)
 
+    def test_current_csharp_accepts_decor_package(self):
+        code, out = self.run_cs(csharp_build.reader_command(), self.decor_package())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip().splitlines()[-1], "OK")
+
     def test_csharp_rejects_extra_listed_member(self):
         """Rule, not additive: both C# readers treat an unknown member as an error (warnings are errors), unlike the
         Python validator, so the positive fixture omits an extra member (docs/PACKAGE_FORMAT.md)."""
@@ -215,6 +229,17 @@ class FrozenReadersTest(Fixtures):
 
     def test_frozen_csharp_accepts_future_minor(self):
         code, out = self.run_cs(["dotnet", self.frozen_dll], self.future_minor())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.strip().splitlines()[-1], "OK")
+
+    def test_frozen_python_accepts_decor_package(self):
+        run = subprocess.run([sys.executable, "-m", "tools.mbmap_cli", "validate", self.decor_package()],
+                             cwd=self.frozen_dir, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("VALID: 0 error(s)", run.stdout)
+
+    def test_frozen_csharp_accepts_decor_package(self):
+        code, out = self.run_cs(["dotnet", self.frozen_dll], self.decor_package())
         self.assertEqual(code, 0, out)
         self.assertEqual(out.strip().splitlines()[-1], "OK")
 

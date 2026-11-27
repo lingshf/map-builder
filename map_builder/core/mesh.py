@@ -9,6 +9,9 @@ from collections.abc import Iterator, Sequence
 Vec3 = tuple[float, float, float]
 UV = tuple[float, float]
 
+# Visual-only decoration (D142): consumers act on the material name; ``extras.mb_decor`` serves JSON readers.
+DECOR_MATERIAL = "MB Decor"
+
 
 class MeshData:
     """Polygon mesh in object-local coordinates (map-frame axes).
@@ -60,8 +63,18 @@ class MeshData:
         explicit triangles instead (see generate._add_planar_face), so the fan never
         changes the surface."""
         for f in self.faces:
-            for k in range(1, len(f) - 1):
-                yield (f[0], f[k], f[k + 1])
+            yield from _fan(f)
+
+    def collidable_triangles(self) -> Iterator[tuple[int, int, int]]:
+        """:meth:`triangles` without the visual-only ``MB Decor`` faces, which have no collision."""
+        for f, mi in zip(self.faces, self.face_materials):
+            if self.materials[mi] != DECOR_MATERIAL:
+                yield from _fan(f)
+
+
+def _fan(face: tuple[int, ...]) -> Iterator[tuple[int, int, int]]:
+    for k in range(1, len(face) - 1):
+        yield (face[0], face[k], face[k + 1])
 
 
 def transform_point(p: Sequence[float], location: Sequence[float] = (0.0, 0.0, 0.0),

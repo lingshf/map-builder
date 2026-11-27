@@ -1767,8 +1767,9 @@ def _check_binding(m: Manifest, col: Collision, nodes: Sequence[GlbNode], r: Val
             continue
         tag = f"collision object #{k} / glTF node #{node.index}"
         vis: list[Tri] = [(gltf_to_map(a), gltf_to_map(b), gltf_to_map(c)) for a, b, c in node.triangles]
+        decor: list[Tri] = [(gltf_to_map(a), gltf_to_map(b), gltf_to_map(c)) for a, b, c in node.decor_triangles]
         ctris = col.object_triangles(e)
-        va = _aabb([p for t in vis for p in t])
+        va = _aabb([p for t in vis + decor for p in t])
         ca = _aabb([p for t in ctris for p in t])
         size = max(ca[3] - ca[0], ca[4] - ca[1], ca[5] - ca[2])
         tol = AABB_TOL_M + AABB_TOL_REL * size

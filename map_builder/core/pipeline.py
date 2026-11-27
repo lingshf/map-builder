@@ -378,7 +378,7 @@ def collision_object(name: str, mb_id: str, cls: str, mesh: MeshData, location: 
     determinant) reverses winding, exactly like the glTF rule, so front faces stay CCW outward."""
     apply, mirrored = object_transform(location, rotation_z, scale)
     verts = [apply(v) for v in mesh.vertices]
-    tris = [(a, c, b) if mirrored else (a, b, c) for a, b, c in mesh.triangles()]
+    tris = [(a, c, b) if mirrored else (a, b, c) for a, b, c in mesh.collidable_triangles()]
     return ColObject(name, mb_id, cls, verts, tris)
 
 

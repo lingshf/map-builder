@@ -106,3 +106,9 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/gv" gltf-validator@2.0.0-dev.3.10
           cp tools/gltf_validate.js "$RUNNER_TEMP/gv/"
           node "$RUNNER_TEMP/gv/gltf_validate.js" "$RUNNER_TEMP/fixture.glb"
+      - name: glTF-Validator on the MB Decor fixture (S5-DECOR step 1a)
+        run: |
+          set -e
+          python3 -m tests.make_decor_fixture "$RUNNER_TEMP/decor.mbmap"
+          python3 -c "import zipfile,sys,os; open(os.path.join(os.environ['RUNNER_TEMP'],'decor.glb'),'wb').write(zipfile.ZipFile(sys.argv[1]).read('visual/map.glb'))" "$RUNNER_TEMP/decor.mbmap"
+          node "$RUNNER_TEMP/gv/gltf_validate.js" "$RUNNER_TEMP/decor.glb"
