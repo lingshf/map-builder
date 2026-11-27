@@ -187,9 +187,21 @@ If either check fails, the importer or the conversion is wrong; refuse the map.
 * The reference exporter is stricter than the validator. It refuses to publish unless each
   node's visual and collision triangles correspond one-to-one with the same winding. The
   correspondence is a bounded order-independent matching; if the budget runs out, the export
-  fails with "cannot verify binding" instead of passing.
+  fails with "cannot verify binding" instead of passing. Primitives whose material is named
+  `MB Decor` are exempt from this correspondence, and only those (see below).
 * Collision is exported from the same evaluated meshes and world matrices as the visuals.
   Visual LOD or simplification done by a consumer **must not** change collision.
+
+## Visual-only decoration (`MB Decor`)
+
+A terrain node's mesh may carry one extra primitive that is decoration only. It uses the
+material named **`MB Decor`**, used by nothing else, and sets `extras.mb_decor = true`. It has
+no collision triangles, adds no node or package member, and every triangle lies inside the
+node's collision AABB (same tolerance as the AABB check). Consumers act on the **material
+name**, because glTF importers do not reliably expose `extras`. A consumer may hide that
+submesh without changing the terrain submesh or any collision result. Readers that predate
+this section accept such a package; a pre-2.1 non-strict validator reports the decoration
+triangles as visual triangles without a collision counterpart (a warning).
 
 ## Textures and asset notices (2.1.0)
 
