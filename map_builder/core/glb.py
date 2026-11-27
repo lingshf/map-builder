@@ -303,9 +303,10 @@ def write_glb(nodes: Sequence[GlbNodeSpec], materials: Mapping[str, MaterialSpec
             ca = add_accessor(add_view(_f32(col), 34962), 5126, cnt, "VEC3")
             idx = struct.pack(f"<{cnt}I", *range(cnt))
             ia = add_accessor(add_view(idx, 34963), 5125, cnt, "SCALAR")
-            attrs = {"POSITION": pa, "COLOR_0": ca}
+            attrs = {"POSITION": pa}
             if na is not None:
                 attrs["NORMAL"] = na
+            attrs["COLOR_0"] = ca
             if textured:
                 attrs["TEXCOORD_0"] = add_accessor(add_view(_f32(uv), 34962), 5126, cnt, "VEC2")
             prims.append({"attributes": attrs, "indices": ia,
