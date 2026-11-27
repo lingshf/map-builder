@@ -34,15 +34,62 @@ fills in every row below with a verdict (pass / fail / information) and a link t
 * **Pinned render inputs.** v0.5.0 has no style presets, no re-framed ponds camera and no style render recipe.
   Each revision therefore only **builds its package**. Both columns are rendered by H's tools from H's files:
   `tools/demo/style_render_recipe.py`, `tools/demo/demo_bundle.py`, every preset JSON in the camera table, and
-  `tools/demo/palette_regions_factoria.json`. The review copies these files out of H once (`git archive H
-  tools/demo`) into one render tree, records the SHA-256 of each file, and passes the before and after packages
-  to that same tree. Fixed render settings: `--engine CYCLES --samples 64 --seed 1` (no `--denoise`),
-  1280 × 720, with the lighting the recipe defines (one sun plus world ambient, D140 step 2). If headless EEVEE
-  works, it may replace Cycles only if **both** columns use it; the review states the engine.
+  `tools/demo/palette_regions_factoria.json`. The review extracts them from H once into one render tree, records
+  the SHA-256 of each file, and passes the before and after packages to that same tree. Fixed render settings:
+  `--engine CYCLES --samples 64 --seed 1` (no `--denoise`), 1280 × 720, with the lighting the recipe defines (one
+  sun plus world ambient, D140 step 2). If headless EEVEE works, it may replace Cycles only if **both** columns
+  use it; the review states the engine.
 * The D140 limit of ≤ 2 min for all cameras is recorded as information only, because it applies to EEVEE.
-* **Reference slot (D187):** the reference crop is not available as a file. The sheets are therefore
-  **before | after** only, and the reference judgment is row R1 below. If the coordinator supplies the crop as a
-  file before the review, it goes into the reference slot, and R1 also judges it side by side.
+* **Reference slot (D187, coordinator ruling in #104 R2):** the reference crop is not available as a file, so the
+  R1 sheets are **two columns, before | after**, with no reference. The recipe cannot emit that today: its
+  `--reference` is required, and its sheet step always draws three columns. It also skips sheets and the palette
+  report when Blender's Python has no Pillow, which is the case for the pinned Blender 4.2.23. The review
+  therefore uses the doc-only fallback below and changes no product code. If the coordinator supplies the crop
+  as a file before the review, R1 judges it side by side with the two-column sheet.
+* **Executable render run (fallback; PowerShell, from the H checkout).** `$H` is the full H SHA, `$W` a scratch
+  directory outside the repo, and `$B`/`$A` hold the before and after `.mbmap` of each G0 package. System Python
+  3.11 or newer with Pillow is required; record `py -c "import PIL; print(PIL.__version__)"`.
+  1. Render tree: `New-Item -ItemType Directory "$W\tree" -Force; git archive --format=tar $H tools/demo map_builder | tar -x -C "$W\tree"`
+     (`demo_bundle.py` imports `map_builder`, so `tools/demo` alone does not run). Then record
+     `Get-ChildItem -Recurse -File "$W\tree\tools\demo" | Get-FileHash -Algorithm SHA256`.
+  2. Placeholder (it only satisfies the required flag): `py -c "from PIL import Image; Image.new('RGB', (1280, 720)).save(r'$W\placeholder.png')"`.
+  3. Per preset `P` in the camera table, with that preset's G0 package `G`:
+     `& C:\tools\blender-4.2.23-windows-x64\blender.exe -b --factory-startup --python "$W\tree\tools\demo\style_render_recipe.py" -- --preset "$W\tree\tools\demo\presets\$P.json" --before "$B\$G.mbmap" --after "$A\$G.mbmap" --reference "$W\placeholder.png" --palette-regions "$W\tree\tools\demo\palette_regions_factoria.json" --out "$W\out\$P" --engine CYCLES --samples 64 --seed 1`.
+     Keep `render-<camera>-before.png`, `render-<camera>-after.png` and `timing.json`. Delete any
+     `contact-sheet-*.png` the recipe writes (they contain the placeholder) and never attach them.
+  4. Two-column sheets and the ΔE report: save the script below as `$W\compose_two_column.py`, record its
+     SHA-256, and run `py "$W\compose_two_column.py" "$W\tree" "$W\out\$P" "$W\tree\tools\demo\presets\$P.json" "$W\tree\tools\demo\palette_regions_factoria.json"`
+     per preset. Pass any further region file a PR added (see Palette report) in an extra run with that file as
+     the fourth argument. Output: `sheet2-<camera>.png` and `palette-<camera>.json` for cameras that have regions.
+     The script reuses the recipe's own `_load_regions` and `_palette_report`, so ΔE is computed exactly as in
+     #100.
+
+  ```python
+  import json, os, sys
+  from PIL import Image, ImageDraw
+  tree, out, preset, regions_file = sys.argv[1:5]
+  sys.path.insert(0, os.path.join(tree, "tools", "demo"))
+  import style_render_recipe as r  # bpy is imported only inside _render, so this runs outside Blender
+  regions = r._load_regions(regions_file)
+  for cam in [c["name"] for c in json.load(open(preset, encoding="utf-8"))["cameras"]]:
+      before = Image.open(os.path.join(out, f"render-{cam}-before.png")).convert("RGB")
+      after = Image.open(os.path.join(out, f"render-{cam}-after.png")).convert("RGB")
+      assert before.size == after.size, cam
+      (w, h), pad, label_h = before.size, 12, 28
+      sheet = Image.new("RGB", (w * 2 + pad * 3, h + label_h + pad * 2), (28, 30, 36))
+      draw = ImageDraw.Draw(sheet)
+      for i, (label, img) in enumerate((("before (v0.5.0)", before), ("after (H)", after))):
+          x = pad + i * (w + pad)
+          draw.text((x, pad), label, fill=(235, 235, 235))
+          sheet.paste(img, (x, pad + label_h))
+      sheet.save(os.path.join(out, f"sheet2-{cam}.png"))
+      mine = [g for g in regions if g.camera == cam]
+      if mine:
+          r._palette_report(os.path.join(out, f"render-{cam}-after.png"), mine, os.path.join(out, f"palette-{cam}.json"))
+  ```
+
+  Dry run of steps 1, 2 and 4 at main 852a137 with synthetic before/after PNGs (Design, #104 R2): three
+  `sheet2-*.png` sheets and the three Factoria `palette-*.json` reports were produced.
 * Sheets, renders and raw logs are attached to the review PR, not committed. Only small JSON or Markdown data may
   go under `design/reviews/data/`, as for S4-REVIEW.
 
