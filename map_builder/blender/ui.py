@@ -77,6 +77,7 @@ class MB_PT_main(bpy.types.Panel):
         row.prop(s, "roads", toggle=True)
         row.prop(s, "trees", toggle=True)
         box.prop(s, "scatter")
+        box.prop(s, "style")
         box.prop(s, "textures")
         box.prop(s, "max_trees")
         box.prop(s, "seed")

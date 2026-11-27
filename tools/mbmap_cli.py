@@ -55,8 +55,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "toward the surrounding ground (default: auto = off for a local elevation file, which "
                         "--dsm-correction opts in; use it for surface models such as Copernicus GLO-30)")
     b.add_argument("--textures", action=argparse.BooleanOptionalAction, default=True,
-                   help="embed the procedural CC0 textures with world-scaled UVs (default on; --no-textures "
-                        "writes the untextured visual GLB)")
+                   help="embed the procedural CC0 textures with world-scaled UVs in classic mode (default on; "
+                        "--no-textures writes the untextured visual GLB)")
+    b.add_argument("--style", choices=("stylized", "classic"), default="stylized",
+                   help="visual style mode (default: stylized; classic keeps legacy look)")
     b.add_argument("--name", default="map")
     b.add_argument("--created-utc", default=None, metavar="YYYY-MM-DDTHH:MM:SSZ",
                    help="fixed manifest created_utc (default: now); with the same inputs the package is "
@@ -75,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                          elevation_vertical_datum=a.datum, elevation_license=a.dem_license, osm_source="file",
                          osm_file=a.osm, osm_license=a.osm_license, terrain_spacing=a.spacing,
                          heightfield_spacing=a.heightfield or None, dsm_correction=a.dsm_correction,
-                         plan_options=PlanOptions(seed=a.seed))
+                         plan_options=PlanOptions(seed=a.seed, style=a.style))
             m, r = build_package(area, s, a.out, a.name,
                                  progress=lambda frac: print(f"terrain {frac:.0%}", file=sys.stderr, end="\r"),
                                  created_utc=a.created_utc, textures=a.textures)

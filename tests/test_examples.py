@@ -27,7 +27,8 @@ BUILD_ARGS = ["build", "--osm", os.path.join(FIXTURES, "synthetic_area.osm"),
               "--dem", os.path.join(FIXTURES, "synthetic_dem.asc"), "--datum", "SYNTHETIC",
               "--dem-license", "SYNTHETIC test data (no licence required)",
               "--osm-license", "SYNTHETIC test fixture (hand-written OSM-format XML, not OpenStreetMap data; no licence required)", "--lat", "47.0", "--lon", "8.0",
-              "--width", "400", "--height", "300", "--heightfield", "2", "--created-utc", "2026-01-01T00:00:00Z",
+              "--width", "400", "--height", "300", "--heightfield", "2", "--style", "classic",
+              "--created-utc", "2026-01-01T00:00:00Z",
               "--name", "synthetic_sample"]
 
 

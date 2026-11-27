@@ -33,8 +33,8 @@ from typing import TYPE_CHECKING
 import bpy
 
 from ..core.errors import MapBuilderError
-from ..core.generate import MATERIALS
 from ..core.geodesy import HARD_MAX_SIDE_M, Area
+from ..core.style import materials_for_style, normalize_style, style_uses_textures
 from ..core import textures as tex
 from ..core import uv as core_uv
 from ..core.pipeline import filter_passage_probes, merge_dropped
@@ -109,7 +109,7 @@ def _linked_from(sock: bpy.types.NodeSocket) -> bpy.types.Node | None:
     return sock.links[0].from_node if sock.is_linked and sock.links else None
 
 
-def material_spec(mat: bpy.types.Material | None, textures: bool = True,
+def material_spec(mat: bpy.types.Material | None, textures: bool = True, style: str = "classic",
                   ) -> tuple[str, MaterialSpec | None, str | None, list[str]]:
     """(export name, (rgb, roughness, metallic[, png bytes]), colour attribute name or None or "" (= render
     colour attribute), [warnings]) for a Blender material. A generated textured material (``mb_textured``, the
@@ -139,17 +139,25 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True,
     attr: str | None = None
     src = _linked_from(base)
     gen = mat.get("mb_material")
-    generated_textured = (mat.library is None and mat.get("mb_textured") and gen in tex.TEXTURES
+    canonical_generated = mat.library is None and isinstance(gen, str) and mat.name == gen
+    generated_textured = (style_uses_textures(style) and mat.library is None and mat.get("mb_textured") and gen in tex.TEXTURES
                           and src is not None and src.type == "MIX_RGB")
-    generated_plain = (textures and _is_plain_generated(mat) and src is not None and src.type == "VERTEX_COLOR"
+    generated_plain = (_is_plain_generated(mat) and src is not None and src.type == "VERTEX_COLOR"
                        and src.layer_name == COLOR_ATTR)
+    generated_style_plain = (normalize_style(style) != "classic" and canonical_generated and gen in materials_for_style(style)
+                             and src is not None and src.type == "VERTEX_COLOR"
+                             and src.layer_name == COLOR_ATTR and not mat.get("mb_textured") and not generated_plain)
     if generated_textured:
         name = gen if textures else name
-        rgb = tuple(float(c) for c in base.default_value[:3]) if textures else WHITE
+        if normalize_style(style) == "classic":
+            rgb = tuple(float(c) for c in base.default_value[:3])
+        else:
+            canon = _canonical(gen, style)
+            rgb = tuple(canon[0]) if textures else WHITE
         attr = COLOR_ATTR
-    elif generated_plain:   # generated with Textures off, exported with Textures on: the CLI's textured material
+    elif generated_plain:   # generated plain material: keep the CLI's canonical factors for this style
         name = gen
-        rgb = tuple(_canonical(gen)[0])
+        rgb = tuple(_canonical(gen, style)[0])
         attr = COLOR_ATTR
     elif src is None:
         rgb = tuple(float(c) for c in base.default_value[:3])
@@ -181,19 +189,27 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True,
                 if key in out.inputs and out.inputs[key].is_linked]  # type: ignore[union-attr]  # out is set: bsdf is not None above
     if omitted:
         warnings.append(f"material {mat.name!r}: not exported (omitted): {', '.join(omitted)}")
+    if generated_style_plain:
+        rgb = tuple(_canonical(gen, style)[0])
     if not all(math.isfinite(v) for v in (*rgb, *values)):
         raise ExportError([f"material {mat.name!r}: non-finite colour/roughness/metallic"])
-    if generated_plain:
-        values = [_canonical(gen)[1], _canonical(gen)[2]]
+    if generated_textured and canonical_generated and normalize_style(style) != "classic":
+        values = [canon[1], canon[2]]
+    if generated_style_plain:
+        values = [_canonical(gen, style)[1], _canonical(gen, style)[2]]
     spec: MaterialSpec = (rgb, values[0], values[1])
     if (generated_textured or generated_plain) and textures:
         spec = (rgb, values[0], values[1], tex.load(gen))
     return name, spec, attr, warnings
 
 
-def _canonical(tag: str) -> tuple[tuple[float, ...], float, float]:
+def _canonical(tag: str, style: str = "classic") -> tuple[tuple[float, ...], float, float]:
     """The CLI writer's factors for the textured material ``tag``."""
-    return MATERIALS.get(tag, ((0.8, 0.8, 0.8), tex.roughness(tag), 0.0))
+    mats = materials_for_style(style)
+    if tag in mats:
+        return mats[tag]
+    rough = tex.roughness(tag) if tag in tex.TEXTURES else 0.9
+    return (0.8, 0.8, 0.8), rough, 0.0
 
 
 def _material_key(base: str, spec: MaterialSpec) -> str:
@@ -317,7 +333,7 @@ def _label(ob: bpy.types.Object) -> str:
 
 def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, materials: dict[str, MaterialSpec],
                       warnings: list[str], registry: dict[str, tuple[str, MaterialSpec]],
-                      textures: bool = True) -> BakedObject:
+                      textures: bool = True, style: str = "classic") -> BakedObject:
     ev = ob.evaluated_get(depsgraph)
     me = ev.to_mesh()
     try:
@@ -343,7 +359,7 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
             warnings.append(f"{ob.name}: no material (exported with the default grey material)")
             slot_specs.append((DEFAULT_MATERIAL, None, None))
         for slot in ev.material_slots:
-            mname, spec, attr, mwarn = material_spec(slot.material, textures)
+            mname, spec, attr, mwarn = material_spec(slot.material, textures, style=style)
             tname = mname if spec is not None and len(spec) > 3 else None   # texture lookup key (material name)
             base = mname
             if spec is not None:
@@ -417,7 +433,7 @@ def _bake_mesh_object(ob: bpy.types.Object, depsgraph: bpy.types.Depsgraph, mate
 
 def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: bpy.types.Depsgraph,
             area: Area | None = None, generated_ids: Iterable[str] = (), textures: bool = True,
-            ) -> tuple[list[BakedObject], dict[str, MaterialSpec], JsonObject]:
+            style: str = "classic") -> tuple[list[BakedObject], dict[str, MaterialSpec], JsonObject]:
     """Bake the map collection. Returns (baked objects, materials, export report). Raises ExportError
     listing every blocking problem (nothing is written in that case).
 
@@ -484,7 +500,7 @@ def collect(context: bpy.types.Context, root: bpy.types.Collection, depsgraph: b
                           "add a Realize Instances node")
             continue
         try:
-            b = _bake_mesh_object(ob, depsgraph, materials, warnings, registry, textures)
+            b = _bake_mesh_object(ob, depsgraph, materials, warnings, registry, textures, style=style)
         except ExportError as e:
             errors.extend(e.errors)
             continue
@@ -542,8 +558,15 @@ def export_map(context: bpy.types.Context, path: str, name: str, heightfield_spa
     out = resolve_path(path)
     root = root or find_map_root(context)
     meta, area = read_meta(root)
+    style = "classic"
+    report = meta.get("report")
+    if isinstance(report, dict):
+        options = report.get("options")
+        if isinstance(options, dict) and isinstance(options.get("style"), str):
+            style = options["style"]
+    textures = bool(textures and style_uses_textures(style))
     depsgraph = context.evaluated_depsgraph_get()
-    baked, materials, export_report = collect(context, root, depsgraph, area, meta["generated_ids"], textures)
+    baked, materials, export_report = collect(context, root, depsgraph, area, meta["generated_ids"], textures, style)
     report = json.loads(json.dumps(meta.get("report", {})))   # deep copy; never mutate the stored metadata
     report["warnings"] = list(report.get("warnings", [])) + export_report["warnings"]
     report["blender_export"] = export_report
