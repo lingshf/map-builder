@@ -55,6 +55,10 @@ _SUN = _normalized(SUN_DIRECTION)
 _CLIFF_MIN_TAN = math.tan(math.radians(CLIFF_MIN_SLOPE_DEG))
 _CLIFF_LIT, _CLIFF_SHADOW = _hex_linear("#d4b590"), _hex_linear("#70828b")
 _SAND_BANK = _hex_linear("#f2dcae")
+# The renderer lifts and desaturates, so these vertex colours are calibrated against rendered pixels, not the
+# target swatches: a material factor and the tone curve sit between the stored colour and what is seen.
+_STYLIZED_WATER: Rgb = (0.0, 0.2, 0.55)
+_SHALLOW_BAND: Rgb = (0.3, 1.0, 1.0)
 _FOOTPATH = _hex_linear("#fdeaa2")
 _FOLIAGE_LIT, _FOLIAGE_MID, _FOLIAGE_SHADOW = _hex_linear("#6f934e"), _hex_linear("#39864c"), _hex_linear("#3d6e69")
 
@@ -188,15 +192,20 @@ def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) 
 
 
 def terrain_face_color(landcover: str | None, normal: Vec3, near_water: bool) -> Rgb:
-    """Stylized colour of one terrain triangle: cliff colours from 35 degrees, else sand in the bank band,
+    """Stylized colour of one terrain triangle: cliff colours from 35 degrees, else the shallow shore band (rendered ``#ceeef6``),
     else the landcover ramp. ``normal`` points up and need not be unit length."""
     nx, ny, nz = normal
     horizontal_sq = nx * nx + ny * ny
     if nz <= 0.0 or horizontal_sq >= (nz * _CLIFF_MIN_TAN) ** 2:
         return _CLIFF_LIT if nx * _SUN[0] + ny * _SUN[1] > 0.0 else _CLIFF_SHADOW
     if near_water and landcover != "water":
-        return _SAND_BANK
+        return _SHALLOW_BAND
     return terrain_color("stylized", landcover, math.sqrt(horizontal_sq) / nz)
+
+
+def water_color(style: str | None) -> Rgb:
+    """Vertex colour of a built water surface; stylized is calibrated so the render reads as ``#6dc0e7``."""
+    return _CLASSIC_LANDCOVER["water"] if normalize_style(style) == "classic" else _STYLIZED_WATER
 
 
 def bank_color(style: str | None) -> Rgb:

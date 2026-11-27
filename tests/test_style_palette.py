@@ -33,11 +33,16 @@ class TerrainFaceColorTest(unittest.TestCase):
                          (style.terrain_face_color("grass", SUN_SIDE, False),
                           style.terrain_face_color("grass", SHADE_SIDE, False)))
 
-    def test_bank_band_is_sand_only_near_water(self):
+    def test_shore_band_is_shallow_water_only_near_water(self):
         near = style.terrain_face_color("grass", FLAT, near_water=True)
         far = style.terrain_face_color("grass", FLAT, near_water=False)
-        self.assertEqual(near, style.bank_color("stylized"))
         self.assertNotEqual(near, far)
+        self.assertGreater(near[2], near[0])    # blue-dominant, distinct from the sand bank ramps
+        self.assertNotEqual(near, style.bank_color("stylized"))
+
+    def test_water_colour_differs_by_style(self):
+        self.assertNotEqual(style.water_color("stylized"), style.water_color("classic"))
+        self.assertEqual(style.water_color("classic"), water.WATER_COLOR)
 
     def test_classic_terrain_has_no_slope_ramp(self):
         self.assertEqual(style.terrain_color("classic", "grass", 0.0), style.terrain_color("classic", "grass", 0.4))
