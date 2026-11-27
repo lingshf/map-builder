@@ -1,0 +1,16 @@
+{
+  "regions": [
+    {
+      "camera": "overview",
+      "label": "footpath-sand",
+      "target_hex": "#fdeaa2",
+      "mean_rgb": [
+        218.9,
+        219.9,
+        218.3
+      ],
+      "deltaE2000": 20.15,
+      "flag_over_15": true
+    }
+  ]
+}

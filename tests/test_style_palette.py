@@ -43,6 +43,17 @@ class TerrainFaceColorTest(unittest.TestCase):
         self.assertEqual(style.terrain_color("classic", "grass", 0.0), style.terrain_color("classic", "grass", 0.4))
 
 
+class RoadColorTest(unittest.TestCase):
+    def test_footpaths_and_tracks_share_one_sand_colour_apart_from_roads(self):
+        foot = {style.road_color("stylized", {"highway": h}) for h in ("footway", "path", "track")}
+        self.assertEqual(len(foot), 1)
+        for road in ("residential", "primary", "service"):
+            self.assertNotIn(style.road_color("stylized", {"highway": road}), foot)
+
+    def test_classic_footpaths_are_unchanged(self):
+        self.assertEqual(style.road_color("classic", {"highway": "footway"}), (0.35, 0.32, 0.28))
+
+
 class FoliageTest(unittest.TestCase):
     def test_crown_faces_have_three_tones_by_facing(self):
         up = style.foliage_color("stylized", 1, FLAT)

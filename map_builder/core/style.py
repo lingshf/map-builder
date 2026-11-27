@@ -55,6 +55,7 @@ _SUN = _normalized(SUN_DIRECTION)
 _CLIFF_MIN_TAN = math.tan(math.radians(CLIFF_MIN_SLOPE_DEG))
 _CLIFF_LIT, _CLIFF_SHADOW = _hex_linear("#d4b590"), _hex_linear("#70828b")
 _SAND_BANK = _hex_linear("#f2dcae")
+_FOOTPATH = _hex_linear("#fdeaa2")
 _FOLIAGE_LIT, _FOLIAGE_MID, _FOLIAGE_SHADOW = _hex_linear("#6f934e"), _hex_linear("#39864c"), _hex_linear("#3d6e69")
 
 _CLASSIC_MATERIALS: dict[str, MaterialSpec] = {
@@ -206,6 +207,8 @@ def road_color(style: str | None, tags: Mapping[str, str]) -> Rgb:
     highway = tags.get("highway")
     if normalize_style(style) == "classic":
         return (0.35, 0.32, 0.28) if highway in _CLASSIC_FOOT_WAYS else (0.12, 0.12, 0.12)
+    if highway in _CLASSIC_FOOT_WAYS:
+        return _FOOTPATH
     if highway in _MAJOR_ROADS:
         return (0.87, 0.72, 0.54)
     if highway in _MINOR_ROADS:
@@ -250,5 +253,3 @@ def foliage_color(style: str | None, variant: int, normal: Vec3) -> Rgb:
     else:
         base = _FOLIAGE_SHADOW
     return _scaled(base, TREE_TINT_SCALES[variant])
-
-

@@ -1,0 +1,28 @@
+{
+  "regions": [
+    {
+      "camera": "factoria-ponds",
+      "label": "water-shore",
+      "target_hex": "#ceeef6",
+      "mean_rgb": [
+        206.5,
+        217.6,
+        213.6
+      ],
+      "deltaE2000": 8.57,
+      "flag_over_15": false
+    },
+    {
+      "camera": "factoria-ponds",
+      "label": "grass-light",
+      "target_hex": "#b9d17a",
+      "mean_rgb": [
+        206.0,
+        216.9,
+        212.9
+      ],
+      "deltaE2000": 21.53,
+      "flag_over_15": true
+    }
+  ]
+}
