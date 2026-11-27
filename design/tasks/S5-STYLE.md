@@ -352,6 +352,7 @@ Order (D156, D161, D164): **BASE** (in parallel with S4-F8, S5-F3 step 1 and [S5
   user next to the contact sheet against the reference. The GO/NO-GO states how Factoria reads against the user's
   priorities (looks good, low cost, fidelity).
 * **Verdict:** explicit **GO or NO-GO**. A NO-GO names the failing evidence and the S5-Fn fix tasks.
+* **Run sheet:** [reviews/S5-STYLE-REVIEW-checklist.md](../reviews/S5-STYLE-REVIEW-checklist.md) (camera set, rows and pass rules; D186 and D187 carry-overs; before = v0.5.0, after = main once S5-PERF-WATER merges).
 * **Dependencies:** S5-STYLE-BASE, PALETTE and WATER, then S5-PERF-WATER (D156; byte-identical, so the review evidence is unchanged). S5-DECOR is not a dependency.
 
 ### S5-DECOR: visual-only decoration ≤ 0.3 m (last; contingent)
