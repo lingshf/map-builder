@@ -27,7 +27,7 @@ FOLIAGE_SHADOW_MAX = 0.0                    # ... and at or below which it is in
 SLOPE_RAMP_FULL_TAN = 0.45                  # slope (rise/run) at which the grass ramp reaches its darkest
 SLOPE_RAMP_BRIGHTEST, SLOPE_RAMP_DARKEST = 1.08, 0.90
 FACADE_MAX_SATURATION, FACADE_VALUE_RANGE = 0.30, (0.78, 0.97)
-ROOF_SATURATION_RANGE, ROOF_VALUE_RANGE = (0.35, 0.65), (0.55, 0.80)
+ROOF_SATURATION_RANGE, ROOF_VALUE_RANGE = (0.35, 0.65), (0.30, 0.45)
 HUE_MIN_SATURATION = 0.05                   # below this a colour counts as grey
 TREE_TINT_SCALES = (0.92, 1.0, 1.08)
 
@@ -57,9 +57,12 @@ _CLIFF_LIT, _CLIFF_SHADOW = _hex_linear("#d4b590"), _hex_linear("#70828b")
 _SAND_BANK = _hex_linear("#f2dcae")
 # The renderer lifts and desaturates, so these vertex colours are calibrated against rendered pixels, not the
 # target swatches: a material factor and the tone curve sit between the stored colour and what is seen.
-_STYLIZED_WATER: Rgb = (0.0, 0.2, 0.55)
-_SHALLOW_BAND: Rgb = (0.3, 1.0, 1.0)
+_STYLIZED_WATER: Rgb = (0.08, 0.38, 0.72)
+_SHALLOW_BAND: Rgb = (0.55, 1.0, 1.0)
 _FOOTPATH = _hex_linear("#fdeaa2")
+_STYLIZED_ROAD_MAJOR: Rgb = (0.40, 0.24, 0.12)
+_STYLIZED_ROAD_MINOR: Rgb = (0.46, 0.30, 0.16)
+_STYLIZED_ROAD_OTHER: Rgb = (0.44, 0.30, 0.18)
 _FOLIAGE_LIT, _FOLIAGE_MID, _FOLIAGE_SHADOW = _hex_linear("#6f934e"), _hex_linear("#39864c"), _hex_linear("#3d6e69")
 
 _CLASSIC_MATERIALS: dict[str, MaterialSpec] = {
@@ -92,15 +95,15 @@ _CLASSIC_LANDCOVER: dict[str | None, Rgb] = {
 
 _STYLIZED_LANDCOVER: dict[str | None, Rgb] = {
     None: (0.75, 0.70, 0.62),
-    "grass": (0.67, 0.79, 0.42),
-    "forest": (0.43, 0.58, 0.37),
+    "grass": (0.52, 0.82, 0.30),
+    "forest": (0.40, 0.62, 0.24),
     "water": (0.45, 0.77, 0.92),
     "sand": (0.91, 0.85, 0.65),
 }
 
 _CLASSIC_BARK, _CLASSIC_LEAF = (0.18, 0.11, 0.06), (0.06, 0.20, 0.05)
 _STYLIZED_BARK = (0.53, 0.43, 0.33)
-_FLAT_ROOF = (0.68, 0.62, 0.56)
+_FLAT_ROOF = (0.55, 0.50, 0.45)
 _MAJOR_ROADS = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link", "trunk_link",
                 "primary_link", "secondary_link"}
 _MINOR_ROADS = {"residential", "unclassified", "living_street", "service"}
@@ -114,7 +117,7 @@ _STYLIZED_FACADE = [
     (0.86, 0.80, 0.73),
     (0.88, 0.76, 0.64),
 ]
-_STYLIZED_ROOF = [(0.74, 0.56, 0.45), (0.66, 0.57, 0.52), (0.56, 0.49, 0.45), (0.69, 0.61, 0.53)]
+_STYLIZED_ROOF = [(0.62, 0.40, 0.30), (0.54, 0.44, 0.38), (0.44, 0.36, 0.32), (0.57, 0.46, 0.38)]
 
 
 def normalize_style(style: str | None) -> StyleMode:
@@ -221,10 +224,10 @@ def road_color(style: str | None, tags: Mapping[str, str]) -> Rgb:
     if highway in _CLASSIC_FOOT_WAYS:
         return _FOOTPATH
     if highway in _MAJOR_ROADS:
-        return (0.87, 0.72, 0.54)
+        return _STYLIZED_ROAD_MAJOR
     if highway in _MINOR_ROADS:
-        return (0.85, 0.76, 0.62)
-    return (0.80, 0.73, 0.61)
+        return _STYLIZED_ROAD_MINOR
+    return _STYLIZED_ROAD_OTHER
 
 
 def facade_color(measured: Sequence[float] | None, fallback_key: str) -> Rgb:
