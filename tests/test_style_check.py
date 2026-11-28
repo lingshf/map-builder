@@ -419,6 +419,15 @@ class StyleCheckTests(unittest.TestCase):
                 merged.add_face(tuple(ids[i] for i in face), "MB Terrain", color)
         return {"name": name, "mesh": merged}
 
+    def test_parity_rejects_colour_drift_hidden_inside_a_patch(self) -> None:
+        pentagon = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (5.0, 0.0, 2.0), (2.0, 0.0, 4.0), (-1.0, 0.0, 2.0)]
+        fan_from_0, fan_from_1 = [(0, 1, 2), (0, 2, 3), (0, 3, 4)], [(1, 2, 3), (1, 3, 4), (1, 4, 0)]
+        for reds in ([0.499992, 0.5, 0.500008], [0.5, 0.500008, 0.499992]):
+            drifting = [(red, 0.7, 0.6) for red in reds]
+            ok, _ = self._parity([{"name": "wall", "mesh": _quad("a", pentagon, fan_from_0, drifting)}],
+                                 [{"name": "wall", "mesh": _quad("b", pentagon, fan_from_1, [(0.5, 0.7, 0.6)] * 3)}])
+            self.assertFalse(ok)
+
     def test_parity_rejects_other_diagonal_with_reversed_winding(self) -> None:
         self._assert_diagonal_rejected(_FLAT_QUAD, [(0, 1, 2), (0, 2, 3)], [(0, 3, 1), (3, 2, 1)])
 

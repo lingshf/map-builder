@@ -162,8 +162,8 @@ checker accepts exactly these differences and no others:
 * **Corner order.** A triangle may start at any of its corners; the winding order must be the same.
 * **Flat re-triangulation.** Triangles with no exact equivalent are accepted when every one is flat-coloured and both
   sides are flat, non-overlapping triangulations of the same patches: no directed edge is used twice, each
-  edge-connected single-colour patch is planar and faces one way, and every CLI patch has exactly one Blender patch with
-  the same colour (within the colour tolerance), winding-aware boundary and area. Another diagonal of a flat quad or
+  edge-connected patch is planar, faces one way and has one colour (every channel spans at most the colour tolerance),
+  and every CLI patch has exactly one Blender patch whose colour range stays within the tolerance of its own, winding-aware boundary and area. Another diagonal of a flat quad or
   polygon passes; a folded split, reversed winding, a double-sided sheet, or an extra or missing triangle does not.
   Colours that vary across a triangle are never accepted this way.
 

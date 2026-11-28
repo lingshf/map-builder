@@ -377,9 +377,10 @@ _AREA_TOLERANCE_M2 = 1e-4
 
 @dataclass(frozen=True)
 class _Patch:
-    """An edge-connected, flat, single-coloured, consistently facing run of triangles: its colour, total area and
+    """An edge-connected, flat, single-coloured (every channel spans at most the colour tolerance), consistently facing run of triangles: its colour range, total area and
     directed boundary edges (vertex-id pairs left once edges shared by two triangles cancel)."""
-    color: tuple[float, ...]
+    color_low: tuple[float, ...]
+    color_high: tuple[float, ...]
     area: float
     boundary: frozenset[tuple[int, int]]
 
@@ -409,8 +410,8 @@ def _edge_neighbours(triangle_ids: list[list[int]]) -> dict[int, list[int]]:
     return neighbours
 
 
-def _same_color_runs(triangles: list[_Triangle], neighbours: dict[int, list[int]]) -> list[list[int]]:
-    """Edge-connected runs of triangles, every one within the colour tolerance of the run's first triangle."""
+def _connected_runs(triangles: list[_Triangle], neighbours: dict[int, list[int]]) -> list[list[int]]:
+    """Edge-connected runs of triangles."""
     seen: set[int] = set()
     runs = []
     for start in range(len(triangles)):
@@ -422,7 +423,7 @@ def _same_color_runs(triangles: list[_Triangle], neighbours: dict[int, list[int]
             t = stack.pop()
             run.append(t)
             for other in neighbours[t]:
-                if other not in seen and _all_close(triangles[other][0][1], triangles[start][0][1], _COLOR_TOLERANCE):
+                if other not in seen:
                     seen.add(other)
                     stack.append(other)
         runs.append(run)
@@ -448,19 +449,22 @@ def _flat_patches(triangles: list[_Triangle], vertices: list[_Vec3]) -> list[_Pa
     if len(set(directed)) != len(directed):
         return None
     patches = []
-    for run in _same_color_runs(triangles, _edge_neighbours(ids)):
+    for run in _connected_runs(triangles, _edge_neighbours(ids)):
         members = [triangles[t] for t in run]
-        if not _is_flat_and_facing_one_way(members):
+        colors = [t[0][1] for t in members]
+        low, high = tuple(map(min, zip(*colors))), tuple(map(max, zip(*colors)))
+        if not _all_close(low, high, _COLOR_TOLERANCE) or not _is_flat_and_facing_one_way(members):
             return None
         edges = {directed[3 * t + k] for t in run for k in range(3)}
-        patches.append(_Patch(members[0][0][1], sum(_triangle_area(t) for t in members),
+        patches.append(_Patch(low, high, sum(_triangle_area(t) for t in members),
                               frozenset(e for e in edges if (e[1], e[0]) not in edges)))
     return patches
 
 
 def _same_patch(a: _Patch, b: _Patch) -> bool:
     return (a.boundary == b.boundary and abs(a.area - b.area) <= _AREA_TOLERANCE_M2
-            and _all_close(a.color, b.color, _COLOR_TOLERANCE))
+            and _all_close(a.color_low, b.color_high, _COLOR_TOLERANCE)
+            and _all_close(a.color_high, b.color_low, _COLOR_TOLERANCE))
 
 
 def _is_flat_retriangulation(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> bool:
