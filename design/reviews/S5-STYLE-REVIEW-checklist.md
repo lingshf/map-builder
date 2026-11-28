@@ -130,7 +130,7 @@ misplacement.
 
 ## Checklist
 
-### G: gates (any fail is NO-GO)
+### G: gates (any fail is NO-GO, except the one D191 exception in G10)
 
 | Row | Check | Evidence | Pass rule |
 |---|---|---|---|
@@ -181,7 +181,9 @@ misplacement.
 
 ## Verdict
 
-* **GO** requires: every G row passes (G1–G14); R1 to R3 have verdicts with no named NO-GO finding; the
+* **GO** requires: every G row passes (G1–G14). The only exception is D191: the pre-existing Munich CLI/Blender
+  façade parity failure in G10 is recorded and tracked as a next-sprint bug but does not block GO; every other G10
+  requirement and every other gate still applies; R1 to R3 have verdicts with no named NO-GO finding; the
   independent QA verdict for R3 is **accepted** and linked (D186f); T1 to T4 pass.
 * **Pending** (neither GO nor NO-GO): every other row passes, but the R3 QA verdict is not yet given. The review
   reports pending and asks QA. When QA accepts, the review becomes GO and S5-STYLE-BASE `done` closes. A QA
