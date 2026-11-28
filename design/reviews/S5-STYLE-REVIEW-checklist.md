@@ -10,7 +10,8 @@ fills in every row below with a verdict (pass / fail / information) and a link t
 ## Gate to start
 
 * S5-PERF-WATER is merged into main. Let **H** be the main commit at that point; the review pins H and does not
-  move it.
+  move it. In the run, H = a6dbe48 (#105). Scoped fixes found by the run were re-checked at their own merges: T4 at
+  26a9cc5 (#107) and R3 at 850a772 (#109, D194). The GO revision is 850a772; all other rows keep their evidence at H.
 * In scope: S5-STYLE-BASE (#85, fba2509), S5-F3 (#97, 8ce3d28), S5-F4 (#94, e780e02), S5-PERF-GATE (#91, 796d72b),
   S5-STYLE-PALETTE (#100, 4cb17fb), S5-STYLE-WATER (#103, 852a137), S5-PERF-WATER (H).
 * The reference slot is waived for #100 and #103 (D187); R1 carries the judgment.
@@ -136,7 +137,7 @@ misplacement.
 | G1 | G0 on H vs 8ce3d28 | `tools/style_check.py`; 4 packages × 2 paths × 2 modes = 16 | 16/16 ok: `.mbcol` and `.mbhf` bytes, georeference, probes, blocked and dropped lists |
 | G2 | G0 negative cases still fail | `tests/test_style_check.py` on H | each listed negative case fails |
 | G3 | Classic identity (D141) | whole archive, H `--style classic` vs 8ce3d28, 4 packages × 2 paths | byte-identical, 8/8. The #100 QA rejection failed here on Blender (classic material factors), so the Blender column is required |
-| G4 | Classic vs stylized members on H | member diff | only `visual/map.glb`, the manifest `files[]` hashes and `package_id`, `asset_notices`/NOTICES, and `report.json` `style` differ. A member's `files[].hash` and `files[].bytes` may change together; the sample NOTICES 1867 → 1015 is intended (D192) |
+| G4 | Classic vs stylized members on H | member diff | only these differ: `visual/map.glb`; in the manifest, `package_id` and, for the same member together, `files[].hash` and `files[].bytes` (D192); `asset_notices`/NOTICES; and `report.json` `style`. The sample NOTICES 1867 → 1015 is intended (D192) |
 | G5 | Absolute budgets on H, stylized | GLB inspection, 4 packages × 2 paths | materials ≤ 8 (the #100 QA rejection found 9); 0 embedded texture bytes; no glTF extensions; visual triangles per node equal to classic |
 | G6 | Per-PR budgets | the D139 table of #100, #103 and PERF-WATER, each against its merge-base | every floor met, or a recorded decision covers the miss |
 | G7 | D153 work gate | the PR evidence of #100, #103 and PERF-WATER | F1–F3 pass; F4 and F6 answered; F5 CPU disclosed |
@@ -154,7 +155,7 @@ misplacement.
 |---|---|---|---|
 | R1 | **Reference vs head** (D187) | Every after-render is judged against the S5-STYLE target table (sRGB swatches) and the user's direction: saturated, bright, readable from drone height, and a low-poly cartoon look. The palette ΔE report supports the judgment. The coordinator-held image is used if supplied (see Reference slot). | One verdict per priority, in D137 order: (1) looks good, (2) low cost (rows G5, G6 and G9), (3) fidelity (landcover keeps its class; objects stay in place, which G1 proves). A fail on (1) is NO-GO only if it is named against a specific camera and swatch. |
 | R2 | **Faceting** (D186b) | Cameras 4, 5, 7, 8, 10, 12 and 17, after vs before. The method PALETTE picked (dropped `NORMAL` or unwelding) is named. | Faces read as flat, low-poly facets. No smooth-shading leftovers, no black or inverted faces, no seams that read as cracks, no shading acne on terrain or roofs. Anything found is named per camera and becomes an S5-Fn task. |
-| R3 | **D163 ponds verdict** (D186f) | Camera 3 (the re-framed `factoria-ponds` from #100), rendered at H. | The southern Mercer Slough ponds (47.584–47.586° N, about +560 to +780 m northing) are visible as water, not a grey foreground: open water plus a shore band inside the frame, and the `water-shore` region falls on water. Since #109 (D194) that window is rows 408–413 on the water-adjacent bank ramp; the old D163 window, rows 419–424, must read sand. Design records its own verdict, and the review links an **independent QA verdict of accepted** on this camera at H. That QA verdict is required: it closes S5-STYLE-BASE `done` and is a GO precondition. A Design verdict alone, or a pending QA request, is not enough. |
+| R3 | **D163 ponds verdict** (D186f) | Camera 3 (the re-framed `factoria-ponds` from #100), rendered at H. | The southern Mercer Slough ponds (47.584–47.586° N, about +560 to +780 m northing) are visible as water, not a grey foreground: open water plus a shore band inside the frame, Measurement rule (D194, since #109): the `water-shore` window is rows 408–413 on the water-adjacent bank ramp, and the old D163 window, rows 419–424 (terrain beyond the ramp), must read sand. Design records its own verdict, and the review links an **independent QA verdict of accepted** on this camera at H. That QA verdict is required: it closes S5-STYLE-BASE `done` and is a GO precondition. A Design verdict alone, or a pending QA request, is not enough. |
 | R4 | Water and shore (D186e) | Cameras 9, 11 and 13. | Open water reads cyan; a light shore band blends into sand; water and bank edges show no gaps. Colour only: G1 holds. |
 | R5 | Trees | Cameras 2 and 17. | Tint variants are deterministic, and the lit, mid and shadow faces are distinguishable. The shape is unchanged (D145). |
 | R6 | Buildings and roads | Cameras 4, 6, 7, 15 and 2. | Pastel walls and saturated roofs, with tagged colours pulled into the palette. Roads are light warm grey; footways and paths are sand. |
@@ -174,7 +175,7 @@ misplacement.
 | Row | Check | Pass rule |
 |---|---|---|
 | T1 | New tests from #100, #103 and PERF-WATER | each ≤ 5 s, no wall-clock asserts, no case duplicated across the water, shore and floating-audit test files |
-| T2 | Persisted vs evidence | real-data audits and replays are PR evidence, not persisted tests |
+| T2 | Persisted vs evidence | real-data audits and replays are PR evidence, not persisted tests. Small, attributed, recorded ODbL fixtures may be persisted in tests (D193) |
 | T3 | PR CI time on H | ≤ 10 min |
 | T4 | Coverage of the S5 rules | palette rules (slope threshold, bank band, road classes, pulled tagged colour, tree tint), classic sample identity, the Blender style-option default, and the G0 negative cases each have at least one test |
 
