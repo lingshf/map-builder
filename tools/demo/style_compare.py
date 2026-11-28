@@ -29,6 +29,7 @@ from style_regions import Region  # noqa: E402
 
 MEAN_RGB_DECIMALS = 1
 DELTA_E_DECIMALS = 2
+MAX_POOL_WORKERS = 61  # ProcessPoolExecutor limit on Windows
 
 
 def render_path(render_dir: str, camera: str, side: str) -> str:
@@ -112,7 +113,7 @@ def compare_cameras(
         for camera in cameras:
             job(camera)
         return
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    with ProcessPoolExecutor(max_workers=min(workers, len(cameras), MAX_POOL_WORKERS)) as pool:
         list(pool.map(job, cameras))
 
 

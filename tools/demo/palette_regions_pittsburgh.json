@@ -2,7 +2,7 @@
   "regions": [
     {"camera": "overview", "label": "water-open", "target_hex": "#6dc0e7", "x": 0.4953, "y": 0.7194, "w": 0.0312, "h": 0.0167},
     {"camera": "river-bend", "label": "water-open", "target_hex": "#6dc0e7", "x": 0.9195, "y": 0.3944, "w": 0.0156, "h": 0.0208},
-    {"camera": "river-bend", "label": "water-shore", "target_hex": "#ceeef6", "x": 0.89, "y": 0.6, "w": 0.012, "h": 0.015},
+    {"camera": "river-bend", "label": "water-shore", "target_hex": "#ceeef6", "x": 0.872, "y": 0.6, "w": 0.01, "h": 0.015},
     {"camera": "dsm-ground", "label": "grass-mid", "target_hex": "#96b671", "x": 0.5992, "y": 0.3917, "w": 0.0234, "h": 0.0278}
   ]
 }

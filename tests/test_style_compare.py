@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 import zlib
+from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEMO = os.path.join(REPO, "tools", "demo")
@@ -205,23 +206,34 @@ class SheetAndReportTests(unittest.TestCase):
             self.assertEqual((report["swatches"], report["contrast_pairs"]), ([], []))
             self.assertFalse(os.path.exists(os.path.join(tmp, "sheet2-bare-regions.png")))
 
+    def test_pool_size_is_capped_to_cameras_and_platform_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(style_compare, "ProcessPoolExecutor") as pool_cls:
+                pool_cls.return_value.__enter__.return_value.map.return_value = []
+                style_compare.compare_cameras(tmp, tmp, [], ["a", "b"], workers=500)
+                self.assertEqual(pool_cls.call_args.kwargs["max_workers"], 2)
+                style_compare.compare_cameras(tmp, tmp, [], [str(i) for i in range(100)], workers=500)
+                self.assertEqual(pool_cls.call_args.kwargs["max_workers"], style_compare.MAX_POOL_WORKERS)
+
 
 class NoPillowTests(unittest.TestCase):
     def test_whole_compose_stage_runs_without_pillow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             img = solid(8, 8, (10, 20, 30))
             for side in ("before", "after"):
-                png_io.write_png(style_compare.render_path(tmp, "cam", side), img)
+                png_io.write_png(style_compare.render_path(tmp, "top", side), img)
             code = (
                 "import sys; sys.modules['PIL'] = None\n"
                 f"sys.path.insert(0, {DEMO!r})\n"
                 "import style_compare, style_regions\n"
                 f"regions = style_regions.load_regions({regions_path('synthetic')!r})\n"
-                f"style_compare.compare_cameras({tmp!r}, {tmp!r}, regions, ['cam'])\n"
+                f"style_compare.compare_cameras({tmp!r}, {tmp!r}, regions, ['top'])\n"
             )
             result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(os.path.exists(os.path.join(tmp, "paired-cam.json")))
+            with open(os.path.join(tmp, "paired-top.json"), encoding="utf-8") as f:
+                self.assertTrue(json.load(f)["swatches"])
+            self.assertTrue(os.path.exists(os.path.join(tmp, "sheet2-top-regions.png")))
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow only needed for the D187 fallback equivalence check")
