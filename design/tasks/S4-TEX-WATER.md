@@ -47,12 +47,11 @@ Hard: `tools/textures/**`, `map_builder/assets/textures/terrain_*.png` and `LICE
 `core/textures.py`, `core/uv.py` (the `TEXTURE_MEAN_ALBEDO` entry only), `tests/test_textures.py`. Soft:
 sample (D103), `tests/fixtures` textured fixture if it pins the image hash.
 
-## Follow-up: S5-TEX-WATER proposed closed (D206, pending Team Leader confirmation)
+## Follow-up: S5-TEX-WATER closed (D206)
 
 The water texture deferred from this task (S4-F2, D124: an "MB Water" texture with water UVs, a CC0 asset and
-NOTICES) is **proposed closed, not re-scoped** (S6-TEX-WATER-CLOSE, D206; it becomes closed when the Team Leader
-confirms D206). Stylized mode, the user's chosen look, ships no
+NOTICES) is **closed, not re-scoped** (S6-TEX-WATER-CLOSE, #116; D206 confirmed by the Team Leader
+2026-11-27). Stylized mode, the user's chosen look, ships no
 textures (D139); in classic mode this task already made the river read blue (B ≥ G) with textures on. Reopen only
-on a user or consumer request for textured classic water, as a new task. Once D206 is confirmed, the user guide's
-"planned: S5-TEX-WATER" wording (`docs/user/generate.md` lines 170–171) is outside `design/` and is handed to the
-coordinator as a docs follow-up.
+on a user or consumer request for textured classic water, as a new task. The user guide's
+"planned: S5-TEX-WATER" wording was corrected outside `design/` in #117.
