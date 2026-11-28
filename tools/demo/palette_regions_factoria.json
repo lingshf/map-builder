@@ -9,9 +9,9 @@
     {"camera": "overview", "label": "footpath-sand", "target_hex": "#fdeaa2", "x": 0.69, "y": 0.508,     "w": 0.005, "h": 0.006},
         {"camera": "overview", "label": "road-1", "x": 0.7297, "y": 0.9167, "w": 0.0078, "h": 0.0083},
         {"camera": "overview", "label": "land-1", "x": 0.7766, "y": 0.9097, "w": 0.0078, "h": 0.0083},
-        {"camera": "factoria-interchange", "label": "road-1", "x": 0.54, "y": 0.775, "w": 0.0047, "h": 0.0042},
-        {"camera": "factoria-interchange", "label": "land-1", "x": 0.4867, "y": 0.8014, "w": 0.0063, "h": 0.0069},
-        {"camera": "factoria-interchange", "label": "road-2", "x": 0.6664, "y": 0.8833, "w": 0.0039, "h": 0.0042},
-        {"camera": "factoria-interchange", "label": "land-2", "x": 0.6125, "y": 0.9, "w": 0.0063, "h": 0.0069}
+        {"camera": "factoria-interchange", "label": "road-1", "x": 0.5352, "y": 0.7583, "w": 0.0047, "h": 0.0042},
+        {"camera": "factoria-interchange", "label": "land-1", "x": 0.5336, "y": 0.7764, "w": 0.0063, "h": 0.0069},
+        {"camera": "factoria-interchange", "label": "road-2", "x": 0.8914, "y": 0.6667, "w": 0.0039, "h": 0.0042},
+        {"camera": "factoria-interchange", "label": "land-2", "x": 0.8695, "y": 0.6639, "w": 0.0063, "h": 0.0069}
   ]
 }

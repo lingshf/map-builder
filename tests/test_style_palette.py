@@ -61,6 +61,44 @@ class RoadColorTest(unittest.TestCase):
         self.assertEqual(style.road_color("classic", {"highway": "footway"}), (0.35, 0.32, 0.28))
 
 
+class StylizedPaletteValuesTest(unittest.TestCase):
+    """S6-STYLE-TUNE (D204): the values that carry the roof/wall and road/land contrast and the water/grass swatches."""
+
+    @staticmethod
+    def brightness(rgb):
+        return sum(rgb) / 3
+
+    def test_roads_are_darker_than_every_landcover_and_the_footpath(self):
+        footpath = style.road_color("stylized", {"highway": "footway"})
+        for highway in ("primary", "residential", "service"):
+            road = style.road_color("stylized", {"highway": highway})
+            self.assertLess(self.brightness(road), self.brightness(footpath))
+            for landcover in (None, "grass", "forest", "sand"):
+                self.assertLess(self.brightness(road), self.brightness(style.terrain_color("stylized", landcover)))
+
+    def test_road_classes_have_their_pinned_colours(self):
+        colours = [style.road_color("stylized", {"highway": h}) for h in ("primary", "residential", "construction")]
+        self.assertEqual(colours, [(0.40, 0.24, 0.12), (0.46, 0.30, 0.16), (0.44, 0.30, 0.18)])
+
+    def test_water_and_shallow_band_are_pinned(self):
+        self.assertEqual(style.water_color("stylized"), (0.08, 0.38, 0.72))
+        self.assertEqual(style.bank_color("stylized"), (0.55, 1.0, 1.0))
+
+    def test_grass_and_forest_are_pinned_and_grass_stays_the_lighter(self):
+        grass, forest = style.terrain_color("stylized", "grass"), style.terrain_color("stylized", "forest")
+        for actual, pinned in ((grass, (0.52, 0.82, 0.30)), (forest, (0.40, 0.62, 0.24))):
+            for channel, expected in zip(actual, pinned):    # the flat-terrain brightness ramp scales the base colour
+                self.assertAlmostEqual(channel / style.SLOPE_RAMP_BRIGHTEST, expected)
+        self.assertGreater(self.brightness(grass), self.brightness(forest))
+
+    def test_tagged_roofs_are_pulled_dark_so_they_stay_apart_from_pale_walls(self):
+        for tagged in ((1.0, 0.9, 0.8), (0.9, 0.5, 0.4)):
+            roof = style.roof_color(tagged, "k", False)
+            wall = style.facade_color(tagged, "k")
+            self.assertLess(max(roof), style.srgb_to_linear(style.ROOF_VALUE_RANGE[1]) + 1e-9)
+            self.assertLess(self.brightness(roof), self.brightness(wall))
+
+
 class FoliageTest(unittest.TestCase):
     def test_crown_faces_have_three_tones_by_facing(self):
         up = style.foliage_color("stylized", 1, FLAT)
