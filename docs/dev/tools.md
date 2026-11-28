@@ -161,9 +161,10 @@ checker accepts exactly these differences and no others:
   two conventions (about 1.5e-5 m at 100 m from the origin).
 * **Corner order.** A triangle may start at any of its corners; the winding order must be the same.
 * **Flat re-triangulation.** Triangles with no exact equivalent are accepted when every one is flat-coloured and,
-  per colour, both sides cover the same surface: the same boundary edges with the same winding, and the same scalar
-  and vector area. Another diagonal of a flat quad or polygon passes; a folded split, reversed winding, or an extra or
-  missing triangle does not. Colours that vary across a triangle are never accepted this way.
+  per colour (within the colour tolerance), both sides are flat, non-overlapping triangulations of the same surface:
+  no directed edge is used twice, every edge-connected patch is planar, and the boundary edges (with winding) and the
+  total area are equal. Another diagonal of a flat quad or polygon passes; a folded split, reversed winding, or an extra
+  or missing triangle does not. Colours that vary across a triangle are never accepted this way.
 
 A colour swapped between corners is still reported. Material factors (base colour, roughness, metallic) are compared
 exactly, so a Blender export that writes a different factor than the CLI fails (D207: the classic Blender export

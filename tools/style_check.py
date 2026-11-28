@@ -377,10 +377,9 @@ _AREA_TOLERANCE_M2 = 1e-4
 
 @dataclass(frozen=True)
 class _Surface:
-    """What a set of same-coloured triangles covers: scalar and vector area, plus the directed boundary edges
-    (vertex-id pairs) left once edges shared by two triangles cancel."""
+    """What a flat-coloured triangle set covers: its total area and its directed boundary edges (vertex-id pairs
+    left once edges shared by two triangles cancel)."""
     area: float
-    vector_area: _Vec3
     boundary: frozenset[tuple[int, int]]
 
 
@@ -392,42 +391,90 @@ def _vertex_id(vertices: list[_Vec3], point: _Vec3) -> int:
     return len(vertices) - 1
 
 
-def _surface_of(triangles: list[_Triangle], vertices: list[_Vec3]) -> _Surface:
-    area, vector_area = 0.0, (0.0, 0.0, 0.0)
-    edges: set[tuple[int, int]] = set()
+def _triangle_area(triangle: _Triangle) -> float:
+    a, b, c = (corner[0] for corner in triangle)
+    twice_area = _cross(_sub(b, a), _sub(c, a))
+    return math.sqrt(_dot(twice_area, twice_area)) / 2
+
+
+def _patches(triangle_ids: list[list[int]]) -> list[list[int]]:
+    """Connected components (indices into ``triangle_ids``) of triangles that share an edge."""
+    owners: dict[frozenset[int], list[int]] = collections.defaultdict(list)
+    for t, ids in enumerate(triangle_ids):
+        for k in range(3):
+            owners[frozenset((ids[k], ids[(k + 1) % 3]))].append(t)
+    neighbours: dict[int, list[int]] = collections.defaultdict(list)
+    for touching in owners.values():
+        for t in touching:
+            neighbours[t].extend(o for o in touching if o != t)
+    seen: set[int] = set()
+    patches = []
+    for start in range(len(triangle_ids)):
+        if start in seen:
+            continue
+        patch, stack = [], [start]
+        seen.add(start)
+        while stack:
+            t = stack.pop()
+            patch.append(t)
+            for other in neighbours[t]:
+                if other not in seen:
+                    seen.add(other)
+                    stack.append(other)
+        patches.append(patch)
+    return patches
+
+
+def _is_planar(triangles: list[_Triangle]) -> bool:
+    origin = triangles[0][0][0]
+    normal = next((n for t in triangles for n in [_cross(_sub(t[1][0], t[0][0]), _sub(t[2][0], t[0][0]))] if _dot(n, n) > 0.0), None)
+    if normal is None:
+        return True
+    length = math.sqrt(_dot(normal, normal))
+    return all(abs(_dot(normal, _sub(corner[0], origin))) / length <= _POSITION_TOLERANCE_M for t in triangles for corner in t)
+
+
+def _surface_of(triangles: list[_Triangle], vertices: list[_Vec3]) -> _Surface | None:
+    """None unless the triangles are flat, non-overlapping patches: no directed edge is used twice (that would be
+    a duplicate or reversed triangle) and every edge-connected patch lies in one plane."""
+    ids = [[_vertex_id(vertices, corner[0]) for corner in triangle] for triangle in triangles]
+    edges = [(i[k], i[(k + 1) % 3]) for i in ids for k in range(3)]
+    edge_set = set(edges)
+    if len(edge_set) != len(edges) or not all(_is_planar([triangles[t] for t in patch]) for patch in _patches(ids)):
+        return None
+    return _Surface(sum(_triangle_area(t) for t in triangles), frozenset(e for e in edge_set if (e[1], e[0]) not in edge_set))
+
+
+def _same_surface(a: _Surface | None, b: _Surface | None) -> bool:
+    return a is not None and b is not None and abs(a.area - b.area) <= _AREA_TOLERANCE_M2 and a.boundary == b.boundary
+
+
+def _group_by_color(triangles: list[_Triangle]) -> list[tuple[tuple[float, ...], list[_Triangle]]]:
+    """Triangles grouped by flat colour; colours within the colour tolerance share a group."""
+    groups: list[tuple[tuple[float, ...], list[_Triangle]]] = []
     for triangle in triangles:
-        a, b, c = (corner[0] for corner in triangle)
-        twice_area = _cross(_sub(b, a), _sub(c, a))
-        area += math.sqrt(_dot(twice_area, twice_area)) / 2
-        vector_area = (vector_area[0] + twice_area[0] / 2, vector_area[1] + twice_area[1] / 2, vector_area[2] + twice_area[2] / 2)
-        ids = [_vertex_id(vertices, corner) for corner in (a, b, c)]
-        edges.update(zip(ids, ids[1:] + ids[:1]))
-    return _Surface(area, vector_area, frozenset(e for e in edges if (e[1], e[0]) not in edges))
-
-
-def _same_surface(a: _Surface, b: _Surface) -> bool:
-    return (abs(a.area - b.area) <= _AREA_TOLERANCE_M2 and a.boundary == b.boundary
-            and _all_close(a.vector_area, b.vector_area, _AREA_TOLERANCE_M2))
-
-
-def _group_by_color(triangles: list[_Triangle]) -> dict[tuple[float, ...], list[_Triangle]]:
-    groups: dict[tuple[float, ...], list[_Triangle]] = collections.defaultdict(list)
-    for triangle in triangles:
-        groups[tuple(round(c, 4) for c in triangle[0][1])].append(triangle)
+        color = triangle[0][1]
+        group = next((g for c, g in groups if _all_close(c, color, _COLOR_TOLERANCE)), None)
+        if group is None:
+            groups.append((color, [triangle]))
+        else:
+            group.append(triangle)
     return groups
 
 
 def _is_flat_retriangulation(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> bool:
-    """Per flat colour, both sides cover the same surface: the same winding-aware boundary and the same scalar
-    and vector area. Another diagonal of a flat polygon passes; a folded split, reversed winding, or an extra or
-    missing triangle changes the boundary or an area."""
+    """Per flat colour, both sides are flat, non-overlapping triangulations of the same surface: the same
+    winding-aware boundary and the same area. Another diagonal of a flat quad or polygon passes; a folded split,
+    reversed winding, or an extra or missing triangle does not."""
     if not all(_is_flat_colored(t) for t in cli_triangles + bl_triangles):
         return False
     cli_groups, bl_groups = _group_by_color(cli_triangles), _group_by_color(bl_triangles)
     vertices: list[_Vec3] = []
-    return cli_groups.keys() == bl_groups.keys() and all(
-        _same_surface(_surface_of(cli_groups[color], vertices), _surface_of(bl_groups[color], vertices))
-        for color in cli_groups)
+    for color, cli_group in cli_groups:
+        bl_group = next((g for c, g in bl_groups if _all_close(c, color, _COLOR_TOLERANCE)), None)
+        if bl_group is None or not _same_surface(_surface_of(cli_group, vertices), _surface_of(bl_group, vertices)):
+            return False
+    return len(cli_groups) == len(bl_groups)
 
 def _triangle_difference(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> dict[str, Any] | None:
     """None when the triangle sets agree; else the first triangle each path has no equivalent for.

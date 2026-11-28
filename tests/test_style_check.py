@@ -384,6 +384,15 @@ class StyleCheckTests(unittest.TestCase):
         folded = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 3.0), (0.0, 1.0, 3.0)]
         self._assert_diagonal_rejected(folded, [(0, 1, 2), (0, 2, 3)], [(0, 1, 3), (1, 2, 3)])
 
+    def test_parity_rejects_other_diagonal_of_a_twisted_quad_with_equal_areas(self) -> None:
+        twisted = [(1.0, 0.0, 0.0), (0.0, 1.0, 1.0), (-1.0, 0.0, 0.0), (0.0, -1.0, 1.0)]
+        self._assert_diagonal_rejected(twisted, [(0, 1, 2), (0, 2, 3)], [(0, 1, 3), (1, 2, 3)])
+
+    def test_parity_rejects_other_diagonal_when_color_differs_beyond_tolerance(self) -> None:
+        ok, _ = self._parity([{"name": "wall", "mesh": _quad("a", _FLAT_QUAD, [(0, 1, 2), (0, 2, 3)])}],
+                             [{"name": "wall", "mesh": _quad("b", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)], [(0.80004, 0.7, 0.6)] * 2)}])
+        self.assertFalse(ok)
+
     def test_parity_rejects_other_diagonal_with_reversed_winding(self) -> None:
         self._assert_diagonal_rejected(_FLAT_QUAD, [(0, 1, 2), (0, 2, 3)], [(0, 3, 1), (3, 2, 1)])
 
