@@ -691,6 +691,17 @@ fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (
 | 7 | Fidelity: S5-F2 rocks, S5-F1 tree shapes, S4-F3 water tagging, S4-F6 landcover staircase | Lowest of the user's priorities | S5-F1 changes `vegetation` collision and needs the user (D145) |
 | 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures | |
 
+## Sprint 7 candidates (additions)
+
+New tasks from the [#17 triage](reviews/S6-CONSUMER-17.md) (S6-CONSUMER-TRIAGE). They add to the unconsumed Sprint 6
+candidates above; none joins M-S6 unless the Team Leader adds it with a D-number.
+
+| Id | Candidate | Why | Notes |
+|---|---|---|---|
+| S7-REL-SAMPLE | Release notes list the committed synthetic sample (bytes, SHA-256, `package_id`, `schema_version`); the SPRINT_CLOSE release AC checks the row | #17 request 3 | Release manager and Design; docs only; applies to the next release |
+| S7-SPAWN | Optional `spawn_points[]` (map frame, metres, heading) as format minor 2.2.0 | #17 request 4 | D101/D110: no new member; positive frozen-reader fixture (Python and C#); source and validation rules to be scoped by the Team Leader |
+| (user) | A `format-2.1.0` tag; a 3.0 notice period and a kept 2.x sample | #17 requests 1 and 6 | Need the user: tagging (D202) and the D101 confirmation (item 3 below) |
+
 ## Decisions that need the user
 
 1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
