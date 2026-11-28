@@ -167,8 +167,9 @@ down to the carved bed. `report.json` `water_bodies` lists each body and its
 outcome (`built(flat)`, `built(profile, N stations)` or a named fallback,
 for example `fallback(no shore samples)` for a body outside the terrain).
 
-**MB Water** has no texture yet; it is a flat, glossy colour (planned:
-S5-TEX-WATER). The heightfield (`.mbhf`) shows the riverbed, not the water;
+**MB Water** uses colour rather than a dedicated water texture. Stylized
+packages contain no textures; water appears blue in Classic. The heightfield
+(`.mbhf`) shows the riverbed, not the water;
 to land on or detect water, query the collision mesh (`.mbcol`), where water
 is class 5 `water`. Packages with no water are unchanged.
 
