@@ -45,9 +45,13 @@ calibrated on a 1920 x 1129 window, so other screen sizes may need adjusting in 
   from a preset and verifying the reported WebGL renderer contains `SwiftShader`.
 * `style_contact_sheet.py` builds one same-camera contact sheet from `reference/base/head` renders.
 * `style_render_recipe.py` renders `before/after` with deterministic Cycles CPU by default
-  (`--engine CYCLES --samples 8 --seed 1 --denoise off`), and writes per-camera contact
-  sheets plus fixed-region palette ΔE2000 reports and `timing.json` (per-output timing vs
-  the 120 s budget). EEVEE stays available via `--engine BLENDER_EEVEE`.
+  (`--engine CYCLES --samples 8 --seed 1 --denoise off`), then composes two-column sheets and
+  paired ΔE2000 reports (`style_compare.py`, Pillow-free; EEVEE stays available via
+  `--engine BLENDER_EEVEE`). Add `--reference` for the legacy three-column sheets. It also writes
+  `timing.json` (per-output timing vs the 120 s budget). See `docs/dev/tools.md`, "Style render recipe".
+* `style_compare.py` is the compose stage on its own: it reads `render-<camera>-before/after.png`
+  and needs neither Blender nor Pillow (modules `png_io`, `style_color`, `style_regions`,
+  `style_sheet`). Preset-scoped regions live in `palette_regions_<preset>.json`.
 * Added preset: `bellevue-factoria` (D157 final: center 47.5790/-122.1790, 1600 x 1400 m).
 * Added style camera presets: `style-sample-forest-edge`, `style-pittsburgh-river-bend`,
   `style-munich-roofscape`.

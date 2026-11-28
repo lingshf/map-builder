@@ -12,106 +12,13 @@ import sys
 import tempfile
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import demo_bundle as db  # noqa: E402
-
-
-@dataclass(frozen=True)
-class Region:
-    camera: str
-    label: str
-    target_hex: str
-    x: float
-    y: float
-    w: float
-    h: float
-
-
-def _srgb_to_lab(rgb: tuple[float, float, float]) -> tuple[float, float, float]:
-    def to_linear(c: float) -> float:
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    r, g, b = [to_linear(c / 255.0) for c in rgb]
-    x = r * 0.4124564 + g * 0.3575761 + b * 0.1804375
-    y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
-    z = r * 0.0193339 + g * 0.1191920 + b * 0.9503041
-    xr, yr, zr = x / 0.95047, y / 1.0, z / 1.08883
-
-    def f(t: float) -> float:
-        return t ** (1 / 3) if t > 0.008856 else (7.787 * t + 16 / 116)
-
-    fx, fy, fz = f(xr), f(yr), f(zr)
-    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
-
-
-def _delta_e2000(lab1: tuple[float, float, float], lab2: tuple[float, float, float]) -> float:
-    # CIEDE2000 with kL=kC=kH=1
-    l1, a1, b1 = lab1
-    l2, a2, b2 = lab2
-    c1 = math.sqrt(a1 * a1 + b1 * b1)
-    c2 = math.sqrt(a2 * a2 + b2 * b2)
-    c_bar = (c1 + c2) / 2
-    g = 0.5 * (1 - math.sqrt((c_bar**7) / (c_bar**7 + 25**7))) if c_bar > 0 else 0.0
-    a1p = (1 + g) * a1
-    a2p = (1 + g) * a2
-    c1p = math.sqrt(a1p * a1p + b1 * b1)
-    c2p = math.sqrt(a2p * a2p + b2 * b2)
-
-    def hp(a: float, b: float) -> float:
-        if a == 0 and b == 0:
-            return 0.0
-        ang = math.degrees(math.atan2(b, a))
-        return ang + 360 if ang < 0 else ang
-
-    h1p = hp(a1p, b1)
-    h2p = hp(a2p, b2)
-    dlp = l2 - l1
-    dcp = c2p - c1p
-    dhp = 0.0
-    if c1p * c2p != 0:
-        dh = h2p - h1p
-        if abs(dh) <= 180:
-            dhp = dh
-        elif dh > 180:
-            dhp = dh - 360
-        else:
-            dhp = dh + 360
-    dhp_rad = math.radians(dhp / 2)
-    dh_term = 2 * math.sqrt(c1p * c2p) * math.sin(dhp_rad)
-    l_bar = (l1 + l2) / 2
-    c_bar_p = (c1p + c2p) / 2
-    h_bar = h1p + h2p
-    if c1p * c2p != 0:
-        if abs(h1p - h2p) <= 180:
-            h_bar = (h1p + h2p) / 2
-        elif h1p + h2p < 360:
-            h_bar = (h1p + h2p + 360) / 2
-        else:
-            h_bar = (h1p + h2p - 360) / 2
-    t = (
-        1
-        - 0.17 * math.cos(math.radians(h_bar - 30))
-        + 0.24 * math.cos(math.radians(2 * h_bar))
-        + 0.32 * math.cos(math.radians(3 * h_bar + 6))
-        - 0.20 * math.cos(math.radians(4 * h_bar - 63))
-    )
-    sl = 1 + (0.015 * ((l_bar - 50) ** 2)) / math.sqrt(20 + (l_bar - 50) ** 2)
-    sc = 1 + 0.045 * c_bar_p
-    sh = 1 + 0.015 * c_bar_p * t
-    dtheta = 30 * math.exp(-(((h_bar - 275) / 25) ** 2))
-    rc = 2 * math.sqrt((c_bar_p**7) / (c_bar_p**7 + 25**7)) if c_bar_p > 0 else 0.0
-    rt = -math.sin(math.radians(2 * dtheta)) * rc
-    return math.sqrt((dlp / sl) ** 2 + (dcp / sc) ** 2 + (dh_term / sh) ** 2 + rt * (dcp / sc) * (dh_term / sh))
-
-
-def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
-    c = hex_color.strip().lstrip("#")
-    if len(c) != 6:
-        raise ValueError(f"invalid hex color: {hex_color}")
-    return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+import style_color  # noqa: E402
+import style_compare  # noqa: E402
+import style_regions  # noqa: E402
+from style_regions import Region  # noqa: E402
 
 
 def _render(
@@ -227,7 +134,7 @@ def _palette_report(image_path: str, regions: list[Region], out_path: str) -> No
         crop = img.crop((x0, y0, x1, y1))
         px = list(crop.getdata())
         mean = tuple(sum(p[i] for p in px) / len(px) for i in range(3))
-        de = _delta_e2000(_srgb_to_lab(mean), _srgb_to_lab(_hex_to_rgb(r.target_hex)))
+        de = style_color.delta_e2000_rgb(mean, style_color.hex_to_rgb(r.target_hex))
         rows.append(
             {
                 "camera": r.camera,
@@ -244,22 +151,47 @@ def _palette_report(image_path: str, regions: list[Region], out_path: str) -> No
 
 
 def _load_regions(path: str) -> list[Region]:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    out: list[Region] = []
-    for r in raw.get("regions", []):
-        out.append(
-            Region(
-                camera=str(r["camera"]),
-                label=str(r["label"]),
-                target_hex=str(r["target_hex"]),
-                x=float(r["x"]),
-                y=float(r["y"]),
-                w=float(r["w"]),
-                h=float(r["h"]),
-            )
+    """Swatch regions only: the three-column report and the D187 fallback need a ``target_hex``."""
+    return style_regions.swatch_regions(style_regions.load_regions(path))
+
+
+def _write_reference_outputs(args: argparse.Namespace, preset: db.Preset, notes: list[str]) -> None:
+    """Three-column sheets (reference | before | after) and the after-only ΔE report; needs Pillow."""
+    try:
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        notes.append("Pillow not available in Blender Python; skipped contact sheets and palette reports.")
+        return
+    for cam in preset["cameras"]:
+        name = cam["name"]
+        _make_sheet(
+            args.reference,
+            os.path.join(args.out, f"render-{name}-before.png"),
+            os.path.join(args.out, f"render-{name}-after.png"),
+            os.path.join(args.out, f"contact-sheet-{name}.png"),
         )
-    return out
+
+    regions = _load_regions(args.palette_regions)
+    for cam in preset["cameras"]:
+        camera_name = cam["name"]
+        camera_regions = style_regions.regions_for_camera(regions, camera_name)
+        if not camera_regions:
+            continue
+        _palette_report(
+            os.path.join(args.out, f"render-{camera_name}-after.png"),
+            camera_regions,
+            os.path.join(args.out, f"palette-{camera_name}.json"),
+        )
+
+
+def _write_two_column_outputs(args: argparse.Namespace, preset: db.Preset) -> None:
+    """No reference: two-column sheets and paired reports, Pillow-free, in the same process as the render."""
+    style_compare.compare_cameras(
+        args.out,
+        args.out,
+        style_regions.load_regions(args.palette_regions),
+        [cam["name"] for cam in preset["cameras"]],
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -267,8 +199,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--preset", required=True)
     ap.add_argument("--before", required=True)
     ap.add_argument("--after", required=True)
-    ap.add_argument("--reference", required=True, help="reference image to place on contact sheets")
-    ap.add_argument("--palette-regions", required=True, help="json file listing fixed regions and target colors")
+    ap.add_argument(
+        "--reference",
+        help="reference image: three-column contact sheets (needs Pillow); without it, two-column before/after sheets",
+    )
+    ap.add_argument("--palette-regions", required=True, help="json file listing fixed regions (preset-scoped)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--engine", choices=("CYCLES", "BLENDER_EEVEE"), default="CYCLES")
     ap.add_argument("--samples", type=int, default=8)
@@ -312,31 +247,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         )
     notes: list[str] = []
-    try:
-        from PIL import Image  # noqa: F401
-    except ImportError:
-        notes.append("Pillow not available in Blender Python; skipped contact sheets and palette reports.")
+    if args.reference:
+        _write_reference_outputs(args, preset, notes)
     else:
-        for cam in preset["cameras"]:
-            name = cam["name"]
-            _make_sheet(
-                args.reference,
-                os.path.join(args.out, f"render-{name}-before.png"),
-                os.path.join(args.out, f"render-{name}-after.png"),
-                os.path.join(args.out, f"contact-sheet-{name}.png"),
-            )
-
-        regions = _load_regions(args.palette_regions)
-        for cam in preset["cameras"]:
-            camera_name = cam["name"]
-            camera_regions = [r for r in regions if r.camera == camera_name]
-            if not camera_regions:
-                continue
-            _palette_report(
-                os.path.join(args.out, f"render-{camera_name}-after.png"),
-                camera_regions,
-                os.path.join(args.out, f"palette-{camera_name}.json"),
-            )
+        _write_two_column_outputs(args, preset)
     with open(os.path.join(args.out, "timing.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(
             {
