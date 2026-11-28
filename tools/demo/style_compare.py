@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 lingshf
 """Compose and report stage of the style recipe: two-column before/after sheets and paired ΔE2000 reports.
 
@@ -94,13 +94,12 @@ def _write_json(path: str, data: object) -> None:
 def compare_camera(render_dir: str, out_dir: str, regions: Sequence[Region], camera: str) -> None:
     before = png_io.read_png(render_path(render_dir, camera, "before"))
     after = png_io.read_png(render_path(render_dir, camera, "after"))
-    png_io.write_png(os.path.join(out_dir, f"sheet2-{camera}.png"), style_sheet.compose_two_column(before, after))
     camera_regions = style_regions.regions_for_camera(list(regions), camera)
-    if not camera_regions:
-        return
-    outlined = style_sheet.compose_two_column(before, after, camera_regions)
-    png_io.write_png(os.path.join(out_dir, f"sheet2-{camera}-regions.png"), outlined)
+    png_io.write_png(os.path.join(out_dir, f"sheet2-{camera}.png"), style_sheet.compose_two_column(before, after))
     _write_json(os.path.join(out_dir, f"paired-{camera}.json"), paired_report(camera, camera_regions, before, after))
+    if camera_regions:
+        outlined = style_sheet.compose_two_column(before, after, camera_regions)
+        png_io.write_png(os.path.join(out_dir, f"sheet2-{camera}-regions.png"), outlined)
 
 
 def compare_cameras(

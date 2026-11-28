@@ -195,18 +195,33 @@ class SheetAndReportTests(unittest.TestCase):
             with open(os.path.join(tmp, "paired-cam.json"), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["camera"], "cam")
 
+    def test_camera_without_regions_still_gets_an_empty_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            png_io.write_png(style_compare.render_path(tmp, "bare", "before"), self.before)
+            png_io.write_png(style_compare.render_path(tmp, "bare", "after"), self.after)
+            style_compare.compare_cameras(tmp, tmp, self.regions, ["bare"])
+            with open(os.path.join(tmp, "paired-bare.json"), encoding="utf-8") as f:
+                report = json.load(f)
+            self.assertEqual((report["swatches"], report["contrast_pairs"]), ([], []))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "sheet2-bare-regions.png")))
+
 
 class NoPillowTests(unittest.TestCase):
-    def test_compose_stage_never_imports_pillow(self) -> None:
-        code = (
-            "import sys; sys.modules['PIL'] = None\n"
-            f"sys.path.insert(0, {DEMO!r})\n"
-            "import style_compare, png_io, style_sheet\n"
-            "img = png_io.RgbImage(2, 2, (bytes(6), bytes(6)))\n"
-            "style_sheet.compose_two_column(img, img)\n"
-        )
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_whole_compose_stage_runs_without_pillow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            img = solid(8, 8, (10, 20, 30))
+            for side in ("before", "after"):
+                png_io.write_png(style_compare.render_path(tmp, "cam", side), img)
+            code = (
+                "import sys; sys.modules['PIL'] = None\n"
+                f"sys.path.insert(0, {DEMO!r})\n"
+                "import style_compare, style_regions\n"
+                f"regions = style_regions.load_regions({regions_path('synthetic')!r})\n"
+                f"style_compare.compare_cameras({tmp!r}, {tmp!r}, regions, ['cam'])\n"
+            )
+            result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(os.path.exists(os.path.join(tmp, "paired-cam.json")))
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow only needed for the D187 fallback equivalence check")

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 lingshf
 """Standard-library PNG reader and writer (zlib + struct only, no Pillow) for the style demo tools.
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import struct
 import zlib
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from itertools import accumulate
 from operator import add
@@ -40,7 +41,7 @@ class RgbImage:
             raise ValueError("rows do not match width and height")
 
 
-def _chunks(data: bytes):
+def _chunks(data: bytes) -> Iterator[tuple[bytes, bytes]]:
     if data[: len(PNG_SIGNATURE)] != PNG_SIGNATURE:
         raise PngError("missing PNG signature")
     pos = len(PNG_SIGNATURE)
@@ -50,7 +51,7 @@ def _chunks(data: bytes):
         pos += length + 12
 
 
-def _wrap8(values) -> bytes:
+def _wrap8(values: Iterable[int]) -> bytes:
     return bytes(map(BYTE_MASK.__and__, values))
 
 
