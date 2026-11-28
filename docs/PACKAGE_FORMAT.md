@@ -237,7 +237,7 @@ Reference tools: `python -m tests.make_textured_fixture OUT.mbmap` writes a comp
 {
   "schema": "map-builder.package", "schema_version": "2.1.0",
   "name": "…", "created_utc": "…",
-  "generator": {"name": "map-builder", "version": "0.5.0", "blender": "4.2.23 LTS" | null},
+  "generator": {"name": "map-builder", "version": "0.6.0", "blender": "4.2.23 LTS" | null},
   "georeference": {"origin": {"lat_deg", "lon_deg"}, "horizontal_datum": "WGS84 (EPSG:4326)",
                    "projection": "…", "vertical_datum": "EGM2008", "z_offset_m": 386,
                    "height_formula": "H = z + z_offset_m", "units": "metre"},

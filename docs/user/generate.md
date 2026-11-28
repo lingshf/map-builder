@@ -172,9 +172,19 @@ S5-TEX-WATER). The heightfield (`.mbhf`) shows the riverbed, not the water;
 to land on or detect water, query the collision mesh (`.mbcol`), where water
 is class 5 `water`. Packages with no water are unchanged.
 
-## Textures
+## Style
 
-**Content > Textures** (default on) gives the generated buildings, roofs,
+**Content > Style** chooses the look. **Stylized** (the default since v0.6.0)
+is a low-poly, flat-shaded palette with no embedded textures; the package is
+smaller and carries no CC0 texture notices. **Classic** is the v0.5.0 look,
+with the optional textures below. The style is fixed when you generate and
+Export reuses it; regenerate to switch. Geometry, collision, heightfield and
+passage probes are the same in both styles. The CLI equivalent is
+`--style stylized` / `--style classic`.
+
+## Textures (Classic style only)
+
+With **Style: Classic**, **Content > Textures** (default on) gives the generated buildings, roofs,
 roads and terrain CC0 base-colour textures (facade, roof tiles, flat-roof
 gravel, asphalt, a neutral terrain detail, concrete) with world-scaled UVs. The
 vertex colour keeps each object's palette colour on average; the texture adds

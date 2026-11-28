@@ -9,7 +9,9 @@ is cut by a vertical wall through that end (since v0.5.0) and falls back to
 hipped only when that is not possible either. Each water body inside the
 terrain becomes a flat water surface on a carved bed (since v0.5.0); a body
 that cannot be built keeps water-coloured terrain cells and the report names
-why. The Textures setting only changes the viewport look here; the package
+why. Style (since v0.6.0; default Stylized) is fixed here and reused at
+export; it changes only materials, never geometry or collision. Textures
+applies only to Classic, and only changes the viewport look here; the package
 follows the setting at export.
 
 ```mermaid
@@ -34,12 +36,15 @@ flowchart TD
   U --> Y
   Y -->|Built| Z[Flat water surface, carved bed, bank keeps landcover colour]
   Y -->|Named fallback| ZF[Water-coloured terrain cells]
-  Y -->|None| V{Textures on?}
-  Z --> V
-  ZF --> V
+  Y -->|None| ST{Style?}
+  Z --> ST
+  ZF --> ST
+  ST -->|Stylized, default| SP[Flat stylized palette, no textures]
+  ST -->|Classic| V{Textures on?}
   V -->|Yes| W[CC0 textured materials and UVs]
   V -->|No| X[Plain colour materials]
-  W --> J{Build succeeds?}
+  SP --> J{Build succeeds?}
+  W --> J
   X --> J
   J -->|No| K[Roll back new data]
   K --> E

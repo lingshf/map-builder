@@ -1,5 +1,10 @@
 # Real-data demo (v0.5.0)
 
+> **v0.6.0:** the stylized look (default) and its before|after comparisons are
+> in the [v0.6.0 demo](demo/v0.6.0/README.md), with raw evidence in
+> [evidence.json](demo/v0.6.0/evidence.json). The build recipe below is unchanged;
+> add `--style classic` to reproduce the v0.5.0 look.
+
 How to rebuild and check the two v0.5.0 real-data maps, textured and
 untextured, with the recorded numbers. Images and the comparisons are in the
 [v0.5.0 demo](demo/v0.5.0/README.md). Raw evidence is in

@@ -6,9 +6,66 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
-* **Stylized ponds show a continuous shallow band** (S5-PONDS-FIX). The light shore band used to sit on terrain triangles within 6 m of the shore, but a pond's `bank:` ramp (sand) covers the first metres, so the band appeared as pale triangles on land beyond a sand ring. The stylized `bank:` ramp is now the shallow band and the terrain bank band is sand. Colour only: classic packages are byte-identical, and collision and heightfield do not change.
+## [0.6.0] - 2026-11-28
 
-* **Banks continue under elevated bridges** (S5-F3, D178). A shore-ramp bank strip used to be dropped whole when it touched a bridge line, which left the water sheet up to 1.8 m above the uncovered ground beside the I-90 crossing on Bellevue-Factoria. A strip is now cut only where it lies inside a deck footprint that sits at grade (less than 2.5 m above the ramp); under an elevated deck it passes. At-grade roads, building footprints, tunnels and abutments still mask the strip. Bellevue-Factoria (`bank:osm:relation/2315576`) and Pittsburgh (`bank:osm:relation/7937544`, `bank:osm:way/379511900`) gain bank triangles and their `.mbhf` changes at the strip nodes; `shore_ramp_blocked_m` drops accordingly. Decks, probes and the georeference are unchanged; Munich and the sample are byte-identical.
+"Stylized look" (sprint 5). **Release candidate**: tagging requires release review and coordinator
+authorization. Package schema stays **2.1.0**; v0.3.0 and later readers accept v0.6.0 packages.
+
+### Changed
+
+* **The stylized look is the new default** (S5-STYLE-PALETTE #100, S5-STYLE-WATER #103, S5-PONDS-FIX #109). New
+  packages use a pastel palette sampled from reference art, flat-shaded faces and no textures. Choose the look with
+  CLI `--style stylized|classic` (default `stylized`) or Blender **Content > Style**. `--style classic` gives the
+  v0.5.0 look, including textures when Textures is on. A classic package differs from v0.5.0 only by
+  `generator.version` and by the S5-F3 bank change below. Collision (`.mbcol`), heightfield (`.mbhf`), georeference,
+  passage probes and triangle counts are the same in both styles: the style changes only colours, materials, normals
+  and textures in `visual/map.glb`, plus `NOTICES.txt`, `manifest.json` and `report.json`.
+  * Stylized terrain: lit and shadowed cliff colours from 35 degrees, a gentle slope brightness ramp, and sand
+    beyond the water's shallow rim.
+  * Stylized trees: three foliage tones by face direction and a deterministic per-tree tint.
+  * Stylized buildings: tagged `building:colour` / `roof:colour` keep their hue, pulled into the palette; untagged
+    buildings get a palette colour keyed on their id. Footpaths and tracks have their own pale road colour.
+  * Stylized water: open water is a clear sky blue, and the `bank:` shore ramp is a light shallow-water rim
+    directly against it, so water, rim and sand read as one continuous edge (#103, #109).
+  * Stylized ignores **Textures**: the GLB embeds no images and no `NORMAL` attribute (flat shading by the glTF
+    rule), so it is smaller with the same triangles. Example CLI GLBs: Munich 4,374,908 to 2,339,412 bytes,
+    Pittsburgh 15,246,708 to 9,153,644, Bellevue-Factoria 25,746,980 to 15,316,096. The package uses 7 or 8
+    materials.
+  * `NOTICES.txt` no longer lists the five CC0 texture records when no textures are shipped, and
+    `report.json` gains `options.style` for stylized packages.
+* Blender **Content** box: new **Style** dropdown (Stylized / Classic) above Textures. Textures applies only in
+  Classic.
+
+### Fixed
+
+* **Stylized ponds show a continuous shallow band** (S5-PONDS-FIX, #109). The light shore band used to sit on terrain triangles within 6 m of the shore, but a pond's `bank:` ramp (sand) covers the first metres, so the band appeared as pale triangles on land beyond a sand ring. The stylized `bank:` ramp is now the shallow band and the terrain bank band is sand. Colour only: classic packages are byte-identical, and collision and heightfield do not change.
+
+* **Banks continue under elevated bridges** (S5-F3, #97, D178). A shore-ramp bank strip used to be dropped whole when it touched a bridge line, which left the water sheet up to 1.8 m above the uncovered ground beside the I-90 crossing on Bellevue-Factoria. A strip is now cut only where it lies inside a deck footprint that sits at grade (less than 2.5 m above the ramp); under an elevated deck it passes. At-grade roads, building footprints, tunnels and abutments still mask the strip. Bellevue-Factoria (`bank:osm:relation/2315576`) and Pittsburgh (`bank:osm:relation/7937544`, `bank:osm:way/379511900`) gain bank triangles and their `.mbhf` changes at the strip nodes; `shore_ramp_blocked_m` drops accordingly. Decks, probes and the georeference are unchanged; Munich and the sample are byte-identical.
+
+### Developer
+
+* Work-count performance gate (S5-PERF-GATE #91): deterministic per-stage counters (`tools/perf/collect.py`) and a
+  checker (`tools/perf/work_count.py compare`) that flags regressions without wall-clock noise; usage in
+  `docs/dev/tools.md` (#99).
+* Faster water stage (S5-PERF-WATER #105): indexed water masks cut Pittsburgh `ring_edge_tests` to 6.7 % of before;
+  every package is byte-identical. Adds the SwiftShader frame-time proxy (`tools/demo/style_frame_time_proxy.py`).
+* Style checker and fixed baselines (S5-STYLE-BASE #85): `tools/style_check.py` (`g0`, `classic-identity`,
+  `mode-diff`, `metrics`), the `bellevue-factoria` demo preset and three style camera presets, and the render
+  recipe `tools/demo/style_render_recipe.py`.
+* The default style is pinned in a unit test on both paths (#107). Blender's terrain-edit export check now targets
+  `terrain:grid` by identity (S5-F4 #94). The floating-collision audit no longer reports a building roof edge as
+  buried (S4-F8 #83).
+* Docs: architecture and water/shore design (#90), developer tools and CI steps (#92).
+
+### Known issues
+
+* Munich CLI and Blender packages differ in facade colours (#106). This was already true before v0.6.0, and the
+  parity check fails the same way on the classic baseline.
+* Stylized scenes read pale: in Munich pale roofs and walls merge, Pittsburgh water is a deeper blue than the
+  target, and on Bellevue-Factoria the road network loses its dark contrast.
+* Planned decorations (S5-DECOR, draft #101) are not in this release (D185).
+
+## [0.5.0] - 2026-11-24
 
 * **Roads no longer hover over carved water beds** (S4-COL-FLOAT). Roads are now draped on the carved terrain mesh instead of the pre-carve ground. Before, a road that ran into or beside a water body kept the old ground height while the terrain under it was carved up to 1.5 m down, so its collision was a cushion above the visible ground and a descending drone stopped on it. At-grade roads over water now follow the bed under the water surface (the `at_grade_roads` report lines are unchanged). Packages with no water are byte-identical. The sample package is regenerated. Developer tools: `tools/floating_audit.py` (downward-ray audit of collision, heightfield and visual surfaces; floating and buried collision, water-to-bank gaps, grouped into regions) and `tools/water_replay.py` classifies the new `road lowered` difference. Known remaining water gaps: a flat water surface can sit up to the 1.5 m carve step above the ground just outside the shore (reported as `water_shore_step`, by design), and a few river banks lower than the shore-band level or two bodies with different levels leave larger steps (`water_above_bank`; the audit lists them).
 

@@ -25,7 +25,14 @@ omits the optional heightfield. `--seed` controls procedural scatter.
 `--dsm-correction` forces correction for a local DSM; `--no-dsm-correction`
 disables it. Auto is off for local elevation.
 
-`--textures` (the default) embeds the CC0 facade, roof, road and terrain
+`--style stylized` (the default since v0.6.0) writes the low-poly stylized
+look: a flat-shaded palette with no embedded textures, a smaller GLB and no
+CC0 texture notices. `--style classic` gives the v0.5.0 look, where the
+texture options below apply. `--textures` is ignored for `stylized`. Geometry,
+collision (`.mbcol`), heightfield and passage probes are the same in both
+styles; `report.json` records the style in `options.style`.
+
+With `--style classic`, `--textures` (the default) embeds the CC0 facade, roof, road and terrain
 textures with world-scaled UVs; `--no-textures` writes a plain-colour GLB of
 the same geometry as the textured build (not the v0.3.0 roofs). The collision (`.mbcol`) and
 heightfield are byte-identical either way, so a simulator sees the same
