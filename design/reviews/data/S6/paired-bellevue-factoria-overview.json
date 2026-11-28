@@ -1,0 +1,107 @@
+{
+  "camera": "overview",
+  "swatches": [
+    {
+      "label": "grass-mid",
+      "target_hex": "#96b671",
+      "before": {
+        "mean_rgb": [
+          185.7,
+          185.1,
+          180.2
+        ],
+        "deltaE2000": 20.44
+      },
+      "after": {
+        "mean_rgb": [
+          183.5,
+          182.2,
+          176.5
+        ],
+        "deltaE2000": 20.22
+      },
+      "change": -0.23
+    },
+    {
+      "label": "water-open",
+      "target_hex": "#6dc0e7",
+      "before": {
+        "mean_rgb": [
+          76.1,
+          139.8,
+          190.9
+        ],
+        "deltaE2000": 16.13
+      },
+      "after": {
+        "mean_rgb": [
+          119.1,
+          164.3,
+          198.3
+        ],
+        "deltaE2000": 8.8
+      },
+      "change": -7.33
+    },
+    {
+      "label": "footpath-sand",
+      "target_hex": "#fdeaa2",
+      "before": {
+        "mean_rgb": [
+          184.3,
+          186.4,
+          183.9
+        ],
+        "deltaE2000": 22.78
+      },
+      "after": {
+        "mean_rgb": [
+          184.3,
+          186.4,
+          183.9
+        ],
+        "deltaE2000": 22.78
+      },
+      "change": -0.01
+    }
+  ],
+  "contrast_pairs": [
+    {
+      "regions": [
+        "road-1",
+        "land-1"
+      ],
+      "before": {
+        "mean_rgb": {
+          "road-1": [
+            192.8,
+            184.7,
+            173.0
+          ],
+          "land-1": [
+            191.0,
+            192.6,
+            190.3
+          ]
+        },
+        "deltaE2000": 5.99
+      },
+      "after": {
+        "mean_rgb": {
+          "road-1": [
+            163.9,
+            135.3,
+            107.0
+          ],
+          "land-1": [
+            190.9,
+            192.6,
+            190.3
+          ]
+        },
+        "deltaE2000": 21.39
+      },
+      "change": 15.4
+    }
+  ]
+}

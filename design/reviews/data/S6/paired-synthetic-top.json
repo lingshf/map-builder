@@ -1,0 +1,48 @@
+{
+  "camera": "top",
+  "swatches": [
+    {
+      "label": "grass-mid",
+      "target_hex": "#96b671",
+      "before": {
+        "mean_rgb": [
+          186.9,
+          195.0,
+          176.3
+        ],
+        "deltaE2000": 14.91
+      },
+      "after": {
+        "mean_rgb": [
+          178.4,
+          196.0,
+          165.1
+        ],
+        "deltaE2000": 10.74
+      },
+      "change": -4.17
+    },
+    {
+      "label": "grass-light",
+      "target_hex": "#b9d17a",
+      "before": {
+        "mean_rgb": [
+          186.9,
+          195.0,
+          176.3
+        ],
+        "deltaE2000": 15.94
+      },
+      "after": {
+        "mean_rgb": [
+          178.4,
+          196.0,
+          165.0
+        ],
+        "deltaE2000": 12.37
+      },
+      "change": -3.56
+    }
+  ],
+  "contrast_pairs": []
+}

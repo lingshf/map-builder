@@ -1,0 +1,43 @@
+{
+  "camera": "overview",
+  "swatches": [],
+  "contrast_pairs": [
+    {
+      "regions": [
+        "roof-1",
+        "wall-1"
+      ],
+      "before": {
+        "mean_rgb": {
+          "roof-1": [
+            132.2,
+            100.0,
+            76.9
+          ],
+          "wall-1": [
+            170.2,
+            167.8,
+            158.8
+          ]
+        },
+        "deltaE2000": 25.8
+      },
+      "after": {
+        "mean_rgb": {
+          "roof-1": [
+            104.4,
+            81.0,
+            65.9
+          ],
+          "wall-1": [
+            170.0,
+            167.6,
+            158.6
+          ]
+        },
+        "deltaE2000": 33.45
+      },
+      "change": 7.65
+    }
+  ]
+}

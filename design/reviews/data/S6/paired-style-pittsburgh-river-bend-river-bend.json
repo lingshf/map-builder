@@ -1,0 +1,48 @@
+{
+  "camera": "river-bend",
+  "swatches": [
+    {
+      "label": "water-open",
+      "target_hex": "#6dc0e7",
+      "before": {
+        "mean_rgb": [
+          85.5,
+          142.3,
+          191.4
+        ],
+        "deltaE2000": 15.39
+      },
+      "after": {
+        "mean_rgb": [
+          122.3,
+          165.8,
+          198.8
+        ],
+        "deltaE2000": 8.63
+      },
+      "change": -6.76
+    },
+    {
+      "label": "water-shore",
+      "target_hex": "#ceeef6",
+      "before": {
+        "mean_rgb": [
+          160.9,
+          196.6,
+          197.5
+        ],
+        "deltaE2000": 10.74
+      },
+      "after": {
+        "mean_rgb": [
+          174.5,
+          196.5,
+          196.7
+        ],
+        "deltaE2000": 10.17
+      },
+      "change": -0.57
+    }
+  ],
+  "contrast_pairs": []
+}

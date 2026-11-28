@@ -1,0 +1,48 @@
+{
+  "camera": "factoria-ponds",
+  "swatches": [
+    {
+      "label": "water-shore",
+      "target_hex": "#ceeef6",
+      "before": {
+        "mean_rgb": [
+          130.2,
+          133.4,
+          127.6
+        ],
+        "deltaE2000": 29.36
+      },
+      "after": {
+        "mean_rgb": [
+          177.2,
+          198.2,
+          199.5
+        ],
+        "deltaE2000": 9.64
+      },
+      "change": -19.72
+    },
+    {
+      "label": "grass-light",
+      "target_hex": "#b9d17a",
+      "before": {
+        "mean_rgb": [
+          94.0,
+          130.6,
+          93.6
+        ],
+        "deltaE2000": 26.45
+      },
+      "after": {
+        "mean_rgb": [
+          170.0,
+          186.7,
+          157.5
+        ],
+        "deltaE2000": 13.42
+      },
+      "change": -13.03
+    }
+  ],
+  "contrast_pairs": []
+}

@@ -1,0 +1,433 @@
+{
+ "method": "one ray per pixel centre through the recipe camera, 1280x720, CLI stylized packages; window pixel box from style_sheet.region_pixel_box; river-bend uses the D209 window (#123)",
+ "windows": {
+  "bellevue-factoria/overview/grass-mid": {
+   "box": [
+    460,
+    417,
+    537,
+    475
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 632,
+    "terrain|MB Terrain|up": 3046,
+    "road|MB Road|up": 304,
+    "bld|MB Roof|up": 484
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 632,
+    "terrain|MB Terrain|up": 3046,
+    "road|MB Road|up": 304,
+    "bld|MB Roof|up": 484
+   }
+  },
+  "bellevue-factoria/overview/water-open": {
+   "box": [
+    256,
+    300,
+    281,
+    308
+   ],
+   "b04b769": {
+    "water|MB Water|up": 196,
+    "bld|MB Roof|up": 4
+   },
+   "fabab19": {
+    "water|MB Water|up": 196,
+    "bld|MB Roof|up": 4
+   }
+  },
+  "bellevue-factoria/overview/footpath-sand": {
+   "box": [
+    883,
+    365,
+    889,
+    370
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 30
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 30
+   }
+  },
+  "bellevue-factoria/overview/road-1": {
+   "box": [
+    934,
+    660,
+    944,
+    666
+   ],
+   "b04b769": {
+    "road|MB Road|up": 60
+   },
+   "fabab19": {
+    "road|MB Road|up": 60
+   }
+  },
+  "bellevue-factoria/overview/land-1": {
+   "box": [
+    994,
+    654,
+    1004,
+    660
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 60
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 60
+   }
+  },
+  "bellevue-factoria/factoria-interchange/road-light": {
+   "box": [
+    576,
+    446,
+    678,
+    496
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 2406,
+    "bld|MB Facade|vert": 1821,
+    "bld|MB Roof|up": 330,
+    "road|MB Road|up": 543
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 2406,
+    "bld|MB Facade|vert": 1821,
+    "bld|MB Roof|up": 330,
+    "road|MB Road|up": 543
+   }
+  },
+  "bellevue-factoria/factoria-interchange/foliage-mid": {
+   "box": [
+    230,
+    396,
+    307,
+    453
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 1248,
+    "terrain|MB Terrain|up": 2341,
+    "bld|MB Roof|up": 406,
+    "road|MB Road|up": 394
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 1248,
+    "terrain|MB Terrain|up": 2341,
+    "bld|MB Roof|up": 406,
+    "road|MB Road|up": 394
+   }
+  },
+  "bellevue-factoria/factoria-interchange/road-1": {
+   "box": [
+    685,
+    545,
+    691,
+    549
+   ],
+   "b04b769": {
+    "road|MB Road|up": 24
+   },
+   "fabab19": {
+    "road|MB Road|up": 24
+   }
+  },
+  "bellevue-factoria/factoria-interchange/land-1": {
+   "box": [
+    683,
+    559,
+    691,
+    563
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 32
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 32
+   }
+  },
+  "bellevue-factoria/factoria-interchange/road-2": {
+   "box": [
+    1140,
+    480,
+    1145,
+    483
+   ],
+   "b04b769": {
+    "road|MB Road|up": 15
+   },
+   "fabab19": {
+    "road|MB Road|up": 15
+   }
+  },
+  "bellevue-factoria/factoria-interchange/land-2": {
+   "box": [
+    1112,
+    478,
+    1121,
+    482
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 36
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 36
+   }
+  },
+  "bellevue-factoria/factoria-ponds/water-shore": {
+   "box": [
+    614,
+    408,
+    626,
+    414
+   ],
+   "b04b769": {
+    "bank|MB Terrain|up": 72
+   },
+   "fabab19": {
+    "bank|MB Terrain|up": 72
+   }
+  },
+  "bellevue-factoria/factoria-ponds/grass-light": {
+   "box": [
+    384,
+    460,
+    460,
+    518
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 4299,
+    "road|MB Road|up": 109
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 4299,
+    "road|MB Road|up": 109
+   }
+  },
+  "munich-altstadt/overview/roof-1": {
+   "box": [
+    404,
+    357,
+    413,
+    363
+   ],
+   "b04b769": {
+    "bld|MB Roof|up": 54
+   },
+   "fabab19": {
+    "bld|MB Roof|up": 54
+   }
+  },
+  "munich-altstadt/overview/wall-1": {
+   "box": [
+    384,
+    421,
+    394,
+    429
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 80
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 80
+   }
+  },
+  "munich-altstadt/roofs/roof-1": {
+   "box": [
+    1122,
+    622,
+    1136,
+    632
+   ],
+   "b04b769": {
+    "bld|MB Roof|up": 140
+   },
+   "fabab19": {
+    "bld|MB Roof|up": 140
+   }
+  },
+  "munich-altstadt/roofs/wall-1": {
+   "box": [
+    876,
+    255,
+    889,
+    265
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 130
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 130
+   }
+  },
+  "munich-altstadt/roofs/roof-2": {
+   "box": [
+    848,
+    162,
+    873,
+    176
+   ],
+   "b04b769": {
+    "bld|MB Roof|up": 350
+   },
+   "fabab19": {
+    "bld|MB Roof|up": 350
+   }
+  },
+  "munich-altstadt/roofs/wall-2": {
+   "box": [
+    524,
+    360,
+    540,
+    368
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 128
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 128
+   }
+  },
+  "style-munich-roofscape/roofscape/roof-1": {
+   "box": [
+    925,
+    499,
+    939,
+    509
+   ],
+   "b04b769": {
+    "bld|MB Roof|up": 140
+   },
+   "fabab19": {
+    "bld|MB Roof|up": 140
+   }
+  },
+  "style-munich-roofscape/roofscape/wall-1": {
+   "box": [
+    960,
+    576,
+    973,
+    586
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 130
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 130
+   }
+  },
+  "style-munich-roofscape/roofscape/roof-2": {
+   "box": [
+    1145,
+    586,
+    1159,
+    596
+   ],
+   "b04b769": {
+    "bld|MB Roof|up": 140
+   },
+   "fabab19": {
+    "bld|MB Roof|up": 140
+   }
+  },
+  "style-munich-roofscape/roofscape/wall-2": {
+   "box": [
+    1024,
+    230,
+    1037,
+    240
+   ],
+   "b04b769": {
+    "bld|MB Facade|vert": 130
+   },
+   "fabab19": {
+    "bld|MB Facade|vert": 130
+   }
+  },
+  "pittsburgh/overview/water-open": {
+   "box": [
+    633,
+    517,
+    673,
+    529
+   ],
+   "b04b769": {
+    "water|MB Water|up": 480
+   },
+   "fabab19": {
+    "water|MB Water|up": 480
+   }
+  },
+  "pittsburgh/dsm-ground/grass-mid": {
+   "box": [
+    766,
+    282,
+    796,
+    302
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 600
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 600
+   }
+  },
+  "style-pittsburgh-river-bend/river-bend/water-open": {
+   "box": [
+    1176,
+    283,
+    1196,
+    298
+   ],
+   "b04b769": {
+    "water|MB Water|up": 300
+   },
+   "fabab19": {
+    "water|MB Water|up": 300
+   }
+  },
+  "style-pittsburgh-river-bend/river-bend/water-shore": {
+   "box": [
+    1181,
+    469,
+    1186,
+    474
+   ],
+   "b04b769": {
+    "bank|MB Terrain|up": 25
+   },
+   "fabab19": {
+    "bank|MB Terrain|up": 25
+   }
+  },
+  "synthetic/top/grass-mid": {
+   "box": [
+    192,
+    194,
+    230,
+    223
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 1102
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 1102
+   }
+  },
+  "synthetic/top/grass-light": {
+   "box": [
+    192,
+    251,
+    230,
+    280
+   ],
+   "b04b769": {
+    "terrain|MB Terrain|up": 1102
+   },
+   "fabab19": {
+    "terrain|MB Terrain|up": 1102
+   }
+  }
+ }
+}
