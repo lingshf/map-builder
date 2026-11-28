@@ -672,6 +672,7 @@ out of the #17 triage (Sprint 7 candidates unless added with a D-number).
 | D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
 | D204 | S6 pinned region map ([tasks/S6.md](tasks/S6.md#pinned-region-map-for-ad)): roofs, walls and roads have no S5 swatch, so observations (a) and (c) pass on same-image contrast pairs (after ΔE2000 ≥ 15 and greater than before); (b) and (d) pass by moving closer to their S5 swatches. Factoria's S5 `road-light` target (the lit-cliff swatch) is informational only. Region key is `(camera, label)` per preset file. | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
 | D205 | S5-DECOR stays deferred, not dropped. It is blocked only on Unity and glTFast availability on the user's side; draft #101 stays open. It is out of the M-S6 baseline. | Team Leader (2026-11-27, #114 D89 ruling) | decided |
+| D206 | S5-TEX-WATER (S4-F2, D124: an "MB Water" texture) is **closed, not re-scoped to classic**. Stylized mode ships no textures (D139) and is the user's chosen default (D141); classic water already reads blue with textures on (S4-TEX-WATER, #61); a water texture would add UVs, a CC0 asset, NOTICES and GLB bytes for no requested benefit, and no consumer asked for it (#17 triage). Reopen only on a user or consumer request, as a new task. When confirmed, the user guide's "planned: S5-TEX-WATER" wording (`docs/user/generate.md`, outside `design/`) goes to the coordinator as a docs follow-up. Settles candidate 8's second half; the PERF-WATER AC3 residual counters (D188) stay a candidate. | De (proposed); Team Leader confirms | proposed |
 
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
 
@@ -689,7 +690,7 @@ fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (
 | 5a | [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps): `floating_audit` output-write errors exit 2 or create parent directories | Deferred from Sprint 5 (deferrable; coordinator ruling on #113, RETRO-I5); reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data | Developer / Knowledge Lead; tools, tests and the `docs/dev/tools.md` note only |
 | 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available on the user's side; stays deferred, not dropped (D205) |
 | 7 | Fidelity: S5-F2 rocks, S5-F1 tree shapes, S4-F3 water tagging, S4-F6 landcover staircase | Lowest of the user's priorities | S5-F1 changes `vegetation` collision and needs the user (D145) |
-| 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures | |
+| 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures. The S5-TEX-WATER half is taken by S6-TEX-WATER-CLOSE: D206 proposes closing it (pending Team Leader confirmation); the D188 counters stay a candidate | |
 
 ## Sprint 7 candidates (additions)
 

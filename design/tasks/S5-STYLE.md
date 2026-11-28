@@ -459,7 +459,7 @@ primitive); `core/package.py` (exporter exemption); `docs/PACKAGE_FORMAT.md`; `d
 * **S5-F2:** rocks and boulders as collision objects from OSM `natural=stone` / `bare_rock`. It needs data and a
   collision-class review.
 * **Classic-only follow-ups:** S4-F2 (water texture) and S4-F4/F6 (default tint, landcover staircase) stay
-  classic-only.
+  classic-only. S4-F2 is proposed closed by D206 (S6-TEX-WATER-CLOSE, pending Team Leader confirmation).
 
 ## Decision record for this spec
 

@@ -103,7 +103,7 @@ Theme D93; decisions D94–D153 (D112 adds S4-WATER-SURFACE, D123 adds S4-WATER-
 | S4-COL-FLOAT | S4 (**v0.5.0 blocker**, D126) | dev | S4-WATER-BANK | `core/generate.py` (road drape source), `tools/floating_audit.py` (new), `tools/water_replay.py`; soft: sample slot (D103), VALIDATION | done (no spec; criteria in the PR) | #76 (53c54d3) |
 | [S4-COL-FLOAT-2](S4-COL-FLOAT-2.md) | S4 (**v0.5.0 blocker**, D126, D129) | dev | S4-COL-FLOAT | `core/shore.py`, `core/overlap.py` (new), `core/water.py`, `core/generate.py` (water stage, ramp objects), `core/package.py` (`_MB_ID`), `tools/floating_audit.py`, `tools/water_replay.py`, their tests, `docs/PACKAGE_FORMAT.md`, `docs/UNITY_CORE_HANDOFF.md`; soft: sample slot (D103), VALIDATION | done (merged under D135 coordinator verification, D146) | #77 (db9db44) |
 | [S4-MYPY](S4-MYPY.md) | S4 (**v0.5.0 blocker**, D128) | dev | **S4-COL-FLOAT-2** (merged, db9db44) | `pyproject.toml` (`[tool.mypy]`), `.github/workflows/ci.yml` (mypy step), the files with mypy errors after #77 | ready | |
-| S4-F2 | later (D124) | dev | S4-WATER-BANK | `core/water.py` (UVs), `map_builder/assets/textures/`, NOTICES | → S5-TEX-WATER: texture "MB Water" | |
+| S4-F2 | later (D124) | dev | S4-WATER-BANK | `core/water.py` (UVs), `map_builder/assets/textures/`, NOTICES | → S5-TEX-WATER: texture "MB Water"; proposed closed, not re-scoped (D206, pending Team Leader confirmation; S6-TEX-WATER-CLOSE) | |
 | S4-F3 | later | dev | — | `core/water.py`, `core/osm.py` | → S5 water coverage: standalone `water=*`, riverbank multipolygons, coastline | |
 | S4-F4 | later | dev | — | `core/generate.py` (landcover colours), `core/textures.py` | → S5: default tint for untagged ground (near-white since D99) | |
 | S4-F5 | later or REL docs | dev | — | `docs/PACKAGE_FORMAT.md` | → stale C# line citations (+50 after #72) | |
@@ -156,7 +156,7 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
 ## Sprint 6 (M-S6)
 
 Specs in [S6.md](S6.md); goal baseline and order in the [roadmap](../roadmap.md#milestone-m-s6-correct-and-readable-goal-baseline-d201)
-(D201–D205). Every code row passes G0 and classic identity (G3); releases follow D202.
+(D201–D206). Every code row passes G0 and classic identity (G3); releases follow D202.
 
 | id | sprint | type | dependencies | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
@@ -164,7 +164,7 @@ Specs in [S6.md](S6.md); goal baseline and order in the [roadmap](../roadmap.md#
 | [S6-DEMO-2COL](S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | S6 | dev | none | `tools/demo/style_render_recipe.py`, `tools/demo/style_contact_sheet.py`, `tools/demo/palette_regions_*.json`, their tests; `docs/dev/tools.md` recipe section (after S6-PARITY merges) | ready | |
 | [S6-STYLE-TUNE](S6.md#s6-style-tune-stylized-contrast-candidate-3) | S6 | dev | S6-PARITY, S6-DEMO-2COL merged | `map_builder/core/style.py`, `tests/test_style_palette.py`; soft: sample slot (D103) | blocked | |
 | [S6-CONSUMER-TRIAGE](S6.md#s6-consumer-triage-simulator-consumer-requests-17) | S6 | design | none | `design/reviews/S6-CONSUMER-17.md`, roadmap "Sprint 7 candidates", own row | in review (record: [S6-CONSUMER-17](../reviews/S6-CONSUMER-17.md)) | |
-| [S6-TEX-WATER-CLOSE](S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | S6 (deferrable) | design | S6-CONSUMER-TRIAGE merged (same owner, shared roadmap) | `design/tasks/S4-TEX-WATER.md`, roadmap "Sprint 6 decisions", the S4-TEX-WATER and own rows | blocked | |
+| [S6-TEX-WATER-CLOSE](S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | S6 (deferrable) | design | S6-CONSUMER-TRIAGE merged (same owner, shared roadmap) | `design/tasks/S4-TEX-WATER.md`, roadmap "Sprint 6 decisions", the S4-TEX-WATER and own rows | in review (D206 proposed: close) | |
 | [S6-REVIEW](S6.md#s6-review-milestone-review-gono-go) | S6 | design | every S6 must code row merged; re-runs after S6-Fn on NO-GO | `design/reviews/S6-REVIEW-checklist.md` | blocked | |
 
 DOC-TOOLS-F1 (in [Knowledge gaps](#knowledge-gaps)) is an M-S6 deferrable item and runs in wave 2, alongside S6-STYLE-TUNE.
