@@ -197,7 +197,7 @@ Team Leader. It runs after goal attainment and before the milestone record close
 
 | id | milestone | owner | trigger (dependency) | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
-| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 **goal attainment** (step 1 of the [closure sequence](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169)): every must delivery item `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. The accepted retro then closes the milestone record (step 3). A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | review: [retro record](../reviews/M-S5-RETRO.md) drafted; per-role self-checks and the DOC-TOOLS-F1 disposition pending; milestone open | |
+| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 **goal attainment** (step 1 of the [closure sequence](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169)): every must delivery item `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. The accepted retro then closes the milestone record (step 3). A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | draft under PR review: [retro record](../reviews/M-S5-RETRO.md); formal acceptance blocked at D169 step 1 on RETRO-I4 and RETRO-I5; per-role self-checks pending; milestone open | |
 
 **M-S5-RETRO acceptance:**
 

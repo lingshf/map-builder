@@ -27,15 +27,17 @@ their own, and DOC-TOOLS-F1 has no disposition. Both are Backlog items below (RE
 | S5-DECOR | deferrable | deferred | D185: step 1b needs Unity and glTFast; draft #101 kept; owner Developer, Sprint 6 candidate 6 |
 | DOC-PERF | deferrable | accepted, done | [QA review 6080515258](https://github.com/lingshf/map-builder/pull/99#pullrequestreview-6080515258); Team Leader DoD 2026-11-27 |
 | DOC-TOOLS-F1 | deferrable | **unfinished** (status `ready`) | Needs an explicit deferral with owner and reason before the milestone record closes (D169 step 1) |
-| M-S5-RETRO | must | this record | Acceptance pending the per-role self-checks below |
+| M-S5-RETRO | must | this record (draft under PR review) | Formal acceptance blocked at D169 step 1 on RETRO-I4 and RETRO-I5; per-role self-checks below also pending |
 | Added: S5-T4 (#107), S5-PONDS-FIX (#109) | must (STYLE-REVIEW NO-GO fixes) | merged; closed by the GO | [#108](https://github.com/lingshf/map-builder/issues/108) |
 
-Counts (must delivery items in the baseline, excluding the retro: 8):
+Counts (must delivery items, excluding the retro):
 
-* `merged`: 8 of 8.
-* `accepted` with a QA verdict: 6 of 8 (BASE, PERF-GATE, F3, F4, PERF-WATER, STYLE-REVIEW GO).
-* Not yet `accepted`: 2 of 8 (PALETTE, WATER; coordinator `done` without a per-task QA verdict; RETRO-I4).
-* Added must fixes: 2 (T4, PONDS-FIX), both `merged`, closed by the GO QA run.
+* Original must subtotal (8): `merged` 8 of 8; `accepted` with a QA verdict 6 of 8 (BASE, PERF-GATE, F3, F4,
+  PERF-WATER, STYLE-REVIEW GO); not yet `accepted` 2 of 8 (PALETTE, WATER; coordinator `done` without a per-task QA
+  verdict; RETRO-I4).
+* NO-GO fixes added to the baseline by D169 (2): T4 and PONDS-FIX, `merged` 2 of 2 and QA `accepted` 2 of 2 (T4 PASS
+  and ponds ACCEPTED in [#108](https://github.com/lingshf/map-builder/issues/108)).
+* Expanded must set (10): `merged` 10 of 10; QA `accepted` 8 of 10; not yet `accepted` 2 of 10 (PALETTE, WATER).
 * Deferrable (3): 1 `accepted` (DOC-PERF), 1 deferred with owner (DECOR), 1 without disposition (DOC-TOOLS-F1; RETRO-I5).
 
 RETRO-I4 and RETRO-I5 must be resolved before D169 step 1 is met; only then can this retro be accepted (step 2).
