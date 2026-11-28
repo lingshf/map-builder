@@ -1,18 +1,23 @@
 # v0.6.0 demo: the stylized look
 
 Before/after images for the v0.6.0 release candidate (sprint 5). Every map
-image is a real Blender 4.2.23 Cycles **CPU** render (1280 x 720, 64 samples,
-seed 1, no denoise) of a CLI package, rendered by
+image is built from real Blender 4.2.23 Cycles **CPU** renders (1280 x 720, 64
+samples, seed 1, no denoise) of CLI packages, composed into labelled two-column
+sheets. The renders come from
 `tools/demo/style_render_recipe.py` from the fixed preset cameras in
-`tools/demo/presets/`. All packages are built offline from the frozen D177
-caches with `created_utc` pinned, so every difference comes from the code.
+`tools/demo/presets/`. All packages are built offline from the frozen S5
+caches (Factoria uses the D177 cache, per D190) with `created_utc` pinned, so every difference comes from the code.
 Provenance and hashes are in [evidence.json](evidence.json).
 
 "Before" is the classic look. The classic baseline is the D181 package
 (`8ce3d28`, the v0.5.0 look plus the S5-F3 bank fix), and classic at
 `850a772` is byte-identical to it (issue #108, gate G3). "After" is the stylized
 default at `850a772`, the REL-v0.6.0 base. Sheets marked *QA* are reused from
-the S5-STYLE-REVIEW run (issue #108); the rest were rendered for this release.
+the S5-STYLE-REVIEW run (issue #108) and use QA's label style; the rest were
+rendered for this release. In QA labels, "H" is the review head `a6dbe48`.
+The Munich QA sheets use the released v0.5.0 package as "before"; Munich has no
+banks, so the S5-F3 change does not touch it and v0.5.0 is the same classic
+look as the D181 baseline.
 
 ## Pittsburgh: the river bend (`style-pittsburgh-river-bend`)
 
@@ -74,7 +79,11 @@ ground (known issue).
 ## Reproduce
 
 Build each package with the CLI (`--style classic` or the default) from the
-frozen caches, then render the two packages from the same preset:
+frozen caches, then render the two packages from the same preset. The recipe
+requires `--reference` and `--palette-regions` for its palette metrics; per D187
+the reference is a dummy image (it lands only in the recipe's own three-column
+`contact-sheet-*.png`, which this demo does not use), and the regions file only
+affects the palette reports, not the renders:
 
 ```powershell
 blender -b --factory-startup --python-exit-code 1 --python tools\demo\style_render_recipe.py -- `
@@ -84,6 +93,7 @@ blender -b --factory-startup --python-exit-code 1 --python tools\demo\style_rend
     --out out --engine CYCLES --samples 64 --seed 1
 ```
 
-The recipe writes `render-<camera>-before.png` and `-after.png`. The two-column
-sheets put the two renders side by side, with a label row above (D187: no
-reference column).
+The recipe writes `render-<camera>-before.png` and `-after.png`. Each sheet
+puts the two renders side by side at full size (12 px gap) under a 36 px white
+label row; this composition step uses Pillow and is not a repository tool
+(D187: no reference column).

@@ -195,9 +195,11 @@ py -3.12 tools\mbmap_cli.py build --osm area.osm --dem dem.tif --datum EGM2008 -
 py -3.12 tools\mbmap_cli.py validate out.mbmap      # exit 0 if VALID
 ```
 
+`--style stylized` (default since v0.6.0) writes a flat-shaded, low-poly palette with no textures, no
+`NORMAL` attribute and no CC0 texture notices; `--style classic` keeps the v0.5.0 look. With classic,
 `--textures` (default) embeds the CC0 textures and writes world-scaled UVs (package format 2.1.0, about
 +23 % GLB on Pittsburgh plus fixed texture bytes); `--no-textures` writes the untextured GLB of earlier
-versions. Collision data is identical either way. The vertex colour of a textured face is divided by its
+versions; stylized ignores `--textures`. Collision data is identical either way. The vertex colour of a textured face is divided by its
 texture's mean albedo, so the face keeps its palette colour on average and the texture adds only detail.
 
 `--created-utc 2026-01-01T00:00:00Z` fixes the timestamp. With the same inputs on the same
@@ -243,8 +245,9 @@ fixtures. The headless Blender run is manual. See [docs/VALIDATION.md](docs/VALI
   not exported and is listed under `passage_probes_blocked` in `report.json`.
 * Each building is a set of closed, outward-facing, positive-volume shells with no interior
   cavities: no rooms, passages or flyable interiors.
-* The GLB is flat-shaded with face normals and PBR colour factors. With textures on (the default) it also has
-  world-scaled UVs and embedded CC0 base-colour textures; it has no custom normals or normal maps.
+* The GLB is flat-shaded with PBR colour factors and no custom normals or normal maps. The default stylized
+  look stores no `NORMAL` attribute (glTF flat shading) and no textures. The classic look stores face normals and,
+  with textures on, world-scaled UVs and embedded CC0 base-colour textures.
 * **DSM correction is an approximation, not a DTM.** It only knows the features mapped in OSM:
   unmapped buildings, trees or hedges stay in the terrain. Inside masked areas the fill is the
   smoothest surface through the surrounding ground. It follows uniform slopes, but it cannot
