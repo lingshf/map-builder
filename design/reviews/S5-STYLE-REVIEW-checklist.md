@@ -185,7 +185,7 @@ misplacement.
   façade parity failure in G10 is recorded and tracked as a next-sprint bug but does not block GO; every other G10
   requirement and every other gate still applies; R1 to R3 have verdicts with no named NO-GO finding; the
   independent QA verdict for R3 is **accepted** and linked (D186f); T1 to T4 pass.
-* **Pending** (neither GO nor NO-GO): every other row passes, but the R3 QA verdict is not yet given. The review
+* **Pending** (neither GO nor NO-GO): every other row passes (G10 under the same D191 exception), but the R3 QA verdict is not yet given. The review
   reports pending and asks QA. When QA accepts, the review becomes GO and S5-STYLE-BASE `done` closes. A QA
   rejection of the camera is a NO-GO with an S5-Fn camera task.
 * **NO-GO** names each failing row, its evidence, and an S5-Fn fix task (id, conflict domain, and ACs), as for
