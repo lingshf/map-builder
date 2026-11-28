@@ -393,6 +393,32 @@ class StyleCheckTests(unittest.TestCase):
                              [{"name": "wall", "mesh": _quad("b", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)], [(0.80004, 0.7, 0.6)] * 2)}])
         self.assertFalse(ok)
 
+    def test_parity_rejects_double_sided_sheets_with_moved_geometry(self) -> None:
+        front = _quad("a", _FLAT_QUAD, [(0, 1, 2), (0, 2, 3)])
+        back_cli = _quad("b", _FLAT_QUAD, [(0, 3, 2), (0, 2, 1)])
+        moved = [(x, y + 10.0, z) for x, y, z in _FLAT_QUAD]
+        back_bl = _quad("c", moved, [(0, 3, 1), (3, 2, 1)])
+        cli = self._merged("wall", front, back_cli)
+        bl = self._merged("wall", _quad("d", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)]), back_bl)
+        ok, _ = self._parity([cli], [bl])
+        self.assertFalse(ok)
+
+    def test_parity_accepts_two_retriangulated_quads_in_any_order(self) -> None:
+        far = [(x + 10.0, y, z) for x, y, z in _FLAT_QUAD]
+        cli = self._merged("wall", _quad("a", _FLAT_QUAD, [(0, 1, 2), (0, 2, 3)]), _quad("b", far, [(0, 1, 2), (0, 2, 3)]))
+        bl = self._merged("wall", _quad("c", far, [(0, 1, 3), (1, 2, 3)]), _quad("d", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)]))
+        ok, _ = self._parity([cli], [bl])
+        self.assertTrue(ok)
+
+    @staticmethod
+    def _merged(name: str, *meshes: MeshData) -> dict:
+        merged = MeshData(name)
+        for mesh in meshes:
+            ids = [merged.add_vertex(*v) for v in mesh.vertices]
+            for face, color in zip(mesh.faces, mesh.face_colors):
+                merged.add_face(tuple(ids[i] for i in face), "MB Terrain", color)
+        return {"name": name, "mesh": merged}
+
     def test_parity_rejects_other_diagonal_with_reversed_winding(self) -> None:
         self._assert_diagonal_rejected(_FLAT_QUAD, [(0, 1, 2), (0, 2, 3)], [(0, 3, 1), (3, 2, 1)])
 
