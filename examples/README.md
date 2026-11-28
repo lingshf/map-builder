@@ -4,10 +4,10 @@
 
 This is a **synthetic** package. It is built with the CLI from the hand-written fixtures in
 [tests/fixtures](../tests/fixtures/README.md), and it is not a real place or real data. It has a
-400 × 300 m area, 80 objects, 5237 collision triangles, a 2 m heightfield, 3 orientation
+400 × 300 m area, 82 objects, 5237 collision triangles, a 2 m heightfield, 3 orientation
 probes and 4 passage probes (one road tunnel bore, way/1072, one on the bridge deck, way/1069, and two beneath the
 elevated building part and through the split building passage). It uses
-package format 2.1.0 and is **textured** (world-scaled UVs, five CC0 textures embedded in the GLB; build with \--no-textures\ for the untextured GLB). Regenerate it from the repository root:
+package format 2.1.0 and is **textured** (world-scaled UVs, five CC0 textures embedded in the GLB; build with `--no-textures` for the untextured GLB). Regenerate it from the repository root:
 
 ```powershell
 py -3.12 tools\mbmap_cli.py build --osm tests\fixtures\synthetic_area.osm --dem tests\fixtures\synthetic_dem.asc `
@@ -20,7 +20,7 @@ py -3.12 tools\mbmap_cli.py validate examples\synthetic_sample.mbmap
 
 The build is deterministic. With the fixed `--created-utc`, Python 3.12 on Windows x64
 (the platform the sample was generated on) reproduces it byte-identically and gives
-`package_id = sha256:4ea40136142615a155eb5995948675cc31826807fb095e7174e5d791d54001ec`.
+`package_id = sha256:c68ed08db5f0fa110c3e40d1c3b1c046c6cb0bf2ef132aa658e19484b6c88bf9`.
 Validation reports `VALID: 0 error(s), 1 warning(s)`; the warning is two degenerate
 (zero-area) collision triangles, which is allowed. `tests/test_examples.py` checks that the
 committed file still validates and matches a fresh build; on other platforms, where the

@@ -1,0 +1,179 @@
+{
+  "release": "v0.6.0 (RC)",
+  "main": "0f45c2c",
+  "code_commit": "850a772907b78da2fe1ee81a02a9420b59fb078b",
+  "note": "main 0f45c2c differs from 850a772 only in design/ docs (#110); renders and builds made at 850a772 apply. Packages here were built before the version bump (generator.version 0.5.0); release-asset packages are rebuilt from the tag.",
+  "render": {
+    "tool": "tools/demo/style_render_recipe.py",
+    "blender": "4.2.23 (Mesa)",
+    "engine": "CYCLES",
+    "device": "CPU",
+    "samples": 64,
+    "seed": 1,
+    "sheet": "two columns, labelled before|after"
+  },
+  "build": {
+    "command": "py -3.12 tools/mbmap_cli.py build --style stylized (frozen caches, created_utc pinned)",
+    "caches": "frozen S5 caches; Factoria D177 cache per D190"
+  },
+  "packages": {
+    "stylized_850a772": {
+      "munich": {
+        "bytes": 839313,
+        "sha256": "5a6baec373aa1c5175ced70f554fe9c1ba1c266198ceb0b3605ee4c434853e8f",
+        "package_id": "sha256:a875fca724b4e23dce585686389fc0fbc2111adde741f20e42ff3ede9079eb88",
+        "python": "VALID: 0 error(s), 1 warning(s) (57 degenerate)",
+        "csharp": "OK, passage 3/3 PASS, 0 mb_id"
+      },
+      "pittsburgh": {
+        "bytes": 3902306,
+        "sha256": "4b4c65ceefa0fdfb67be04649438d3219476e83a525f638c1da2441a5a953951",
+        "package_id": "sha256:7ff11fe7bf7e2ff4bb93f0ca776a2bc804f71abde74fd0d19a24998adc6e1f0f",
+        "python": "VALID: 0 error(s), 1 warning(s) (73 degenerate)",
+        "csharp": "OK, passage 11/11 PASS, 0 mb_id"
+      },
+      "bellevue-factoria": {
+        "bytes": 7005552,
+        "sha256": "b0c763ef00bc4a2f8bcb4fcc59494afed225619e7699a1cbda0902606037f59c",
+        "package_id": "sha256:d27d659fd209386785ce55a6200b110b5fa7e4829466aeb6644a068ba11b4d53",
+        "python": "VALID: 0 error(s), 1 warning(s) (305 degenerate)",
+        "csharp": "OK, passage 43/43 PASS, 0 mb_id"
+      }
+    },
+    "classic_baseline": {
+      "munich": {
+        "bytes": 1554274,
+        "sha256": "f12dc1345ee51bdac0a5363345086e4f05bb8168e720f22b9ca5c859c4ac4cb5"
+      },
+      "pittsburgh": {
+        "bytes": 5336528,
+        "sha256": "584fa2727e4fe6934711d0b6d0e3fa1fdc9cfe2ddf45d1a3ad735ca731883db3"
+      },
+      "bellevue-factoria": {
+        "bytes": 9178387,
+        "sha256": "f18fa18e6cecf1f07918e6e98a738a43b6ac06bc51a7c6389084f624019f1053"
+      },
+      "note": "D181 classic baseline (8ce3d28) and 850a772 classic are byte-identical"
+    },
+    "glb_bytes_classic_to_stylized": {
+      "munich": [
+        4374908,
+        2339412
+      ],
+      "pittsburgh": [
+        15246708,
+        9153644
+      ],
+      "bellevue-factoria": [
+        25746980,
+        15316096
+      ]
+    }
+  },
+  "suite": {
+    "unittest": "981 OK (4 skipped)",
+    "mypy": "no issues in 59 source files"
+  },
+  "sample": {
+    "package_id": "sha256:c68ed08db5f0fa110c3e40d1c3b1c046c6cb0bf2ef132aa658e19484b6c88bf9",
+    "change": "generator.version only"
+  },
+  "images": [
+    {
+      "file": "pittsburgh-river-bend-before-after.png",
+      "bytes": 2287407,
+      "sha256": "1301e5d9c3faa696897a41855413e9af6465468075e902e33c3b72c1efed2f68",
+      "source": "new render",
+      "before": "pk/before_pittsburgh.mbmap (classic, D181 8ce3d28)",
+      "after": "rel060/after_pittsburgh.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "pittsburgh-overview-before-after.png",
+      "bytes": 1184471,
+      "sha256": "efc2a22ee363e12329d8f71eb5bfc6bc8b3381c2107258f64458f1eebafc86d2",
+      "source": "new render",
+      "before": "pk/before_pittsburgh.mbmap (classic, D181 8ce3d28)",
+      "after": "rel060/after_pittsburgh.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "pittsburgh-bridge-under-before-after.png",
+      "bytes": 1412165,
+      "sha256": "132eb35ac719631047f735d0f72170a3e2dce4b9f0dc251166d301e5fad7f285",
+      "source": "new render",
+      "before": "pk/before_pittsburgh.mbmap (classic, D181 8ce3d28)",
+      "after": "rel060/after_pittsburgh.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "munich-roofs-before-after.png",
+      "bytes": 2456461,
+      "sha256": "39fa7e2aad1ef644dd0b60f807c3ebc2c757d3e3234adc2f78f53da8c61b9995",
+      "source": "QA sheet, issue #108",
+      "before": "v0.5.0 classic",
+      "after": "QA H a6dbe48 stylized (byte-identical to 850a772)"
+    },
+    {
+      "file": "munich-roofscape-before-after.png",
+      "bytes": 2730219,
+      "sha256": "a9cd6e94f0cbf77f51e70217caf4b52249a6b82804cc0fbb5a8176d49820a2ac",
+      "source": "QA sheet, issue #108",
+      "before": "v0.5.0 classic",
+      "after": "QA H a6dbe48 stylized (byte-identical to 850a772)"
+    },
+    {
+      "file": "factoria-ponds-fix-before-after.png",
+      "bytes": 773230,
+      "sha256": "7ac826d8899b0213c0cfe1f50b888d05a5e3cce7deef63601baab746c5c76990",
+      "source": "QA R3 sheet, issue #108 (ACCEPTED at 850a772)",
+      "before": "a6dbe48 stylized (before #109)",
+      "after": "850a772 stylized (after #109)"
+    },
+    {
+      "file": "factoria-ponds-classic-stylized.png",
+      "bytes": 1247376,
+      "sha256": "bd2dcb558d849c265861c868df12842a83f3d8e10e2ca6553f5dcbabeb611401",
+      "source": "new render",
+      "before": "pk/headclassic_bellevue-factoria.mbmap (classic, 850a772)",
+      "after": "rel060/after_bellevue-factoria.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "factoria-interchange-classic-stylized.png",
+      "bytes": 1916354,
+      "sha256": "5eddd09d53b20632e93a465c19dfb9b2f5ce98821f7c8ef20ea22e0f3ac13ac7",
+      "source": "new render",
+      "before": "pk/headclassic_bellevue-factoria.mbmap (classic, 850a772)",
+      "after": "rel060/after_bellevue-factoria.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "factoria-overview-classic-stylized.png",
+      "bytes": 1694306,
+      "sha256": "a7fef6136c51818fbe884704924a697056c6e918a58e9f6611c4c98001258a55",
+      "source": "new render",
+      "before": "pk/headclassic_bellevue-factoria.mbmap (classic, 850a772)",
+      "after": "rel060/after_bellevue-factoria.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "panel.png",
+      "bytes": 1268162,
+      "sha256": "d6389358e2c78ec4a447985899e728dab027da5d1f9db00b9b3636804df317d3",
+      "source": "tools/demo/run_demo.py --bundle-only --preset munich-altstadt --panel (Blender 4.2.23 Mesa, real window capture)",
+      "package": "rel060/after_munich.mbmap (stylized, 850a772)",
+      "shows": "Content > Style: Stylized"
+    },
+    {
+      "file": "viewer-munich.png",
+      "bytes": 143249,
+      "sha256": "712c7d8864bf88d18b668813b8d78fa93cb08b7fb498f78d32e8448f719a3c76",
+      "source": "run_demo.py viewer bundle, headless Microsoft Edge (SwiftShader), 1280x720",
+      "package": "rel060/after_munich.mbmap (stylized, 850a772)",
+      "probes": "3/3 PASS"
+    },
+    {
+      "file": "viewer-pittsburgh.png",
+      "bytes": 332092,
+      "sha256": "f6ed958637a48453118f3eeab39471303e7e4cc8d0a7e3c4cd45520fbc8c8e5e",
+      "source": "run_demo.py viewer bundle, Playwright Chromium, 1280x720 (headless Edge timed out on the 9 MB GLB)",
+      "package": "rel060/after_pittsburgh.mbmap (stylized, 850a772)",
+      "probes": "11/11 PASS"
+    }
+  ]
+}

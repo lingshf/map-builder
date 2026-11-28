@@ -6,36 +6,138 @@ All notable user-visible changes are recorded here, following
 
 ## [Unreleased]
 
-* **Stylized ponds show a continuous shallow band** (S5-PONDS-FIX). The light shore band used to sit on terrain triangles within 6 m of the shore, but a pond's `bank:` ramp (sand) covers the first metres, so the band appeared as pale triangles on land beyond a sand ring. The stylized `bank:` ramp is now the shallow band and the terrain bank band is sand. Colour only: classic packages are byte-identical, and collision and heightfield do not change.
+## [0.6.0] - 2026-11-28
 
-* **Banks continue under elevated bridges** (S5-F3, D178). A shore-ramp bank strip used to be dropped whole when it touched a bridge line, which left the water sheet up to 1.8 m above the uncovered ground beside the I-90 crossing on Bellevue-Factoria. A strip is now cut only where it lies inside a deck footprint that sits at grade (less than 2.5 m above the ramp); under an elevated deck it passes. At-grade roads, building footprints, tunnels and abutments still mask the strip. Bellevue-Factoria (`bank:osm:relation/2315576`) and Pittsburgh (`bank:osm:relation/7937544`, `bank:osm:way/379511900`) gain bank triangles and their `.mbhf` changes at the strip nodes; `shore_ramp_blocked_m` drops accordingly. Decks, probes and the georeference are unchanged; Munich and the sample are byte-identical.
+"Stylized look" (sprint 5). Package schema stays **2.1.0**; v0.3.0 and later readers accept v0.6.0 packages.
 
-* **Roads no longer hover over carved water beds** (S4-COL-FLOAT). Roads are now draped on the carved terrain mesh instead of the pre-carve ground. Before, a road that ran into or beside a water body kept the old ground height while the terrain under it was carved up to 1.5 m down, so its collision was a cushion above the visible ground and a descending drone stopped on it. At-grade roads over water now follow the bed under the water surface (the `at_grade_roads` report lines are unchanged). Packages with no water are byte-identical. The sample package is regenerated. Developer tools: `tools/floating_audit.py` (downward-ray audit of collision, heightfield and visual surfaces; floating and buried collision, water-to-bank gaps, grouped into regions) and `tools/water_replay.py` classifies the new `road lowered` difference. Known remaining water gaps: a flat water surface can sit up to the 1.5 m carve step above the ground just outside the shore (reported as `water_shore_step`, by design), and a few river banks lower than the shore-band level or two bodies with different levels leave larger steps (`water_above_bank`; the audit lists them).
+### Changed
 
-* **Rivers and lakes are now water surfaces, not painted ditches** (S4-WATER-SURFACE, D113-D118). Each water body gets its own mesh (water:<osm-id>, collision class `water`, material MB Water, untextured until S4-TEX-WATER) clipped to the exact OSM polygon, at a level taken from the shore band (p20 of the corrected DEM; rivers of 300 m or more follow a non-increasing downstream profile). The terrain bed under it is carved to 1.5 m below the surface and the banks are blended, so water no longer follows the DSM dip with 30 m cell staircase edges. Roads, bridges and building bases keep the pre-carve ground; decks are never lowered and are raised only where the water surface would touch them; piers and building walls extend to the carved bed. `report.json` lists every body with its outcome (`built(flat)`, `built(profile, N stations)` or a named fallback to today's painted cells) under `water_bodies`. Each body also lists `at_grade_roads` ("at-grade road over water" lines: metres inside the polygon and metres below the surface), and `report.water_decks_raised` lists every deck raised above the water with `raised_m` (also `water_raise_m` in the object provenance). No package format change; .mbhf stays terrain-only. Packages with no water (the Munich fixture) are byte-identical. Developer tools: `tools/water_replay.py` (fixed-query and regenerated-passage replays, Python and C#, classified differences) and `tools/water_check.py` (carve invariant and wet-probe clearance on an emitted package); the C# reference reader gains a `--ray-work` parity mode.
+* **The stylized look is the new default** (S5-STYLE-PALETTE #100, S5-STYLE-WATER #103, S5-PONDS-FIX #109). New
+  packages use a pastel palette sampled from reference art, flat-shaded faces and no textures. Choose the look with
+  CLI `--style stylized|classic` (default `stylized`) or Blender **Content > Style**. `--style classic` gives the
+  v0.5.0 look, including textures when Textures is on. A classic package differs from v0.5.0 only by
+  `generator.version` and by the S5-F3 bank change below. Collision (`.mbcol`), heightfield (`.mbhf`), georeference,
+  passage probes and triangle counts are the same in both styles: the style changes only colours, materials, normals
+  and textures in `visual/map.glb`, plus `NOTICES.txt`, `manifest.json` and `report.json`.
+  * Stylized terrain: lit and shadowed cliff colours from 35 degrees, a gentle slope brightness ramp, and sand
+    beyond the water's shallow rim.
+  * Stylized trees: three foliage tones by face direction and a deterministic per-tree tint.
+  * Stylized buildings: tagged `building:colour` / `roof:colour` keep their hue, pulled into the palette; untagged
+    buildings get a palette colour keyed on their id. Footpaths and tracks have their own pale road colour.
+  * Stylized water: open water is a clear sky blue, and the `bank:` shore ramp is a light shallow-water rim
+    directly against it, so water, rim and sand read as one continuous edge (#103, #109).
+  * Stylized ignores **Textures**: the GLB embeds no images and no `NORMAL` attribute (flat shading by the glTF
+    rule), so it is smaller with the same triangles. Example CLI GLBs: Munich 4,374,908 to 2,339,412 bytes,
+    Pittsburgh 15,246,708 to 9,153,644, Bellevue-Factoria 25,746,980 to 15,316,096. The package uses 7 or 8
+    materials.
+  * `NOTICES.txt` no longer lists the five CC0 texture records when no textures are shipped, and
+    `report.json` gains `options.style` for stylized packages.
+* Blender **Content** box: new **Style** dropdown (Stylized / Classic) above Textures. Textures applies only in
+  Classic. The style is fixed at **Generate** and recorded in the map; **Export** reuses it, so changing Style
+  or Textures afterwards does not restyle a stylized map (regenerate to switch).
 
-* **Fewer degenerate collision triangles** (S4-COL-DEGEN, D98, D111). Road ribbon polygons drop duplicate and collinear
-  vertices (the fan is not re-chosen, D119); faces with no
-  area in float32 storage on either path are omitted. No ray or capsule probe changes. The remaining slivers are real
-  surface (a ray can hit them), so they stay; `report.json` lists them per object (`degenerate_objects`) and an object
-  with no triangles is dropped and listed (`objects_dropped_empty`). The validator rule and warning are unchanged.
+### Fixed
 
-* Blender: the bounding-box edges (South/West/North/East) are text fields read in double precision; the old float32 fields moved an edge by up to 0.24 m (S3-F6). A bbox saved by an earlier version migrates automatically, with the precision it was stored at.
-* Blender export: an unmodified default material is named "MB Default"; any parameter variant keeps its digest suffix (S3-F11).
+* **Stylized ponds show a continuous shallow band** (S5-PONDS-FIX, #109). The light shore band used to sit on
+  terrain triangles within 6 m of the shore, but a pond's `bank:` ramp (sand) covers the first metres, so the band
+  appeared as pale triangles on land beyond a sand ring. The stylized `bank:` ramp is now the shallow band and the
+  terrain bank band is sand. Colour only: classic packages are byte-identical, and collision and heightfield do not
+  change.
+* **Banks continue under elevated bridges** (S5-F3, #97). A shore-ramp bank strip used to be dropped whole
+  when it touched a bridge line, which left the water sheet up to 1.8 m above the uncovered ground beside the I-90
+  crossing on Bellevue-Factoria. A strip is now cut only where it lies inside a deck footprint that sits at grade
+  (less than 2.5 m above the ramp); under an elevated deck it passes. At-grade roads, building footprints, tunnels
+  and abutments still mask the strip. Bellevue-Factoria (`bank:osm:relation/2315576`) and Pittsburgh
+  (`bank:osm:relation/7937544`, `bank:osm:way/379511900`) gain bank triangles and their `.mbhf` changes at the strip
+  nodes; `shore_ramp_blocked_m` drops accordingly. Decks, probes and the georeference are unchanged; Munich and the
+  sample are byte-identical.
+
+### Developer
+
+* Work-count performance gate (S5-PERF-GATE #91): deterministic per-stage counters (`tools/perf/collect.py`) and a
+  checker (`tools/perf/work_count.py compare`) that flags regressions without wall-clock noise; usage in
+  `docs/dev/tools.md` (#99).
+* Faster water stage (S5-PERF-WATER #105): indexed water masks cut Pittsburgh `ring_edge_tests` to 6.7 % of before;
+  every package is byte-identical. Adds the SwiftShader frame-time proxy (`tools/demo/style_frame_time_proxy.py`).
+* Style checker and fixed baselines (S5-STYLE-BASE #85): `tools/style_check.py` (`g0`, `classic-identity`,
+  `mode-diff`, `metrics`), the `bellevue-factoria` demo preset and three style camera presets, and the render
+  recipe `tools/demo/style_render_recipe.py`.
+* The default style is pinned in a unit test on both paths (#107). Blender's terrain-edit export check now targets
+  `terrain:grid` by identity (S5-F4 #94). The floating-collision audit no longer reports a building roof edge as
+  buried (S4-F8 #83).
+* Docs: architecture and water/shore design (#90), developer tools and CI steps (#92).
+
+### Known limitations
+
+* Munich CLI and Blender packages differ in facade colours (#106). This was already true before v0.6.0, and the
+  parity check fails the same way on the classic baseline.
+* Stylized scenes read pale: in Munich pale roofs and walls merge, Pittsburgh water is a deeper blue than the
+  target, and on Bellevue-Factoria the road network loses its dark contrast.
+* Planned decorations (S5-DECOR, draft #101) are not in this release; they need a Unity glTFast check first.
+
+## [0.5.0] - 2026-11-24
+
+"Rivers, roof ends and release hygiene" (sprint 4). Package schema stays **2.1.0**.
+
+### Added
+
+* **Rivers and lakes are now water surfaces, not painted ditches** (S4-WATER-SURFACE, D113-D118). Each water body
+  gets its own mesh (water:<osm-id>, collision class `water`, material MB Water, untextured until S4-TEX-WATER)
+  clipped to the exact OSM polygon, at a level taken from the shore band (p20 of the corrected DEM; rivers of 300 m
+  or more follow a non-increasing downstream profile). The terrain bed under it is carved to 1.5 m below the surface
+  and the banks are blended, so water no longer follows the DSM dip with 30 m cell staircase edges. Roads, bridges
+  and building bases keep the pre-carve ground; decks are never lowered and are raised only where the water surface
+  would touch them; piers and building walls extend to the carved bed. `report.json` lists every body with its
+  outcome (`built(flat)`, `built(profile, N stations)` or a named fallback to today's painted cells) under
+  `water_bodies`. Each body also lists `at_grade_roads` ("at-grade road over water" lines: metres inside the polygon
+  and metres below the surface), and `report.water_decks_raised` lists every deck raised above the water with
+  `raised_m` (also `water_raise_m` in the object provenance). No package format change; .mbhf stays terrain-only.
+  Packages with no water (the Munich fixture) are byte-identical. Developer tools: `tools/water_replay.py`
+  (fixed-query and regenerated-passage replays, Python and C#, classified differences) and `tools/water_check.py`
+  (carve invariant and wet-probe clearance on an emitted package); the C# reference reader gains a `--ray-work`
+  parity mode.
+* **Shore ramps close water-sheet/bank gaps** (S4-COL-FLOAT-2, #77). Built water bodies now emit terrain ramp
+  objects (`bank:<osm-id>`) in the shore band so water surfaces meet the banks consistently.
+
+### Changed
+
 * **Gabled roofs on chamfered and angled ends** (S4-ROOF-ENDS). A gable end that the plain cut could not represent
-  (the ridge met the end outside it, or the end was a sliver) is now cut by a vertical wall through the end edge, and
-  the remaining ends stay hipped (a gabled roof needs at least two gable ends). On the Munich fixture 45 of 67 roofs
-  are now built as tagged (33 before); every roof that still falls back names the reason in its provenance.
-  A concave footprint tagged `roof:shape=pyramidal` is now a named flat fallback.
-* **Shore ramps close water-sheet/bank gaps** (S4-COL-FLOAT-2, #77). Built water bodies now emit terrain ramp objects
-  (`bank:<osm-id>`) in the shore band so water surfaces meet the banks consistently.
-* **Mypy is clean and enforced in CI** (S4-MYPY, #81). The strict typing cleanup is merged and the CI gate now blocks
-  regressions instead of treating typing as advisory.
+  (the ridge met the end outside it, or the end was a sliver) is now cut by a vertical wall through the end edge,
+  and the remaining ends stay hipped (a gabled roof needs at least two gable ends). On the Munich fixture 45 of 67
+  roofs are now built as tagged (33 before); every roof that still falls back names the reason in its provenance. A
+  concave footprint tagged `roof:shape=pyramidal` is now a named flat fallback.
+* Blender: the bounding-box edges (South/West/North/East) are text fields read in double precision; the old float32
+  fields moved an edge by up to 0.24 m (S3-F6). A bbox saved by an earlier version migrates automatically, with the
+  precision it was stored at.
+* Blender export: an unmodified default material is named "MB Default"; any parameter variant keeps its digest
+  suffix (S3-F11).
+* Licence confirmed (D13, option B): Blender add-on code (`map_builder/blender/`) is GPL-3.0-or-later; everything
+  else we wrote is Apache-2.0. Added `LICENSE`, `LICENSE-GPL-3.0.txt`, `NOTICE` and SPDX headers; the extension zip
+  now ships the licence texts. Textures stay CC0; generated packages keep their data attribution.
 
-* Licence confirmed (D13, option B): Blender add-on code (`map_builder/blender/`) is GPL-3.0-or-later;
-  everything else we wrote is Apache-2.0. Added `LICENSE`, `LICENSE-GPL-3.0.txt`, `NOTICE` and SPDX
-  headers; the extension zip now ships the licence texts. Textures stay CC0; generated packages keep
-  their data attribution.
+### Fixed
+
+* **Roads no longer hover over carved water beds** (S4-COL-FLOAT). Roads are now draped on the carved terrain mesh
+  instead of the pre-carve ground. Before, a road that ran into or beside a water body kept the old ground height
+  while the terrain under it was carved up to 1.5 m down, so its collision was a cushion above the visible ground
+  and a descending drone stopped on it. At-grade roads over water now follow the bed under the water surface (the
+  `at_grade_roads` report lines are unchanged). Packages with no water are byte-identical. The sample package is
+  regenerated. Developer tools: `tools/floating_audit.py` (downward-ray audit of collision, heightfield and visual
+  surfaces; floating and buried collision, water-to-bank gaps, grouped into regions) and `tools/water_replay.py`
+  classifies the new `road lowered` difference. Known remaining water gaps: a flat water surface can sit up to the
+  1.5 m carve step above the ground just outside the shore (reported as `water_shore_step`, by design), and a few
+  river banks lower than the shore-band level or two bodies with different levels leave larger steps
+  (`water_above_bank`; the audit lists them).
+* **Fewer degenerate collision triangles** (S4-COL-DEGEN, D98, D111). Road ribbon polygons drop duplicate and
+  collinear vertices (the fan is not re-chosen, D119); faces with no area in float32 storage on either path are
+  omitted. No ray or capsule probe changes. The remaining slivers are real surface (a ray can hit them), so they
+  stay; `report.json` lists them per object (`degenerate_objects`) and an object with no triangles is dropped and
+  listed (`objects_dropped_empty`). The validator rule and warning are unchanged.
+
+### Developer
+
+* **Mypy is clean and enforced in CI** (S4-MYPY, #81). The strict typing cleanup is merged and the CI gate now
+  blocks regressions instead of treating typing as advisory.
 
 ## [0.4.0] - 2026-11-20
 
@@ -300,7 +402,9 @@ release review and coordinator authorization.
 - Code licence is provisionally GPL-3.0-or-later; owner confirmation and a root
   licence file are still outstanding. Source-data licences apply separately.
 
-[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lingshf/map-builder/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lingshf/map-builder/releases/tag/v0.6.0
+[0.5.0]: https://github.com/lingshf/map-builder/releases/tag/v0.5.0
 [0.4.0]: https://github.com/lingshf/map-builder/releases/tag/v0.4.0
 [0.3.0]: https://github.com/lingshf/map-builder/releases/tag/v0.3.0
 [0.2.0]: https://github.com/lingshf/map-builder/releases/tag/v0.2.0
