@@ -698,7 +698,7 @@ candidates above; none joins M-S6 unless the Team Leader adds it with a D-number
 
 | Id | Candidate | Why | Notes |
 |---|---|---|---|
-| S7-REL-SAMPLE | Release notes list the committed synthetic sample (bytes, SHA-256, `package_id`, `schema_version`); the SPRINT_CLOSE release AC checks the row | #17 request 3 | Release manager and Design; docs only; applies to the next release |
+| S7-REL-SAMPLE | Release notes list the committed synthetic sample (bytes, SHA-256, `package_id`, `schema_version`); the SPRINT_CLOSE release AC checks the row | #17 request 3 | Release manager and Design; docs only; proposed for a future release, not committed |
 | S7-SPAWN | Optional `spawn_points[]` (map frame, metres, heading) as format minor 2.2.0 | #17 request 4 | D101/D110: no new member; positive frozen-reader fixture (Python and C#); source and validation rules to be scoped by the Team Leader |
 | (user) | A `format-2.1.0` tag; a 3.0 notice period and a kept 2.x sample | #17 requests 1 and 6 | Need the user: tagging (D202) and the D101 confirmation (item 3 below) |
 
