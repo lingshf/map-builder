@@ -138,7 +138,7 @@ py -3.12 tools\style_check.py palette-regions --image RENDER.png --regions REGIO
 | `classic-identity` | Whole-archive byte identity (D141) | 0 / 1 |
 | `mode-diff` | Member diff between classic and stylized | 0 (report) |
 | `metrics` | Style budget rows (D139): materials, draw submissions, triangles, vertices, and `render_memory_bytes`, a **proxy**: the GLB buffer views referenced by drawn primitives plus embedded image bytes. Sizes: `texture_bytes`, `glb_bytes`, and `package_bytes`, the sum of the **uncompressed** archive members, which is not the on-disk `.mbmap` size (the committed sample: 1,369,164 vs 709,216 bytes). Compare `package_bytes` between packages; use the file size for download size | 0 (report) |
-| `parity` | Per-node material and colour parity between CLI and Blender | 0 / 1 |
+| `parity` | Per-primitive material and triangle parity between CLI and Blender, see [Parity equivalence](#parity-equivalence) | 0 / 1 |
 | `palette-regions` | ΔE2000 of fixed screen regions against the target palette (information, D140); needs Pillow | 0 (report) |
 
 The output is JSON on stdout. `--output` is optional and also writes it to a file. The minimal `REGIONS.json`
@@ -148,6 +148,24 @@ for `palette-regions`; `x`, `y`, `w` and `h` are fractions of the image size fro
 ```json
 {"regions": [{"camera": "ponds", "label": "water", "x": 0.40, "y": 0.55, "w": 0.10, "h": 0.08, "target_hex": "#3c6e8c"}]}
 ```
+
+### Parity equivalence
+
+`parity` pairs the primitives of the two packages by node, material and mode, and compares each pair's triangles as
+(position, colour) corner triples. The paths legitimately differ in how they write the same surface (#106), so the
+checker accepts exactly these differences and no others:
+
+* **Node transform.** The CLI keeps each object's pivot (and a tree's rotation) in the glTF node transform; Blender
+  bakes it into the vertices. Positions are compared in the scene frame, after scale, rotation and translation.
+* **Float rounding.** Positions match within 0.1 mm and colours within 1e-5, which absorbs the float32 rounding of the
+  two conventions (about 1.5e-5 m at 100 m from the origin).
+* **Corner order.** A triangle may start at any of its corners; the winding order must be the same.
+* **Quad diagonal.** Triangles with no exact equivalent are accepted when every one is flat-coloured and the two
+  sides are made of the same corners, i.e. a quad split along its other diagonal. Colours that vary across a
+  triangle are never accepted this way.
+
+A colour swapped between corners is still reported. A failing primitive lists `difference` with the first triangle each
+path has no equivalent for.
 
 ## Perf gate (`tools/perf/`, D153)
 

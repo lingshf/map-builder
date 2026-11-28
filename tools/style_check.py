@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -13,7 +15,7 @@ import struct
 import sys
 import zipfile
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, Sequence
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -31,6 +33,16 @@ class PackageData:
 # The only report drift tolerated by G0 is report.options.style. Omission is treated as "classic"
 # for pre-style baselines. The value must be "classic" or "stylized" when present.
 ALLOWED_REPORT_OPTIONS_STYLE = frozenset({"classic", "stylized"})
+
+# CLI/Blender parity tolerances. The CLI adds a float64 node transform to float32 local vertices while Blender stores
+# one float32 scene-space value, so the same corner differs by up to ~1.5e-5 m at 100 m; a real defect is far larger.
+_POSITION_TOLERANCE_M = 1e-4
+_COLOR_TOLERANCE = 1e-5
+_MATERIAL_DECIMALS = 6
+_CELL_M = 0.01  # grid used to find candidate triangles by centroid
+
+_Corner = tuple[tuple[float, ...], tuple[float, ...]]  # (scene-space position, colour)
+_Triangle = tuple[_Corner, _Corner, _Corner]
 
 
 def _build_path_kind(manifest: dict[str, Any]) -> str:
@@ -228,139 +240,266 @@ def glb_metrics(path: str) -> dict[str, int]:
     }
 
 
-def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str, Any]]:
-    cli = _load_package(cli_path)
-    bl = _load_package(blender_path)
-    cli_gl, cli_bin = _glb_json_and_bin(cli.glb)
-    bl_gl, bl_bin = _glb_json_and_bin(bl.glb)
-    _, cli_nodes = read_glb(cli.glb)
-    _, bl_nodes = read_glb(bl.glb)
+def _norm_num(value: Any) -> Any:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return round(float(value), _MATERIAL_DECIMALS)
+    return value
 
-    def _norm_num(value: Any) -> Any:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return round(float(value), 6)
-        return value
 
-    def _norm_accessor_rows(gl: dict[str, Any], bin_chunk: bytes, accessor_index: int) -> list[tuple[Any, ...]] | None:
-        raw = _buffer_slice(gl, bin_chunk, accessor_index)
-        accessor = gl.get("accessors", [])[accessor_index]
-        if (isinstance(accessor, dict) and accessor.get("componentType") == 5126
-                and accessor.get("type") in {"VEC3", "VEC4"} and len(raw) % 4 == 0):
-            values = struct.unpack("<" + "f" * (len(raw) // 4), raw)
-            width = 3 if accessor.get("type") == "VEC3" else 4
-            return [tuple(_norm_num(values[i + k]) for k in range(width)) for i in range(0, len(values), width)]
+def _float_rows(gl: dict[str, Any], bin_chunk: bytes, accessor_index: int) -> list[tuple[float, ...]] | None:
+    """Rows of a float32 VEC3/VEC4 accessor, or None for any other accessor layout."""
+    raw = _buffer_slice(gl, bin_chunk, accessor_index)
+    accessor = gl["accessors"][accessor_index]
+    if accessor.get("componentType") != 5126 or accessor.get("type") not in {"VEC3", "VEC4"} or len(raw) % 4:
+        return None
+    values = struct.unpack("<" + "f" * (len(raw) // 4), raw)
+    width = 3 if accessor["type"] == "VEC3" else 4
+    return [values[i:i + width] for i in range(0, len(values), width)]
+
+
+def _primitive_indices(gl: dict[str, Any], bin_chunk: bytes, primitive: dict[str, Any], vertex_count: int) -> list[int]:
+    if "indices" not in primitive:
+        return list(range(vertex_count))
+    raw = _buffer_slice(gl, bin_chunk, primitive["indices"])
+    code = {5121: "B", 5123: "H", 5125: "I"}[gl["accessors"][primitive["indices"]]["componentType"]]
+    return list(struct.unpack("<" + code * (len(raw) // struct.calcsize(code)), raw))
+
+
+def _cross(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float]:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _to_scene_frame(node: dict[str, Any], vertex: Sequence[float]) -> tuple[float, float, float]:
+    """The glTF node transform (scale, then rotation quaternion, then translation) applied to a local vertex."""
+    scaled = [v * s for v, s in zip(vertex, node.get("scale", (1.0, 1.0, 1.0)))]
+    qx, qy, qz, qw = node.get("rotation", (0.0, 0.0, 0.0, 1.0))
+    t = [2.0 * c for c in _cross((qx, qy, qz), scaled)]
+    u = _cross((qx, qy, qz), t)
+    translation = node.get("translation", (0.0, 0.0, 0.0))
+    return tuple(scaled[k] + qw * t[k] + u[k] + translation[k] for k in range(3))
+
+
+def _primitive_triangles(gl: dict[str, Any], bin_chunk: bytes, node: dict[str, Any],
+                         primitive: dict[str, Any]) -> list[_Triangle] | None:
+    """Triangles as (position, colour) corners in the scene frame, or None when the layout is not float32.
+
+    The CLI exporter keeps each object's pivot and tree orientation in the node transform while the Blender
+    exporter bakes them into the vertices, so the same triangle has different local positions on the two paths;
+    both are compared in the scene frame."""
+    attrs = primitive["attributes"]
+    positions = _float_rows(gl, bin_chunk, attrs["POSITION"])
+    colors = _float_rows(gl, bin_chunk, attrs["COLOR_0"])
+    if positions is None or colors is None or len(positions) != len(colors):
+        return None
+    corners = [(_to_scene_frame(node, positions[i]), colors[i])
+               for i in _primitive_indices(gl, bin_chunk, primitive, len(positions))]
+    return [tuple(corners[k:k + 3]) for k in range(0, len(corners) - 2, 3)]
+
+
+def _all_close(a: Sequence[float], b: Sequence[float], tolerance: float) -> bool:
+    return len(a) == len(b) and all(abs(x - y) <= tolerance for x, y in zip(a, b))
+
+
+def _corners_match(a: _Corner, b: _Corner) -> bool:
+    return _all_close(a[0], b[0], _POSITION_TOLERANCE_M) and _all_close(a[1], b[1], _COLOR_TOLERANCE)
+
+
+def _triangles_match(a: _Triangle, b: _Triangle) -> bool:
+    """Same corners in the same cyclic (winding) order, from any starting corner."""
+    return any(all(_corners_match(a[i], b[(i + shift) % 3]) for i in range(3)) for shift in range(3))
+
+
+def _centroid(triangle: _Triangle) -> tuple[float, float, float]:
+    return tuple(sum(corner[0][k] for corner in triangle) / 3.0 for k in range(3))
+
+
+def _corner_position(corner: _Corner) -> tuple[float, ...]:
+    return corner[0]
+
+
+class _MatchIndex:
+    """Items bucketed on a grid by a 3-D locating point, so a match within the position tolerance is found
+    without comparing against every item. Each item is handed out at most once."""
+
+    def __init__(self, items: list[Any], locate: Callable[[Any], Sequence[float]], matches: Callable[[Any, Any], bool]):
+        self._locate = locate
+        self._matches = matches
+        self._cells: dict[tuple[int, ...], list[Any]] = collections.defaultdict(list)
+        for item in items:
+            self._cells[tuple(math.floor(c / _CELL_M) for c in locate(item))].append(item)
+
+    def _find(self, item: Any) -> tuple[list[Any], int] | None:
+        per_axis = [{math.floor((c - _POSITION_TOLERANCE_M) / _CELL_M), math.floor((c + _POSITION_TOLERANCE_M) / _CELL_M)}
+                    for c in self._locate(item)]
+        for cell in itertools.product(*per_axis):
+            bucket = self._cells.get(cell, [])
+            for i, candidate in enumerate(bucket):
+                if self._matches(item, candidate):
+                    return bucket, i
         return None
 
-    def _primitive_indices(gl: dict[str, Any], bin_chunk: bytes, primitive: dict[str, Any], vertex_count: int) -> list[int]:
-        if "indices" not in primitive:
-            return list(range(vertex_count))
-        raw = _buffer_slice(gl, bin_chunk, primitive["indices"])
-        code = {5121: "B", 5123: "H", 5125: "I"}[gl["accessors"][primitive["indices"]]["componentType"]]
-        return list(struct.unpack("<" + code * (len(raw) // struct.calcsize(code)), raw))
+    def has_match(self, item: Any) -> bool:
+        return self._find(item) is not None
 
-    def _canonical_triangle(corners: list[Any]) -> tuple[Any, ...]:
-        """Corner tuples rotated to start at the smallest one; the cyclic (winding) order is kept."""
-        start = corners.index(min(corners))
-        return tuple(corners[start:] + corners[:start])
+    def take_match(self, item: Any) -> bool:
+        found = self._find(item)
+        if found is None:
+            return False
+        bucket, i = found
+        del bucket[i]
+        return True
 
-    def _norm_color_hash(gl: dict[str, Any], bin_chunk: bytes, primitive: dict[str, Any]) -> str:
-        """Hash of the triangles as (position, colour) corner triples, so a colour swap between
-        coincident corners of different triangles is a difference."""
-        attrs = primitive["attributes"]
-        pos_rows = _norm_accessor_rows(gl, bin_chunk, attrs["POSITION"])
-        color_rows = _norm_accessor_rows(gl, bin_chunk, attrs["COLOR_0"])
-        if pos_rows is not None and color_rows is not None and len(pos_rows) == len(color_rows):
-            indices = _primitive_indices(gl, bin_chunk, primitive, len(pos_rows))
-            corners = [(pos_rows[i], color_rows[i]) for i in indices]
-            triangles = sorted(_canonical_triangle(corners[k:k + 3]) for k in range(0, len(corners) - 2, 3))
-            return hashlib.sha256(json.dumps(triangles, separators=(",", ":")).encode("utf-8")).hexdigest()
-        return hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
 
-    def signature(gl: dict[str, Any], bin_chunk: bytes, nodes: list[Any]) -> list[dict[str, Any]]:
-        sig: list[dict[str, Any]] = []
-        mats = gl.get("materials", [])
-        meshes = gl.get("meshes", [])
-        _assert_unique_identity(
-            [(_identity_name(m.get("name"), i, "material"), _mb_id_of(m)) for i, m in enumerate(mats) if isinstance(m, dict)],
-            "material identity",
-        )
-        _assert_unique_identity(
-            [(str(gl["nodes"][n.index].get("name", n.name)), _mb_id_of(gl["nodes"][n.index])) for n in nodes if "mesh" in gl["nodes"][n.index]],
-            "node identity",
-        )
-        material_payload_by_index: list[dict[str, Any]] = []
-        for i, m in enumerate(mats):
-            pbr = m.get("pbrMetallicRoughness", {}) if isinstance(m, dict) else {}
-            mat_name = _identity_name(m.get("name") if isinstance(m, dict) else None, i, "material")
-            base_color = pbr.get("baseColorFactor")
-            material_payload_by_index.append(
-                {
-                    "name": mat_name,
-                    "mb_id": _mb_id_of(m),
-                    "baseColorFactor": [_norm_num(v) for v in base_color] if isinstance(base_color, list) else base_color,
-                    "metallicFactor": _norm_num(pbr.get("metallicFactor")),
-                    "roughnessFactor": _norm_num(pbr.get("roughnessFactor")),
-                    "hasBaseColorTexture": isinstance(pbr, dict) and "baseColorTexture" in pbr,
-                }
-            )
-        for n in nodes:
-            njs = gl["nodes"][n.index]
-            if "mesh" not in njs:
-                continue
-            mesh = meshes[njs["mesh"]]
-            node_name = _identity_name(njs.get("name"), n.index, "node")
-            node_mb_id = _mb_id_of(njs)
-            for p in mesh.get("primitives", []):
-                attrs = p.get("attributes", {})
-                material_name = None
-                material_mb_id = None
-                material_payload = None
-                if "material" in p:
-                    mat_idx = int(p["material"])
-                    if not (0 <= mat_idx < len(material_payload_by_index)):
-                        raise ValueError(f"primitive references invalid material index {mat_idx}")
-                    material_payload = material_payload_by_index[mat_idx]
-                    material_name = str(material_payload["name"])
-                    material_mb_id = material_payload["mb_id"]
-                color_hash = None
-                if "COLOR_0" in attrs and "POSITION" in attrs:
-                    color_hash = _norm_color_hash(gl, bin_chunk, p)
-                sig.append(
-                    {
-                        "node_name": node_name,
-                        "node_mb_id": node_mb_id,
-                        "primitive_mb_id": _mb_id_of(p),
-                        "material_name": material_name,
-                        "material_mb_id": material_mb_id,
-                        "material_payload": material_payload,
-                        "color_sha256": color_hash,
-                        "mode": int(p.get("mode", 4)),
-                    }
-                )
-        return sorted(
-            sig,
-            key=lambda x: (
-                str(x.get("node_name", "")),
-                str(x.get("node_mb_id", "")),
-                str(x.get("primitive_mb_id", "")),
-                str(x.get("material_name", "")),
-                str(x.get("material_mb_id", "")),
-                str(x.get("color_sha256", "")),
-                int(x.get("mode", 0)),
-            ),
-        )
+def _unmatched(items: list[Any], candidates: list[Any], locate: Callable[[Any], Sequence[float]],
+               matches: Callable[[Any, Any], bool]) -> list[Any]:
+    """Items with no equivalent among the candidates; each candidate is used at most once."""
+    index = _MatchIndex(candidates, locate, matches)
+    return [item for item in items if not index.take_match(item)]
 
+
+def _is_flat_colored(triangle: _Triangle) -> bool:
+    return all(_all_close(corner[1], triangle[0][1], _COLOR_TOLERANCE) for corner in triangle[1:])
+
+
+def _corner_set(triangles: list[_Triangle]) -> _MatchIndex:
+    return _MatchIndex([corner for triangle in triangles for corner in triangle], _corner_position, _corners_match)
+
+
+def _is_flat_retriangulation(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> bool:
+    """Flat-coloured triangles made of the same corners: a quad split along its other diagonal renders the same."""
+    if not all(map(_is_flat_colored, cli_triangles + bl_triangles)):
+        return False
+    cli_corners, bl_corners = _corner_set(cli_triangles), _corner_set(bl_triangles)
+    return (all(bl_corners.has_match(c) for t in cli_triangles for c in t)
+            and all(cli_corners.has_match(c) for t in bl_triangles for c in t))
+
+
+def _triangle_difference(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> dict[str, Any] | None:
+    """None when the triangle sets agree; else the first triangle each path has no equivalent for.
+
+    Triangles with no exact equivalent are still accepted when they are flat-coloured re-triangulations of each
+    other (the Blender exporter picks its own quad diagonal). Colours that vary across a triangle are never
+    accepted this way, so a colour swapped between corners stays a difference."""
+    cli_left = _unmatched(cli_triangles, bl_triangles, _centroid, _triangles_match)
+    bl_left = _unmatched(bl_triangles, cli_triangles, _centroid, _triangles_match)
+    if _is_flat_retriangulation(cli_left, bl_left):
+        return None
+    return {"unmatched_cli_triangles": len(cli_left), "unmatched_blender_triangles": len(bl_left),
+            "first_cli_triangle": cli_left[0] if cli_left else None,
+            "first_blender_triangle": bl_left[0] if bl_left else None}
+
+
+@dataclass(frozen=True)
+class _PrimitiveSignature:
+    identity: dict[str, Any]
+    triangles: list[_Triangle] | None
+
+    @property
+    def key(self) -> str:
+        return json.dumps(self.identity, sort_keys=True)
+
+
+def _material_payload(index: int, material: dict[str, Any]) -> dict[str, Any]:
+    pbr = material.get("pbrMetallicRoughness", {})
+    base_color = pbr.get("baseColorFactor")
+    return {
+        "name": _identity_name(material.get("name"), index, "material"),
+        "mb_id": _mb_id_of(material),
+        "baseColorFactor": [_norm_num(v) for v in base_color] if isinstance(base_color, list) else base_color,
+        "metallicFactor": _norm_num(pbr.get("metallicFactor")),
+        "roughnessFactor": _norm_num(pbr.get("roughnessFactor")),
+        "hasBaseColorTexture": "baseColorTexture" in pbr,
+    }
+
+
+def _primitive_signature(gl: dict[str, Any], bin_chunk: bytes, node: dict[str, Any], node_name: str,
+                         primitive: dict[str, Any], materials: list[dict[str, Any]]) -> _PrimitiveSignature:
+    material = None
+    if "material" in primitive:
+        material_index = int(primitive["material"])
+        if not 0 <= material_index < len(materials):
+            raise ValueError(f"primitive references invalid material index {material_index}")
+        material = materials[material_index]
+    attrs = primitive.get("attributes", {})
+    has_colors = "COLOR_0" in attrs and "POSITION" in attrs
+    triangles = _primitive_triangles(gl, bin_chunk, node, primitive) if has_colors else None
+    raw_color_sha256 = None
+    if has_colors and triangles is None:
+        raw_color_sha256 = hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
+    identity = {
+        "node_name": node_name,
+        "node_mb_id": _mb_id_of(node),
+        "primitive_mb_id": _mb_id_of(primitive),
+        "material_name": None if material is None else material["name"],
+        "material_mb_id": None if material is None else material["mb_id"],
+        "material_payload": material,
+        "color_sha256": raw_color_sha256,
+        "mode": int(primitive.get("mode", 4)),
+    }
+    return _PrimitiveSignature(identity, triangles)
+
+
+def _parity_signatures(gl: dict[str, Any], bin_chunk: bytes, nodes: list[Any]) -> list[_PrimitiveSignature]:
+    raw_materials = gl.get("materials", [])
+    mesh_nodes = [(n, gl["nodes"][n.index]) for n in nodes if "mesh" in gl["nodes"][n.index]]
+    _assert_unique_identity(
+        [(_identity_name(m.get("name"), i, "material"), _mb_id_of(m)) for i, m in enumerate(raw_materials) if isinstance(m, dict)],
+        "material identity",
+    )
+    _assert_unique_identity([(str(node.get("name", n.name)), _mb_id_of(node)) for n, node in mesh_nodes], "node identity")
+    materials = [_material_payload(i, m) for i, m in enumerate(raw_materials)]
+    signatures: list[_PrimitiveSignature] = []
+    for n, node in mesh_nodes:
+        node_name = _identity_name(node.get("name"), n.index, "node")
+        for primitive in gl["meshes"][node["mesh"]].get("primitives", []):
+            signatures.append(_primitive_signature(gl, bin_chunk, node, node_name, primitive, materials))
+    return signatures
+
+
+def _group_by_identity(signatures: list[_PrimitiveSignature]) -> dict[str, list[_PrimitiveSignature]]:
+    groups: dict[str, list[_PrimitiveSignature]] = collections.defaultdict(list)
+    for signature in signatures:
+        groups[signature.key].append(signature)
+    return groups
+
+
+def _primitive_difference(cli: _PrimitiveSignature | None, blender: _PrimitiveSignature | None) -> dict[str, Any] | None:
+    if cli is None or blender is None:
+        return {"missing_on": "cli" if cli is None else "blender"}
+    if cli.triangles is None or blender.triangles is None:
+        return None
+    return _triangle_difference(cli.triangles, blender.triangles)
+
+
+def cli_blender_parity(cli_path: str, blender_path: str) -> tuple[bool, dict[str, Any]]:
+    """Per-primitive parity of the CLI and Blender packages.
+
+    A primitive is the same when its node, material and mode agree and its triangles agree as (scene-space
+    position, colour) corner triples: same winding, any starting corner, positions within a tolerance that absorbs
+    float32 rounding of the two transform conventions, so swapping colours between corners is still a difference."""
+    cli = _load_package(cli_path)
+    bl = _load_package(blender_path)
     try:
-        cli_sig = signature(cli_gl, cli_bin, cli_nodes)
-        bl_sig = signature(bl_gl, bl_bin, bl_nodes)
+        cli_sigs = _parity_signatures(*_glb_json_and_bin(cli.glb), read_glb(cli.glb)[1])
+        bl_sigs = _parity_signatures(*_glb_json_and_bin(bl.glb), read_glb(bl.glb)[1])
     except ValueError as e:
         return False, {"error": str(e)}
-    ok = cli_sig == bl_sig
-    if ok:
-        return True, {"different": [], "cli_count": len(cli_sig), "blender_count": len(bl_sig)}
-    cli_only = [entry for entry in cli_sig if entry not in bl_sig]
-    bl_only = [entry for entry in bl_sig if entry not in cli_sig]
-    return False, {"cli_only": cli_only[:20], "blender_only": bl_only[:20], "cli_count": len(cli_sig), "blender_count": len(bl_sig)}
+    cli_groups, bl_groups = _group_by_identity(cli_sigs), _group_by_identity(bl_sigs)
+    cli_only: list[dict[str, Any]] = []
+    bl_only: list[dict[str, Any]] = []
+    for key in sorted(cli_groups.keys() | bl_groups.keys()):
+        for cli_sig, bl_sig in itertools.zip_longest(cli_groups.get(key, []), bl_groups.get(key, [])):
+            difference = _primitive_difference(cli_sig, bl_sig)
+            if difference is None:
+                continue
+            if cli_sig is not None:
+                cli_only.append({**cli_sig.identity, "difference": difference})
+            if bl_sig is not None:
+                bl_only.append({**bl_sig.identity, "difference": difference})
+    counts = {"cli_count": len(cli_sigs), "blender_count": len(bl_sigs)}
+    if not cli_only and not bl_only:
+        return True, {"different": [], **counts}
+    return False, {"cli_only": cli_only[:20], "blender_only": bl_only[:20], **counts}
 
 
 def _mb_id_of(item: Any) -> str | None:

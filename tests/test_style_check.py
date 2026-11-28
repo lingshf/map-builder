@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import struct
 import tempfile
@@ -29,9 +30,26 @@ def _mesh(name: str) -> MeshData:
     return m
 
 
-def _build_valid_mbmap(path: str) -> None:
-    mesh = _mesh("terrain")
-    glb = write_glb([{"name": "terrain", "mesh": mesh}], {"MB Terrain": ((0.4, 0.6, 0.4), 1.0, 0.0)})
+def _quad(name: str, corners: list[tuple[float, float, float]], first: tuple[int, int, int],
+          second: tuple[int, int, int], colors: tuple[tuple[float, ...], tuple[float, ...]] = ((0.8, 0.7, 0.6),) * 2) -> MeshData:
+    """A quad split into two triangles, each with its own flat colour."""
+    m = MeshData(name)
+    ids = [m.add_vertex(*c) for c in corners]
+    for triangle, color in zip((first, second), colors):
+        m.add_face(tuple(ids[i] for i in triangle), "MB Terrain", color)
+    return m
+
+
+def _map_frame_transform(vertex: tuple[float, float, float], location: tuple[float, float, float],
+                         rotation_z: float) -> tuple[float, float, float]:
+    x, y, z = vertex
+    c, s = math.cos(rotation_z), math.sin(rotation_z)
+    return (c * x - s * y + location[0], s * x + c * y + location[1], z + location[2])
+
+
+def _build_valid_mbmap(path: str, nodes: list[dict] | None = None) -> None:
+    nodes = nodes or [{"name": "terrain", "mesh": _mesh("terrain")}]
+    glb = write_glb(nodes, {"MB Terrain": ((0.4, 0.6, 0.4), 1.0, 0.0)})
     col = b"MBCOL\x00\x00\x00\x02\x00\x00\x00" + b"\x00" * 128
     hf = b"MBHF\x00\x00\x00\x02\x00\x00\x00" + b"\x00" * 96
     probes = [{"id": "p0", "kind": "bridge", "feature": "osm:way/1", "path_map": [[0.0, 0.0, 5.0], [1.0, 0.0, 5.0]],
@@ -337,6 +355,36 @@ class StyleCheckTests(unittest.TestCase):
             ok, details = style_check.cli_blender_parity(cli, bl)
             self.assertFalse(ok)
             self.assertGreater(len(details.get("cli_only", [])), 0)
+
+    def test_parity_accepts_node_transform_baked_into_vertices(self) -> None:
+        pivot, angle = (110.5, 52.25, 5.75), 0.7
+        local = _quad("local", [(-4.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 15.0), (-4.0, 0.0, 15.0)], (0, 1, 2), (0, 2, 3))
+        baked = _quad("baked", [_map_frame_transform(v, pivot, angle) for v in local.vertices], (0, 1, 2), (0, 2, 3))
+        ok, details = self._parity([{"name": "wall", "mesh": local, "location": pivot, "rotation_z": angle}],
+                                   [{"name": "wall", "mesh": baked}])
+        self.assertTrue(ok, details)
+
+    def test_parity_accepts_flat_quad_split_on_other_diagonal(self) -> None:
+        corners = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 3.0), (0.0, 0.0, 3.0)]
+        ok, details = self._parity([{"name": "wall", "mesh": _quad("a", corners, (0, 1, 2), (0, 2, 3))}],
+                                   [{"name": "wall", "mesh": _quad("b", corners, (0, 1, 3), (1, 2, 3))}])
+        self.assertTrue(ok, details)
+
+    def test_parity_rejects_other_diagonal_when_triangle_colors_differ(self) -> None:
+        corners = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 3.0), (0.0, 0.0, 3.0)]
+        colors = ((0.9, 0.1, 0.1), (0.1, 0.1, 0.9))
+        ok, details = self._parity([{"name": "wall", "mesh": _quad("a", corners, (0, 1, 2), (0, 2, 3), colors)}],
+                                   [{"name": "wall", "mesh": _quad("b", corners, (0, 1, 3), (1, 2, 3), colors)}])
+        self.assertFalse(ok)
+        self.assertIn("first_cli_triangle", details["cli_only"][0]["difference"])
+
+    @staticmethod
+    def _parity(cli_nodes: list[dict], bl_nodes: list[dict]) -> tuple[bool, dict]:
+        with tempfile.TemporaryDirectory() as td:
+            cli, bl = os.path.join(td, "cli.mbmap"), os.path.join(td, "bl.mbmap")
+            _build_valid_mbmap(cli, cli_nodes)
+            _build_valid_mbmap(bl, bl_nodes)
+            return style_check.cli_blender_parity(cli, bl)
 
     @staticmethod
     def _swap_first_two_colors(members: dict[str, bytes]) -> None:
