@@ -11,8 +11,9 @@ The `v0.6.0` tag is pending (a user decision).
 
 Goal: the stylized low-poly look by default, classic mode byte-identical, flight data exact (G0), within the
 low-end budgets. **Technically met**: S5-STYLE-REVIEW is GO at 850a772 ([#108](https://github.com/lingshf/map-builder/issues/108)).
-**D169 goal attainment is not yet recorded**: S5-STYLE-PALETTE and S5-STYLE-WATER have no QA `accepted` verdict of
-their own yet (RETRO-I4). DOC-TOOLS-F1 is deferred to Sprint 6 (RETRO-I5, done).
+**D169 step 1 conditions are now satisfied**: every must item has a QA `accepted` verdict (PALETTE and WATER via
+RETRO-I4, done) and every deferrable item is accepted or deferred with an owner (DOC-TOOLS-F1 via RETRO-I5, done).
+The Team Leader records goal attainment and accepts this retro.
 
 | Item | Class | Outcome | Evidence |
 |---|---|---|---|
@@ -20,27 +21,27 @@ their own yet (RETRO-I4). DOC-TOOLS-F1 is deferred to Sprint 6 (RETRO-I5, done).
 | S5-PERF-GATE | must | accepted, done | [QA 7203624794](https://github.com/lingshf/map-builder/pull/91#issuecomment-7203624794) under D182; Team Leader DoD 2026-11-27 |
 | S5-F3 | must | accepted, done | [QA 7201074044](https://github.com/lingshf/map-builder/pull/97#issuecomment-7201074044); D184 |
 | S5-F4 | must | accepted, done | [QA 7147309581](https://github.com/lingshf/map-builder/pull/94#issuecomment-7147309581); D171 |
-| S5-STYLE-PALETTE | must | done (coordinator) | D186 m1–m4; carry-overs closed by PERF-WATER AC5 and the STYLE-REVIEW QA run |
-| S5-STYLE-WATER | must | done (coordinator) | D187; verified in the STYLE-REVIEW QA run |
+| S5-STYLE-PALETTE | must | accepted, done | [QA 7231809953](https://github.com/lingshf/map-builder/pull/100#issuecomment-7231809953) (merged 4cb17fb, integrated evidence through 850a772); D186 m1–m4 |
+| S5-STYLE-WATER | must | accepted, done | [QA 7231810312](https://github.com/lingshf/map-builder/pull/103#issuecomment-7231810312) at 850a772, after the #109 shoreline fix (merged 852a137); D187 |
 | S5-PERF-WATER | must | accepted, done | [QA 7231537377](https://github.com/lingshf/map-builder/pull/105#issuecomment-7231537377); AC3 an accepted shortfall (D188) |
 | S5-STYLE-REVIEW | must | GO | [#108](https://github.com/lingshf/map-builder/issues/108); T4 fixed by #107, R3 by #109 (D194) |
 | S5-DECOR | deferrable | deferred | D185: step 1b needs Unity and glTFast; draft #101 kept; owner Developer, Sprint 6 candidate 6 |
 | DOC-PERF | deferrable | accepted, done | [QA review 6080515258](https://github.com/lingshf/map-builder/pull/99#pullrequestreview-6080515258); Team Leader DoD 2026-11-27 |
 | DOC-TOOLS-F1 | deferrable | deferred | Coordinator ruling on #113: deferred to Sprint 6 (candidate 5a), owner Developer / Knowledge Lead; not blocking M-S5 |
-| M-S5-RETRO | must | this record (draft under PR review) | Formal acceptance blocked at D169 step 1 on RETRO-I4; per-role self-checks below are `not collected` (non-blocking) |
+| M-S5-RETRO | must | this record (draft under PR review) | Awaiting Team Leader acceptance (D169 steps 1–2; RETRO-I4 and RETRO-I5 done); per-role self-checks below are `not collected` (non-blocking) |
 | Added: S5-T4 (#107), S5-PONDS-FIX (#109) | must (STYLE-REVIEW NO-GO fixes) | merged; closed by the GO | [#108](https://github.com/lingshf/map-builder/issues/108) |
 
 Counts (must delivery items, excluding the retro):
 
-* Original must subtotal (8): `merged` 8 of 8; `accepted` with a QA verdict 6 of 8 (BASE, PERF-GATE, F3, F4,
-  PERF-WATER, STYLE-REVIEW GO); not yet `accepted` 2 of 8 (PALETTE, WATER; coordinator `done` without a per-task QA
-  verdict; RETRO-I4).
+* Original must subtotal (8): `merged` 8 of 8; `accepted` with a QA verdict 8 of 8 (BASE, PERF-GATE, F3, F4,
+  PALETTE, WATER, PERF-WATER, STYLE-REVIEW GO). PALETTE and WATER were coordinator `done` first and QA `accepted`
+  later (RETRO-I4).
 * NO-GO fixes added to the baseline by D169 (2): T4 and PONDS-FIX, `merged` 2 of 2 and QA `accepted` 2 of 2 (T4 PASS
   and ponds ACCEPTED in [#108](https://github.com/lingshf/map-builder/issues/108)).
-* Expanded must set (10): `merged` 10 of 10; QA `accepted` 8 of 10; not yet `accepted` 2 of 10 (PALETTE, WATER).
+* Expanded must set (10): `merged` 10 of 10; QA `accepted` 10 of 10.
 * Deferrable (3): 1 `accepted` (DOC-PERF), 2 deferred with owner (DECOR, DOC-TOOLS-F1).
 
-RETRO-I4 must be resolved before D169 step 1 is met; only then can this retro be accepted (step 2).
+RETRO-I4 and RETRO-I5 are done, so nothing in the Backlog blocks D169 step 1 or retro acceptance (step 2).
 
 Release: REL-v0.6.0 merged at b04b769 (#111). The PO review rejected the first RC head (7012d86) for a missing panel
 screenshot and viewer captures; both were added, and QA passed the scoped delta.
@@ -106,7 +107,7 @@ Coordinator ruling on #113: self-checks are non-blocking for M-S5; roles without
 
 | Role | Self-check of own outputs | Status |
 |---|---|---|
-| Product/Design | Task table and roadmap statuses brought current (#112, this PR); REL-v0.6.0 spec added late, after the RC opened (now in place); D-log complete to D199; Sprint 6 candidates recorded. Outdated: none known. Needs refine: PALETTE/WATER have no per-task QA verdict (recorded as coordinator `done`). | done |
+| Product/Design | Task table and roadmap statuses brought current (#112, this PR); REL-v0.6.0 spec added late, after the RC opened (now in place); D-log complete to D199; Sprint 6 candidates recorded. Outdated: none known. Needs refine: PALETTE/WATER were recorded `done` before a per-task QA verdict; closed by RETRO-I4. | done |
 | Team Leader | Consistency per member; the D200 audit finding; DOC-TOOLS-F1 deferral (ruled on #113) | not collected |
 | Developers | Code, tests and docs of #83, #85, #91, #94, #97, #100, #103, #105, #107, #109 | not collected |
 | QA | Verdicts and pinned windows (D194, D198) | not collected |
@@ -119,4 +120,4 @@ Coordinator ruling on #113: self-checks are non-blocking for M-S5; roles without
 Entered in the canonical Backlog: [tasks/README.md § M-S5-RETRO improvements](../tasks/README.md#m-s5-retro-improvements)
 (owner, priority, acceptance and target milestone per row).
 
-Milestone record: open until RETRO-I4 is resolved and the Team Leader accepts this retro (D169 step 3).
+Milestone record: open until the Team Leader accepts this retro (D169 step 3).
