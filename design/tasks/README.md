@@ -165,7 +165,7 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 | DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | merged (197335d); done (D168) | #92 (197335d) |
 | DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | merged (7cf6f45); done | #87 (7cf6f45) |
 | DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | merged (197335d); done (D168) | #92 (197335d) |
-| DOC-TOOLS-F1 | later | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then `docs/dev/tools.md` exit-code note | ready: floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
+| DOC-TOOLS-F1 | later | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then `docs/dev/tools.md` exit-code note | deferred to Sprint 6 (candidate 5a; coordinator ruling on #113, RETRO-I5; owner Developer / Knowledge Lead): floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
 | DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
 | DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/tools.md` §Perf gate (the canonical usage page; `docs/dev/README.md` links to it) | merged 8a78975. accepted: QA accepted on 496b72b ([review 6080515258](https://github.com/lingshf/map-builder/pull/99#pullrequestreview-6080515258)). done (signed off by Team Leader 2026-11-27) | #99 |
 
@@ -197,7 +197,7 @@ Team Leader. It runs after goal attainment and before the milestone record close
 
 | id | milestone | owner | trigger (dependency) | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
-| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 **goal attainment** (step 1 of the [closure sequence](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169)): every must delivery item `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. The accepted retro then closes the milestone record (step 3). A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | draft under PR review: [retro record](../reviews/M-S5-RETRO.md); formal acceptance blocked at D169 step 1 on RETRO-I4 and RETRO-I5; per-role self-checks pending; milestone open | |
+| M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 **goal attainment** (step 1 of the [closure sequence](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169)): every must delivery item `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. The accepted retro then closes the milestone record (step 3). A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | draft under PR review: [retro record](../reviews/M-S5-RETRO.md); formal acceptance blocked at D169 step 1 on RETRO-I4; per-role self-checks `not collected` (non-blocking); milestone open | |
 
 **M-S5-RETRO acceptance:**
 
@@ -206,7 +206,8 @@ Team Leader. It runs after goal attainment and before the milestone record close
 * **Deviation:** each deviation from the goal or the order, its cause and its impact.
 * **Self-check by every role** of its own outputs (code, tests, specs, docs, records) for outdated, missed or
   needs-refine, with evidence or a not-applicable reason: Team Leader, Product/Design, each Developer, QA, Code
-  Reviewer, Delivery/Release, Knowledge Lead.
+  Reviewer, Delivery/Release, Knowledge Lead. For M-S5 the coordinator ruled (#113) that self-checks are non-blocking;
+  roles without one are recorded as `not collected`.
 * **Knowledge Lead audit:** cross-module coverage-matrix recheck and the learning paths in `docs/README.md`.
 * **Consistency:** the Team Leader confirms per member that each role works from the same baseline, Backlog and
   decisions.
@@ -217,15 +218,15 @@ Team Leader. It runs after goal attainment and before the milestone record close
 
 ### M-S5-RETRO improvements
 
-From the [M-S5 retro record](../reviews/M-S5-RETRO.md) (D195–D199).
+From the [M-S5 retro record](../reviews/M-S5-RETRO.md) (D195–D200).
 
 | id | improvement | owner | priority | acceptance | target | status |
 |---|---|---|---|---|---|---|
 | RETRO-I1 | Pre-review grep of added public prose for internal labels (D195) | Delivery/Release | P1 | The REL PR description shows the grep command and 0 hits | Sprint 6 RC | ready |
 | RETRO-I2 | Demo-set diff against the previous release before opening the RC (D196) | Delivery/Release | P1 | The RC description lists the previous and new demo sets; every new UI control has `panel.png`, every showcase city a viewer capture | Sprint 6 RC | ready |
-| RETRO-I3 | Record the final approval of every merge on GitHub: an `APPROVED` verdict on the exact head, or a link to the coordinator ruling | Team Leader | P2 | Every Sprint 6 merge has one of the two on the PR | Sprint 6 | ready |
+| RETRO-I3 | Record the final approval of every merge on GitHub as a D200 review record | Team Leader | P2 | Every Sprint 6 merge has a review whose body starts `VERDICT: APPROVED` with `commit_id` equal to the merged head | Sprint 6 | ready |
 | RETRO-I4 | QA acceptance for S5-STYLE-PALETTE and S5-STYLE-WATER (D169 goal attainment) | QA | P1 | A QA `accepted` verdict per task against its spec criteria (S5-STYLE.md), linked from its row; a Team Leader ruling alone does not satisfy this | Before D169 step 1 (blocks retro acceptance) | ready |
-| RETRO-I5 | DOC-TOOLS-F1 disposition (deferrable) | Team Leader | P1 | The row says `accepted`, or deferred with owner and reason | Before D169 step 1 (blocks retro acceptance) | ready |
+| RETRO-I5 | DOC-TOOLS-F1 disposition (deferrable) | Team Leader | P1 | The row says `accepted`, or deferred with owner and reason | Before D169 step 1 (blocks retro acceptance) | done: deferred to Sprint 6 (coordinator ruling on #113; candidate 5a) |
 
 ## Dependency order and parallel waves (max 3 devs)
 
