@@ -32,15 +32,23 @@ sprint-5 deliverable. The RC is [#111](https://github.com/lingshf/map-builder/pu
    * the licence split (D13) and OSM/Copernicus attribution.
 4. **Extension reproducibility (D100).** The extension zip built in CI from the tag matches a local clean build from
    the same commit.
-5. **Asset reproduction.** At least one release `.mbmap` built from the tag matches a frozen-input rebuild; the
-   tag-time SHA-256 of every asset is in the release body. Evidence builds made before the version bump are labelled
-   as such.
+5. **Release assets.** The assets are the extension zip, the stylized Munich, Pittsburgh and Bellevue-Factoria
+   `.mbmap` (CLI) and their `.glb`, the renders, the viewer zip and `NOTICES.txt` (SPRINT_CLOSE). Every shipped package
+   is built from the tag and is VALID with the Python validator and the C# reader (probes as in AC1). At least one
+   matches a frozen-input rebuild. The tag-time SHA-256 of every asset is in the release body. Evidence builds made
+   before the version bump are labelled as such.
 6. **Demo (D17, SPRINT_CLOSE).** `docs/demo/v0.6.0/` contains:
    * `panel.png`: the Map Builder panel with **Content > Style** visible;
    * 2–3 feature examples, each with input area, command and before|after renders from identical cameras;
-   * `viewer-munich.png` and `viewer-pittsburgh.png`: the bundled three.js viewer showing the stylized GLBs;
-   * `evidence.json` with the commit, build command, caches and per-package hashes.
-7. **Floating collision (D126).** `tools/floating_audit.py` on every release package, CLI and Blender: 0 floating,
+   * `viewer-munich.png` and `viewer-pittsburgh.png`: the bundled three.js viewer showing the stylized GLBs, plus the
+     viewer bundle (shipped as the release viewer zip);
+   * a `summary.md` per preset or an equivalent summary in the demo README, and `evidence.json` with the commit,
+     build command, caches and per-package hashes;
+   * the demo README and the release notes link the panel screenshot, the sheets and the viewer captures.
+
+   **Demo check (SPRINT_CLOSE step 2):** the demo commands and assets reproduce on the RC merge.
+7. **Floating collision (D126).** `tools/floating_audit.py` on every RC build (CLI and Blender) and on every shipped
+   tag-built package: 0 floating,
    0 `water_above_bank` and 0 `water_buried` regions above 0.2 m.
 8. **Typing (D128).** mypy is clean and CI-enforced on the RC head.
 9. **Final RC (D133).** No `design/` hunk in the RC (D125). It merges through the D133 gate (exact-head approval,
@@ -49,7 +57,8 @@ sprint-5 deliverable. The RC is [#111](https://github.com/lingshf/map-builder/pu
 
 ## Conflict domain
 
-Version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `blender_manifest.toml`), `CHANGELOG.md`,
-`README.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.6.0/`, `docs/releases/v0.6.0.md`, `docs/DEMO.md`,
-`docs/PACKAGE_FORMAT.md`, `docs/VALIDATION.md`, and the D103 sample slot (`examples/synthetic_sample.mbmap`).
+Version files (`map_builder/__init__.py`, `map_builder/core/__init__.py`, `map_builder/blender_manifest.toml`),
+`CHANGELOG.md`, `README.md`, `docs/user/`, `docs/flows/`, `docs/demo/v0.6.0/`, `docs/releases/v0.6.0.md`,
+`docs/DEMO.md`, `docs/PACKAGE_FORMAT.md`, `docs/VALIDATION.md`, `examples/README.md`, and the D103 sample slot
+(`examples/synthetic_sample.mbmap`).
 Runs alone, after S5-STYLE-REVIEW GO.
