@@ -8,8 +8,7 @@ All notable user-visible changes are recorded here, following
 
 ## [0.6.0] - 2026-11-28
 
-"Stylized look" (sprint 5). **Release candidate**: tagging requires release review and coordinator
-authorization. Package schema stays **2.1.0**; v0.3.0 and later readers accept v0.6.0 packages.
+"Stylized look" (sprint 5). Package schema stays **2.1.0**; v0.3.0 and later readers accept v0.6.0 packages.
 
 ### Changed
 

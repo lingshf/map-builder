@@ -150,6 +150,30 @@
       "source": "new render",
       "before": "pk/headclassic_bellevue-factoria.mbmap (classic, 850a772)",
       "after": "rel060/after_bellevue-factoria.mbmap (stylized, 850a772)"
+    },
+    {
+      "file": "panel.png",
+      "bytes": 1268162,
+      "sha256": "d6389358e2c78ec4a447985899e728dab027da5d1f9db00b9b3636804df317d3",
+      "source": "tools/demo/run_demo.py --bundle-only --preset munich-altstadt --panel (Blender 4.2.23 Mesa, real window capture)",
+      "package": "rel060/after_munich.mbmap (stylized, 850a772)",
+      "shows": "Content > Style: Stylized"
+    },
+    {
+      "file": "viewer-munich.png",
+      "bytes": 143249,
+      "sha256": "712c7d8864bf88d18b668813b8d78fa93cb08b7fb498f78d32e8448f719a3c76",
+      "source": "run_demo.py viewer bundle, headless Microsoft Edge (SwiftShader), 1280x720",
+      "package": "rel060/after_munich.mbmap (stylized, 850a772)",
+      "probes": "3/3 PASS"
+    },
+    {
+      "file": "viewer-pittsburgh.png",
+      "bytes": 332092,
+      "sha256": "f6ed958637a48453118f3eeab39471303e7e4cc8d0a7e3c4cd45520fbc8c8e5e",
+      "source": "run_demo.py viewer bundle, Playwright Chromium, 1280x720 (headless Edge timed out on the 9 MB GLB)",
+      "package": "rel060/after_pittsburgh.mbmap (stylized, 850a772)",
+      "probes": "11/11 PASS"
     }
   ]
 }
