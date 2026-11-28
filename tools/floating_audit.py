@@ -790,6 +790,11 @@ def _print(res: dict[str, Any], quiet: bool) -> None:
                 print(f"      {r['area_m2']:9.1f} m2  max {r['max_offset_m']:7.3f} m at {r['at_xy']}  {o}")
 
 
+def _write_json(res: dict[str, Any], path: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(res, f, indent=1)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("package")
@@ -809,8 +814,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     _print(res, a.quiet)
     if a.json:
-        with open(a.json, "w", encoding="utf-8") as f:
-            json.dump(res, f, indent=1)
+        try:
+            _write_json(res, a.json)
+        except OSError as e:
+            print(f"ERROR: cannot write --json {a.json}: {type(e).__name__}: {e}", file=sys.stderr)
+            return 2
     return 0 if res["ok"] else 1
 
 

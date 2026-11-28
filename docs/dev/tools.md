@@ -57,10 +57,10 @@ gap. This table is the canonical explanation of the audit categories; other page
 **Exit codes:**
 
 * 0: the audit completed and found no failing kind;
-* 1: the audit completed with a failing finding. **Also 1** for an error writing `--json`: the file is written
-  after the guarded audit, so a missing output directory ends with an uncaught `FileNotFoundError` and exit 1, not 2
-  (DOC-TOOLS-F1). Create the `--json` directory first. `--png-dir` is created by the tool;
-* 2: the audit itself raised an error, for example a missing or unreadable package.
+* 1: the audit completed with a failing finding;
+* 2: the audit itself raised an error, for example a missing or unreadable package, **or** the `--json` file could
+  not be written (for example its directory does not exist), whatever the audit result. The tool does not create
+  the `--json` directory; create it first. `--png-dir` is created by the tool.
 
 ## Water replay
 
