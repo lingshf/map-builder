@@ -4,7 +4,7 @@
     {"camera": "overview", "label": "water-open", "target_hex": "#6dc0e7", "x": 0.2, "y": 0.418, "w": 0.02, "h": 0.01},
     {"camera": "factoria-interchange", "label": "road-light", "target_hex": "#d4b590", "x": 0.45, "y": 0.62, "w": 0.08, "h": 0.07},
     {"camera": "factoria-interchange", "label": "foliage-mid", "target_hex": "#39864c", "x": 0.18, "y": 0.55, "w": 0.06, "h": 0.08},
-    {"camera": "factoria-ponds", "label": "water-shore", "target_hex": "#ceeef6", "x": 0.4797, "y": 0.5833, "w": 0.0094, "h": 0.0083},
+    {"camera": "factoria-ponds", "label": "water-shore", "target_hex": "#ceeef6", "x": 0.4797, "y": 0.567, "w": 0.0094, "h": 0.0083},
     {"camera": "factoria-ponds", "label": "grass-light", "target_hex": "#b9d17a", "x": 0.30, "y": 0.64, "w": 0.06, "h": 0.08},
     {"camera": "overview", "label": "footpath-sand", "target_hex": "#fdeaa2", "x": 0.69, "y": 0.508, "w": 0.005, "h": 0.006}
   ]

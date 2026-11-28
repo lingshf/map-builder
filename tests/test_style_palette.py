@@ -7,8 +7,11 @@ from types import SimpleNamespace
 
 from map_builder.core import style, water
 from map_builder.core.dem import ElevationGrid
+from map_builder.core.generate import PlanOptions
 from map_builder.core.glb import read_glb, write_glb
 from map_builder.core.mesh import MeshData
+
+from .test_water import lake_scene
 
 FLAT = (0.0, 0.0, 1.0)
 SUN_SIDE = (math.sin(math.radians(60)) * -0.64, math.sin(math.radians(60)) * -0.77, math.cos(math.radians(60)))
@@ -22,10 +25,10 @@ def hue(linear_rgb):
 
 class TerrainFaceColorTest(unittest.TestCase):
     def test_steep_faces_use_cliff_colours_by_facing(self):
-        lit = style.terrain_face_color("grass", SUN_SIDE, near_water=False)
-        shadow = style.terrain_face_color("grass", SHADE_SIDE, near_water=False)
+        lit = style.terrain_face_color("grass", SUN_SIDE, in_bank_band=False)
+        shadow = style.terrain_face_color("grass", SHADE_SIDE, in_bank_band=False)
         self.assertNotEqual(lit, shadow)
-        self.assertEqual(lit, style.terrain_face_color("forest", SUN_SIDE, near_water=True))
+        self.assertEqual(lit, style.terrain_face_color("forest", SUN_SIDE, in_bank_band=True))
 
     def test_gentle_slope_is_not_a_cliff(self):
         gentle = (math.sin(math.radians(30)), 0.0, math.cos(math.radians(30)))
@@ -33,12 +36,11 @@ class TerrainFaceColorTest(unittest.TestCase):
                          (style.terrain_face_color("grass", SUN_SIDE, False),
                           style.terrain_face_color("grass", SHADE_SIDE, False)))
 
-    def test_shore_band_is_shallow_water_only_near_water(self):
-        near = style.terrain_face_color("grass", FLAT, near_water=True)
-        far = style.terrain_face_color("grass", FLAT, near_water=False)
-        self.assertNotEqual(near, far)
-        self.assertGreater(near[2], near[0])    # blue-dominant, distinct from the sand bank ramps
-        self.assertNotEqual(near, style.bank_color("stylized"))
+    def test_bank_band_faces_are_sand_not_shallow_water(self):
+        in_band = style.terrain_face_color("grass", FLAT, in_bank_band=True)
+        out_of_band = style.terrain_face_color("grass", FLAT, in_bank_band=False)
+        self.assertNotEqual(in_band, out_of_band)
+        self.assertGreater(in_band[0], in_band[2])    # warm sand, not water-blue
 
     def test_water_colour_differs_by_style(self):
         self.assertNotEqual(style.water_color("stylized"), style.water_color("classic"))
@@ -109,6 +111,30 @@ class ShoreBandFacesTest(unittest.TestCase):
     def test_the_two_faces_of_a_cell_are_decided_by_their_own_centroid(self) -> None:
         faces = self.faces_within(0.5)
         self.assertEqual({k for (i, j, k) in faces if (i, j) == (10, 2)}, {0})
+
+
+class ShorePlanColoursTest(unittest.TestCase):
+    """The visible shallow band must be the ramp that adjoins the water, not terrain triangles beyond it."""
+
+    @staticmethod
+    def face_colours(plan, prefix):
+        (obj,) = [o for o in plan.objects if o.mb_id.startswith(prefix)]
+        return set(obj.mesh.face_colors)
+
+    def lake_plan(self, style_name):
+        plan, _, _ = lake_scene(PlanOptions(style=style_name))
+        return plan
+
+    def test_stylized_bank_ramp_is_the_blue_dominant_shallow_band(self):
+        (ramp,) = self.face_colours(self.lake_plan("stylized"), "bank:")
+        self.assertEqual(ramp, style.bank_color("stylized"))
+        self.assertGreater(ramp[2], ramp[0])
+
+    def test_no_stylized_terrain_face_is_shallow_band_coloured(self):
+        self.assertNotIn(style.bank_color("stylized"), self.face_colours(self.lake_plan("stylized"), "terrain"))
+
+    def test_classic_bank_ramp_keeps_the_classic_colour(self):
+        self.assertEqual(self.face_colours(self.lake_plan("classic"), "bank:"), {style.bank_color("classic")})
 
 
 class GlbNormalsTest(unittest.TestCase):

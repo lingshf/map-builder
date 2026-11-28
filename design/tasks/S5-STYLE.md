@@ -101,10 +101,11 @@ How each element is styled:
   attributes). S5-STYLE-PALETTE measures dropping normals against unwelding, using the validator's orientation
   probes and the runtime proxy, and picks the one that passes and costs less.
 * **Terrain** is coloured per face by OSM landcover, then by slope: faces of ≥ 35° use the cliff colours, lit or
-  shadowed by facing. A bank band (≤ 6 m from a built water body, plus every `bank:` ramp face) uses sand.
+  shadowed by facing. A bank band (≤ 6 m from a built water body) uses sand.
 * **Water and its shore** (U3, D143): **colour only** on the existing triangles. Water bodies get open cyan.
-  The light shore band goes on the terrain-side faces next to water (and on the `bank:` ramps), using the
-  shallow-band colour blending into sand. The water is not re-triangulated.
+  The light shore band is the `bank:` ramp, the first land from the water's edge, so water, shallow band and sand
+  follow each other without a gap; terrain faces beyond the ramp (the bank band) are sand. The water is not
+  re-triangulated.
 * **Trees** (D145): the current tree mesh is already a faceted bicone, and its triangles stay unchanged. Style
   comes from colours: per-face foliage shading (lit, mid or shadow by facing), a deterministic tint variant from
   the OSM id or scatter index, and the bark colour. A new tree **shape** changes `vegetation` collision, so it is

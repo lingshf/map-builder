@@ -42,9 +42,9 @@ def river_scene(extra=(), **kw):
     return make_scene(river_ways(extra), river_ground, width=W, height=H, **kw)
 
 
-def lake_scene():
+def lake_scene(opts=None):
     ring = [(-40.0, -30.0), (40.0, -30.0), (40.0, 30.0), (-40.0, 30.0)]
-    return make_scene([(ring, {"natural": "water"}, True)], lake_ground, width=W, height=H)
+    return make_scene([(ring, {"natural": "water"}, True)], lake_ground, width=W, height=H, opts=opts)
 
 
 def bodies(plan):

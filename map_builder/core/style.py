@@ -191,15 +191,15 @@ def terrain_color(style: str | None, landcover: str | None, slope: float = 0.0) 
             b * factor if b * factor < 1.0 else 1.0)
 
 
-def terrain_face_color(landcover: str | None, normal: Vec3, near_water: bool) -> Rgb:
-    """Stylized colour of one terrain triangle: cliff colours from 35 degrees, else the shallow shore band (rendered ``#ceeef6``),
+def terrain_face_color(landcover: str | None, normal: Vec3, in_bank_band: bool) -> Rgb:
+    """Stylized colour of one terrain triangle: cliff colours from 35 degrees, else sand inside the bank band,
     else the landcover ramp. ``normal`` points up and need not be unit length."""
     nx, ny, nz = normal
     horizontal_sq = nx * nx + ny * ny
     if nz <= 0.0 or horizontal_sq >= (nz * _CLIFF_MIN_TAN) ** 2:
         return _CLIFF_LIT if nx * _SUN[0] + ny * _SUN[1] > 0.0 else _CLIFF_SHADOW
-    if near_water and landcover != "water":
-        return _SHALLOW_BAND
+    if in_bank_band and landcover != "water":
+        return _SAND_BANK
     return terrain_color("stylized", landcover, math.sqrt(horizontal_sq) / nz)
 
 
@@ -209,7 +209,9 @@ def water_color(style: str | None) -> Rgb:
 
 
 def bank_color(style: str | None) -> Rgb:
-    return _CLASSIC_LANDCOVER[None] if normalize_style(style) == "classic" else _SAND_BANK
+    """Colour of a ``bank:`` shore ramp. The ramp is the first land from the sheet's edge, so stylized it is the
+    shallow band: water, shallow band and sand then follow each other without a gap."""
+    return _CLASSIC_LANDCOVER[None] if normalize_style(style) == "classic" else _SHALLOW_BAND
 
 
 def road_color(style: str | None, tags: Mapping[str, str]) -> Rgb:
