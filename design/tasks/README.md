@@ -215,6 +215,18 @@ Team Leader. It runs after goal attainment and before the milestone record close
   ([charter §5](../team-charter.md#5-retained-project-rules-exceptions-to-the-shared-defaults)) stay; no scheduled
   task. The M2 report goes through the Team Leader only.
 
+### M-S5-RETRO improvements
+
+From the [M-S5 retro record](../reviews/M-S5-RETRO.md) (D195–D199).
+
+| id | improvement | owner | priority | acceptance | target | status |
+|---|---|---|---|---|---|---|
+| RETRO-I1 | Pre-review grep of added public prose for internal labels (D195) | Delivery/Release | P1 | The REL PR description shows the grep command and 0 hits | Sprint 6 RC | ready |
+| RETRO-I2 | Demo-set diff against the previous release before opening the RC (D196) | Delivery/Release | P1 | The RC description lists the previous and new demo sets; every new UI control has `panel.png`, every showcase city a viewer capture | Sprint 6 RC | ready |
+| RETRO-I3 | Record the final approval of every merge on GitHub: an `APPROVED` verdict on the exact head, or a link to the coordinator ruling | Team Leader | P2 | Every Sprint 6 merge has one of the two on the PR | Sprint 6 | ready |
+| RETRO-I4 | QA acceptance for S5-STYLE-PALETTE and S5-STYLE-WATER (D169 goal attainment) | QA | P1 | A QA `accepted` verdict per task, or a recorded Team Leader ruling that the STYLE-REVIEW QA run accepts them | Before M-S5 closes | ready |
+| RETRO-I5 | DOC-TOOLS-F1 disposition (deferrable) | Team Leader | P1 | The row says `accepted`, or deferred with owner and reason | Before M-S5 closes | ready |
+
 ## Dependency order and parallel waves (max 3 devs)
 
 1. Wave 1 (now): **S1-DEMOKIT**; after #11 merges: **REL-v0.1.0** (alone), then **S1-SEAMS** ∥

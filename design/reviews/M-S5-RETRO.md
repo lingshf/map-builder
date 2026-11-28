@@ -10,7 +10,9 @@ The `v0.6.0` tag is pending (a user decision).
 ## 1. Outcomes against the goal baseline (D169)
 
 Goal: the stylized low-poly look by default, classic mode byte-identical, flight data exact (G0), within the
-low-end budgets. **Attained**: S5-STYLE-REVIEW is GO at 850a772 ([#108](https://github.com/lingshf/map-builder/issues/108)).
+low-end budgets. **Technically met**: S5-STYLE-REVIEW is GO at 850a772 ([#108](https://github.com/lingshf/map-builder/issues/108)).
+**D169 goal attainment is not yet recorded**: S5-STYLE-PALETTE and S5-STYLE-WATER have no QA `accepted` verdict of
+their own, and DOC-TOOLS-F1 has no disposition. Both are Backlog items below (RETRO-I4, RETRO-I5).
 
 | Item | Class | Outcome | Evidence |
 |---|---|---|---|
@@ -44,7 +46,7 @@ screenshot and viewer captures; both were added, and QA passed the scoped delta.
 | Review verdicts posted (`VERDICT:` reviews) | 70; mean 2.6 per PR |
 | Approved in round 1 | 1 (#107) |
 | More than 3 verdict reviews (D89 cap) | #100 (5), #103 (4), #105 (4); including scoped re-reviews after coordinator rulings |
-| PRs whose last `VERDICT:` review on GitHub is CHANGES_REQUESTED | 9 (#82, #83, #84, #85, #87, #88, #91, #93, #94); merged under coordinator rulings (D89) without an `APPROVED` verdict on GitHub |
+| PRs whose last `VERDICT:` review on GitHub is CHANGES_REQUESTED | 9 (#82, #83, #84, #85, #87, #88, #91, #93, #94); merged without an `APPROVED` verdict on GitHub; the GitHub record does not show what closed the final round (to be confirmed by the Team Leader) |
 | GLB size, classic → stylized | Munich 4.37 → 2.34 MB (−46.5 %), Pittsburgh 15.25 → 9.15 MB (−40.0 %), Bellevue-Factoria 25.75 → 15.32 MB (−40.5 %) |
 | Flight data | `.mbcol`, `.mbhf`, georeference and probes identical between styles (G1 16/16); classic identity G3 8/8; floating audit 0 (G13) |
 
@@ -58,7 +60,7 @@ screenshot and viewer captures; both were added, and QA passed the scoped delta.
 | PERF-WATER AC3 counters short of target | Three counters stay above target; recorded as known limits (D188) | Accepted shortfall; Sprint 6 candidate 8 |
 | First RC head rejected by PO | The RC compared prose, not the previous release's demo set | One extra RC round; D196 |
 | Internal labels in release prose | No check on public prose before review | Rework in the RC; D195 |
-| Review rounds above the D89 cap; 9 merges without an `APPROVED` verdict on GitHub | Coordinator rulings closed the remaining points | The approval trail is split between GitHub and coordinator messages |
+| Review rounds above the D89 cap; 9 merges without an `APPROVED` verdict on GitHub | Not determined from the GitHub record (Team Leader to confirm) | The approval trail is not complete on GitHub |
 
 ## 4. Lessons and decisions
 
@@ -83,13 +85,9 @@ screenshot and viewer captures; both were added, and QA passed the scoped delta.
 | Delivery/Release | #111 and the D195/D196 pre-RC checks | pending |
 | Knowledge Lead | Coverage matrix and learning paths in `docs/README.md` | pending |
 
-## 6. Improvements (Backlog)
+## 6. Improvements
 
-| Improvement | Owner | Priority | Acceptance | Target |
-|---|---|---|---|---|
-| Pre-review grep of added public prose for internal labels (D195) | Delivery/Release | P1 | REL PR description shows the grep and 0 hits | Sprint 6 RC |
-| Demo-set diff against the previous release before opening the RC (D196) | Delivery/Release | P1 | RC description lists the previous and new demo sets | Sprint 6 RC |
-| Record the final approval of every merge on GitHub (an `APPROVED` verdict or a linked coordinator ruling) | Team Leader | P2 | Every Sprint 6 merge has one of the two on the PR | Sprint 6 |
-| Explicit DOC-TOOLS-F1 disposition | Team Leader | P1 | Row says deferred with owner and reason, or accepted | Before M-S5 closes |
+Entered in the canonical Backlog: [tasks/README.md § M-S5-RETRO improvements](../tasks/README.md#m-s5-retro-improvements)
+(owner, priority, acceptance and target milestone per row).
 
 Milestone record: open until the pending self-checks are recorded and the Team Leader accepts this retro (D169 step 3).
