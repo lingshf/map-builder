@@ -620,15 +620,58 @@ Out of the baseline: S5-F1 and S5-F2 (deferred, need user approval or data revie
 | D199 | Sprint 6 starts from the ordered [Sprint 6 candidates](#sprint-6-candidates-ordered-from-the-v060-po-review). Product/Design proposes the Sprint 6 goal and must list in a follow-up PR. Sprint 5 retro record: [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md). | C (coordinator) | decided |
 | D200 | The canonical review record for a merge is a PR review whose body starts `VERDICT: APPROVED` and whose `commit_id` equals the merged head. Its GitHub review state may be COMMENTED, because the reviewers share the owner account. A merge without such a review is a retro finding. | C (coordinator) | decided |
 
+## v6: sprint 6 — correct and readable stylized maps (after v0.6.0)
+
+Proposed by Product/Design under D199 from the ordered [Sprint 6 candidates](#sprint-6-candidates-ordered-from-the-v060-po-review).
+Specs, acceptance, performance and conflict domains: [tasks/S6.md](tasks/S6.md). M-S5 is closed: the Team Leader
+accepted the [M-S5 retro](reviews/M-S5-RETRO.md) on 2026-11-27 (D169 steps 1–3; #113 merged at a5f4e03).
+
+### Milestone M-S6 "correct and readable": goal baseline (D201)
+
+**Goal.** The stylized map is correct on both export paths (CLI/Blender parity passes on every preset, so checklist
+G10 gates again) and reads clearly from drone height (roofs against walls, water depth, road contrast, grass), with
+the flight data exact (G0) and the low-end budgets unchanged. The milestone may span Sprints and is not a version.
+
+**Closure** follows the D169 sequence: (1) goal attainment: every must delivery item `accepted` with a QA verdict on
+its criteria, every deferrable item `accepted` or deferred with an owner and a reason; (2) M-S6-RETRO; (3) the Team
+Leader closes the record. A Sprint end or a tag is not closure.
+
+| Item | Class | Acceptance (canonical criteria in [tasks/S6.md](tasks/S6.md)) |
+|---|---|---|
+| [S6-PARITY](tasks/S6.md#s6-parity-munich-cliblender-façade-parity-106) ([#106](https://github.com/lingshf/map-builder/issues/106)) | must (correctness) | Cause named; parity exits 0 on all presets and both styles; negative tests still detect real swaps; no geometry change |
+| [S6-DEMO-2COL](tasks/S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | must (evidence enabler) | Two-column no-reference sheets and ΔE report, Pillow-free; ΔE equal to the D187 fallback |
+| [S6-STYLE-TUNE](tasks/S6.md#s6-style-tune-stylized-contrast-candidate-3) | must (looks) | Colour only; (a)–(d) moved toward target with ΔE evidence; G0, G3, G10 and D139 budgets pass |
+| [S6-CONSUMER-TRIAGE](tasks/S6.md#s6-consumer-triage-simulator-consumer-requests-17) ([#17](https://github.com/lingshf/map-builder/issues/17)) | must (triage only) | Per-request state and disposition recorded; format changes routed through D101/D110; reply on #17 |
+| [S6-REVIEW](tasks/S6.md#s6-review-milestone-review-gono-go) | must | Explicit GO, or NO-GO naming S6-Fn tasks, which join this baseline as must |
+| [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps) | deferrable | `floating_audit` output-write errors exit 2 or create parent directories; doc note updated |
+| [S6-TEX-WATER-CLOSE](tasks/S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | deferrable | S5-TEX-WATER closed or re-scoped to classic, with a D-number |
+| [M-S6-RETRO](tasks/README.md#milestone-retros) | must (retro) | The retro acceptance in the Backlog (D169) |
+
+Order (max 3 devs): wave 1 S6-PARITY ∥ S6-DEMO-2COL ∥ DOC-TOOLS-F1 (disjoint hard domains), with S6-CONSUMER-TRIAGE
+and S6-TEX-WATER-CLOSE in `design/` alongside; wave 2 S6-STYLE-TUNE (after PARITY and DEMO-2COL); then S6-REVIEW,
+then M-S6-RETRO.
+
+Out of the baseline: S5-DECOR (D185; needs Unity and glTFast, see Decisions that need the user), fidelity items
+(candidate 7: S5-F2, S5-F1, S4-F3, S4-F6), PERF-WATER AC3 residual counters (D188), and any implementation coming
+out of the #17 triage (Sprint 7 candidates unless added with a D-number).
+
+### Sprint 6 decisions
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D201 | M-S6 goal baseline and must/deferrable split as above, from the D199 candidates. Candidate 1 (M-S5 closure) is done; candidates 6–8 stay out except S6-TEX-WATER-CLOSE. | De (proposed); Team Leader confirms | proposed |
+| D202 | Releases stay infrequent (D17). Sprint 6 does not end with a release by default. A `v0.7.0` RC opens only after the S6-REVIEW GO and only if the Team Leader judges the increment worth a release; otherwise M-S6 rolls into the next release. Tagging and publishing stay user decisions. | C (coordinator) | decided |
+| D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirms | proposed |
+
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
 
 Proposed by Design in the [v0.6.0 PO review](https://github.com/lingshf/map-builder/pull/111#issuecomment-7231439618);
 the Team Leader sets the Sprint 6 baseline. Order follows D137 under G0: correctness first, then looks, low cost,
-fidelity. These are candidates, not commitments.
+fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (D201); the rest are Sprint 7 candidates.
 
 | # | Candidate | Why | Notes |
 |---|---|---|---|
-| 1 | M-S5 closure: [M-S5-RETRO](tasks/README.md#milestone-retros) acceptance | M-S5 is not closed by the tag (D169) | PERF-WATER QA accepted ([7231537377](https://github.com/lingshf/map-builder/pull/105#issuecomment-7231537377)); retro record in [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md) |
+| 1 | M-S5 closure: [M-S5-RETRO](tasks/README.md#milestone-retros) acceptance (**done**: retro accepted 2026-11-27, #113 at a5f4e03) | M-S5 is not closed by the tag (D169) | PERF-WATER QA accepted ([7231537377](https://github.com/lingshf/map-builder/pull/105#issuecomment-7231537377)); retro record in [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md) |
 | 2 | [#106](https://github.com/lingshf/map-builder/issues/106) Munich CLI/Blender façade parity | Correctness; non-gating only for S5 (D191) | After the fix, checklist G10 gates again |
 | 3 | S6-STYLE-TUNE: stylized contrast | Looks good is the user's first priority | Munich pale roofs and walls merging, Pittsburgh water deeper than target, Factoria road contrast, grass paleness (N1); colour only under G0 |
 | 4 | [#17](https://github.com/lingshf/map-builder/issues/17) simulator consumer requests | The `.mbmap` consumer | Triage first; anything touching the format goes through D101/D110 |
@@ -648,6 +691,8 @@ fidelity. These are candidates, not commitments.
 4. **S5 style.** U1 and U2 were decided by the user (D141, D142). U3, U4 and the tree rule were decided by the
    coordinator under the user's delegation (D143–D145); the user may change them. A tree shape change (S5-F1) still
    needs the user.
+5. **S5-DECOR (D185).** It needs Unity and glTFast, which this host does not have. Keep it deferred until they are
+   available, or drop it. Out of M-S6 either way.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.
