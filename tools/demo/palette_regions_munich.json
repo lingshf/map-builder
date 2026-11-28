@@ -1,0 +1,14 @@
+{
+  "regions": [
+    {"camera": "overview", "label": "roof-1", "x": 0.3164, "y": 0.4972, "w": 0.0063, "h": 0.0083},
+    {"camera": "overview", "label": "wall-1", "x": 0.3, "y": 0.585, "w": 0.008, "h": 0.012},
+    {"camera": "roofs", "label": "roof-1", "x": 0.8766, "y": 0.8639, "w": 0.0109, "h": 0.0139},
+    {"camera": "roofs", "label": "wall-1", "x": 0.6844, "y": 0.3542, "w": 0.0109, "h": 0.0139},
+    {"camera": "roofs", "label": "roof-2", "x": 0.66, "y": 0.215, "w": 0.02, "h": 0.02},
+    {"camera": "roofs", "label": "wall-2", "x": 0.41, "y": 0.50, "w": 0.012, "h": 0.012},
+    {"camera": "roofscape", "label": "roof-1", "x": 0.72, "y": 0.70, "w": 0.0109, "h": 0.0139},
+    {"camera": "roofscape", "label": "wall-1",     "x": 0.142, "y": 0.36, "w": 0.0109, "h": 0.0139},
+    {"camera": "roofscape", "label": "roof-2", "x": 0.9, "y": 0.8, "w": 0.0109, "h": 0.0139},
+    {"camera": "roofscape", "label": "wall-2", "x": 0.7, "y": 0.36, "w": 0.0109, "h": 0.0139}
+  ]
+}

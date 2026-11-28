@@ -1,0 +1,6 @@
+{
+  "regions": [
+    {"camera": "top", "label": "grass-mid", "target_hex": "#96b671",     "x": 0.15, "y": 0.27, "w": 0.03, "h": 0.04},
+        {"camera": "top", "label": "grass-light", "target_hex": "#b9d17a", "x": 0.15, "y": 0.35, "w": 0.03, "h": 0.04}
+  ]
+}

@@ -172,6 +172,33 @@ exactly, so a Blender export that writes a different factor than the CLI fails (
 once wrote 1.0 instead of the CLI's 0.8 for the untextured generated materials, e.g. trees). A failing primitive lists
 `difference` with the first triangle each path has no equivalent for.
 
+## Style render recipe (`tools/demo/`, S6-DEMO-2COL)
+
+Two stages. Run the render stage inside Blender; it renders both builds and then composes. The compose stage
+alone needs only plain Python (no Blender, no Pillow) and can be rerun on existing renders.
+
+```powershell
+# Render stage (Blender, deterministic Cycles CPU); writes render-<camera>-before/after.png, then composes
+blender -b --factory-startup --python tools\demo\style_render_recipe.py -- --preset PRESET.json `
+  --before BEFORE.mbmap --after AFTER.mbmap --palette-regions tools\demo\palette_regions_<preset>.json --out OUT
+
+# Compose stage (plain Python); --workers defaults to the CPU count
+py -3.12 tools\demo\style_compare.py --preset PRESET.json --render-dir OUT --regions tools\demo\palette_regions_<preset>.json
+```
+
+Outputs per camera: `sheet2-<camera>.png` (before left, after right), and for cameras that have regions
+`sheet2-<camera>-regions.png` (same sheet with each region outlined) and `paired-<camera>.json`.
+
+* **Region files** are preset-scoped (`palette_regions_munich.json`, `_pittsburgh`, `_factoria`, `_synthetic`); a
+  region is keyed by `(camera, label)`. Regions with `target_hex` are **swatches**; regions without it are
+  **contrast regions** that pair by label suffix (`roof-1` with `wall-1`, in twos, per camera).
+* **Paired report**: `swatches` rows give ΔE2000 to the target before and after; `contrast_pairs` rows give ΔE2000
+  between the two regions of the same image before and after. `change` is after minus before (negative is lower).
+* `--reference` keeps the legacy three-column Pillow sheets and after-only `palette-<camera>.json`. That path (and
+  the D187 fallback, which uses `_load_regions` and `_palette_report`) only sees swatch regions.
+* `palette_regions_factoria_v060.json` holds the seven original Factoria swatches; a test checks the Pillow-free
+  ΔE equals the fallback to 0.01 on three cameras.
+
 ## Perf gate (`tools/perf/`, D153)
 
 A deterministic work-count gate: the collector records operation counters and Python primitive calls per stage;
