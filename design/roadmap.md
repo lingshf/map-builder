@@ -632,24 +632,32 @@ accepted the [M-S5 retro](reviews/M-S5-RETRO.md) on 2026-11-27 (D169 steps 1–3
 G10 gates again) and reads clearly from drone height (roofs against walls, water depth, road contrast, grass), with
 the flight data exact (G0) and the low-end budgets unchanged. The milestone may span Sprints and is not a version.
 
-**Closure** follows the D169 sequence: (1) goal attainment: every must delivery item `accepted` with a QA verdict on
-its criteria, every deferrable item `accepted` or deferred with an owner and a reason; (2) M-S6-RETRO; (3) the Team
-Leader closes the record. A Sprint end or a tag is not closure.
+**Closure** follows the D169 sequence: (1) goal attainment: every must delivery item (all rows below except
+M-S6-RETRO) `accepted` with a QA verdict on its criteria, every deferrable item `accepted` or deferred with an owner
+and a reason; S6-REVIEW counts only as a **GO** on the reviewed head; a NO-GO adds S6-Fn must items and S6-REVIEW
+re-runs on the fixed head until GO, with QA acceptance of the affected criteria; (2) M-S6-RETRO, including the
+collected role self-checks (the M-S5 "not collected" exception does not carry over); (3) the Team Leader closes the
+record. A Sprint end or a tag is not closure.
 
 | Item | Class | Acceptance (canonical criteria in [tasks/S6.md](tasks/S6.md)) |
 |---|---|---|
-| [S6-PARITY](tasks/S6.md#s6-parity-munich-cliblender-façade-parity-106) ([#106](https://github.com/lingshf/map-builder/issues/106)) | must (correctness) | Cause named; parity exits 0 on all presets and both styles; negative tests still detect real swaps; no geometry change |
-| [S6-DEMO-2COL](tasks/S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | must (evidence enabler) | Two-column no-reference sheets and ΔE report, Pillow-free; ΔE equal to the D187 fallback |
-| [S6-STYLE-TUNE](tasks/S6.md#s6-style-tune-stylized-contrast-candidate-3) | must (looks) | Colour only; (a)–(d) moved toward target with ΔE evidence; G0, G3, G10 and D139 budgets pass |
+| [S6-PARITY](tasks/S6.md#s6-parity-munich-cliblender-façade-parity-106) ([#106](https://github.com/lingshf/map-builder/issues/106)) | must (correctness) | Cause named; historical #106 controls and PR-head matrix both behave as specified; negative tests still detect real swaps; G0 and strict G3 |
+| [S6-DEMO-2COL](tasks/S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | must (evidence enabler) | Two-column no-reference sheets and paired before/after ΔE from preset-scoped regions, Pillow-free; ΔE equal to the D187 fallback |
+| [S6-STYLE-TUNE](tasks/S6.md#s6-style-tune-stylized-contrast-candidate-3) | must (looks) | Colour only; (a)–(d) moved toward target with paired ΔE; G0 full matrix, G3, G10, determinism and all D139 budgets against b04b769 |
 | [S6-CONSUMER-TRIAGE](tasks/S6.md#s6-consumer-triage-simulator-consumer-requests-17) ([#17](https://github.com/lingshf/map-builder/issues/17)) | must (triage only) | Per-request state and disposition recorded; format changes routed through D101/D110; reply on #17 |
-| [S6-REVIEW](tasks/S6.md#s6-review-milestone-review-gono-go) | must | Explicit GO, or NO-GO naming S6-Fn tasks, which join this baseline as must |
+| [S6-REVIEW](tasks/S6.md#s6-review-milestone-review-gono-go) | must | Explicit GO on the review head; a NO-GO names S6-Fn must tasks and the review re-runs on the fixed head |
 | [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps) | deferrable | `floating_audit` output-write errors exit 2 or create parent directories; doc note updated |
 | [S6-TEX-WATER-CLOSE](tasks/S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | deferrable | S5-TEX-WATER closed or re-scoped to classic, with a D-number |
 | [M-S6-RETRO](tasks/README.md#milestone-retros) | must (retro) | The retro acceptance in the Backlog (D169) |
 
-Order (max 3 devs): wave 1 S6-PARITY ∥ S6-DEMO-2COL ∥ DOC-TOOLS-F1 (disjoint hard domains), with S6-CONSUMER-TRIAGE
-and S6-TEX-WATER-CLOSE in `design/` alongside; wave 2 S6-STYLE-TUNE (after PARITY and DEMO-2COL); then S6-REVIEW,
-then M-S6-RETRO.
+Order (max 3 devs):
+- **Wave 1:** S6-PARITY ∥ S6-DEMO-2COL. Their code domains are disjoint. The one shared file, `docs/dev/tools.md`
+  (separate sections), is serialized by merge order: S6-PARITY merges first, and S6-DEMO-2COL rebases on it before
+  its review head.
+- **Wave 2:** S6-STYLE-TUNE (after PARITY and DEMO-2COL) ∥ DOC-TOOLS-F1 (`tools/floating_audit.py`, its tests,
+  and the `floating_audit` section of `docs/dev/tools.md`; disjoint from STYLE-TUNE).
+- **Design track (one owner, serial):** S6-CONSUMER-TRIAGE, then S6-TEX-WATER-CLOSE; both may run during wave 1 or 2.
+- **Then** S6-REVIEW, then M-S6-RETRO.
 
 Out of the baseline: S5-DECOR (D185; needs Unity and glTFast, see Decisions that need the user), fidelity items
 (candidate 7: S5-F2, S5-F1, S4-F3, S4-F6), PERF-WATER AC3 residual counters (D188), and any implementation coming
@@ -660,7 +668,7 @@ out of the #17 triage (Sprint 7 candidates unless added with a D-number).
 | # | Decision | Who | Status |
 |---|---|---|---|
 | D201 | M-S6 goal baseline and must/deferrable split as above, from the D199 candidates. Candidate 1 (M-S5 closure) is done; candidates 6–8 stay out except S6-TEX-WATER-CLOSE. | De (proposed); Team Leader confirms | proposed |
-| D202 | Releases stay infrequent (D17). Sprint 6 does not end with a release by default. A `v0.7.0` RC opens only after the S6-REVIEW GO and only if the Team Leader judges the increment worth a release; otherwise M-S6 rolls into the next release. Tagging and publishing stay user decisions. | C (coordinator) | decided |
+| D202 | Releases stay infrequent (D17). Sprint 6 does not end with a release by default. The S6-REVIEW GO is the milestone verdict on main and a **precondition for release candidacy** only; it does not replace the D28 release review. If the Team Leader judges the increment worth a release, a `v0.7.0` RC opens and the D28 sequence in [SPRINT_CLOSE](tasks/SPRINT_CLOSE.md) runs unchanged on the RC (demo check, Design release review and test audit on the RC revision, retro, then tag). Otherwise M-S6 rolls into the next release. Tagging and publishing stay user decisions. D28 is not changed. | C (coordinator); D28 link De | decided |
 | D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirms | proposed |
 
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)

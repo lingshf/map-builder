@@ -160,14 +160,14 @@ Specs in [S6.md](S6.md); goal baseline and order in the [roadmap](../roadmap.md#
 
 | id | sprint | type | dependencies | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
-| [S6-PARITY](S6.md#s6-parity-munich-cliblender-façade-parity-106) | S6 | dev | none | `tools/style_check.py`, `tests/test_style_check.py`; if the exporter is at fault also `map_builder/blender/export.py`, `map_builder/core/glb.py`, `tests/blender/checks_parity.py` | ready | |
-| [S6-DEMO-2COL](S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | S6 | dev | none | `tools/demo/style_render_recipe.py`, `tools/demo/style_contact_sheet.py`, their tests | ready | |
+| [S6-PARITY](S6.md#s6-parity-munich-cliblender-façade-parity-106) | S6 | dev | none | `tools/style_check.py`, `tests/test_style_check.py`; if the exporter is at fault also `map_builder/blender/export.py`, `map_builder/core/glb.py`, `tests/blender/checks_parity.py`; `docs/dev/tools.md` parity section (merges before DEMO-2COL) | ready | |
+| [S6-DEMO-2COL](S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | S6 | dev | none | `tools/demo/style_render_recipe.py`, `tools/demo/style_contact_sheet.py`, `tools/demo/palette_regions_*.json`, their tests; `docs/dev/tools.md` recipe section (after S6-PARITY merges) | ready | |
 | [S6-STYLE-TUNE](S6.md#s6-style-tune-stylized-contrast-candidate-3) | S6 | dev | S6-PARITY, S6-DEMO-2COL merged | `map_builder/core/style.py`, `tests/test_style_palette.py`; soft: sample slot (D103) | blocked | |
-| [S6-CONSUMER-TRIAGE](S6.md#s6-consumer-triage-simulator-consumer-requests-17) | S6 | design | none | `design/` only | ready | |
-| [S6-TEX-WATER-CLOSE](S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | S6 (deferrable) | design | none | `design/` only | ready | |
-| [S6-REVIEW](S6.md#s6-review-milestone-review-gono-go) | S6 | design | every S6 must code row merged | `design/reviews/` | blocked | |
+| [S6-CONSUMER-TRIAGE](S6.md#s6-consumer-triage-simulator-consumer-requests-17) | S6 | design | none | `design/reviews/S6-CONSUMER-17.md`, roadmap "Sprint 7 candidates", own row | ready | |
+| [S6-TEX-WATER-CLOSE](S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | S6 (deferrable) | design | S6-CONSUMER-TRIAGE merged (same owner, shared roadmap) | `design/tasks/S4-TEX-WATER.md`, roadmap "Sprint 6 decisions", the S4-TEX-WATER and own rows | blocked | |
+| [S6-REVIEW](S6.md#s6-review-milestone-review-gono-go) | S6 | design | every S6 must code row merged; re-runs after S6-Fn on NO-GO | `design/reviews/S6-REVIEW-checklist.md` | blocked | |
 
-DOC-TOOLS-F1 (in [Knowledge gaps](#knowledge-gaps)) is an M-S6 deferrable item and runs in wave 1.
+DOC-TOOLS-F1 (in [Knowledge gaps](#knowledge-gaps)) is an M-S6 deferrable item and runs in wave 2, alongside S6-STYLE-TUNE.
 
 ## Knowledge gaps
 
@@ -181,7 +181,7 @@ Each row needs facts from its owner, integration by the Knowledge Lead, and a no
 | DOC-DEV | S5 | Developer / Knowledge Lead | — | `docs/dev/README.md` (checks, CI) | merged (197335d); done (D168) | #92 (197335d) |
 | DOC-DOD | S5 | Team Leader / Knowledge Lead | — | charter §4 single DoD; links from the Backlog and dev guide | merged (7cf6f45); done | #87 (7cf6f45) |
 | DOC-TOOLS | S5 | Developer / Knowledge Lead | — | `docs/dev/` (new short tools section) | merged (197335d); done (D168) | #92 (197335d) |
-| DOC-TOOLS-F1 | S6 (M-S6 deferrable, D201) | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then `docs/dev/tools.md` exit-code note | ready (M-S6 wave 1). Deferred from Sprint 5 (candidate 5a; coordinator ruling on #113, RETRO-I5; owner Developer / Knowledge Lead; reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data): floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
+| DOC-TOOLS-F1 | S6 (M-S6 deferrable, D201) | Developer / Knowledge Lead | DOC-TOOLS merged | `tools/floating_audit.py`, `tests/test_floating_audit.py`; then the `floating_audit` section of `docs/dev/tools.md` | ready (M-S6 wave 2). Deferred from Sprint 5 (candidate 5a; coordinator ruling on #113, RETRO-I5; owner Developer / Knowledge Lead; reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data): floating_audit: map output write errors to exit 2 or create parent dirs (#92 R2; today a missing `--json` directory exits 1 with `FileNotFoundError`) | |
 | DOC-USER-STRUCT | next release | Delivery/Release / Knowledge Lead | release authorized | `docs/user/structures.md` (title/version) | blocked (release-owned, D28) | |
 | DOC-PERF | S5 | Developer / Knowledge Lead | S5-PERF-GATE | `docs/dev/tools.md` §Perf gate (the canonical usage page; `docs/dev/README.md` links to it) | merged 8a78975. accepted: QA accepted on 496b72b ([review 6080515258](https://github.com/lingshf/map-builder/pull/99#pullrequestreview-6080515258)). done (signed off by Team Leader 2026-11-27) | #99 |
 
@@ -214,7 +214,7 @@ Team Leader. It runs after goal attainment and before the milestone record close
 | id | milestone | owner | trigger (dependency) | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|
 | M-S5-RETRO | M-S5 "stylized look" | Team Leader (facts from every role) | M-S5 **goal attainment** (step 1 of the [closure sequence](../roadmap.md#milestone-m-s5-stylized-look-goal-baseline-d169)): every must delivery item `accepted` and every deferrable item `accepted` or explicitly deferred with an owner. The accepted retro then closes the milestone record (step 3). A Sprint end or a tag is not closure | `design/` (retro record and Backlog rows) | done: [retro record](../reviews/M-S5-RETRO.md) accepted by the Team Leader 2026-11-27; M-S5 closed (D169 steps 1–3) | #113 (a5f4e03) |
-| M-S6-RETRO | M-S6 "correct and readable" | Team Leader (facts from every role) | M-S6 goal attainment ([D201](../roadmap.md#milestone-m-s6-correct-and-readable-goal-baseline-d201), D169 sequence); same acceptance as M-S5-RETRO | `design/` (retro record and Backlog rows) | blocked | |
+| M-S6-RETRO | M-S6 "correct and readable" | Team Leader (facts from every role) | M-S6 goal attainment ([D201](../roadmap.md#milestone-m-s6-correct-and-readable-goal-baseline-d201), D169 sequence); same acceptance as M-S5-RETRO; role self-checks are collected (the M-S5 "not collected" exception does not carry over) | `design/` (retro record and Backlog rows) | blocked | |
 
 **M-S5-RETRO acceptance:**
 
