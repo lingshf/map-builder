@@ -620,21 +620,74 @@ Out of the baseline: S5-F1 and S5-F2 (deferred, need user approval or data revie
 | D199 | Sprint 6 starts from the ordered [Sprint 6 candidates](#sprint-6-candidates-ordered-from-the-v060-po-review). Product/Design proposes the Sprint 6 goal and must list in a follow-up PR. Sprint 5 retro record: [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md). | C (coordinator) | decided |
 | D200 | The canonical review record for a merge is a PR review whose body starts `VERDICT: APPROVED` and whose `commit_id` equals the merged head. Its GitHub review state may be COMMENTED, because the reviewers share the owner account. A merge without such a review is a retro finding. | C (coordinator) | decided |
 
+## v6: sprint 6 — correct and readable stylized maps (after v0.6.0)
+
+Proposed by Product/Design under D199 from the ordered [Sprint 6 candidates](#sprint-6-candidates-ordered-from-the-v060-po-review).
+Specs, acceptance, performance and conflict domains: [tasks/S6.md](tasks/S6.md). M-S5 is closed: the Team Leader
+accepted the [M-S5 retro](reviews/M-S5-RETRO.md) on 2026-11-27 (D169 steps 1–3; #113 merged at a5f4e03).
+
+### Milestone M-S6 "correct and readable": goal baseline (D201)
+
+**Goal.** The stylized map is correct on both export paths (CLI/Blender parity passes on every preset, so checklist
+G10 gates again) and reads clearly from drone height (roofs against walls, water depth, road contrast, grass), with
+the flight data exact (G0) and the low-end budgets unchanged. The milestone may span Sprints and is not a version.
+
+**Closure** follows the D169 sequence: (1) goal attainment: every must delivery item (all rows below except
+M-S6-RETRO) `accepted` with a QA verdict on its criteria, every deferrable item `accepted` or deferred with an owner
+and a reason; S6-REVIEW counts only as a **GO** on the reviewed head; a NO-GO adds S6-Fn must items and S6-REVIEW
+re-runs on the fixed head until GO, with QA acceptance of the affected criteria; (2) M-S6-RETRO, including the
+collected role self-checks (the M-S5 "not collected" exception does not carry over); (3) the Team Leader closes the
+record. A Sprint end or a tag is not closure.
+
+| Item | Class | Acceptance (canonical criteria in [tasks/S6.md](tasks/S6.md)) |
+|---|---|---|
+| [S6-PARITY](tasks/S6.md#s6-parity-munich-cliblender-façade-parity-106) ([#106](https://github.com/lingshf/map-builder/issues/106)) | must (correctness) | Cause named; historical #106 controls and PR-head matrix both behave as specified; negative tests still detect real swaps; G0 and strict G3 |
+| [S6-DEMO-2COL](tasks/S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | must (evidence enabler) | Two-column no-reference sheets and paired before/after ΔE from preset-scoped regions, Pillow-free; ΔE equal to the D187 fallback |
+| [S6-STYLE-TUNE](tasks/S6.md#s6-style-tune-stylized-contrast-candidate-3) | must (looks) | Colour only; per D204, (a) and (c) reach the same-image contrast rule and (b) and (d) move closer to their swatches; G0 full matrix, G3, G10, determinism and all D139 budgets against b04b769 |
+| [S6-CONSUMER-TRIAGE](tasks/S6.md#s6-consumer-triage-simulator-consumer-requests-17) ([#17](https://github.com/lingshf/map-builder/issues/17)) | must (triage only) | Per-request state and disposition recorded; format changes routed through D101/D110; reply on #17 |
+| [S6-REVIEW](tasks/S6.md#s6-review-milestone-review-gono-go) | must | Explicit GO on the review head; a NO-GO names S6-Fn must tasks and the review re-runs on the fixed head |
+| [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps) | deferrable | `floating_audit` output-write errors exit 2 or create parent directories; doc note updated |
+| [S6-TEX-WATER-CLOSE](tasks/S6.md#s6-tex-water-close-close-or-re-scope-s5-tex-water-candidate-8-part) | deferrable | S5-TEX-WATER closed or re-scoped to classic, with a D-number |
+| [M-S6-RETRO](tasks/README.md#milestone-retros) | must (retro) | The retro acceptance in the Backlog (D169) |
+
+Order (max 3 devs):
+- **Wave 1:** S6-PARITY ∥ S6-DEMO-2COL. Their code domains are disjoint. The one shared file, `docs/dev/tools.md`
+  (separate sections), is serialized by merge order: S6-PARITY merges first, and S6-DEMO-2COL rebases on it before
+  its review head.
+- **Wave 2:** S6-STYLE-TUNE (after PARITY and DEMO-2COL) ∥ DOC-TOOLS-F1 (`tools/floating_audit.py`, its tests,
+  and the `floating_audit` section of `docs/dev/tools.md`; disjoint from STYLE-TUNE).
+- **Design track (one owner, serial):** S6-CONSUMER-TRIAGE, then S6-TEX-WATER-CLOSE; both may run during wave 1 or 2.
+- **Then** S6-REVIEW, then M-S6-RETRO.
+
+Out of the baseline: S5-DECOR (D185, D205: stays deferred until Unity and glTFast are available), fidelity items
+(candidate 7: S5-F2, S5-F1, S4-F3, S4-F6), PERF-WATER AC3 residual counters (D188), and any implementation coming
+out of the #17 triage (Sprint 7 candidates unless added with a D-number).
+
+### Sprint 6 decisions
+
+| # | Decision | Who | Status |
+|---|---|---|---|
+| D201 | M-S6 goal baseline and must/deferrable split as above, from the D199 candidates. Candidate 1 (M-S5 closure) is done; candidates 6–8 stay out except S6-TEX-WATER-CLOSE. | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
+| D202 | Releases stay infrequent (D17). Sprint 6 does not end with a release by default. The S6-REVIEW GO is the milestone verdict on main and a **precondition for release candidacy** only; it does not replace the D28 release review. If the Team Leader judges the increment worth a release, a `v0.7.0` RC opens and the D28 sequence in [SPRINT_CLOSE](tasks/SPRINT_CLOSE.md) runs unchanged on the RC (demo check, Design release review and test audit on the RC revision, retro, then tag). Otherwise M-S6 rolls into the next release. Tagging and publishing stay user decisions. D28 is not changed. | C (coordinator); D28 link De | decided |
+| D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
+| D204 | S6 pinned region map ([tasks/S6.md](tasks/S6.md#pinned-region-map-for-ad)): roofs, walls and roads have no S5 swatch, so observations (a) and (c) pass on same-image contrast pairs (after ΔE2000 ≥ 15 and greater than before); (b) and (d) pass by moving closer to their S5 swatches. Factoria's S5 `road-light` target (the lit-cliff swatch) is informational only. Region key is `(camera, label)` per preset file. | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
+| D205 | S5-DECOR stays deferred, not dropped. It is blocked only on Unity and glTFast availability on the user's side; draft #101 stays open. It is out of the M-S6 baseline. | Team Leader (2026-11-27, #114 D89 ruling) | decided |
+
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
 
 Proposed by Design in the [v0.6.0 PO review](https://github.com/lingshf/map-builder/pull/111#issuecomment-7231439618);
 the Team Leader sets the Sprint 6 baseline. Order follows D137 under G0: correctness first, then looks, low cost,
-fidelity. These are candidates, not commitments.
+fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (D201); the rest are Sprint 7 candidates.
 
 | # | Candidate | Why | Notes |
 |---|---|---|---|
-| 1 | M-S5 closure: [M-S5-RETRO](tasks/README.md#milestone-retros) acceptance | M-S5 is not closed by the tag (D169) | PERF-WATER QA accepted ([7231537377](https://github.com/lingshf/map-builder/pull/105#issuecomment-7231537377)); retro record in [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md) |
+| 1 | M-S5 closure: [M-S5-RETRO](tasks/README.md#milestone-retros) acceptance (**done**: retro accepted 2026-11-27, #113 at a5f4e03) | M-S5 is not closed by the tag (D169) | PERF-WATER QA accepted ([7231537377](https://github.com/lingshf/map-builder/pull/105#issuecomment-7231537377)); retro record in [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md) |
 | 2 | [#106](https://github.com/lingshf/map-builder/issues/106) Munich CLI/Blender façade parity | Correctness; non-gating only for S5 (D191) | After the fix, checklist G10 gates again |
 | 3 | S6-STYLE-TUNE: stylized contrast | Looks good is the user's first priority | Munich pale roofs and walls merging, Pittsburgh water deeper than target, Factoria road contrast, grass paleness (N1); colour only under G0 |
 | 4 | [#17](https://github.com/lingshf/map-builder/issues/17) simulator consumer requests | The `.mbmap` consumer | Triage first; anything touching the format goes through D101/D110 |
 | 5 | Demo tooling: two-column, no-reference mode in `tools/demo/style_render_recipe.py` with in-repo, Pillow-free sheet output (Blender's Python has no Pillow) | Replaces the D187 doc-only fallback | Tools and tests only |
 | 5a | [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps): `floating_audit` output-write errors exit 2 or create parent directories | Deferred from Sprint 5 (deferrable; coordinator ruling on #113, RETRO-I5); reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data | Developer / Knowledge Lead; tools, tests and the `docs/dev/tools.md` note only |
-| 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available; otherwise ask the user whether to drop it |
+| 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available on the user's side; stays deferred, not dropped (D205) |
 | 7 | Fidelity: S5-F2 rocks, S5-F1 tree shapes, S4-F3 water tagging, S4-F6 landcover staircase | Lowest of the user's priorities | S5-F1 changes `vegetation` collision and needs the user (D145) |
 | 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures | |
 
@@ -648,6 +701,8 @@ fidelity. These are candidates, not commitments.
 4. **S5 style.** U1 and U2 were decided by the user (D141, D142). U3, U4 and the tree rule were decided by the
    coordinator under the user's delegation (D143–D145); the user may change them. A tree shape change (S5-F1) still
    needs the user.
+5. **S5-DECOR (D185, D205).** Resolved by the Team Leader: it stays deferred, not dropped (D205). It is blocked
+   only on Unity and glTFast being available on the user's side. Out of M-S6.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.

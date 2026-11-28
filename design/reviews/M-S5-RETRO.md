@@ -120,4 +120,4 @@ Coordinator ruling on #113: self-checks are non-blocking for M-S5; roles without
 Entered in the canonical Backlog: [tasks/README.md § M-S5-RETRO improvements](../tasks/README.md#m-s5-retro-improvements)
 (owner, priority, acceptance and target milestone per row).
 
-Milestone record: open until the Team Leader accepts this retro (D169 step 3).
+Milestone record: **closed**. The Team Leader accepted this retro on 2026-11-27 (D169 steps 1–3); #113 merged at a5f4e03.
