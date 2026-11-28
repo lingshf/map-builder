@@ -27,7 +27,7 @@ The Team Leader records goal attainment and accepts this retro.
 | S5-STYLE-REVIEW | must | GO | [#108](https://github.com/lingshf/map-builder/issues/108); T4 fixed by #107, R3 by #109 (D194) |
 | S5-DECOR | deferrable | deferred | D185: step 1b needs Unity and glTFast; draft #101 kept; owner Developer, Sprint 6 candidate 6 |
 | DOC-PERF | deferrable | accepted, done | [QA review 6080515258](https://github.com/lingshf/map-builder/pull/99#pullrequestreview-6080515258); Team Leader DoD 2026-11-27 |
-| DOC-TOOLS-F1 | deferrable | deferred | Coordinator ruling on #113: deferred to Sprint 6 (candidate 5a), owner Developer / Knowledge Lead; not blocking M-S5 |
+| DOC-TOOLS-F1 | deferrable | deferred | Coordinator ruling on #113: deferred to Sprint 6 (candidate 5a), owner Developer / Knowledge Lead; reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data; not blocking M-S5 |
 | M-S5-RETRO | must | this record (draft under PR review) | Awaiting Team Leader acceptance (D169 steps 1–2; RETRO-I4 and RETRO-I5 done); per-role self-checks below are `not collected` (non-blocking) |
 | Added: S5-T4 (#107), S5-PONDS-FIX (#109) | must (STYLE-REVIEW NO-GO fixes) | merged; closed by the GO | [#108](https://github.com/lingshf/map-builder/issues/108) |
 
