@@ -144,7 +144,7 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True, style: 
                           and src is not None and src.type == "MIX_RGB")
     generated_plain = (_is_plain_generated(mat) and src is not None and src.type == "VERTEX_COLOR"
                        and src.layer_name == COLOR_ATTR)
-    generated_style_plain = (normalize_style(style) != "classic" and canonical_generated and gen in materials_for_style(style)
+    generated_style_plain = (canonical_generated and gen in materials_for_style(style)
                              and src is not None and src.type == "VERTEX_COLOR"
                              and src.layer_name == COLOR_ATTR and not mat.get("mb_textured") and not generated_plain)
     if generated_textured:

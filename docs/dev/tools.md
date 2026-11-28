@@ -164,8 +164,10 @@ checker accepts exactly these differences and no others:
   sides are made of the same corners, i.e. a quad split along its other diagonal. Colours that vary across a
   triangle are never accepted this way.
 
-A colour swapped between corners is still reported. A failing primitive lists `difference` with the first triangle each
-path has no equivalent for.
+A colour swapped between corners is still reported. Material factors (base colour, roughness, metallic) are compared
+exactly, so a Blender export that writes a different factor than the CLI fails (D207: the classic Blender export
+once wrote 1.0 instead of the CLI's 0.8 for the untextured generated materials, e.g. trees). A failing primitive lists
+`difference` with the first triangle each path has no equivalent for.
 
 ## Perf gate (`tools/perf/`, D153)
 

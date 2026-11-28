@@ -158,6 +158,10 @@ def run(out_dir):
           "textures: TEXCOORD_0 exactly on the textured materials")
     check(sorted(m["name"] for m in gl["materials"]) == sorted(m["name"] for m in cgl["materials"]),
           "textures: the same materials as the CLI package")
+    factors = {m["name"]: [round(c, 6) for c in m["pbrMetallicRoughness"]["baseColorFactor"]] for m in gl["materials"]}
+    cli_factors = {m["name"]: [round(c, 6) for c in m["pbrMetallicRoughness"]["baseColorFactor"]]
+                   for m in cgl["materials"]}
+    check(factors == cli_factors, f"textures: base colour factors equal the CLI's, trees included ({factors})")
     tp, ctp = [p for p in prims if p["uv"]], [p for p in cprims if p["uv"]]
     check(seams(tp) == seams(ctp), f"textures: UV seam count equals the CLI's ({seams(tp)})")
     bad = []
