@@ -156,7 +156,7 @@ Sprint close order (D28): **RC PR (REL) → demo → design review (Sx-REVIEW) �
 ## Sprint 6 (M-S6)
 
 Specs in [S6.md](S6.md); goal baseline and order in the [roadmap](../roadmap.md#milestone-m-s6-correct-and-readable-goal-baseline-d201)
-(D201–D204). Every code row passes G0 and classic identity (G3); releases follow D202.
+(D201–D205). Every code row passes G0 and classic identity (G3); releases follow D202.
 
 | id | sprint | type | dependencies | conflict domain (hard) | status | PR |
 |---|---|---|---|---|---|---|

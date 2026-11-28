@@ -659,7 +659,7 @@ Order (max 3 devs):
 - **Design track (one owner, serial):** S6-CONSUMER-TRIAGE, then S6-TEX-WATER-CLOSE; both may run during wave 1 or 2.
 - **Then** S6-REVIEW, then M-S6-RETRO.
 
-Out of the baseline: S5-DECOR (D185; needs Unity and glTFast, see Decisions that need the user), fidelity items
+Out of the baseline: S5-DECOR (D185, D205: stays deferred until Unity and glTFast are available), fidelity items
 (candidate 7: S5-F2, S5-F1, S4-F3, S4-F6), PERF-WATER AC3 residual counters (D188), and any implementation coming
 out of the #17 triage (Sprint 7 candidates unless added with a D-number).
 
@@ -667,10 +667,11 @@ out of the #17 triage (Sprint 7 candidates unless added with a D-number).
 
 | # | Decision | Who | Status |
 |---|---|---|---|
-| D201 | M-S6 goal baseline and must/deferrable split as above, from the D199 candidates. Candidate 1 (M-S5 closure) is done; candidates 6–8 stay out except S6-TEX-WATER-CLOSE. | De (proposed); Team Leader confirms | proposed |
+| D201 | M-S6 goal baseline and must/deferrable split as above, from the D199 candidates. Candidate 1 (M-S5 closure) is done; candidates 6–8 stay out except S6-TEX-WATER-CLOSE. | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
 | D202 | Releases stay infrequent (D17). Sprint 6 does not end with a release by default. The S6-REVIEW GO is the milestone verdict on main and a **precondition for release candidacy** only; it does not replace the D28 release review. If the Team Leader judges the increment worth a release, a `v0.7.0` RC opens and the D28 sequence in [SPRINT_CLOSE](tasks/SPRINT_CLOSE.md) runs unchanged on the RC (demo check, Design release review and test audit on the RC revision, retro, then tag). Otherwise M-S6 rolls into the next release. Tagging and publishing stay user decisions. D28 is not changed. | C (coordinator); D28 link De | decided |
-| D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirms | proposed |
-| D204 | S6 pinned region map ([tasks/S6.md](tasks/S6.md#pinned-region-map-for-ad)): roofs, walls and roads have no S5 swatch, so observations (a) and (c) pass on same-image contrast pairs (after ΔE2000 ≥ 15 and greater than before); (b) and (d) pass by moving closer to their S5 swatches. Factoria's S5 `road-light` target (the lit-cliff swatch) is informational only. Region key is `(camera, label)` per preset file. | De (proposed); Team Leader confirms | proposed |
+| D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
+| D204 | S6 pinned region map ([tasks/S6.md](tasks/S6.md#pinned-region-map-for-ad)): roofs, walls and roads have no S5 swatch, so observations (a) and (c) pass on same-image contrast pairs (after ΔE2000 ≥ 15 and greater than before); (b) and (d) pass by moving closer to their S5 swatches. Factoria's S5 `road-light` target (the lit-cliff swatch) is informational only. Region key is `(camera, label)` per preset file. | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
+| D205 | S5-DECOR stays deferred, not dropped. It is blocked only on Unity and glTFast availability on the user's side; draft #101 stays open. It is out of the M-S6 baseline. | Team Leader (2026-11-27, #114 D89 ruling) | decided |
 
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
 
@@ -686,7 +687,7 @@ fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (
 | 4 | [#17](https://github.com/lingshf/map-builder/issues/17) simulator consumer requests | The `.mbmap` consumer | Triage first; anything touching the format goes through D101/D110 |
 | 5 | Demo tooling: two-column, no-reference mode in `tools/demo/style_render_recipe.py` with in-repo, Pillow-free sheet output (Blender's Python has no Pillow) | Replaces the D187 doc-only fallback | Tools and tests only |
 | 5a | [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps): `floating_audit` output-write errors exit 2 or create parent directories | Deferred from Sprint 5 (deferrable; coordinator ruling on #113, RETRO-I5); reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data | Developer / Knowledge Lead; tools, tests and the `docs/dev/tools.md` note only |
-| 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available; otherwise ask the user whether to drop it |
+| 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available on the user's side; stays deferred, not dropped (D205) |
 | 7 | Fidelity: S5-F2 rocks, S5-F1 tree shapes, S4-F3 water tagging, S4-F6 landcover staircase | Lowest of the user's priorities | S5-F1 changes `vegetation` collision and needs the user (D145) |
 | 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures | |
 
@@ -700,8 +701,8 @@ fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (
 4. **S5 style.** U1 and U2 were decided by the user (D141, D142). U3, U4 and the tree rule were decided by the
    coordinator under the user's delegation (D143–D145); the user may change them. A tree shape change (S5-F1) still
    needs the user.
-5. **S5-DECOR (D185).** It needs Unity and glTFast, which this host does not have. Keep it deferred until they are
-   available, or drop it. Out of M-S6 either way.
+5. **S5-DECOR (D185, D205).** Resolved by the Team Leader: it stays deferred, not dropped (D205). It is blocked
+   only on Unity and glTFast being available on the user's side. Out of M-S6.
 
 D25 (scope), D26 (demo area) and D49 (second real-data preset for S2-F2) were decided by the coordinator on the user's behalf; the user
 may change them at any time.
