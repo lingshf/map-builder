@@ -614,6 +614,23 @@ Out of the baseline: S5-F1 and S5-F2 (deferred, need user approval or data revie
 | D193 | Small, attributed, recorded ODbL fixtures are allowed in tests (example: `RealWaterCasesTest`). The attribution travels with the fixture. | C (coordinator) | decided |
 | D194 | Checklist R3: the `water-shore` measurement window moves from the D163 rows 419–424 (terrain beyond the bank ramp) to rows 408–413 on the water-adjacent bank ramp, approved in [#109](https://github.com/lingshf/map-builder/pull/109) R2. The old window must read sand. **Outcome:** S5-STYLE-REVIEW is **GO** at 850a772 ([#108](https://github.com/lingshf/map-builder/issues/108)); T4 was fixed by #107 and R3 by #109. S5-STYLE-BASE is `done` per D186(f). | C (coordinator) | decided |
 
+## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
+
+Proposed by Design in the [v0.6.0 PO review](https://github.com/lingshf/map-builder/pull/111#issuecomment-7231439618);
+the Team Leader sets the Sprint 6 baseline. Order follows D137 under G0: correctness first, then looks, low cost,
+fidelity. These are candidates, not commitments.
+
+| # | Candidate | Why | Notes |
+|---|---|---|---|
+| 1 | M-S5 closure: PERF-WATER QA verdict, then [M-S5-RETRO](tasks/README.md#milestone-retros) | M-S5 is not closed by the tag (D169) | PERF-WATER has review approval but no QA `accepted` yet |
+| 2 | [#106](https://github.com/lingshf/map-builder/issues/106) Munich CLI/Blender façade parity | Correctness; non-gating only for S5 (D191) | After the fix, checklist G10 gates again |
+| 3 | S6-STYLE-TUNE: stylized contrast | Looks good is the user's first priority | Munich pale roofs and walls merging, Pittsburgh water deeper than target, Factoria road contrast, grass paleness (N1); colour only under G0 |
+| 4 | [#17](https://github.com/lingshf/map-builder/issues/17) simulator consumer requests | The `.mbmap` consumer | Triage first; anything touching the format goes through D101/D110 |
+| 5 | Demo tooling: two-column, no-reference mode in `tools/demo/style_render_recipe.py` with in-repo, Pillow-free sheet output (Blender's Python has no Pillow) | Replaces the D187 doc-only fallback | Tools and tests only |
+| 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available; otherwise ask the user whether to drop it |
+| 7 | Fidelity: S5-F2 rocks, S5-F1 tree shapes, S4-F3 water tagging, S4-F6 landcover staircase | Lowest of the user's priorities | S5-F1 changes `vegetation` collision and needs the user (D145) |
+| 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures | |
+
 ## Decisions that need the user
 
 1. **D13 licence.** Decided 2026-11-20 (option B, split GPL-3.0-or-later add-on / Apache-2.0 rest).
