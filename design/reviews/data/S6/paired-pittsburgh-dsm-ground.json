@@ -1,0 +1,27 @@
+{
+  "camera": "dsm-ground",
+  "swatches": [
+    {
+      "label": "grass-mid",
+      "target_hex": "#96b671",
+      "before": {
+        "mean_rgb": [
+          169.6,
+          182.6,
+          169.4
+        ],
+        "deltaE2000": 15.47
+      },
+      "after": {
+        "mean_rgb": [
+          167.0,
+          184.5,
+          155.1
+        ],
+        "deltaE2000": 10.04
+      },
+      "change": -5.43
+    }
+  ],
+  "contrast_pairs": []
+}

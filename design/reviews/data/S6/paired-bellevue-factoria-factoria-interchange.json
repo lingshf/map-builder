@@ -1,0 +1,123 @@
+{
+  "camera": "factoria-interchange",
+  "swatches": [
+    {
+      "label": "road-light",
+      "target_hex": "#d4b590",
+      "before": {
+        "mean_rgb": [
+          178.1,
+          176.2,
+          168.7
+        ],
+        "deltaE2000": 13.67
+      },
+      "after": {
+        "mean_rgb": [
+          175.8,
+          172.9,
+          164.3
+        ],
+        "deltaE2000": 13.25
+      },
+      "change": -0.42
+    },
+    {
+      "label": "foliage-mid",
+      "target_hex": "#39864c",
+      "before": {
+        "mean_rgb": [
+          180.9,
+          179.2,
+          172.4
+        ],
+        "deltaE2000": 29.78
+      },
+      "after": {
+        "mean_rgb": [
+          177.9,
+          174.6,
+          166.4
+        ],
+        "deltaE2000": 29.14
+      },
+      "change": -0.64
+    }
+  ],
+  "contrast_pairs": [
+    {
+      "regions": [
+        "road-1",
+        "land-1"
+      ],
+      "before": {
+        "mean_rgb": {
+          "road-1": [
+            191.5,
+            186.5,
+            177.4
+          ],
+          "land-1": [
+            189.9,
+            191.4,
+            188.7
+          ]
+        },
+        "deltaE2000": 4.11
+      },
+      "after": {
+        "mean_rgb": {
+          "road-1": [
+            169.3,
+            145.8,
+            119.2
+          ],
+          "land-1": [
+            189.9,
+            191.4,
+            188.7
+          ]
+        },
+        "deltaE2000": 17.76
+      },
+      "change": 13.65
+    },
+    {
+      "regions": [
+        "road-2",
+        "land-2"
+      ],
+      "before": {
+        "mean_rgb": {
+          "road-2": [
+            192.1,
+            184.1,
+            172.7
+          ],
+          "land-2": [
+            189.9,
+            191.7,
+            189.6
+          ]
+        },
+        "deltaE2000": 5.97
+      },
+      "after": {
+        "mean_rgb": {
+          "road-2": [
+            163.1,
+            136.2,
+            110.0
+          ],
+          "land-2": [
+            189.9,
+            191.7,
+            189.6
+          ]
+        },
+        "deltaE2000": 20.66
+      },
+      "change": 14.68
+    }
+  ]
+}

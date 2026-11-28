@@ -1,0 +1,27 @@
+{
+  "camera": "overview",
+  "swatches": [
+    {
+      "label": "water-open",
+      "target_hex": "#6dc0e7",
+      "before": {
+        "mean_rgb": [
+          68.0,
+          137.6,
+          191.4
+        ],
+        "deltaE2000": 16.94
+      },
+      "after": {
+        "mean_rgb": [
+          115.9,
+          163.7,
+          199.0
+        ],
+        "deltaE2000": 8.77
+      },
+      "change": -8.18
+    }
+  ],
+  "contrast_pairs": []
+}
