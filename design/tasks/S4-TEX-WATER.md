@@ -46,3 +46,10 @@ PR (not committed; the release manager owns `docs/demo/`).
 Hard: `tools/textures/**`, `map_builder/assets/textures/terrain_*.png` and `LICENSE-textures.txt`,
 `core/textures.py`, `core/uv.py` (the `TEXTURE_MEAN_ALBEDO` entry only), `tests/test_textures.py`. Soft:
 sample (D103), `tests/fixtures` textured fixture if it pins the image hash.
+
+## Follow-up: S5-TEX-WATER closed (D206)
+
+The water texture deferred from this task (S4-F2, D124: an "MB Water" texture with water UVs, a CC0 asset and
+NOTICES) is **closed, not re-scoped** (S6-TEX-WATER-CLOSE, D206). Stylized mode, the user's chosen look, ships no
+textures (D139); in classic mode this task already made the river read blue (B ≥ G) with textures on. Reopen only
+on a user or consumer request for textured classic water, as a new task.
