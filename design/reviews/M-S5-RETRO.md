@@ -30,10 +30,15 @@ their own, and DOC-TOOLS-F1 has no disposition. Both are Backlog items below (RE
 | M-S5-RETRO | must | this record | Acceptance pending the per-role self-checks below |
 | Added: S5-T4 (#107), S5-PONDS-FIX (#109) | must (STYLE-REVIEW NO-GO fixes) | merged; closed by the GO | [#108](https://github.com/lingshf/map-builder/issues/108) |
 
-Counts: 10 must delivery items (8 in the baseline, 2 added fixes), all `merged`. With a QA verdict: 6 (BASE,
-PERF-GATE, F3, F4, PERF-WATER, and the STYLE-REVIEW GO). Closed by the coordinator on the STYLE-REVIEW QA evidence
-without a per-task QA verdict: 2 (PALETTE, WATER). Closed by the GO: 2 (T4, PONDS-FIX). Deferrable: 1 accepted
-(DOC-PERF), 1 deferred (DECOR), 1 unfinished (DOC-TOOLS-F1).
+Counts (must delivery items in the baseline, excluding the retro: 8):
+
+* `merged`: 8 of 8.
+* `accepted` with a QA verdict: 6 of 8 (BASE, PERF-GATE, F3, F4, PERF-WATER, STYLE-REVIEW GO).
+* Not yet `accepted`: 2 of 8 (PALETTE, WATER; coordinator `done` without a per-task QA verdict; RETRO-I4).
+* Added must fixes: 2 (T4, PONDS-FIX), both `merged`, closed by the GO QA run.
+* Deferrable (3): 1 `accepted` (DOC-PERF), 1 deferred with owner (DECOR), 1 without disposition (DOC-TOOLS-F1; RETRO-I5).
+
+RETRO-I4 and RETRO-I5 must be resolved before D169 step 1 is met; only then can this retro be accepted (step 2).
 
 Release: REL-v0.6.0 merged at b04b769 (#111). The PO review rejected the first RC head (7012d86) for a missing panel
 screenshot and viewer captures; both were added, and QA passed the scoped delta.
