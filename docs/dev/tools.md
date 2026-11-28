@@ -156,13 +156,14 @@ for `palette-regions`; `x`, `y`, `w` and `h` are fractions of the image size fro
 checker accepts exactly these differences and no others:
 
 * **Node transform.** The CLI keeps each object's pivot (and a tree's rotation) in the glTF node transform; Blender
-  bakes it into the vertices. Positions are compared in the scene frame, after scale, rotation and translation.
+  bakes it into the vertices. Positions are compared in the scene frame, after the node's full world matrix (parents included).
 * **Float rounding.** Positions match within 0.1 mm and colours within 1e-5, which absorbs the float32 rounding of the
   two conventions (about 1.5e-5 m at 100 m from the origin).
 * **Corner order.** A triangle may start at any of its corners; the winding order must be the same.
-* **Quad diagonal.** Triangles with no exact equivalent are accepted when every one is flat-coloured and the two
-  sides are made of the same corners, i.e. a quad split along its other diagonal. Colours that vary across a
-  triangle are never accepted this way.
+* **Flat re-triangulation.** Triangles with no exact equivalent are accepted when every one is flat-coloured and,
+  per colour, both sides cover the same surface: the same boundary edges with the same winding, and the same scalar
+  and vector area. Another diagonal of a flat quad or polygon passes; a folded split, reversed winding, or an extra or
+  missing triangle does not. Colours that vary across a triangle are never accepted this way.
 
 A colour swapped between corners is still reported. Material factors (base colour, roughness, metallic) are compared
 exactly, so a Blender export that writes a different factor than the CLI fails (D207: the classic Blender export

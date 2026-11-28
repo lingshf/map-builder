@@ -19,7 +19,7 @@ from typing import Any, Callable, Sequence
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from map_builder.core.glb import read_glb  # noqa: E402
+from map_builder.core.glb import det3, read_glb  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,8 @@ _COLOR_TOLERANCE = 1e-5
 _MATERIAL_DECIMALS = 6
 _CELL_M = 0.01  # grid used to find candidate triangles by centroid
 
-_Corner = tuple[tuple[float, ...], tuple[float, ...]]  # (scene-space position, colour)
+_Vec3 = tuple[float, float, float]
+_Corner = tuple[_Vec3, tuple[float, ...]]  # (scene-space position, colour)
 _Triangle = tuple[_Corner, _Corner, _Corner]
 
 
@@ -265,35 +266,40 @@ def _primitive_indices(gl: dict[str, Any], bin_chunk: bytes, primitive: dict[str
     return list(struct.unpack("<" + code * (len(raw) // struct.calcsize(code)), raw))
 
 
-def _cross(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float]:
+def _sub(a: Sequence[float], b: Sequence[float]) -> _Vec3:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _cross(a: Sequence[float], b: Sequence[float]) -> _Vec3:
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-def _to_scene_frame(node: dict[str, Any], vertex: Sequence[float]) -> tuple[float, float, float]:
-    """The glTF node transform (scale, then rotation quaternion, then translation) applied to a local vertex."""
-    scaled = [v * s for v, s in zip(vertex, node.get("scale", (1.0, 1.0, 1.0)))]
-    qx, qy, qz, qw = node.get("rotation", (0.0, 0.0, 0.0, 1.0))
-    t = [2.0 * c for c in _cross((qx, qy, qz), scaled)]
-    u = _cross((qx, qy, qz), t)
-    translation = node.get("translation", (0.0, 0.0, 0.0))
-    return tuple(scaled[k] + qw * t[k] + u[k] + translation[k] for k in range(3))
+def _to_scene_frame(world: Sequence[Sequence[float]], vertex: Sequence[float]) -> _Vec3:
+    """A local vertex through the node's world matrix (parents, scale, rotation and translation composed)."""
+    x, y, z = vertex
+    row = [world[r][0] * x + world[r][1] * y + world[r][2] * z + world[r][3] for r in range(3)]
+    return (row[0], row[1], row[2])
 
 
-def _primitive_triangles(gl: dict[str, Any], bin_chunk: bytes, node: dict[str, Any],
+def _primitive_triangles(gl: dict[str, Any], bin_chunk: bytes, node: Any,
                          primitive: dict[str, Any]) -> list[_Triangle] | None:
     """Triangles as (position, colour) corners in the scene frame, or None when the layout is not float32.
 
     The CLI exporter keeps each object's pivot and tree orientation in the node transform while the Blender
     exporter bakes them into the vertices, so the same triangle has different local positions on the two paths;
-    both are compared in the scene frame."""
+    both are compared in the scene frame. A mirroring (negative-determinant) world matrix reverses the winding,
+    as glTF defines it, so the front face stays counter-clockwise."""
     attrs = primitive["attributes"]
     positions = _float_rows(gl, bin_chunk, attrs["POSITION"])
     colors = _float_rows(gl, bin_chunk, attrs["COLOR_0"])
     if positions is None or colors is None or len(positions) != len(colors):
         return None
-    corners = [(_to_scene_frame(node, positions[i]), colors[i])
+    corners = [(_to_scene_frame(node.matrix, positions[i]), colors[i])
                for i in _primitive_indices(gl, bin_chunk, primitive, len(positions))]
-    return [tuple(corners[k:k + 3]) for k in range(0, len(corners) - 2, 3)]
+    triangles = [(corners[k], corners[k + 1], corners[k + 2]) for k in range(0, len(corners) - 2, 3)]
+    if det3(node.matrix) < 0:
+        return [(a, c, b) for a, b, c in triangles]
+    return triangles
 
 
 def _all_close(a: Sequence[float], b: Sequence[float], tolerance: float) -> bool:
@@ -309,12 +315,13 @@ def _triangles_match(a: _Triangle, b: _Triangle) -> bool:
     return any(all(_corners_match(a[i], b[(i + shift) % 3]) for i in range(3)) for shift in range(3))
 
 
-def _centroid(triangle: _Triangle) -> tuple[float, float, float]:
-    return tuple(sum(corner[0][k] for corner in triangle) / 3.0 for k in range(3))
+def _mean_point(points: Sequence[Sequence[float]]) -> _Vec3:
+    n = len(points)
+    return (sum(p[0] for p in points) / n, sum(p[1] for p in points) / n, sum(p[2] for p in points) / n)
 
 
-def _corner_position(corner: _Corner) -> tuple[float, ...]:
-    return corner[0]
+def _centroid(triangle: _Triangle) -> _Vec3:
+    return _mean_point([corner[0] for corner in triangle])
 
 
 class _MatchIndex:
@@ -361,18 +368,66 @@ def _is_flat_colored(triangle: _Triangle) -> bool:
     return all(_all_close(corner[1], triangle[0][1], _COLOR_TOLERANCE) for corner in triangle[1:])
 
 
-def _corner_set(triangles: list[_Triangle]) -> _MatchIndex:
-    return _MatchIndex([corner for triangle in triangles for corner in triangle], _corner_position, _corners_match)
+def _dot(a: Sequence[float], b: Sequence[float]) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
+_AREA_TOLERANCE_M2 = 1e-4
+
+
+@dataclass(frozen=True)
+class _Surface:
+    """What a set of same-coloured triangles covers: scalar and vector area, plus the directed boundary edges
+    (vertex-id pairs) left once edges shared by two triangles cancel."""
+    area: float
+    vector_area: _Vec3
+    boundary: frozenset[tuple[int, int]]
+
+
+def _vertex_id(vertices: list[_Vec3], point: _Vec3) -> int:
+    for i, known in enumerate(vertices):
+        if _all_close(known, point, _POSITION_TOLERANCE_M):
+            return i
+    vertices.append(point)
+    return len(vertices) - 1
+
+
+def _surface_of(triangles: list[_Triangle], vertices: list[_Vec3]) -> _Surface:
+    area, vector_area = 0.0, (0.0, 0.0, 0.0)
+    edges: set[tuple[int, int]] = set()
+    for triangle in triangles:
+        a, b, c = (corner[0] for corner in triangle)
+        twice_area = _cross(_sub(b, a), _sub(c, a))
+        area += math.sqrt(_dot(twice_area, twice_area)) / 2
+        vector_area = (vector_area[0] + twice_area[0] / 2, vector_area[1] + twice_area[1] / 2, vector_area[2] + twice_area[2] / 2)
+        ids = [_vertex_id(vertices, corner) for corner in (a, b, c)]
+        edges.update(zip(ids, ids[1:] + ids[:1]))
+    return _Surface(area, vector_area, frozenset(e for e in edges if (e[1], e[0]) not in edges))
+
+
+def _same_surface(a: _Surface, b: _Surface) -> bool:
+    return (abs(a.area - b.area) <= _AREA_TOLERANCE_M2 and a.boundary == b.boundary
+            and _all_close(a.vector_area, b.vector_area, _AREA_TOLERANCE_M2))
+
+
+def _group_by_color(triangles: list[_Triangle]) -> dict[tuple[float, ...], list[_Triangle]]:
+    groups: dict[tuple[float, ...], list[_Triangle]] = collections.defaultdict(list)
+    for triangle in triangles:
+        groups[tuple(round(c, 4) for c in triangle[0][1])].append(triangle)
+    return groups
 
 
 def _is_flat_retriangulation(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> bool:
-    """Flat-coloured triangles made of the same corners: a quad split along its other diagonal renders the same."""
-    if not all(map(_is_flat_colored, cli_triangles + bl_triangles)):
+    """Per flat colour, both sides cover the same surface: the same winding-aware boundary and the same scalar
+    and vector area. Another diagonal of a flat polygon passes; a folded split, reversed winding, or an extra or
+    missing triangle changes the boundary or an area."""
+    if not all(_is_flat_colored(t) for t in cli_triangles + bl_triangles):
         return False
-    cli_corners, bl_corners = _corner_set(cli_triangles), _corner_set(bl_triangles)
-    return (all(bl_corners.has_match(c) for t in cli_triangles for c in t)
-            and all(cli_corners.has_match(c) for t in bl_triangles for c in t))
-
+    cli_groups, bl_groups = _group_by_color(cli_triangles), _group_by_color(bl_triangles)
+    vertices: list[_Vec3] = []
+    return cli_groups.keys() == bl_groups.keys() and all(
+        _same_surface(_surface_of(cli_groups[color], vertices), _surface_of(bl_groups[color], vertices))
+        for color in cli_groups)
 
 def _triangle_difference(cli_triangles: list[_Triangle], bl_triangles: list[_Triangle]) -> dict[str, Any] | None:
     """None when the triangle sets agree; else the first triangle each path has no equivalent for.
@@ -412,7 +467,7 @@ def _material_payload(index: int, material: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _primitive_signature(gl: dict[str, Any], bin_chunk: bytes, node: dict[str, Any], node_name: str,
+def _primitive_signature(gl: dict[str, Any], bin_chunk: bytes, glb_node: Any, node: dict[str, Any], node_name: str,
                          primitive: dict[str, Any], materials: list[dict[str, Any]]) -> _PrimitiveSignature:
     material = None
     if "material" in primitive:
@@ -422,7 +477,7 @@ def _primitive_signature(gl: dict[str, Any], bin_chunk: bytes, node: dict[str, A
         material = materials[material_index]
     attrs = primitive.get("attributes", {})
     has_colors = "COLOR_0" in attrs and "POSITION" in attrs
-    triangles = _primitive_triangles(gl, bin_chunk, node, primitive) if has_colors else None
+    triangles = _primitive_triangles(gl, bin_chunk, glb_node, primitive) if has_colors else None
     raw_color_sha256 = None
     if has_colors and triangles is None:
         raw_color_sha256 = hashlib.sha256(_buffer_slice(gl, bin_chunk, attrs["COLOR_0"])).hexdigest()
@@ -452,7 +507,7 @@ def _parity_signatures(gl: dict[str, Any], bin_chunk: bytes, nodes: list[Any]) -
     for n, node in mesh_nodes:
         node_name = _identity_name(node.get("name"), n.index, "node")
         for primitive in gl["meshes"][node["mesh"]].get("primitives", []):
-            signatures.append(_primitive_signature(gl, bin_chunk, node, node_name, primitive, materials))
+            signatures.append(_primitive_signature(gl, bin_chunk, n, node, node_name, primitive, materials))
     return signatures
 
 

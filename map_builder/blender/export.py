@@ -195,7 +195,7 @@ def material_spec(mat: bpy.types.Material | None, textures: bool = True, style: 
         raise ExportError([f"material {mat.name!r}: non-finite colour/roughness/metallic"])
     if generated_textured and canonical_generated and normalize_style(style) != "classic":
         values = [canon[1], canon[2]]
-    if generated_style_plain:
+    if generated_style_plain and normalize_style(style) != "classic":   # classic keeps the material's own roughness and metallic
         values = [_canonical(gen, style)[1], _canonical(gen, style)[2]]
     spec: MaterialSpec = (rgb, values[0], values[1])
     if (generated_textured or generated_plain) and textures:
