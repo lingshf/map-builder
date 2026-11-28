@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import struct
 import tempfile
@@ -29,9 +30,28 @@ def _mesh(name: str) -> MeshData:
     return m
 
 
-def _build_valid_mbmap(path: str) -> None:
-    mesh = _mesh("terrain")
-    glb = write_glb([{"name": "terrain", "mesh": mesh}], {"MB Terrain": ((0.4, 0.6, 0.4), 1.0, 0.0)})
+_FLAT_QUAD = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 3.0), (0.0, 0.0, 3.0)]
+
+
+def _quad(name: str, corners: list[tuple[float, float, float]], triangles: list[tuple[int, int, int]],
+          colors: list[tuple[float, ...]] | None = None) -> MeshData:
+    """Triangles over shared corners, each with its own flat colour (one colour by default)."""
+    m = MeshData(name)
+    ids = [m.add_vertex(*c) for c in corners]
+    for triangle, color in zip(triangles, colors or [(0.8, 0.7, 0.6)] * len(triangles)):
+        m.add_face(tuple(ids[i] for i in triangle), "MB Terrain", color)
+    return m
+
+def _map_frame_transform(vertex: tuple[float, float, float], location: tuple[float, float, float],
+                         rotation_z: float) -> tuple[float, float, float]:
+    x, y, z = vertex
+    c, s = math.cos(rotation_z), math.sin(rotation_z)
+    return (c * x - s * y + location[0], s * x + c * y + location[1], z + location[2])
+
+
+def _build_valid_mbmap(path: str, nodes: list[dict] | None = None) -> None:
+    nodes = nodes or [{"name": "terrain", "mesh": _mesh("terrain")}]
+    glb = write_glb(nodes, {"MB Terrain": ((0.4, 0.6, 0.4), 1.0, 0.0)})
     col = b"MBCOL\x00\x00\x00\x02\x00\x00\x00" + b"\x00" * 128
     hf = b"MBHF\x00\x00\x00\x02\x00\x00\x00" + b"\x00" * 96
     probes = [{"id": "p0", "kind": "bridge", "feature": "osm:way/1", "path_map": [[0.0, 0.0, 5.0], [1.0, 0.0, 5.0]],
@@ -338,6 +358,104 @@ class StyleCheckTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertGreater(len(details.get("cli_only", [])), 0)
 
+    def test_parity_accepts_node_transform_baked_into_vertices(self) -> None:
+        pivot, angle = (110.5, 52.25, 5.75), 0.7
+        local = _quad("local", [(-4.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 15.0), (-4.0, 0.0, 15.0)], [(0, 1, 2), (0, 2, 3)])
+        baked = _quad("baked", [_map_frame_transform(v, pivot, angle) for v in local.vertices], [(0, 1, 2), (0, 2, 3)])
+        ok, details = self._parity([{"name": "wall", "mesh": local, "location": pivot, "rotation_z": angle}],
+                                   [{"name": "wall", "mesh": baked}])
+        self.assertTrue(ok, details)
+
+    def test_parity_accepts_flat_quad_split_on_other_diagonal(self) -> None:
+        corners = _FLAT_QUAD
+        ok, details = self._parity([{"name": "wall", "mesh": _quad("a", corners, [(0, 1, 2), (0, 2, 3)])}],
+                                   [{"name": "wall", "mesh": _quad("b", corners, [(0, 1, 3), (1, 2, 3)])}])
+        self.assertTrue(ok, details)
+
+    def test_parity_rejects_other_diagonal_when_triangle_colors_differ(self) -> None:
+        corners = _FLAT_QUAD
+        colors = [(0.9, 0.1, 0.1), (0.1, 0.1, 0.9)]
+        ok, details = self._parity([{"name": "wall", "mesh": _quad("a", corners, [(0, 1, 2), (0, 2, 3)], colors)}],
+                                   [{"name": "wall", "mesh": _quad("b", corners, [(0, 1, 3), (1, 2, 3)], colors)}])
+        self.assertFalse(ok)
+        self.assertIn("first_cli_triangle", details["cli_only"][0]["difference"])
+
+    def test_parity_rejects_other_diagonal_of_a_non_coplanar_quad(self) -> None:
+        folded = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (4.0, 0.0, 3.0), (0.0, 1.0, 3.0)]
+        self._assert_diagonal_rejected(folded, [(0, 1, 2), (0, 2, 3)], [(0, 1, 3), (1, 2, 3)])
+
+    def test_parity_rejects_other_diagonal_of_a_twisted_quad_with_equal_areas(self) -> None:
+        twisted = [(1.0, 0.0, 0.0), (0.0, 1.0, 1.0), (-1.0, 0.0, 0.0), (0.0, -1.0, 1.0)]
+        self._assert_diagonal_rejected(twisted, [(0, 1, 2), (0, 2, 3)], [(0, 1, 3), (1, 2, 3)])
+
+    def test_parity_rejects_other_diagonal_when_color_differs_beyond_tolerance(self) -> None:
+        ok, _ = self._parity([{"name": "wall", "mesh": _quad("a", _FLAT_QUAD, [(0, 1, 2), (0, 2, 3)])}],
+                             [{"name": "wall", "mesh": _quad("b", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)], [(0.80004, 0.7, 0.6)] * 2)}])
+        self.assertFalse(ok)
+
+    def test_parity_rejects_double_sided_sheets_with_moved_geometry(self) -> None:
+        front = _quad("a", _FLAT_QUAD, [(0, 1, 2), (0, 2, 3)])
+        back_cli = _quad("b", _FLAT_QUAD, [(0, 3, 2), (0, 2, 1)])
+        moved = [(x, y + 10.0, z) for x, y, z in _FLAT_QUAD]
+        back_bl = _quad("c", moved, [(0, 3, 1), (3, 2, 1)])
+        cli = self._merged("wall", front, back_cli)
+        bl = self._merged("wall", _quad("d", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)]), back_bl)
+        ok, _ = self._parity([cli], [bl])
+        self.assertFalse(ok)
+
+    def test_parity_accepts_two_retriangulated_quads_in_any_order(self) -> None:
+        far = [(x + 10.0, y, z) for x, y, z in _FLAT_QUAD]
+        cli = self._merged("wall", _quad("a", _FLAT_QUAD, [(0, 1, 2), (0, 2, 3)]), _quad("b", far, [(0, 1, 2), (0, 2, 3)]))
+        bl = self._merged("wall", _quad("c", far, [(0, 1, 3), (1, 2, 3)]), _quad("d", _FLAT_QUAD, [(0, 1, 3), (1, 2, 3)]))
+        ok, _ = self._parity([cli], [bl])
+        self.assertTrue(ok)
+
+    @staticmethod
+    def _merged(name: str, *meshes: MeshData) -> dict:
+        merged = MeshData(name)
+        for mesh in meshes:
+            ids = [merged.add_vertex(*v) for v in mesh.vertices]
+            for face, color in zip(mesh.faces, mesh.face_colors):
+                merged.add_face(tuple(ids[i] for i in face), "MB Terrain", color)
+        return {"name": name, "mesh": merged}
+
+    def test_parity_rejects_colour_drift_hidden_inside_a_patch(self) -> None:
+        pentagon = [(0.0, 0.0, 0.0), (4.0, 0.0, 0.0), (5.0, 0.0, 2.0), (2.0, 0.0, 4.0), (-1.0, 0.0, 2.0)]
+        fan_from_0, fan_from_1 = [(0, 1, 2), (0, 2, 3), (0, 3, 4)], [(1, 2, 3), (1, 3, 4), (1, 4, 0)]
+        for reds in ([0.499992, 0.5, 0.500008], [0.5, 0.500008, 0.499992]):
+            drifting = [(red, 0.7, 0.6) for red in reds]
+            ok, _ = self._parity([{"name": "wall", "mesh": _quad("a", pentagon, fan_from_0, drifting)}],
+                                 [{"name": "wall", "mesh": _quad("b", pentagon, fan_from_1, [(0.5, 0.7, 0.6)] * 3)}])
+            self.assertFalse(ok)
+
+    def test_parity_rejects_other_diagonal_with_reversed_winding(self) -> None:
+        self._assert_diagonal_rejected(_FLAT_QUAD, [(0, 1, 2), (0, 2, 3)], [(0, 3, 1), (3, 2, 1)])
+
+    def test_parity_rejects_other_diagonal_with_an_extra_triangle(self) -> None:
+        self._assert_diagonal_rejected(_FLAT_QUAD, [(0, 1, 2), (0, 2, 3)], [(0, 1, 3), (1, 2, 3), (0, 1, 2)])
+
+    def test_parity_rejects_a_parent_node_translation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cli, bl = os.path.join(td, "cli.mbmap"), os.path.join(td, "bl.mbmap")
+            _build_valid_mbmap(cli)
+            _mutate(cli, bl, lambda m: self._nest_under_parent(m, [10.0, 0.0, 0.0]))
+            ok, _ = style_check.cli_blender_parity(cli, bl)
+            self.assertFalse(ok)
+
+    def _assert_diagonal_rejected(self, corners: list[tuple[float, float, float]], cli_split: list[tuple[int, int, int]],
+                                  bl_split: list[tuple[int, int, int]]) -> None:
+        ok, _ = self._parity([{"name": "wall", "mesh": _quad("a", corners, cli_split)}],
+                             [{"name": "wall", "mesh": _quad("b", corners, bl_split)}])
+        self.assertFalse(ok)
+
+    @staticmethod
+    def _parity(cli_nodes: list[dict], bl_nodes: list[dict]) -> tuple[bool, dict]:
+        with tempfile.TemporaryDirectory() as td:
+            cli, bl = os.path.join(td, "cli.mbmap"), os.path.join(td, "bl.mbmap")
+            _build_valid_mbmap(cli, cli_nodes)
+            _build_valid_mbmap(bl, bl_nodes)
+            return style_check.cli_blender_parity(cli, bl)
+
     @staticmethod
     def _swap_first_two_colors(members: dict[str, bytes]) -> None:
         StyleCheckTests._swap_corner_colors(members, [(0, 1)])
@@ -364,6 +482,17 @@ class StyleCheckTests(unittest.TestCase):
         offset = int(view.get("byteOffset", 0)) + int(accessor.get("byteOffset", 0))
         out_bin = bytearray(bin_chunk)
         out_bin[offset:offset + len(swapped)] = swapped
+        StyleCheckTests._repack_glb(members, gl, out_bin)
+
+    @staticmethod
+    def _nest_under_parent(members: dict[str, bytes], translation: list[float]) -> None:
+        gl, bin_chunk = style_check._glb_json_and_bin(members["visual/map.glb"])
+        gl["nodes"].append({"name": "parent", "children": [0], "translation": translation})
+        gl["scenes"][0]["nodes"] = [len(gl["nodes"]) - 1]
+        StyleCheckTests._repack_glb(members, gl, bytearray(bin_chunk))
+
+    @staticmethod
+    def _repack_glb(members: dict[str, bytes], gl: dict, out_bin: bytearray) -> None:
         json_bytes = json.dumps(gl, separators=(",", ":"), sort_keys=True).encode("utf-8")
         while len(json_bytes) % 4:
             json_bytes += b" "
@@ -377,7 +506,6 @@ class StyleCheckTests(unittest.TestCase):
             + struct.pack("<I4s", len(out_bin), b"BIN\x00")
             + bytes(out_bin)
         )
-
 
 if __name__ == "__main__":
     unittest.main()

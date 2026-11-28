@@ -158,6 +158,19 @@ def run(out_dir):
           "textures: TEXCOORD_0 exactly on the textured materials")
     check(sorted(m["name"] for m in gl["materials"]) == sorted(m["name"] for m in cgl["materials"]),
           "textures: the same materials as the CLI package")
+    factors = {m["name"]: [round(c, 6) for c in m["pbrMetallicRoughness"]["baseColorFactor"]] for m in gl["materials"]}
+    cli_factors = {m["name"]: [round(c, 6) for c in m["pbrMetallicRoughness"]["baseColorFactor"]]
+                   for m in cgl["materials"]}
+    check(factors == cli_factors, f"textures: base colour factors equal the CLI's, trees included ({factors})")
+    from map_builder.blender.export import material_spec
+    bark = bpy.data.materials["MB Bark"]
+    bsdf = next(n for n in bark.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    kept = bsdf.inputs["Roughness"].default_value
+    bsdf.inputs["Roughness"].default_value = 0.25
+    _, spec, _, _ = material_spec(bark, True, "classic")
+    bsdf.inputs["Roughness"].default_value = kept
+    check(abs(spec[1] - 0.25) < 1e-6 and tuple(round(c, 6) for c in spec[0]) == (0.8, 0.8, 0.8),
+          f"textures: classic export keeps an edited roughness and the canonical base colour ({spec})")
     tp, ctp = [p for p in prims if p["uv"]], [p for p in cprims if p["uv"]]
     check(seams(tp) == seams(ctp), f"textures: UV seam count equals the CLI's ({seams(tp)})")
     bad = []
