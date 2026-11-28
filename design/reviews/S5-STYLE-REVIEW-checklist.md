@@ -1,7 +1,7 @@
 # S5-STYLE-REVIEW: checklist and camera set (prepared before the review)
 
 Owner: design · task [S5-STYLE-REVIEW](../tasks/S5-STYLE.md#s5-style-review-design-milestone-review-gono-go) ·
-decisions D137, D139–D141, D153, D156, D157, D163, D166, D170, D185–D187
+decisions D137, D139–D141, D153, D156, D157, D163, D166, D170, D185–D194
 
 This is the run sheet for the GO/NO-GO. It is fixed **before** the review, so the review can start as soon as
 S5-PERF-WATER merges (D156). The review itself is a separate PR, `design/reviews/S5-STYLE-REVIEW.md`, which
@@ -10,7 +10,8 @@ fills in every row below with a verdict (pass / fail / information) and a link t
 ## Gate to start
 
 * S5-PERF-WATER is merged into main. Let **H** be the main commit at that point; the review pins H and does not
-  move it.
+  move it. In the run, H = a6dbe48 (#105). Scoped fixes found by the run were re-checked at their own merges: T4 at
+  26a9cc5 (#107) and R3 at 850a772 (#109, D194). The GO revision is 850a772; all other rows keep their evidence at H.
 * In scope: S5-STYLE-BASE (#85, fba2509), S5-F3 (#97, 8ce3d28), S5-F4 (#94, e780e02), S5-PERF-GATE (#91, 796d72b),
   S5-STYLE-PALETTE (#100, 4cb17fb), S5-STYLE-WATER (#103, 852a137), S5-PERF-WATER (H).
 * The reference slot is waived for #100 and #103 (D187); R1 carries the judgment.
@@ -28,7 +29,7 @@ fills in every row below with a verdict (pass / fail / information) and a link t
 | G0 and classic-identity base | 8ce3d28 (the D181 rebaseline target, classic) | byte checks |
 | Per-PR budget bases | each PR's own merge-base (the per-PR rule in S5-STYLE.md) | taken from the PR evidence, not re-measured |
 
-* **Build settings (G0 pinned):** the frozen caches from the D163 custody (Factoria: the D157 cache, per D183;
+* **Build settings (G0 pinned):** the frozen caches from the D163 custody (Factoria: the D177 cache `065ca7fd…56ac` on both sides, per D190, because the D157 cache is lost;
   record the MANIFEST hashes you verified), seed 1, DSM on, offline, `created_utc = "2026-11-20T00:00:00Z"`, and the
   same export options on both sides.
 * **Pinned render inputs.** v0.5.0 has no style presets, no re-framed ponds camera and no style render recipe.
@@ -129,20 +130,20 @@ misplacement.
 
 ## Checklist
 
-### G: gates (any fail is NO-GO)
+### G: gates (any fail is NO-GO, except the one D191 exception in G10)
 
 | Row | Check | Evidence | Pass rule |
 |---|---|---|---|
 | G1 | G0 on H vs 8ce3d28 | `tools/style_check.py`; 4 packages × 2 paths × 2 modes = 16 | 16/16 ok: `.mbcol` and `.mbhf` bytes, georeference, probes, blocked and dropped lists |
 | G2 | G0 negative cases still fail | `tests/test_style_check.py` on H | each listed negative case fails |
 | G3 | Classic identity (D141) | whole archive, H `--style classic` vs 8ce3d28, 4 packages × 2 paths | byte-identical, 8/8. The #100 QA rejection failed here on Blender (classic material factors), so the Blender column is required |
-| G4 | Classic vs stylized members on H | member diff | only `visual/map.glb`, the manifest `files[]` hashes and `package_id`, `asset_notices`/NOTICES, and `report.json` `style` differ |
+| G4 | Classic vs stylized members on H | member diff | only these differ: `visual/map.glb`; in the manifest, `package_id` and, for the same member together, `files[].hash` and `files[].bytes` (D192); `asset_notices`/NOTICES; and `report.json` `style`. The sample NOTICES 1867 → 1015 is intended (D192) |
 | G5 | Absolute budgets on H, stylized | GLB inspection, 4 packages × 2 paths | materials ≤ 8 (the #100 QA rejection found 9); 0 embedded texture bytes; no glTF extensions; visual triangles per node equal to classic |
 | G6 | Per-PR budgets | the D139 table of #100, #103 and PERF-WATER, each against its merge-base | every floor met, or a recorded decision covers the miss |
 | G7 | D153 work gate | the PR evidence of #100, #103 and PERF-WATER | F1–F3 pass; F4 and F6 answered; F5 CPU disclosed |
-| G8 | PERF-WATER output | the PERF-WATER PR | byte-identical output on all packages and paths, and its spec ACs closed in the PR |
+| G8 | PERF-WATER output | the PERF-WATER PR | byte-identical output on all packages and paths, and its spec ACs closed in the PR. The AC3 counter shortfall is accepted (D188); the `may_touch` oracle check is evidence only (D189) |
 | G9 | Frame-time proxy (D186a) | the PERF-WATER PR, [AC5](../tasks/S5-PERF-WATER.md) | AC5 as specified there: the proxy times render work (`median_render_ms`); C1 A/A on the Pittsburgh stylized package has `abs(ratio − 1) ≤ 0.03`; C2 (`--head-passes 2`, about +100 % render work) has `ratio ≥ 1.10`; the D139 pair (merge-base vs head, Pittsburgh stylized, overview) has `ratio ≤ 1.10`. If C1 or C2 failed, G9 fails (proxy not established) |
-| G10 | Parity and determinism | `tools/style_check.py` parity; two builds of the same preset | CLI and Blender vertex colours and materials equal per node; two builds byte-identical |
+| G10 | Parity and determinism | `tools/style_check.py` parity; two builds of the same preset | CLI and Blender vertex colours and materials equal per node; two builds byte-identical. The Munich façade parity failure is pre-existing (v0.5.0, D181, H in both styles) and non-gating; it is a next-sprint bug (D191) |
 | G11 | CI readers on the committed sample | CI on H | green. CI reads only the committed classic `examples/synthetic_sample.mbmap` and fixtures, so this row does not cover stylized output; G14 does |
 | G14 | Readers on a **fresh stylized** sample | at H, build the sample with the CI build command (`.github/workflows/ci.yml`, "Build and validate the SYNTHETIC fixture package": `tools/mbmap_cli.py build` on `tests/fixtures/synthetic_area.osm` and `synthetic_dem.asc`) plus `--created-utc 2026-11-20T00:00:00Z` and the default style (stylized); confirm the style in `report.json`; record the archive SHA-256 | the **same file** passes all five: glTF-Validator 2.0.0-dev.3.10 (D66, `tools/gltf_validate.js`) on its `visual/map.glb` with 0 errors; the current Python validator (`tools/mbmap_cli.py validate`) `VALID`; the current C# reader (`examples/csharp/MbmapReader`) `OK`; the frozen v0.3.0 Python validator `VALID` and C# reader `OK` (`git archive v0.3.0`, as in CI), with no warnings beyond those they give on the committed sample. Raw outputs are attached |
 | G12 | Full headless Blender suite (D166) | `tests/blender/run_integration.py` on H | `OK: 0 failure(s)` |
@@ -154,7 +155,7 @@ misplacement.
 |---|---|---|---|
 | R1 | **Reference vs head** (D187) | Every after-render is judged against the S5-STYLE target table (sRGB swatches) and the user's direction: saturated, bright, readable from drone height, and a low-poly cartoon look. The palette ΔE report supports the judgment. The coordinator-held image is used if supplied (see Reference slot). | One verdict per priority, in D137 order: (1) looks good, (2) low cost (rows G5, G6 and G9), (3) fidelity (landcover keeps its class; objects stay in place, which G1 proves). A fail on (1) is NO-GO only if it is named against a specific camera and swatch. |
 | R2 | **Faceting** (D186b) | Cameras 4, 5, 7, 8, 10, 12 and 17, after vs before. The method PALETTE picked (dropped `NORMAL` or unwelding) is named. | Faces read as flat, low-poly facets. No smooth-shading leftovers, no black or inverted faces, no seams that read as cracks, no shading acne on terrain or roofs. Anything found is named per camera and becomes an S5-Fn task. |
-| R3 | **D163 ponds verdict** (D186f) | Camera 3 (the re-framed `factoria-ponds` from #100), rendered at H. | The southern Mercer Slough ponds (47.584–47.586° N, about +560 to +780 m northing) are visible as water, not a grey foreground: open water plus a shore band inside the frame, and the `water-shore` region falls on water. Design records its own verdict, and the review links an **independent QA verdict of accepted** on this camera at H. That QA verdict is required: it closes S5-STYLE-BASE `done` and is a GO precondition. A Design verdict alone, or a pending QA request, is not enough. |
+| R3 | **D163 ponds verdict** (D186f) | Camera 3 (the re-framed `factoria-ponds` from #100), rendered first at H (a6dbe48, the initial run); the final R3 render is at 850a772 (#109, D194). | The southern Mercer Slough ponds (47.584–47.586° N, about +560 to +780 m northing) are visible as water, not a grey foreground: open water plus a shore band inside the frame. Measurement rule (D194, since #109): the `water-shore` window is rows 408–413 on the water-adjacent bank ramp, and the old D163 window, rows 419–424 (terrain beyond the ramp), must read sand. Design records its own verdict, and the review links an **independent QA verdict of accepted** on this camera at the final R3 revision (850a772). That QA verdict is required: it closes S5-STYLE-BASE `done` and is a GO precondition. A Design verdict alone, or a pending QA request, is not enough. |
 | R4 | Water and shore (D186e) | Cameras 9, 11 and 13. | Open water reads cyan; a light shore band blends into sand; water and bank edges show no gaps. Colour only: G1 holds. |
 | R5 | Trees | Cameras 2 and 17. | Tint variants are deterministic, and the lit, mid and shadow faces are distinguishable. The shape is unchanged (D145). |
 | R6 | Buildings and roads | Cameras 4, 6, 7, 15 and 2. | Pastel walls and saturated roofs, with tagged colours pulled into the palette. Roads are light warm grey; footways and paths are sand. |
@@ -174,15 +175,17 @@ misplacement.
 | Row | Check | Pass rule |
 |---|---|---|
 | T1 | New tests from #100, #103 and PERF-WATER | each ≤ 5 s, no wall-clock asserts, no case duplicated across the water, shore and floating-audit test files |
-| T2 | Persisted vs evidence | real-data audits and replays are PR evidence, not persisted tests |
+| T2 | Persisted vs evidence | real-data audits and replays are PR evidence, not persisted tests. Small, attributed, recorded ODbL fixtures may be persisted in tests (D193) |
 | T3 | PR CI time on H | ≤ 10 min |
 | T4 | Coverage of the S5 rules | palette rules (slope threshold, bank band, road classes, pulled tagged colour, tree tint), classic sample identity, the Blender style-option default, and the G0 negative cases each have at least one test |
 
 ## Verdict
 
-* **GO** requires: every G row passes (G1–G14); R1 to R3 have verdicts with no named NO-GO finding; the
+* **GO** requires: every G row passes (G1–G14). The only exception is D191: the pre-existing Munich CLI/Blender
+  façade parity failure in G10 is recorded and tracked as a next-sprint bug but does not block GO; every other G10
+  requirement and every other gate still applies; R1 to R3 have verdicts with no named NO-GO finding; the
   independent QA verdict for R3 is **accepted** and linked (D186f); T1 to T4 pass.
-* **Pending** (neither GO nor NO-GO): every other row passes, but the R3 QA verdict is not yet given. The review
+* **Pending** (neither GO nor NO-GO): every other row passes (G10 under the same D191 exception), but the R3 QA verdict is not yet given. The review
   reports pending and asks QA. When QA accepts, the review becomes GO and S5-STYLE-BASE `done` closes. A QA
   rejection of the camera is a NO-GO with an S5-Fn camera task.
 * **NO-GO** names each failing row, its evidence, and an S5-Fn fix task (id, conflict domain, and ACs), as for
