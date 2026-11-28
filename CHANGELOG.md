@@ -43,7 +43,7 @@ All notable user-visible changes are recorded here, following
   appeared as pale triangles on land beyond a sand ring. The stylized `bank:` ramp is now the shallow band and the
   terrain bank band is sand. Colour only: classic packages are byte-identical, and collision and heightfield do not
   change.
-* **Banks continue under elevated bridges** (S5-F3, #97, D178). A shore-ramp bank strip used to be dropped whole
+* **Banks continue under elevated bridges** (S5-F3, #97). A shore-ramp bank strip used to be dropped whole
   when it touched a bridge line, which left the water sheet up to 1.8 m above the uncovered ground beside the I-90
   crossing on Bellevue-Factoria. A strip is now cut only where it lies inside a deck footprint that sits at grade
   (less than 2.5 m above the ramp); under an elevated deck it passes. At-grade roads, building footprints, tunnels
@@ -73,7 +73,7 @@ All notable user-visible changes are recorded here, following
   parity check fails the same way on the classic baseline.
 * Stylized scenes read pale: in Munich pale roofs and walls merge, Pittsburgh water is a deeper blue than the
   target, and on Bellevue-Factoria the road network loses its dark contrast.
-* Planned decorations (S5-DECOR, draft #101) are not in this release (D185).
+* Planned decorations (S5-DECOR, draft #101) are not in this release; they need a Unity glTFast check first.
 
 ## [0.5.0] - 2026-11-24
 

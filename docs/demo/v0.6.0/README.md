@@ -53,7 +53,7 @@ to the one QA rendered at `a6dbe48`, so this sheet shows the release.
 
 ![Before (v0.5.0): the textured Altstadt roofscape. After: the stylized roofscape](munich-roofscape-before-after.png)
 
-## Bellevue-Factoria ponds: the R3 fix (*QA*)
+## Bellevue-Factoria ponds: the shallow shoreline fix (*QA*)
 
 ![Before: stylized at a6dbe48, pale triangles on land beyond a sand ring. After: 850a772, a continuous light rim against the blue water, then sand](factoria-ponds-fix-before-after.png)
 
