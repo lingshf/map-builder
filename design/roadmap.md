@@ -628,8 +628,8 @@ accepted the [M-S5 retro](reviews/M-S5-RETRO.md) on 2026-11-27 (D169 steps 1–3
 
 ### Milestone M-S6 "correct and readable": goal baseline (D201)
 
-**Goal.** The stylized map is correct on both export paths (CLI/Blender parity passes on every preset, so checklist
-G10 gates again) and reads clearly from drone height (roofs against walls, water depth, road contrast, grass), with
+**Goal.** The stylized map is correct on both export paths (CLI/Blender parity passes on every preset that has a same-style
+CLI/Blender pair, so checklist G10 gates again; D208) and reads clearly from drone height (roofs against walls, water depth, road contrast, grass), with
 the flight data exact (G0) and the low-end budgets unchanged. The milestone may span Sprints and is not a version.
 
 **Closure** follows the D169 sequence: (1) goal attainment: every must delivery item (all rows below except
@@ -641,9 +641,9 @@ record. A Sprint end or a tag is not closure.
 
 | Item | Class | Acceptance (canonical criteria in [tasks/S6.md](tasks/S6.md)) |
 |---|---|---|
-| [S6-PARITY](tasks/S6.md#s6-parity-munich-cliblender-façade-parity-106) ([#106](https://github.com/lingshf/map-builder/issues/106)) | must (correctness) | Cause named; historical #106 controls and PR-head matrix both behave as specified; negative tests still detect real swaps; G0 and strict G3 |
+| [S6-PARITY](tasks/S6.md#s6-parity-munich-cliblender-façade-parity-106) ([#106](https://github.com/lingshf/map-builder/issues/106)) | must (correctness) | Cause named; historical #106 controls and PR-head matrix both behave as specified; negative tests still detect real swaps; G0 and G3 (strict except the D207 classic-Blender rebaseline) |
 | [S6-DEMO-2COL](tasks/S6.md#s6-demo-2col-two-column-no-reference-style-sheets-candidate-5) | must (evidence enabler) | Two-column no-reference sheets and paired before/after ΔE from preset-scoped regions, Pillow-free; ΔE equal to the D187 fallback |
-| [S6-STYLE-TUNE](tasks/S6.md#s6-style-tune-stylized-contrast-candidate-3) | must (looks) | Colour only; per D204, (a) and (c) reach the same-image contrast rule and (b) and (d) move closer to their swatches; G0 full matrix, G3, G10, determinism and all D139 budgets against b04b769 |
+| [S6-STYLE-TUNE](tasks/S6.md#s6-style-tune-stylized-contrast-candidate-3) | must (looks) | Colour only; per D204, (a) and (c) reach the same-image contrast rule and (b) and (d) move closer to their swatches; G0 full matrix, G3 (classic CLI against b04b769, classic Blender against the #119 merge, D207), G10 (D208), determinism and all D139 budgets against b04b769 |
 | [S6-CONSUMER-TRIAGE](tasks/S6.md#s6-consumer-triage-simulator-consumer-requests-17) ([#17](https://github.com/lingshf/map-builder/issues/17)) | must (triage only) | Per-request state and disposition recorded; format changes routed through D101/D110; reply on #17 |
 | [S6-REVIEW](tasks/S6.md#s6-review-milestone-review-gono-go) | must | Explicit GO on the review head; a NO-GO names S6-Fn must tasks and the review re-runs on the fixed head |
 | [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps) | deferrable | `floating_audit` output-write errors exit 2 or create parent directories; doc note updated |
@@ -672,7 +672,9 @@ out of the #17 triage (Sprint 7 candidates unless added with a D-number).
 | D203 | S6-STYLE-TUNE changes colours only; a changed S5-STYLE target swatch needs its own D-number with the ΔE evidence. The S5 QA metric windows stay pinned (D198). | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
 | D204 | S6 pinned region map ([tasks/S6.md](tasks/S6.md#pinned-region-map-for-ad)): roofs, walls and roads have no S5 swatch, so observations (a) and (c) pass on same-image contrast pairs (after ΔE2000 ≥ 15 and greater than before); (b) and (d) pass by moving closer to their S5 swatches. Factoria's S5 `road-light` target (the lit-cliff swatch) is informational only. Region key is `(camera, label)` per preset file. | De (proposed); Team Leader confirmed 2026-11-27 (#114 D89 ruling) | decided |
 | D205 | S5-DECOR stays deferred, not dropped. It is blocked only on Unity and glTFast availability on the user's side; draft #101 stays open. It is out of the M-S6 baseline. | Team Leader (2026-11-27, #114 D89 ruling) | decided |
-| D206 | S5-TEX-WATER (S4-F2, D124: an "MB Water" texture) is **closed, not re-scoped to classic**. Stylized mode ships no textures (D139) and is the user's chosen default (D141); classic water already reads blue with textures on (S4-TEX-WATER, #61); a water texture would add UVs, a CC0 asset, NOTICES and GLB bytes for no requested benefit, and no consumer asked for it (#17 triage). Reopen only on a user or consumer request, as a new task. When confirmed, the user guide's "planned: S5-TEX-WATER" wording (`docs/user/generate.md`, outside `design/`) goes to the coordinator as a docs follow-up. Settles candidate 8's second half; the PERF-WATER AC3 residual counters (D188) stay a candidate. | De (proposed); Team Leader confirms | proposed |
+| D206 | S5-TEX-WATER (S4-F2, D124: an "MB Water" texture) is **closed, not re-scoped to classic**. Stylized mode ships no textures (D139) and is the user's chosen default (D141); classic water already reads blue with textures on (S4-TEX-WATER, #61); a water texture would add UVs, a CC0 asset, NOTICES and GLB bytes for no requested benefit, and no consumer asked for it (#17 triage). Reopen only on a user or consumer request, as a new task. The user guide's wording was corrected outside `design/` in #117. Settles candidate 8's second half; the PERF-WATER AC3 residual counters (D188) stay a candidate. | De (proposed, #116); Team Leader confirmed 2026-11-27 | decided |
+| D207 | S6-PARITY AC5 exception (#106, #119): the Blender classic exporter's MB Bark, MB Foliage and MB Water `baseColorFactor` is aligned to the CLI's 0.8. Only the classic Blender GLB bytes change (with that package's GLB hash entries and `package_id`); collision and heightfield (G0) and the CLI classic package (G3) are unchanged, and the stylized GLBs of both paths are unchanged. The new G3 baseline for the classic Blender path is the S6-PARITY (#119) merge commit; S6-REVIEW uses it. | Team Leader | decided |
+| D208 | M-S6 G10 scope: CLI/Blender parity is required on the presets with a same-style pair, Munich, Pittsburgh and Bellevue-Factoria, in both styles. The sample preset has none (CLI sample classic-only, sample preset Blender/stylized-only; #119 evidence exception), so it is outside G10 for M-S6 and does not block GO; S7-SAMPLE-PARITY adds it. Narrows D201's "every preset" goal wording. | De (proposed, #120); Team Leader confirmed 2026-11-27 | decided |
 
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
 
@@ -690,7 +692,7 @@ fidelity. These are candidates, not commitments. Consumed by the M-S6 baseline (
 | 5a | [DOC-TOOLS-F1](tasks/README.md#knowledge-gaps): `floating_audit` output-write errors exit 2 or create parent directories | Deferred from Sprint 5 (deferrable; coordinator ruling on #113, RETRO-I5); reason: tools-only error handling in a deferrable item, no effect on the M-S5 goal or flight data | Developer / Knowledge Lead; tools, tests and the `docs/dev/tools.md` note only |
 | 6 | [S5-DECOR](tasks/S5-STYLE.md#s5-decor-visual-only-decoration--03-m-last-contingent) (draft #101) | Deferred (D185) | Only when Unity and glTFast are available on the user's side; stays deferred, not dropped (D205) |
 | 7 | Fidelity: S5-F2 rocks, S5-F1 tree shapes, S4-F3 water tagging, S4-F6 landcover staircase | Lowest of the user's priorities | S5-F1 changes `vegetation` collision and needs the user (D145) |
-| 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures. The S5-TEX-WATER half is taken by S6-TEX-WATER-CLOSE: D206 proposes closing it (pending Team Leader confirmation); the D188 counters stay a candidate | |
+| 8 | Low: PERF-WATER AC3 residual counters (D188); re-scope S5-TEX-WATER to classic only or close it | Deferred to S5 under D124; stylized ships no textures. The S5-TEX-WATER half is taken by S6-TEX-WATER-CLOSE: D206 closes it (decided, #116); the D188 counters stay a candidate | |
 
 ## Sprint 7 candidates (additions)
 
@@ -701,6 +703,7 @@ candidates above; none joins M-S6 unless the Team Leader adds it with a D-number
 |---|---|---|---|
 | S7-REL-SAMPLE | Release notes list the committed synthetic sample (bytes, SHA-256, `package_id`, `schema_version`); the SPRINT_CLOSE release AC checks the row | #17 request 3 | Release manager and Design; docs only; proposed for a future release, not committed |
 | S7-SPAWN | Optional `spawn_points[]` (map frame, metres, heading) as format minor 2.2.0 | #17 request 4 | D101/D110: no new member; positive frozen-reader fixture (Python and C#); source and validation rules to be scoped by the Team Leader |
+| S7-SAMPLE-PARITY | A same-style CLI/Blender sample pair so the sample preset can be parity-checked (G10) | S6-PARITY (#119, D207): the sample preset has no same-style CLI/Blender pair, so G10 cannot check it (#119 evidence exception). Not an M-S6 GO blocker under D208 | Team Leader request; scope (committed vs generated in CI, size) to be set in Sprint 7 planning |
 | (user) | A `format-2.1.0` tag; a 3.0 notice period and a kept 2.x sample | #17 requests 1 and 6 | Need the user: tagging (D202) and the D101 confirmation (item 3 below) |
 
 ## Decisions that need the user
