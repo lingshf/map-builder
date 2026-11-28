@@ -613,6 +613,11 @@ Out of the baseline: S5-F1 and S5-F2 (deferred, need user approval or data revie
 | D192 | Checklist G4: a member's `files[].hash` and `files[].bytes` may change together. The sample NOTICES shrinking from 1867 to 1015 is intended: #100 removed the notices for five CC0 textures the stylized output does not ship. | C (coordinator) | decided |
 | D193 | Small, attributed, recorded ODbL fixtures are allowed in tests (example: `RealWaterCasesTest`). The attribution travels with the fixture. | C (coordinator) | decided |
 | D194 | Checklist R3: the `water-shore` measurement window moves from the D163 rows 419–424 (terrain beyond the bank ramp) to rows 408–413 on the water-adjacent bank ramp, approved in [#109](https://github.com/lingshf/map-builder/pull/109) R2. The old window must read sand. **Outcome:** S5-STYLE-REVIEW is **GO** at 850a772 ([#108](https://github.com/lingshf/map-builder/issues/108)); T4 was fixed by #107 and R3 by #109. S5-STYLE-BASE is `done` per D186(f). | C (coordinator) | decided |
+| D195 | Public release and demo prose (release notes, demo README, the new CHANGELOG section) contains no internal process labels (R#, T#, G#, D# numbers; sign-off or gate narration). REL greps its added lines before requesting review and links the QA record issue instead. | C (coordinator) | decided |
+| D196 | RC demo evidence: every release ships `panel.png` for any new UI control plus viewer captures for each showcase city. REL checks the RC against the previous release's demo set before opening it (v0.6.0 lesson, [PO review](https://github.com/lingshf/map-builder/pull/111#issuecomment-7231439618)). | C (coordinator) | decided |
+| D197 | When an RC head changes only by prose edits in docs files (the coordinator verifies the compare file list), the prior exact-head QA PASS carries forward. Review must still approve the exact head. | C (coordinator) | decided |
+| D198 | Lesson from the ponds R3 finding (6 m shore bank against the shallow band): visual QA windows are checked against geometry ownership before acceptance. QA metric windows are pinned in the checklist; changing one needs a D-number (as D194). | C (coordinator) | decided |
+| D199 | Sprint 6 starts from the ordered [Sprint 6 candidates](#sprint-6-candidates-ordered-from-the-v060-po-review). Product/Design proposes the Sprint 6 goal and must list in a follow-up PR. Sprint 5 retro record: [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md). | C (coordinator) | decided |
 
 ## Sprint 6 candidates (ordered; from the v0.6.0 PO review)
 
@@ -622,7 +627,7 @@ fidelity. These are candidates, not commitments.
 
 | # | Candidate | Why | Notes |
 |---|---|---|---|
-| 1 | M-S5 closure: PERF-WATER QA verdict, then [M-S5-RETRO](tasks/README.md#milestone-retros) | M-S5 is not closed by the tag (D169) | PERF-WATER has review approval but no QA `accepted` yet |
+| 1 | M-S5 closure: [M-S5-RETRO](tasks/README.md#milestone-retros) acceptance | M-S5 is not closed by the tag (D169) | PERF-WATER QA accepted ([7231537377](https://github.com/lingshf/map-builder/pull/105#issuecomment-7231537377)); retro record in [reviews/M-S5-RETRO.md](reviews/M-S5-RETRO.md) |
 | 2 | [#106](https://github.com/lingshf/map-builder/issues/106) Munich CLI/Blender façade parity | Correctness; non-gating only for S5 (D191) | After the fix, checklist G10 gates again |
 | 3 | S6-STYLE-TUNE: stylized contrast | Looks good is the user's first priority | Munich pale roofs and walls merging, Pittsburgh water deeper than target, Factoria road contrast, grass paleness (N1); colour only under G0 |
 | 4 | [#17](https://github.com/lingshf/map-builder/issues/17) simulator consumer requests | The `.mbmap` consumer | Triage first; anything touching the format goes through D101/D110 |
