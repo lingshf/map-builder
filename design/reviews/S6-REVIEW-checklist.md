@@ -1,7 +1,7 @@
 # S6-REVIEW: milestone checklist and verdict (M-S6)
 
 Owner: design · task [S6-REVIEW](../tasks/S6.md#s6-review-milestone-review-gono-go) · decisions D137, D139, D140,
-D198, D200–D209 (D210 proposed here). Derived from the [S5 checklist](S5-STYLE-REVIEW-checklist.md); rows keep their
+D198, D200–D210. Derived from the [S5 checklist](S5-STYLE-REVIEW-checklist.md); rows keep their
 S5 numbers where the check is the same.
 
 This is the milestone review on main (M-S6). It is not a release review; no release is cut by default (D202).
@@ -40,7 +40,9 @@ Out of scope: S5-DECOR (deferred, D185); the sample preset in G10 (D208, S7-SAMP
 
 The 18 rows of the [S5 camera table](S5-STYLE-REVIEW-checklist.md#camera-set-every-d140-camera), unchanged. Rows
 1–17 are revision pairs (stylized b04b769 | stylized H). Row 18 is Factoria classic H | stylized H, information only
-(AC1). All 17 pair sheets and the row 18 sheets were produced.
+(AC1). All 17 pair sheets are in the [sheets comment](https://github.com/lingshf/map-builder/pull/124#issuecomment-7234634573), which
+also carries row 18 `overview`; row 18 `factoria-interchange` (with an extra `factoria-ponds`) is in the
+[row 18 comment](https://github.com/lingshf/map-builder/pull/124#issuecomment-7234671174).
 
 ## Checklist
 
@@ -53,7 +55,7 @@ The 18 rows of the [S5 camera table](S5-STYLE-REVIEW-checklist.md#camera-set-eve
 | G3 | Classic identity | whole archive, 4 presets × 2 paths; CLI vs b04b769, Blender vs 656eab0 (D207) | **pass**, 8/8 byte-identical |
 | G4 | Classic vs stylized members | only `visual/map.glb`, `manifest.json`, `report.json`, `NOTICES.txt` differ | **pass**, the same four members on every preset and path |
 | G5 | Absolute budgets, stylized | ≤ 8 materials, 0 texture bytes, no glTF extensions, triangles per node equal to classic | **pass**, 7–8 materials, 0 bytes, none, equal |
-| G6 | D139 budgets (STYLE-TUNE AC2) | per preset and path vs b04b769 stylized: materials ≤ 8, draws ≤, triangles =, render memory ≤, GLB size ≤, frame-time proxy ≤ +10 % | **pass**, every static metric **equal** on 8/8; proxy ratio 0.9993 (Pittsburgh overview, 150.0 ms both sides; Edge/Chromium with SwiftShader) |
+| G6 | D139 budgets (STYLE-TUNE AC2) | per preset and path vs b04b769 stylized: materials ≤ 8, draws ≤, triangles =, render memory ≤, GLB size ≤, frame-time proxy ≤ +10 % | **pass**, every static metric **equal** on 8/8. Frame-time proxy on all 8 preset/path cells, `overview` camera, render-time ratio head/base (medians in ms): sample CLI 1.000 (19.3/19.3), Blender 0.985 (19.5/19.2); Munich CLI 1.026 (30.3/31.1), Blender 1.010 (31.1/31.4); Pittsburgh CLI 0.999 (149.4/149.3), Blender 1.001 (153.3/153.5); Factoria CLI 0.998 (164.7/164.4), Blender 0.992 (173.7/172.3). Setup in [`data/S6/d139-frame-time-proxy.json`](data/S6/d139-frame-time-proxy.json) (Edge headless, SwiftShader, 3 alternating pairs + 3 repeats) |
 | G10 | Parity and determinism | `style_check.py parity` exits 0 on Munich, Pittsburgh and Factoria × 2 styles (D208); two builds of each cell byte-identical | **pass**, 6/6 parity exit 0; determinism 16/16. The sample also exits 0 in both styles (information, F3) |
 | G11 | CI on the gate revision | green | **pass**, [run 46106950695](https://github.com/lingshf/map-builder/actions/runs/46106950695) |
 | G12 | Headless Blender suite | `OK: 0 failure(s)` | **pass**, 32 s |
@@ -76,8 +78,9 @@ The 18 rows of the [S5 camera table](S5-STYLE-REVIEW-checklist.md#camera-set-eve
 ### R: visual judgment (D137 order: looks good, low cost, fidelity)
 
 The rule for (a)–(d) is the [pinned region map](../tasks/S6.md#pinned-region-map-for-ad) (D204): contrast pairs reach
-after ΔE2000 ≥ 15 and after > before; swatch rows end closer to their target (after ΔE < before ΔE). Every one of
-the 15 windows was ray-checked on both revisions: all pixel-centre rays hit the window's own surface (roof windows
+after ΔE2000 ≥ 15 and after > before; swatch rows end closer to their target (after ΔE < before ΔE). The windows are
+the D210 set (the #122 rectangles plus the D209 shore window). All 22 windows of the 14 comparisons were ray-checked
+on both revisions: all pixel-centre rays hit the window's own surface (roof windows
 `MB Roof`, wall windows `MB Facade`, road windows `MB Road`, land and grass windows terrain, water windows
 `MB Water`, the shore window the `bank:` ramp), see [`data/S6/raycheck-windows.json`](data/S6/raycheck-windows.json).
 
@@ -97,14 +100,16 @@ the 15 windows was ray-checked on both revisions: all pixel-centre rays hit the 
 
 **Priority statement (AC3, D137).** (1) Looks good: all four observations improved by the pinned rule, and roads and
 water read clearly; the remaining weakness is pale Factoria buildings (F6). (2) Low cost: every D139 metric is
-equal to v0.6.0 and the frame-time ratio is 0.9993. (3) Fidelity: geometry, collision and classic output are
-byte-identical (G1, G3).
+equal to v0.6.0 and the frame-time ratio is 0.9993. (3) Fidelity: collision and heightfield bytes and the protected
+manifest fields are identical to v0.6.0 (G1); classic archives are byte-identical to their baselines (G3); stylized
+GLBs keep the same per-node triangle counts as classic and the same draws and triangle totals as v0.6.0 (G5, G6).
+Stylized visual geometry bytes were not compared separately.
 
 **QA (AC4).** Independent QA, criterion by criterion:
 
 | Row | QA record |
 |---|---|
-| R-a, R-b open water, R-c, R-d (14 numeric rows) | [accepted on fresh renders](https://github.com/lingshf/map-builder/pull/122#issuecomment-7234136774); the same comment held back only the shore window, now closed by D209 |
+| R-a, R-b open water, R-c, R-d (13 of the 14 numeric rows) | [accepted on fresh renders](https://github.com/lingshf/map-builder/pull/122#issuecomment-7234136774); all 14 rows reproduced numerically, but the same comment withheld acceptance of the shore row pending a window check, since closed by D209 |
 | R-b shore (D209) | [#122 shore row accepted at 4e51412](https://github.com/lingshf/map-builder/pull/122#issuecomment-7234470759); [#118 AC2 window accepted at 4e51412](https://github.com/lingshf/map-builder/pull/118#issuecomment-7234470758) |
 | R-all | [accepted, one verdict per camera](https://github.com/lingshf/map-builder/pull/122#issuecomment-7234623961): no new face defects or bank gaps; confined shading and tree forms and tints preserved |
 
@@ -120,7 +125,7 @@ byte-identical (G1, G3).
 
 | Id | Finding | Disposition |
 |---|---|---|
-| F1 | #122 moved nine D204 rectangles in `palette_regions_factoria.json` and `palette_regions_munich.json` (Factoria interchange road-1, land-1, road-2, land-2; Munich roofs roof-2; roofscape roof-1, wall-1, roof-2, wall-2) outside its conflict domain and without a D-number (D198). With the #118 rectangles, the interchange pairs fail D204 (0.45 → 0.41, 10.38 → 10.37) because those windows sat on edges or the wrong surface; with the #122 rectangles every window is ray-verified on its surface (see R). | **D210 proposed** (decision for the Team Leader): the #122 rectangles plus the D209 shore window are the pinned M-S6 windows; any later window move needs a D-number and a ray check on both revisions before merge. |
+| F1 | #122 moved nine D204 rectangles in `palette_regions_factoria.json` and `palette_regions_munich.json` (Factoria interchange road-1, land-1, road-2, land-2; Munich roofs roof-2; roofscape roof-1, wall-1, roof-2, wall-2) outside its conflict domain and without a D-number (D198). With the #118 rectangles, the interchange pairs fail D204 (0.45 → 0.41, 10.38 → 10.37) because those windows sat on edges or the wrong surface; with the #122 rectangles every window is ray-verified on its surface (see R). Closed by **D210** (Team Leader decided): the #122 rectangles plus the D209 shore window are the pinned M-S6 windows; any later move needs a D-number and a ray check on both revisions, every ray on the window's surface, before merge. Recorded in the roadmap and the S6 region map. |
 | F2 | The river-bend `water-shore` window had 3 of 25 rays on terrain (QA). | Closed by D209 (#123). |
 | F3 | #122 and D208 say the sample has no Blender build. The sample does build on the Blender path through the S5 harness (`configure_sample`), and its CLI/Blender parity exits 0 in both styles; G1, G3 and determinism include it. | Sprint 7 planning: re-scope S7-SAMPLE-PARITY to making that harness pair the committed G10 cell, rather than building a new pair. |
 | F4 | The Blender export writes a wall-clock `created_utc` (`map_builder/blender/export.py` does not pass one, so `core/package.py` falls back to `time.gmtime()`). Evidence uses the S5 harness pin; #122 left it out. Not a regression (S5 used the same pin). | Sprint 7 candidate: a pinnable `created_utc` on the Blender export path, so determinism does not depend on a test stub. |
@@ -130,4 +135,4 @@ byte-identical (G1, G3).
 
 ## Verdict
 
-**GO** for M-S6 on review head `4e51412`. Every G row passes, (a)–(d) pass the pinned D204 rule and are QA-accepted, R-all is QA-accepted, and D209 is closed. No S6-Fn task is opened. The findings go to M-S6-RETRO and Sprint 7 planning: F1 needs a Team Leader decision on D210; F3, F4 and F6 are Sprint 7 candidates; F5 is a retro item. No release is cut (D202).
+**GO** for M-S6 on review head `4e51412`. Every G row passes, (a)–(d) pass the pinned D204 rule and are QA-accepted, R-all is QA-accepted, and D209 is closed. No S6-Fn task is opened. The findings go to M-S6-RETRO and Sprint 7 planning: F1 is closed by D210; F3, F4 and F6 are Sprint 7 candidates; F5 is a retro item. No release is cut (D202).
