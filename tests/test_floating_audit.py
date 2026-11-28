@@ -3,6 +3,8 @@
 """tools/floating_audit.py: ray raster, finding classification and the committed sample (needs numpy)."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import math
 import os
@@ -11,6 +13,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 from map_builder.core.glb import write_glb
@@ -362,6 +365,30 @@ class SampleAuditTest(unittest.TestCase):
         self.assertEqual(summary["buried_collision"]["regions"], 2)
         self.assertEqual(summary["buried_collision"]["area_m2"], 2.0)
         self.assertEqual(summary["buried_collision"]["max_offset_m"], 10.0)
+
+
+class OutputErrorExitCodeTest(unittest.TestCase):
+    """The audit is stubbed: only the output handling is under test."""
+
+    def run_main(self, ok: bool, json_path: str) -> int:
+        result = {"ok": ok, "package": "p", "grid": [1, 1], "cell_m": 1.0, "threshold_m": 0.2,
+                  "triangles": {"collision": 0, "visual": 0}, "water_bodies": [], "findings_summary": {}}
+        with mock.patch.object(fa, "audit", return_value=result), contextlib.redirect_stderr(io.StringIO()), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return fa.main(["p.mbmap", "--json", json_path, "--quiet"])
+
+    def test_a_missing_json_directory_exits_2_even_when_the_audit_passes(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(self.run_main(True, os.path.join(td, "missing", "out.json")), 2)
+
+    def test_a_missing_json_directory_exits_2_even_when_the_audit_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(self.run_main(False, os.path.join(td, "missing", "out.json")), 2)
+
+    def test_a_writable_json_path_keeps_the_audit_exit_code(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(self.run_main(False, os.path.join(td, "out.json")), 1)
+            self.assertEqual(self.run_main(True, os.path.join(td, "out.json")), 0)
 
 
 if __name__ == "__main__":
