@@ -95,8 +95,18 @@ class StylizedPaletteValuesTest(unittest.TestCase):
         for tagged in ((1.0, 0.9, 0.8), (0.9, 0.5, 0.4)):
             roof = style.roof_color(tagged, "k", False)
             wall = style.facade_color(tagged, "k")
-            self.assertLess(max(roof), style.srgb_to_linear(style.ROOF_VALUE_RANGE[1]) + 1e-9)
+            self.assertLess(max(roof), style.srgb_to_linear(0.45) + 1e-9)
             self.assertLess(self.brightness(roof), self.brightness(wall))
+
+    def test_untagged_roofs_are_pinned_and_darker_than_every_untagged_facade(self):
+        flat = style.roof_color(None, "k", is_flat=True)
+        pitched = {style.roof_color(None, f"k{i}", is_flat=False) for i in range(40)}
+        self.assertEqual(flat, (0.55, 0.50, 0.45))
+        self.assertEqual(pitched, {(0.62, 0.40, 0.30), (0.54, 0.44, 0.38), (0.44, 0.36, 0.32), (0.57, 0.46, 0.38)})
+        facades = [style.facade_color(None, f"k{i}") for i in range(40)]
+        for roof in (flat, *pitched):
+            for facade in facades:
+                self.assertLess(self.brightness(roof), self.brightness(facade))
 
 
 class FoliageTest(unittest.TestCase):

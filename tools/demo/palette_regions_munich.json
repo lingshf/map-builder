@@ -7,7 +7,7 @@
     {"camera": "roofs", "label": "roof-2", "x": 0.6625, "y": 0.225, "w": 0.02, "h": 0.02},
     {"camera": "roofs", "label": "wall-2", "x": 0.41, "y": 0.50, "w": 0.012, "h": 0.012},
     {"camera": "roofscape", "label": "roof-1", "x": 0.7227, "y": 0.6931, "w": 0.0109, "h": 0.0139},
-    {"camera": "roofscape", "label": "wall-1", "x": 0.66, "y": 0.80, "w": 0.0109, "h": 0.0139},
+    {"camera": "roofscape", "label": "wall-1", "x": 0.75, "y": 0.80, "w": 0.0109, "h": 0.0139},
     {"camera": "roofscape", "label": "roof-2", "x": 0.8953, "y": 0.8139, "w": 0.0109, "h": 0.0139},
     {"camera": "roofscape", "label": "wall-2", "x": 0.80, "y": 0.32, "w": 0.0109, "h": 0.0139}
   ]
